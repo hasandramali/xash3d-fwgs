@@ -332,7 +332,7 @@ void R_AddSkyBoxSurface( msurface_t *fa )
 	float	*v;
 	int	i;
 
-	if( FBitSet( tr.world->flags, FWORLD_SKYSPHERE ) && fa->polys && !FBitSet( tr.world->flags, FWORLD_CUSTOM_SKYBOX ))
+	if( ENGINE_GET_PARM( PARM_SKY_SPHERE ) && fa->polys && !tr.fCustomSkybox )
 	{
 		glpoly_t	*p = fa->polys;
 
@@ -362,7 +362,7 @@ R_UnloadSkybox
 Unload previous skybox
 ==============
 */
-static void R_UnloadSkybox( void )
+void R_UnloadSkybox( void )
 {
 	int	i;
 
@@ -376,7 +376,7 @@ static void R_UnloadSkybox( void )
 	tr.skyboxbasenum = SKYBOX_BASE_NUM;	// set skybox base (to let some mods load hi-res skyboxes)
 
 	memset( tr.skyboxTextures, 0, sizeof( tr.skyboxTextures ));
-	ClearBits( tr.world->flags, FWORLD_CUSTOM_SKYBOX );
+	tr.fCustomSkybox = false;
 }
 
 /*
@@ -478,7 +478,7 @@ void R_SetupSky( const char *skyboxname )
 
 	if( i == 6 )
 	{
-		SetBits( tr.world->flags, FWORLD_CUSTOM_SKYBOX );
+		tr.fCustomSkybox = true;
 		gEngfuncs.Con_DPrintf( "done\n" );
 		return; // loaded
 	}
@@ -526,7 +526,7 @@ static void R_CloudTexCoord( vec3_t v, float speed, float *s, float *t )
 	float	length, speedscale;
 	vec3_t	dir;
 
-	speedscale = gp_cl->time * speed;
+	speedscale = gpGlobals->time * speed;
 	speedscale -= (int)speedscale & ~127;
 
 	VectorSubtract( v, RI.vieworg, dir );
@@ -813,8 +813,8 @@ void EmitWaterPolys( msurface_t *warp, qboolean reverse )
 		{
 			if( waveHeight )
 			{
-				nv = r_turbsin[(int)(gp_cl->time * 160.0f + v[1] + v[0]) & 255] + 8.0f;
-				nv = (r_turbsin[(int)(v[0] * 5.0f + gp_cl->time * 171.0f - v[1]) & 255] + 8.0f ) * 0.8f + nv;
+				nv = r_turbsin[(int)(gpGlobals->time * 160.0f + v[1] + v[0]) & 255] + 8.0f;
+				nv = (r_turbsin[(int)(v[0] * 5.0f + gpGlobals->time * 171.0f - v[1]) & 255] + 8.0f ) * 0.8f + nv;
 				nv = nv * waveHeight + v[2];
 			}
 			else nv = v[2];
@@ -824,8 +824,8 @@ void EmitWaterPolys( msurface_t *warp, qboolean reverse )
 
 			if( !r_ripple.value )
 			{
-				s = os + r_turbsin[(int)((ot * 0.125f + gp_cl->time) * TURBSCALE) & 255];
-				t = ot + r_turbsin[(int)((os * 0.125f + gp_cl->time) * TURBSCALE) & 255];
+				s = os + r_turbsin[(int)((ot * 0.125f + gpGlobals->time) * TURBSCALE) & 255];
+				t = ot + r_turbsin[(int)((os * 0.125f + gpGlobals->time) * TURBSCALE) & 255];
 			}
 			else
 			{
@@ -865,7 +865,7 @@ void R_ResetRipples( void )
 {
 	g_ripple.curbuf = g_ripple.buf[0];
 	g_ripple.oldbuf = g_ripple.buf[1];
-	g_ripple.time = g_ripple.oldtime = gp_cl->time - 0.1;
+	g_ripple.time = g_ripple.oldtime = gpGlobals->time - 0.1;
 	memset( g_ripple.buf, 0, sizeof( g_ripple.buf ));
 }
 
@@ -882,7 +882,7 @@ void R_InitRipples( void )
 	pic.numMips = 1;
 	memset( pic.buffer, 0, pic.size );
 
-	g_ripple.rippletexturenum = GL_LoadTextureInternal( "*rippletex", &pic, TF_NOMIPMAP|TF_ALLOW_NEAREST );
+	g_ripple.rippletexturenum = GL_LoadTextureInternal( "*rippletex", &pic, TF_NOMIPMAP );
 }
 
 static void R_SwapBufs( void )
@@ -936,14 +936,14 @@ static int MostSignificantBit( unsigned int v )
 
 void R_AnimateRipples( void )
 {
-	double frametime = gp_cl->time - g_ripple.time;
+	double frametime = gpGlobals->time - g_ripple.time;
 
 	g_ripple.update = r_ripple.value && frametime >= r_ripple_updatetime.value;
 
 	if( !g_ripple.update )
 		return;
 
-	g_ripple.time = gp_cl->time;
+	g_ripple.time = gpGlobals->time;
 
 	R_SwapBufs();
 
@@ -963,12 +963,29 @@ void R_AnimateRipples( void )
 	R_RunRipplesAnimation( g_ripple.oldbuf, g_ripple.curbuf );
 }
 
+void R_UpdateRippleTexParams( void )
+{
+	gl_texture_t *tex = R_GetTexture( g_ripple.rippletexturenum );
+
+	GL_Bind( XASH_TEXTURE0, g_ripple.rippletexturenum );
+
+	if( gl_texture_nearest.value )
+	{
+		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	}
+	else
+	{
+		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	}
+}
+
 void R_UploadRipples( texture_t *image )
 {
 	gl_texture_t *glt;
 	uint32_t *pixels;
 	int wbits, wmask, wshft;
-	int y;
 
 	// discard unuseful textures
 	if( !r_ripple.value || image->width > RIPPLES_CACHEWIDTH || image->width != image->height )
@@ -1006,12 +1023,11 @@ void R_UploadRipples( texture_t *image )
 	wshft = 7 - wbits;
 	wmask = image->width - 1;
 
-	for( y = 0; y < image->height; y++ )
+	for( int y = 0; y < image->height; y++ )
 	{
 		int ry = y << ( 7 + wshft );
-		int x;
 
-		for( x = 0; x < image->width; x++ )
+		for( int x = 0; x < image->width; x++ )
 		{
 			int rx = x << wshft;
 			int val = g_ripple.curbuf[ry + rx] >> 4;

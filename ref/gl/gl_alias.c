@@ -59,7 +59,7 @@ static int	g_used[8192];
 
 // a pose is a single set of vertexes. a frame may be
 // an animating sequence of poses
-static int	g_posenum;
+int		g_posenum;
 
 // the command list holds counts and s/t values that are valid for
 // every frame
@@ -225,7 +225,7 @@ Generate a list of trifans or strips
 for the model, which holds for all frames
 ================
 */
-static void BuildTris( void )
+void BuildTris( void )
 {
 	int	len, bestlen, besttype = 0;
 	int	bestverts[1024];
@@ -305,7 +305,7 @@ static void BuildTris( void )
 GL_MakeAliasModelDisplayLists
 ================
 */
-static void GL_MakeAliasModelDisplayLists( model_t *m )
+void GL_MakeAliasModelDisplayLists( model_t *m )
 {
 	trivertex_t	*verts;
 	int		i, j;
@@ -340,7 +340,7 @@ ALIAS MODELS
 Mod_LoadAliasFrame
 =================
 */
-static void *Mod_LoadAliasFrame( void *pin, maliasframedesc_t *frame )
+void *Mod_LoadAliasFrame( void *pin, maliasframedesc_t *frame )
 {
 	daliasframe_t	*pdaliasframe;
 	trivertex_t	*pinframe;
@@ -372,7 +372,7 @@ static void *Mod_LoadAliasFrame( void *pin, maliasframedesc_t *frame )
 Mod_LoadAliasGroup
 =================
 */
-static void *Mod_LoadAliasGroup( void *pin, maliasframedesc_t *frame )
+void *Mod_LoadAliasGroup( void *pin, maliasframedesc_t *frame )
 {
 	daliasgroup_t	*pingroup;
 	int		i, numframes;
@@ -413,7 +413,7 @@ static void *Mod_LoadAliasGroup( void *pin, maliasframedesc_t *frame )
 Mod_CreateSkinData
 ===============
 */
-static rgbdata_t *Mod_CreateSkinData( model_t *mod, byte *data, int width, int height )
+rgbdata_t *Mod_CreateSkinData( model_t *mod, byte *data, int width, int height )
 {
 	static rgbdata_t	skin;
 	char		name[MAX_QPATH];
@@ -427,7 +427,7 @@ static rgbdata_t *Mod_CreateSkinData( model_t *mod, byte *data, int width, int h
 	skin.encode = DXT_ENCODE_DEFAULT;
 	skin.numMips = 1;
 	skin.buffer = data;
-	skin.palette = (byte *)tr.palette;
+	skin.palette = (byte *)gEngfuncs.CL_GetPaletteColor( 0 );
 	skin.size = width * height;
 
 	if( !gEngfuncs.Image_CustomPalette() )
@@ -475,7 +475,7 @@ static rgbdata_t *Mod_CreateSkinData( model_t *mod, byte *data, int width, int h
 	return gEngfuncs.FS_CopyImage( &skin );
 }
 
-static void *Mod_LoadSingleSkin( model_t *loadmodel, daliasskintype_t *pskintype, int skinnum, int size )
+void *Mod_LoadSingleSkin( model_t *loadmodel, daliasskintype_t *pskintype, int skinnum, int size )
 {
 	string	name, lumaname;
 	string	checkname;
@@ -506,7 +506,7 @@ static void *Mod_LoadSingleSkin( model_t *loadmodel, daliasskintype_t *pskintype
 	return ((byte *)(pskintype + 1) + size);
 }
 
-static void *Mod_LoadGroupSkin( model_t *loadmodel, daliasskintype_t *pskintype, int skinnum, int size )
+void *Mod_LoadGroupSkin( model_t *loadmodel, daliasskintype_t *pskintype, int skinnum, int size )
 {
 	daliasskininterval_t	*pinskinintervals;
 	daliasskingroup_t		*pinskingroup;
@@ -552,7 +552,7 @@ static void *Mod_LoadGroupSkin( model_t *loadmodel, daliasskintype_t *pskintype,
 Mod_LoadAllSkins
 ===============
 */
-static void *Mod_LoadAllSkins( model_t *mod, int numskins, daliasskintype_t *pskintype )
+void *Mod_LoadAllSkins( model_t *mod, int numskins, daliasskintype_t *pskintype )
 {
 	int	i, size;
 
@@ -582,7 +582,7 @@ static void *Mod_LoadAllSkins( model_t *mod, int numskins, daliasskintype_t *psk
 Mod_CalcAliasBounds
 =================
 */
-static void Mod_CalcAliasBounds( model_t *mod )
+void Mod_CalcAliasBounds( model_t *mod )
 {
 	int	i, j, k;
 	float	radius;
@@ -763,9 +763,9 @@ R_AliasDynamicLight
 similar to R_StudioDynamicLight
 ===============
 */
-static void R_AliasDynamicLight( cl_entity_t *ent, alight_t *plight )
+void R_AliasDynamicLight( cl_entity_t *ent, alight_t *plight )
 {
-	movevars_t	*mv = tr.movevars;
+	movevars_t	*mv = gEngfuncs.pfnGetMoveVars();
 	vec3_t		lightDir, vecSrc, vecEnd;
 	vec3_t		origin, dist, finalLight;
 	float		add, radius, total;
@@ -801,7 +801,7 @@ static void R_AliasDynamicLight( cl_entity_t *ent, alight_t *plight )
 		msurface_t	*psurf = NULL;
 		pmtrace_t		trace;
 
-		if( FBitSet( gp_host->features, ENGINE_WRITE_LARGE_COORD ))
+		if( FBitSet( ENGINE_GET_PARM( PARM_FEATURES ), ENGINE_WRITE_LARGE_COORD ))
 		{
 			vecEnd[0] = origin[0] - mv->skyvec_x * 65536.0f;
 			vecEnd[1] = origin[1] - mv->skyvec_y * 65536.0f;
@@ -822,9 +822,9 @@ static void R_AliasDynamicLight( cl_entity_t *ent, alight_t *plight )
 		{
 			VectorSet( lightDir, mv->skyvec_x, mv->skyvec_y, mv->skyvec_z );
 
-			light.r = mv->skycolor_r;
-			light.g = mv->skycolor_g;
-			light.b = mv->skycolor_b;
+			light.r = gEngfuncs.LightToTexGamma( bound( 0, mv->skycolor_r, 255 ));
+			light.g = gEngfuncs.LightToTexGamma( bound( 0, mv->skycolor_g, 255 ));
+			light.b = gEngfuncs.LightToTexGamma( bound( 0, mv->skycolor_b, 255 ));
 		}
 	}
 
@@ -907,9 +907,9 @@ static void R_AliasDynamicLight( cl_entity_t *ent, alight_t *plight )
 
 			VectorAdd( lightDir, dist, lightDir );
 
-			finalLight[0] += dl->color.r * ( add / 256.0f );
-			finalLight[1] += dl->color.g * ( add / 256.0f );
-			finalLight[2] += dl->color.b * ( add / 256.0f );
+			finalLight[0] += gEngfuncs.LightToTexGamma( dl->color.r ) * ( add / 256.0f ) * 2.0f;
+			finalLight[1] += gEngfuncs.LightToTexGamma( dl->color.g ) * ( add / 256.0f ) * 2.0f;
+			finalLight[2] += gEngfuncs.LightToTexGamma( dl->color.b ) * ( add / 256.0f ) * 2.0f;
 		}
 	}
 
@@ -943,7 +943,7 @@ R_AliasSetupLighting
 
 ===============
 */
-static void R_AliasSetupLighting( alight_t *plight )
+void R_AliasSetupLighting( alight_t *plight )
 {
 	if( !m_pAliasHeader || !plight )
 		return;
@@ -964,7 +964,7 @@ R_AliasLighting
 
 ===============
 */
-static void R_AliasLighting( float *lv, const vec3_t normal )
+void R_AliasLighting( float *lv, const vec3_t normal )
 {
 	float 	illum = g_alias.ambientlight;
 	float	r, lightcos;
@@ -991,9 +991,9 @@ static void R_AliasLighting( float *lv, const vec3_t normal )
 			illum -= g_alias.shadelight * lightcos;
 	}
 
-	illum = bound( 0.0f, illum, 255.0f );
-
-	*lv = gEngfuncs.LightToTexGammaEx( illum * 4 ) / 1023.0f;
+	illum = Q_max( illum, 0.0f );
+	illum = Q_min( illum, 255.0f );
+	*lv = illum * (1.0f / 255.0f);
 }
 
 /*
@@ -1002,10 +1002,15 @@ R_AliasSetRemapColors
 
 ===============
 */
-static void R_AliasSetRemapColors( int newTop, int newBottom )
+void R_AliasSetRemapColors( int newTop, int newBottom )
 {
-	if( gEngfuncs.CL_EntitySetRemapColors( RI.currententity, RI.currentmodel, newTop, newBottom ))
+	gEngfuncs.CL_AllocRemapInfo( RI.currententity, RI.currentmodel, newTop, newBottom );
+
+	if( gEngfuncs.CL_GetRemapInfoForEntity( RI.currententity ))
+	{
+		gEngfuncs.CL_UpdateRemapInfo( RI.currententity, newTop, newBottom );
 		m_fDoRemap = true;
+	}
 }
 
 /*
@@ -1013,7 +1018,7 @@ static void R_AliasSetRemapColors( int newTop, int newBottom )
 GL_DrawAliasFrame
 =============
 */
-static void GL_DrawAliasFrame( aliashdr_t *paliashdr )
+void GL_DrawAliasFrame( aliashdr_t *paliashdr )
 {
 	float 		lv_tmp;
 	trivertex_t	*verts0;
@@ -1075,7 +1080,7 @@ static void GL_DrawAliasFrame( aliashdr_t *paliashdr )
 GL_DrawAliasShadow
 =============
 */
-static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
+void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 {
 	trivertex_t	*verts0;
 	trivertex_t	*verts1;
@@ -1153,7 +1158,7 @@ R_AliasLerpMovement
 
 ====================
 */
-static void R_AliasLerpMovement( cl_entity_t *e )
+void R_AliasLerpMovement( cl_entity_t *e )
 {
 	float	f = 1.0f;
 
@@ -1196,7 +1201,7 @@ R_SetupAliasFrame
 
 =================
 */
-static void R_SetupAliasFrame( cl_entity_t *e, aliashdr_t *paliashdr )
+void R_SetupAliasFrame( cl_entity_t *e, aliashdr_t *paliashdr )
 {
 	int	newpose, oldpose;
 	int	newframe, oldframe;
@@ -1256,7 +1261,7 @@ static void R_AliasDrawAbsBBox( cl_entity_t *e, const vec3_t absmin, const vec3_
 	int	i;
 
 	// looks ugly, skip
-	if( r_drawentities->value != 5 || e == tr.viewent )
+	if( r_drawentities->value != 5 || e == gEngfuncs.GetViewModel() )
 		return;
 
 	// compute a full bounding box
@@ -1332,12 +1337,12 @@ static void R_AliasSetupTimings( void )
 	if( RI.drawWorld )
 	{
 		// synchronize with server time
-		g_alias.time = gp_cl->time;
+		g_alias.time = gpGlobals->time;
 	}
 	else
 	{
 		// menu stuff
-		g_alias.time = gp_host->realtime;
+		g_alias.time = gpGlobals->realtime;
 	}
 
 	m_fDoRemap = false;
@@ -1381,7 +1386,7 @@ void R_DrawAliasModel( cl_entity_t *e )
 
 	R_AliasLerpMovement( e );
 
-	if( !FBitSet( gp_host->features, ENGINE_COMPENSATE_QUAKE_BUG ))
+	if( !FBitSet( ENGINE_GET_PARM( PARM_FEATURES ), ENGINE_COMPENSATE_QUAKE_BUG ))
 		e->angles[PITCH] = -e->angles[PITCH]; // stupid quake bug
 
 	// don't rotate clients, only aim

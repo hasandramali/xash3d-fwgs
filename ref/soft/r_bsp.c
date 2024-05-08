@@ -51,7 +51,7 @@ static qboolean		makeclippededge;
 R_ConcatRotations
 ================
 */
-static void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3])
+void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3])
 {
 		out[0][0] = in1[0][0] * in2[0][0] + in1[0][1] * in2[1][0] +
 								in1[0][2] * in2[2][0];
@@ -81,7 +81,7 @@ static void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3]
 R_EntityRotate
 ================
 */
-static void R_EntityRotate (vec3_t vec)
+void R_EntityRotate (vec3_t vec)
 {
 	vec3_t	tvec;
 
@@ -348,7 +348,7 @@ void R_RecursiveClipBPoly (bedge_t *pedges, mnode_t *pnode, msurface_t *psurf)
 R_RecursiveClipBPoly
 ================
 */
-static void R_RecursiveClipBPoly (bedge_t *pedges, mnode_t *pnode, msurface_t *psurf)
+void R_RecursiveClipBPoly (bedge_t *pedges, mnode_t *pnode, msurface_t *psurf)
 {
 	bedge_t		*psideedges[2], *pnextedge, *ptedge;
 	int			i, side, lastside;
@@ -781,7 +781,7 @@ int r_leafkeys[MAX_MAP_LEAFS];
 R_RecursiveWorldNode
 ================
 */
-static void R_RecursiveWorldNode (mnode_t *node, int clipflags)
+void R_RecursiveWorldNode (mnode_t *node, int clipflags)
 {
 	int			i, c, side, *pindex;
 	vec3_t		acceptpt, rejectpt;
@@ -949,8 +949,8 @@ void R_RenderWorld (void)
 	c_drawnode=0;
 
 	// auto cycle the world frame for texture animation
-	RI.currententity = CL_GetEntityByIndex(0);
-	//RI.currententity->frame = (int)(gp_cl->time*2);
+	RI.currententity = gEngfuncs.GetEntityByIndex(0);
+	//RI.currententity->frame = (int)(gpGlobals->time*2);
 
 	VectorCopy (RI.vieworg, tr.modelorg);
 	RI.currentmodel = WORLDMODEL;

@@ -49,7 +49,7 @@ void CL_DrawParticles( double frametime, particle_t *cl_active_particles, float 
 {
 	particle_t	*p;
 	vec3_t		right, up;
-	color24		color;
+	color24		*pColor;
 	int		alpha;
 	float		size;
 
@@ -85,13 +85,15 @@ void CL_DrawParticles( double frametime, particle_t *cl_active_particles, float 
 			VectorScale( RI.cull_vup, size, up );
 
 			p->color = bound( 0, p->color, 255 );
-			color = tr.palette[p->color];
+			pColor = gEngfuncs.CL_GetPaletteColor( p->color );
 
-			alpha = 255 * (p->die - gp_cl->time) * 16.0f;
+			alpha = 255 * (p->die - gpGlobals->time) * 16.0f;
 			if( alpha > 255 || p->type == pt_static )
 				alpha = 255;
 
-			pglColor4ub( color.r, color.g, color.b, alpha );
+			pglColor4ub( gEngfuncs.LightToTexGamma( pColor->r ),
+				gEngfuncs.LightToTexGamma( pColor->g ),
+				gEngfuncs.LightToTexGamma( pColor->b ), alpha );
 
 			pglTexCoord2f( 0.0f, 1.0f );
 			pglVertex3f( p->org[0] - right[0] + up[0], p->org[1] - right[1] + up[1], p->org[2] - right[2] + up[2] );
@@ -186,15 +188,13 @@ void CL_DrawTracers( double frametime, particle_t *cl_active_tracers )
 	pglDisable( GL_ALPHA_TEST );
 	pglDepthMask( GL_FALSE );
 
-	gravity = frametime * tr.movevars->gravity;
+	gravity = frametime * MOVEVARS->gravity;
 	scale = 1.0 - (frametime * 0.9);
 	if( scale < 0.0f ) scale = 0.0f;
 
-	pglBegin( GL_QUADS );
-
 	for( p = cl_active_tracers; p; p = p->next )
 	{
-		atten = (p->die - gp_cl->time);
+		atten = (p->die - gpGlobals->time);
 		if( atten > 0.1f ) atten = 0.1f;
 
 		VectorScale( p->vel, ( p->ramp * atten ), delta );
@@ -205,7 +205,7 @@ void CL_DrawTracers( double frametime, particle_t *cl_active_tracers )
 		{
 			vec3_t	verts[4], tmp2;
 			vec3_t	tmp, normal;
-			color24	color;
+			color24	*pColor;
 
 			// Transform point into screen space
 			TriWorldToScreen( start, screen );
@@ -235,9 +235,10 @@ void CL_DrawTracers( double frametime, particle_t *cl_active_tracers )
 				p->color = 0;
 			}
 
-			color = gTracerColors[p->color];
-			pglColor4ub( color.r, color.g, color.b, p->packedColor );
+			pColor = &gTracerColors[p->color];
+			pglColor4ub( pColor->r, pColor->g, pColor->b, p->packedColor );
 
+			pglBegin( GL_QUADS );
 				pglTexCoord2f( 0.0f, 0.8f );
 				pglVertex3fv( verts[2] );
 				pglTexCoord2f( 1.0f, 0.8f );
@@ -246,6 +247,7 @@ void CL_DrawTracers( double frametime, particle_t *cl_active_tracers )
 				pglVertex3fv( verts[1] );
 				pglTexCoord2f( 0.0f, 0.0f );
 				pglVertex3fv( verts[0] );
+			pglEnd();
 		}
 
 		// evaluate position
@@ -257,7 +259,7 @@ void CL_DrawTracers( double frametime, particle_t *cl_active_tracers )
 			p->vel[1] *= scale;
 			p->vel[2] -= gravity;
 
-			p->packedColor = 255 * (p->die - gp_cl->time) * 2;
+			p->packedColor = 255 * (p->die - gpGlobals->time) * 2;
 			if( p->packedColor > 255 ) p->packedColor = 255;
 		}
 		else if( p->type == pt_slowgrav )
@@ -265,7 +267,6 @@ void CL_DrawTracers( double frametime, particle_t *cl_active_tracers )
 			p->vel[2] = gravity * 0.05f;
 		}
 	}
-	pglEnd();
 
 	pglDepthMask( GL_TRUE );
 }

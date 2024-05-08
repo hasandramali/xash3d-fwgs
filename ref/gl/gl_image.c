@@ -118,28 +118,6 @@ void GL_Bind( GLint tmu, GLenum texnum )
 	glState.currentTexturesIndex[tmu] = texnum;
 }
 
-qboolean GL_TextureFilteringEnabled( const gl_texture_t *tex )
-{
-	if( FBitSet( tex->flags, TF_NEAREST ))
-		return false;
-
-	if( FBitSet( tex->flags, TF_DEPTHMAP ))
-		return true;
-
-	if( FBitSet( tex->flags, TF_NOMIPMAP ) || tex->numMips <= 1 )
-	{
-		if( FBitSet( tex->flags, TF_ATLAS_PAGE ))
-			return gl_lightmap_nearest.value == 0.0f;
-
-		if( FBitSet( tex->flags, TF_ALLOW_NEAREST ))
-			return gl_texture_nearest.value == 0.0f;
-
-		return true;
-	}
-
-	return gl_texture_nearest.value == 0.0f;
-}
-
 /*
 =================
 GL_ApplyTextureParams
@@ -148,7 +126,6 @@ GL_ApplyTextureParams
 void GL_ApplyTextureParams( gl_texture_t *tex )
 {
 	vec4_t	border = { 0.0f, 0.0f, 0.0f, 1.0f };
-	qboolean nomipmap;
 
 	if( !glw_state.initialized )
 		return;
@@ -160,18 +137,6 @@ void GL_ApplyTextureParams( gl_texture_t *tex )
 		return;
 
 	// set texture filter
-	nomipmap = tex->numMips <= 1 || FBitSet( tex->flags, TF_NOMIPMAP|TF_DEPTHMAP );
-	if( !GL_TextureFilteringEnabled( tex ))
-	{
-		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, nomipmap ? GL_NEAREST : GL_NEAREST_MIPMAP_NEAREST );
-		pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
-	}
-	else
-	{
-		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, nomipmap ? GL_LINEAR : GL_LINEAR_MIPMAP_LINEAR );
-		pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	}
-
 	if( FBitSet( tex->flags, TF_DEPTHMAP ))
 	{
 		if( !FBitSet( tex->flags, TF_NOCOMPARE ))
@@ -184,12 +149,47 @@ void GL_ApplyTextureParams( gl_texture_t *tex )
 			pglTexParameteri( tex->target, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE );
 		else pglTexParameteri( tex->target, GL_DEPTH_TEXTURE_MODE_ARB, GL_INTENSITY );
 
+		if( FBitSet( tex->flags, TF_NEAREST ))
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		}
+		else
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		}
+
 		// allow max anisotropy as 1.0f on depth textures
 		if( GL_Support( GL_ANISOTROPY_EXT ))
 			pglTexParameterf( tex->target, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f );
 	}
-	else if( !FBitSet( tex->flags, TF_NOMIPMAP ) && tex->numMips > 1 )
+	else if( FBitSet( tex->flags, TF_NOMIPMAP ) || tex->numMips <= 1 )
 	{
+		if( FBitSet( tex->flags, TF_NEAREST ) || ( IsLightMap( tex ) && gl_lightmap_nearest.value ) || ( tex->flags == TF_SKYSIDE && gl_texture_nearest.value ))
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		}
+		else
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		}
+	}
+	else
+	{
+		if( FBitSet( tex->flags, TF_NEAREST ) || gl_texture_nearest.value )
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		}
+		else
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		}
+
 		// set texture anisotropy if available
 		if( GL_Support( GL_ANISOTROPY_EXT ) && ( tex->numMips > 1 ) && !FBitSet( tex->flags, TF_ALPHACONTRAST ))
 			pglTexParameterf( tex->target, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value );
@@ -266,7 +266,6 @@ GL_UpdateTextureParams
 static void GL_UpdateTextureParams( int iTexture )
 {
 	gl_texture_t	*tex = &gl_textures[iTexture];
-	qboolean nomipmap;
 
 	Assert( tex != NULL );
 
@@ -282,16 +281,30 @@ static void GL_UpdateTextureParams( int iTexture )
 	if( GL_Support( GL_TEXTURE_LOD_BIAS ) && ( tex->numMips > 1 ) && !FBitSet( tex->flags, TF_DEPTHMAP ))
 		pglTexParameterf( tex->target, GL_TEXTURE_LOD_BIAS_EXT, gl_texture_lodbias.value );
 
-	nomipmap = tex->numMips <= 1 || FBitSet( tex->flags, TF_NOMIPMAP|TF_DEPTHMAP );
-
-	if( !GL_TextureFilteringEnabled( tex ))
+	if( IsLightMap( tex ))
 	{
-		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, nomipmap ? GL_NEAREST : GL_NEAREST_MIPMAP_NEAREST );
+		if( gl_lightmap_nearest.value )
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		}
+		else
+		{
+			pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		}
+	}
+
+	if( tex->numMips <= 1 ) return;
+
+	if( FBitSet( tex->flags, TF_NEAREST ) || gl_texture_nearest.value )
+	{
+		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST );
 		pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 	}
 	else
 	{
-		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, nomipmap ? GL_LINEAR : GL_LINEAR_MIPMAP_LINEAR );
+		pglTexParameteri( tex->target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
 		pglTexParameteri( tex->target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	}
 }
@@ -329,6 +342,8 @@ void R_SetTextureParameters( void )
 	// change all the existing mipmapped texture objects
 	for( i = 0; i < gl_numTextures; i++ )
 		GL_UpdateTextureParams( i );
+
+	R_UpdateRippleTexParams();
 }
 
 /*
@@ -631,12 +646,9 @@ static void GL_SetTextureTarget( gl_texture_t *tex, rgbdata_t *pic )
 	pic->numMips = Q_max( 1, pic->numMips );
 
 	// trying to determine texture type
-#ifndef XASH_GLES
 	if( pic->width > 1 && pic->height <= 1 )
 		tex->target = GL_TEXTURE_1D;
-	else 
-#endif // just skip first condition
-	if( FBitSet( pic->flags, IMAGE_CUBEMAP ))
+	else if( FBitSet( pic->flags, IMAGE_CUBEMAP ))
 		tex->target = GL_TEXTURE_CUBE_MAP_ARB;
 	else if( FBitSet( pic->flags, IMAGE_MULTILAYER ) && pic->depth >= 1 )
 		tex->target = GL_TEXTURE_2D_ARRAY_EXT;
@@ -871,7 +883,7 @@ GL_BoxFilter3x3
 box filter 3x3
 =================
 */
-static void GL_BoxFilter3x3( byte *out, const byte *in, int w, int h, int x, int y )
+void GL_BoxFilter3x3( byte *out, const byte *in, int w, int h, int x, int y )
 {
 	int		r = 0, g = 0, b = 0, a = 0;
 	int		count = 0, acount = 0;
@@ -918,7 +930,7 @@ GL_ApplyFilter
 Apply box-filter to 1-bit alpha
 =================
 */
-static byte *GL_ApplyFilter( const byte *source, int width, int height )
+byte *GL_ApplyFilter( const byte *source, int width, int height )
 {
 	byte	*in = (byte *)source;
 	byte	*out = (byte *)source;
@@ -1343,7 +1355,7 @@ static void GL_ProcessImage( gl_texture_t *tex, rgbdata_t *pic )
 GL_CheckTexName
 ================
 */
-static qboolean GL_CheckTexName( const char *name )
+qboolean GL_CheckTexName( const char *name )
 {
 	int len;
 
@@ -1469,22 +1481,6 @@ static void GL_DeleteTexture( gl_texture_t *tex )
 			break;
 		}
 		prev = &cur->nextHash;
-	}
-
-	// invalidate texture units state cache
-	for( int i = 0; i < MAX_TEXTURE_UNITS; i++ )
-	{
-		if( glState.currentTextures[i] == tex->texnum )
-		{
-			if( glState.currentTextureTargets[i] != GL_NONE )
-			{
-				GL_SelectTexture( i );
-				pglDisable( glState.currentTextureTargets[i] );
-			}
-			glState.currentTextureTargets[i] = GL_NONE;
-			glState.currentTextures[i] = -1;
-			glState.currentTexturesIndex[i] = 0;
-		}
 	}
 
 	// release source
@@ -1672,11 +1668,11 @@ int GL_LoadTextureArray( const char **names, int flags )
 		else
 		{
 			// create new image
-			pic = Mem_Malloc( r_temppool, sizeof( rgbdata_t ));
+			pic = Mem_Malloc( gEngfuncs.Image_GetPool(), sizeof( rgbdata_t ));
 			memcpy( pic, src, sizeof( rgbdata_t ));
 
 			// expand pic buffer for all layers
-			pic->buffer = Mem_Malloc( r_temppool, pic->size * numLayers );
+			pic->buffer = Mem_Malloc( gEngfuncs.Image_GetPool(), pic->size * numLayers );
 			pic->depth = 0;
 		}
 

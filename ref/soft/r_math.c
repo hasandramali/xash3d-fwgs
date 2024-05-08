@@ -150,7 +150,7 @@ void Matrix4x4_CreateRotate( matrix4x4 out, float angle, float x, float y, float
 	out[3][3]=1.0f;
 }
 
-static void Matrix4x4_CreateScale( matrix4x4 out, float x )
+void Matrix4x4_CreateScale( matrix4x4 out, float x )
 {
 	out[0][0] = x;
 	out[0][1] = 0.0f;
@@ -170,7 +170,7 @@ static void Matrix4x4_CreateScale( matrix4x4 out, float x )
 	out[3][3] = 1.0f;
 }
 
-static void Matrix4x4_CreateScale3( matrix4x4 out, float x, float y, float z )
+void Matrix4x4_CreateScale3( matrix4x4 out, float x, float y, float z )
 {
 	out[0][0] = x;
 	out[0][1] = 0.0f;
