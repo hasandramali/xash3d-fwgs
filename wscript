@@ -3,7 +3,7 @@
 # a1batross, mittorn, 2018
 
 from waflib import Build, Context, Logs
-from waflib.Tools import waf_unit_test
+from waflib.Tools import waf_unit_test, c_tests
 import sys
 import os
 
@@ -13,6 +13,9 @@ top = '.'
 default_prefix = '/' # Waf uses it to set default prefix
 
 Context.Context.line_just = 55 # should fit for everything on 80x26
+
+c_tests.LARGE_FRAGMENT='''#include <unistd.h>
+int check[sizeof(off_t) >= 8 ? 1 : -1]; int main(void) { return 0; }'''
 
 class Subproject:
 	def __init__(self, name, fnFilter = None):
@@ -74,12 +77,12 @@ SUBDIRS = [
 	Subproject('3rdparty/gl-wes-v2',    lambda x: not x.env.DEDICATED and x.env.GLWES),
 	Subproject('3rdparty/gl4es',        lambda x: not x.env.DEDICATED and x.env.GL4ES),
 	Subproject('ref/gl',                lambda x: not x.env.DEDICATED and (x.env.GL or x.env.NANOGL or x.env.GLWES or x.env.GL4ES)),
-	Subproject('ref/soft',              lambda x: not x.env.DEDICATED and x.env.SOFT),
-	Subproject('3rdparty/bzip2',        lambda x: not x.env.DEDICATED),
+	Subproject('ref/soft',              lambda x: not x.env.DEDICATED and not x.env.SUPPORT_BSP2_FORMAT and x.env.SOFT),
+	Subproject('ref/null',              lambda x: not x.env.DEDICATED and x.env.NULL),
 	Subproject('3rdparty/mainui',       lambda x: not x.env.DEDICATED),
 	Subproject('3rdparty/vgui_support', lambda x: not x.env.DEDICATED),
 	Subproject('stub/client',           lambda x: not x.env.DEDICATED),
-	Subproject('game_launch',           lambda x: not x.env.SINGLE_BINARY and x.env.DEST_OS != 'android'),
+	Subproject('game_launch',           lambda x: not x.env.DISABLE_LAUNCHER),
 
 	# disable only by external dependency presense
 	Subproject('3rdparty/opus', lambda x: not x.env.HAVE_SYSTEM_OPUS and not x.env.DEDICATED),
@@ -101,6 +104,7 @@ REFDLLS = [
 	RefDll('gles2', False, 'GLWES'),
 	RefDll('gl4es', False),
 	RefDll('gles3compat', False),
+	RefDll('null', False),
 ]
 
 def options(opt):
@@ -113,9 +117,6 @@ def options(opt):
 
 	grp.add_option('--gamedir', action = 'store', dest = 'GAMEDIR', default = 'valve',
 		help = 'engine default game directory [default: %default]')
-
-	grp.add_option('--single-binary', action = 'store_true', dest = 'SINGLE_BINARY', default = False,
-		help = 'build single "xash" binary (always enabled for dedicated) [default: %default]')
 
 	grp.add_option('-8', '--64bits', action = 'store_true', dest = 'ALLOW64', default = False,
 		help = 'allow targetting 64-bit engine(Linux/Windows/OSX x86 only) [default: %default]')
@@ -168,7 +169,7 @@ def configure(conf):
 	conf.env.MSVC_TARGETS = ['x86' if not conf.options.ALLOW64 else 'x64']
 
 	# Load compilers early
-	conf.load('xshlib xcompile compiler_c compiler_cxx cmake gccdeps msvcdeps')
+	conf.load('xshlib xcompile compiler_c compiler_cxx cmake gccdeps')
 
 	if conf.options.NSWITCH:
 		conf.load('nswitch')
@@ -183,7 +184,7 @@ def configure(conf):
 	if conf.env.COMPILER_CC == 'msvc':
 		conf.load('msvc_pdb')
 
-	conf.load('msvs msdev subproject gitversion clang_compilation_database strip_on_install waf_unit_test enforce_pic cmake')
+	conf.load('msvs msdev subproject clang_compilation_database strip_on_install waf_unit_test enforce_pic cmake')
 
 	# Force XP compatibility, all build targets should add subsystem=bld.env.MSVC_SUBSYSTEM
 	if conf.env.MSVC_TARGETS[0] == 'x86':
@@ -197,32 +198,29 @@ def configure(conf):
 
 	# modify options dictionary early
 	if conf.env.DEST_OS == 'android':
-		conf.options.NO_VGUI= True # skip vgui
-		conf.options.NANOGL = True
-		conf.options.GLWES  = True
-		conf.options.GL4ES  = True
-		conf.options.GL     = False
+		conf.options.NO_VGUI          = True # skip vgui
+		conf.options.NANOGL           = True
+		conf.options.GLWES            = False # deprecated
+		conf.options.GL4ES            = True
+		conf.options.GLES3COMPAT      = True
+		conf.options.GL               = False
+		conf.define('XASH_SDLMAIN', 1)
 	elif conf.env.MAGX:
 		conf.options.SDL12            = True
 		conf.options.NO_VGUI          = True
 		conf.options.GL               = False
 		conf.options.LOW_MEMORY       = 1
-		conf.options.SINGLE_BINARY    = True
 		conf.options.NO_ASYNC_RESOLVE = True
 		conf.define('XASH_SDLMAIN', 1)
 		enforce_pic = False
-	elif conf.env.DEST_OS == 'dos':
-		conf.options.SINGLE_BINARY = True
 	elif conf.env.DEST_OS == 'nswitch':
 		conf.options.NO_VGUI          = True
 		conf.options.GL               = True
-		conf.options.SINGLE_BINARY    = True
 		conf.options.NO_ASYNC_RESOLVE = True
 		conf.options.USE_STBTT        = True
 	elif conf.env.DEST_OS == 'psvita':
 		conf.options.NO_VGUI          = True
 		conf.options.GL               = True
-		conf.options.SINGLE_BINARY    = True
 		conf.options.NO_ASYNC_RESOLVE = True
 		conf.options.USE_STBTT        = True
 		# we'll specify -fPIC by hand for shared libraries only
@@ -284,18 +282,19 @@ def configure(conf):
 	conf.env.append_unique('CXXFLAGS', cxxflags)
 	conf.env.append_unique('LINKFLAGS', linkflags)
 
-	if conf.env.COMPILER_CC != 'msvc' and not conf.options.DISABLE_WERROR:
+	if conf.env.COMPILER_CC != 'msvc':
 		opt_flags = [
 			# '-Wall', '-Wextra', '-Wpedantic',
 			'-fdiagnostics-color=always',
 
 			# stable diagnostics, forced to error, sorted
+			'-Werror=alloc-size',
 			'-Werror=bool-compare',
 			'-Werror=bool-operation',
 			'-Werror=cast-align=strict',
 			'-Werror=duplicated-cond',
 			# '-Werror=format=2',
-#			'-Werror=implicit-fallthrough=2',
+			'-Werror=implicit-fallthrough=2',
 			'-Werror=logical-op',
 			'-Werror=nonnull',
 			'-Werror=packed',
@@ -319,9 +318,14 @@ def configure(conf):
 			'-Wmisleading-indentation',
 			'-Wstringop-overflow',
 			'-Wunintialized',
+			'-Walloc-zero',
 
 			# disabled, flood
 			# '-Wdouble-promotion',
+
+			'-Wunused-function',
+			'-Wunused-variable',
+			'-Wunused-but-set-variable',
 		]
 
 		opt_cflags = [
@@ -335,27 +339,37 @@ def configure(conf):
 			'-Werror=old-style-declaration',
 			'-Werror=old-style-definition',
 			'-Werror=strict-prototypes',
-			'-fnonconst-initializers' # owcc
+			'-fnonconst-initializers', # owcc
+			'-Wmissing-prototypes', # not an error yet
 		]
 
 		opt_cxxflags = [] # TODO:
 
-		cflags = conf.filter_cflags(opt_flags + opt_cflags, cflags)
-		cxxflags = conf.filter_cxxflags(opt_flags + opt_cxxflags, cxxflags)
+		if conf.options.DISABLE_WERROR:
+			opt_flags = []
+			opt_cflags = ['-Werror=implicit-function-declaration']
+			opt_cxxflags = []
 
-		conf.env.append_unique('CFLAGS', cflags)
-		conf.env.append_unique('CXXFLAGS', cxxflags)
+		conf.env.CFLAGS_werror = conf.filter_cflags(opt_flags + opt_cflags, cflags)
+		conf.env.CXXFLAGS_werror = conf.filter_cxxflags(opt_flags + opt_cxxflags, cxxflags)
 
 	conf.env.TESTS         = conf.options.TESTS
 	conf.env.ENABLE_UTILS  = conf.options.ENABLE_UTILS
 	conf.env.ENABLE_FUZZER = conf.options.ENABLE_FUZZER
 	conf.env.DEDICATED     = conf.options.DEDICATED
-	conf.env.SINGLE_BINARY = conf.options.SINGLE_BINARY or conf.env.DEDICATED
+	conf.env.SUPPORT_BSP2_FORMAT = conf.options.SUPPORT_BSP2_FORMAT
+
+	# disable game_launch compiling on platform where it's not needed
+	conf.env.DISABLE_LAUNCHER = conf.env.DEST_OS in ['android', 'nswitch', 'psvita', 'dos'] or conf.env.MAGX or conf.env.DEDICATED
 
 	if conf.env.SAILFISH == 'aurora':
 		conf.env.DEFAULT_RPATH = '/usr/share/su.xash.Engine/lib'
 	elif conf.env.DEST_OS == 'darwin':
 		conf.env.DEFAULT_RPATH = '@loader_path'
+	elif conf.env.DEST_OS == 'openbsd':
+		# OpenBSD requires -z origin to enable $ORIGIN expansion in RPATH
+		conf.env.RPATH_ST = '-Wl,-z,origin,-rpath,%s'
+		conf.env.DEFAULT_RPATH = '$ORIGIN'
 	else:
 		conf.env.DEFAULT_RPATH = '$ORIGIN'
 
@@ -367,15 +381,6 @@ def configure(conf):
 	conf.env.GAMEDIR = conf.options.GAMEDIR
 	conf.define('XASH_GAMEDIR', conf.options.GAMEDIR)
 	conf.define_cond('XASH_ALL_SERVERS', conf.options.ALL_SERVERS)
-
-	# check if we can use C99 stdint
-	conf.define('STDINT_H', 'stdint.h' if conf.check_cc(header_name='stdint.h', mandatory=False) else 'pstdint.h')
-
-	# check if we can use alloca.h or malloc.h
-	if conf.check_cc(header_name='alloca.h', mandatory=False):
-		conf.define('ALLOCA_H', 'alloca.h')
-	elif conf.check_cc(header_name='malloc.h', mandatory=False):
-		conf.define('ALLOCA_H', 'malloc.h')
 
 	if conf.env.DEST_OS == 'nswitch':
 		conf.check_cfg(package='solder', args='--cflags --libs', uselib_store='SOLDER')
@@ -404,57 +409,16 @@ def configure(conf):
 			for i in a:
 				conf.check_cc(lib = i)
 	else:
-		conf.check_cc(lib='dl')
+		conf.check_cc(lib='dl', mandatory = False)
 		conf.check_cc(lib='m')
 
 
-	# check if we can use C99 tgmath
-	if conf.check_cc(header_name='tgmath.h', mandatory=False):
-		if conf.env.COMPILER_CC == 'msvc':
-			conf.define('_CRT_SILENCE_NONCONFORMING_TGMATH_H', 1)
-		tgmath_usable = conf.check_cc(fragment='''#include<tgmath.h>
-			const float val = 2, val2 = 3;
-			int main(void){ return (int)(-asin(val) + cos(val2)); }''',
-			msg='Checking if tgmath.h is usable', mandatory=False, use='M')
-		conf.define_cond('HAVE_TGMATH_H', tgmath_usable)
-	else:
-		conf.undefine('HAVE_TGMATH_H')
-
 	# set _FILE_OFFSET_BITS=64 for filesystems with 64-bit inodes
-	if conf.env.DEST_OS != 'win32' and conf.env.DEST_SIZEOF_VOID_P == 4:
-		# check was borrowed from libarchive source code
-		file_offset_bits_usable = conf.check_cc(fragment='''
-#define _FILE_OFFSET_BITS 64
-#include <sys/types.h>
-#define KB ((off_t)1024)
-#define MB ((off_t)1024 * KB)
-#define GB ((off_t)1024 * MB)
-#define TB ((off_t)1024 * GB)
-int t2[(((64 * GB -1) % 671088649) == 268434537)
-       && (((TB - (64 * GB -1) + 255) % 1792151290) == 305159546)? 1: -1];
-int main(void) { return 0; }''',
-		msg='Checking if _FILE_OFFSET_BITS can be defined to 64', mandatory=False)
-		if file_offset_bits_usable:
-			conf.define('_FILE_OFFSET_BITS', 64)
-		else: conf.undefine('_FILE_OFFSET_BITS')
-
-	if conf.env.DEST_OS != 'win32':
-		strcasestr_frag = '''#include <string.h>
-int main(int argc, char **argv) { strcasestr(argv[1], argv[2]); return 0; }'''
-		strchrnul_frag  = '''#include <string.h>
-int main(int argc, char **argv) { strchrnul(argv[1], 'x'); return 0; }'''
-
-		def check_gnu_function(frag, msg, define):
-			if conf.check_cc(msg=msg, mandatory=False, fragment=frag):
-				conf.define(define, 1)
-			elif conf.check_cc(msg='... with _GNU_SOURCE?', mandatory=False, fragment=frag, defines='_GNU_SOURCE=1'):
-				conf.define(define, 1)
-				conf.define('_GNU_SOURCE', 1)
-		check_gnu_function(strcasestr_frag, 'Checking for strcasestr', 'HAVE_STRCASESTR')
-		check_gnu_function(strchrnul_frag, 'Checking for strchrnul', 'HAVE_STRCHRNUL')
+	# must be set globally as it changes ABI
+	if conf.env.DEST_OS not in ['psvita']:
+		conf.check_large_file(compiler = 'c', execute = False)
 
 	# indicate if we are packaging for Linux/BSD
-	conf.env.PACKAGING = conf.options.PACKAGING
 	if conf.options.PACKAGING:
 		conf.env.PREFIX = conf.options.prefix
 		if conf.env.SAILFISH == "aurora":
@@ -472,9 +436,9 @@ int main(int argc, char **argv) { strchrnul(argv[1], 'x'); return 0; }'''
 		if conf.check_cfg(package='opus', uselib_store='opus', args='opus >= 1.4 --cflags --libs', mandatory=False):
 			# now try to link with export that only exists with CUSTOM_MODES defined
 			frag='''#include <opus_custom.h>
-int main(void) { return !opus_custom_encoder_init(0, 0, 0); }'''
+int main(void) { return !opus_custom_encoder_init((OpusCustomEncoder *)1, (const OpusCustomMode *)1, 1); }'''
 
-			if conf.check_cc(msg='Checking if opus supports custom modes', defines='CUSTOM_MODES=1', use='opus', fragment=frag, mandatory=False):
+			if conf.check_cc(msg='Checking if opus supports custom modes', defines='CUSTOM_MODES=1', use='opus werror', fragment=frag, mandatory=False):
 				conf.env.HAVE_SYSTEM_OPUS = True
 
 	conf.define('XASH_LOW_MEMORY', conf.options.LOW_MEMORY)

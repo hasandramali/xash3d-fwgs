@@ -30,7 +30,7 @@ compiler_optimizations.CFLAGS['gottagofast'] = {
 }
 '''
 
-VALID_BUILD_TYPES = ['fastnative', 'fast', 'release', 'debug', 'sanitize', 'msan', 'none']
+VALID_BUILD_TYPES = ['fastnative', 'fast', 'humanrights', 'debug', 'sanitize', 'msan', 'none']
 
 LINKFLAGS = {
 	'common': {
@@ -64,6 +64,7 @@ CFLAGS = {
 		'msvc':    ['/O2', '/Oy', '/Zi'],
 		'gcc': {
 			'3':       ['-O3', '-fomit-frame-pointer'],
+			'4':       ['-Ofast', '-funsafe-math-optimizations', '-funsafe-loop-optimizations', '-fomit-frame-pointer'],
 			'default': ['-Ofast', '-funsafe-math-optimizations', '-funsafe-loop-optimizations', '-fomit-frame-pointer', '-fno-semantic-interposition']
 		},
 		'clang':   ['-Ofast'],
@@ -75,10 +76,14 @@ CFLAGS = {
 		'clang':   ['-Ofast', '-march=native'],
 		'default': ['-O3']
 	},
-	'release': {
+	'humanrights': {
 		'msvc':    ['/O2', '/Zi'],
 		'owcc':    ['-O3', '-foptimize-sibling-calls', '-fomit-leaf-frame-pointer', '-fomit-frame-pointer', '-fschedule-insns', '-funsafe-math-optimizations', '-funroll-loops', '-frerun-optimizer', '-finline-functions', '-finline-limit=512', '-fguess-branch-probability', '-fno-strict-aliasing', '-floop-optimize'],
-		'gcc':     ['-O3', '-fno-semantic-interposition'],
+		'gcc': {
+			'4':   ['-O3'],
+			'3':   ['-O3'],
+			'default': ['-O3','-fno-semantic-interposition'],
+		},
 		'default': ['-O3']
 	},
 	'debug': {
@@ -116,10 +121,37 @@ POLLY_CFLAGS = {
 	# msvc sosat :(
 }
 
+OPENMP_CFLAGS = {
+	'gcc':   ['-fopenmp'],
+	'clang': ['-fopenmp'],
+	'msvc':  ['/openmp']
+}
+
+OPENMP_LINKFLAGS = {
+	'gcc':   ['-fopenmp'],
+	'clang': ['-fopenmp'],
+}
+
+PROFILE_GENERATE_CFLAGS = {
+	'gcc':   ['-fprofile-generate=xash3d-prof'],
+}
+
+PROFILE_GENERATE_LINKFLAGS = {
+	'gcc':   ['-fprofile-generate=xash3d-prof'],
+}
+
+PROFILE_USE_CFLAGS = {
+	'gcc':   ['-fprofile-use=%s'],
+}
+
+PROFILE_USE_LINKFLAGS = {
+	'gcc':   ['-fprofile-use=%s'],
+}
+
 def options(opt):
 	grp = opt.add_option_group('Compiler optimization options')
 
-	grp.add_option('-T', '--build-type', action='store', dest='BUILD_TYPE', default='release',
+	grp.add_option('-T', '--build-type', action='store', dest='BUILD_TYPE', default='humanrights',
 		help = 'build type: debug, release or none(custom flags)')
 
 	grp.add_option('--enable-lto', action = 'store_true', dest = 'LTO', default = False,
@@ -128,8 +160,22 @@ def options(opt):
 	grp.add_option('--enable-poly-opt', action = 'store_true', dest = 'POLLY', default = False,
 		help = 'enable polyhedral optimization if possible [default: %default]')
 
+	grp.add_option('--enable-openmp', action = 'store_true', dest = 'OPENMP', default = False,
+		help = 'enable OpenMP extensions [default: %default]')
+
+	grp.add_option('--enable-profile', action = 'store_true', dest = 'PROFILE_GENERATE', default = False,
+		help = 'enable profile generating build (stored in xash3d-prof directory) [default: %default]')
+
+	grp.add_option('--use-profile', action = 'store', dest = 'PROFILE_USE', default = None,
+		help = 'use profile during build [default: %default]')
+
 def configure(conf):
 	conf.start_msg('Build type')
+
+	# legacy naming for default release build
+	# https://chaos.social/@karolherbst/111340511652012860
+	if conf.options.BUILD_TYPE == 'release':
+		conf.options.BUILD_TYPE = 'humanrights'
 
 	if not conf.options.BUILD_TYPE in VALID_BUILD_TYPES:
 		conf.end_msg(conf.options.BUILD_TYPE, color='RED')
@@ -139,6 +185,9 @@ def configure(conf):
 
 	conf.msg('LTO build', 'yes' if conf.options.LTO else 'no')
 	conf.msg('PolyOpt build', 'yes' if conf.options.POLLY else 'no')
+	conf.msg('OpenMP build', 'yes' if conf.options.OPENMP else 'no')
+	conf.msg('Generate profile', 'yes' if conf.options.PROFILE_GENERATE else 'no')
+	conf.msg('Use profile', conf.options.PROFILE_USE if not conf.options.PROFILE_GENERATE else 'no')
 
 	# -march=native should not be used
 	if conf.options.BUILD_TYPE.startswith('fast'):
@@ -168,6 +217,17 @@ def get_optimization_flags(conf):
 
 	if conf.options.POLLY:
 		cflags   += conf.get_flags_by_compiler(POLLY_CFLAGS, conf.env.COMPILER_CC)
+
+	if conf.options.OPENMP:
+		linkflags+= conf.get_flags_by_compiler(OPENMP_LINKFLAGS, conf.env.COMPILER_CC)
+		cflags   += conf.get_flags_by_compiler(OPENMP_CFLAGS, conf.env.COMPILER_CC)
+
+	if conf.options.PROFILE_GENERATE:
+		linkflags+= conf.get_flags_by_compiler(PROFILE_GENERATE_LINKFLAGS, conf.env.COMPILER_CC)
+		cflags   += conf.get_flags_by_compiler(PROFILE_GENERATE_CFLAGS, conf.env.COMPILER_CC)
+	elif conf.options.PROFILE_USE:
+		linkflags+= [conf.get_flags_by_compiler(PROFILE_USE_LINKFLAGS, conf.env.COMPILER_CC)[0] % conf.options.PROFILE_USE]
+		cflags   += [conf.get_flags_by_compiler(PROFILE_USE_CFLAGS, conf.env.COMPILER_CC)[0] % conf.options.PROFILE_USE]
 
 	if conf.env.DEST_OS == 'nswitch' and conf.options.BUILD_TYPE == 'debug':
 		# enable remote debugger
