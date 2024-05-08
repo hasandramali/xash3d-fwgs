@@ -233,13 +233,6 @@ public:
 		return FS_FileTime( p, false );
 	}
 
-	long int GetFileModificationTime( const char *path )
-	{
-		// TODO: properly reverse-engineer this
-		FixupPath( p, path );
-		return FS_FileTime( p, false );
-	}
-
 	void FileTimeToString( char *p, int size, long int time ) override
 	{
 		const time_t curtime = time;
@@ -320,12 +313,6 @@ public:
 			return nullptr;
 
 		state = new CSearchState( &searchHead, search );
-		if( !state )
-		{
-			Mem_Free( search );
-			return nullptr;
-		}
-
 		*handle = state->handle;
 		return state->search->filenames[0];
 	}

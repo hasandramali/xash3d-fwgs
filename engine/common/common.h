@@ -273,12 +273,12 @@ typedef struct
 
 typedef enum bugcomp_e
 {
-	// reverts fix for pfnPEntityOfEntIndex for bug compatibility with GoldSrc
-	BUGCOMP_PENTITYOFENTINDEX_FLAG = BIT( 0 ),
+	// default mode, we assume that user dlls are not relying on engine bugs
+	BUGCOMP_OFF,
 
-	// rewrites mod's attempts to write GoldSrc-specific messages into Xash protocol
-	// (new wrappers are added by request)
-	BUGCOMP_MESSAGE_REWRITE_FACILITY_FLAG = BIT( 1 ),
+	// GoldSrc mode, user dlls are relying on GoldSrc specific bugs
+	// but fixing them may break regular Xash games
+	BUGCOMP_GOLDSRC,
 } bugcomp_t;
 
 typedef struct host_parm_s
@@ -302,12 +302,8 @@ typedef struct host_parm_s
 	int		argc;
 	char	**argv;
 
-	// ==== shared through RefAPI's ref_host_t
 	double		realtime;		// host.curtime
 	double		frametime;	// time between engine frames
-	uint		features;		// custom features that enables by mod-maker request
-	// ==== shared through RefAPI's ref_host_t
-
 	double		realframetime;	// for some system events, e.g. console animations
 
 	uint		framecount;	// global framecount
@@ -348,6 +344,8 @@ typedef struct host_parm_s
 	poolhandle_t imagepool;	// imagelib mempool
 	poolhandle_t soundpool;	// soundlib mempool
 
+	uint		features;		// custom features that enables by mod-maker request
+
 	// for IN_MouseMove() easy access
 	int		window_center_x;
 	int		window_center_y;
@@ -356,7 +354,7 @@ typedef struct host_parm_s
 	int		numdecals;
 
 	// bug compatibility level, for very "special" games
-	uint32_t bugcomp;
+	bugcomp_t bugcomp;
 
 	// measure time to first frame
 	double starttime;
@@ -388,6 +386,7 @@ void *FS_GetNativeObject( const char *obj );
 //
 // cmd.c
 //
+void Cbuf_Init( void );
 void Cbuf_Clear( void );
 void Cbuf_AddText( const char *text );
 void Cbuf_AddTextf( const char *text, ... ) _format( 1 );
@@ -411,6 +410,9 @@ void Cmd_RemoveCommand( const char *cmd_name );
 qboolean Cmd_Exists( const char *cmd_name );
 void Cmd_LookupCmds( void *buffer, void *ptr, setpair_t callback );
 int Cmd_ListMaps( search_t *t , char *lastmapname, size_t len );
+qboolean Cmd_GetMapList( const char *s, char *completedname, int length );
+qboolean Cmd_GetDemoList( const char *s, char *completedname, int length );
+qboolean Cmd_GetMovieList( const char *s, char *completedname, int length );
 void Cmd_TokenizeString( const char *text );
 void Cmd_ExecuteString( const char *text );
 void Cmd_ForwardToServer( void );
@@ -420,8 +422,8 @@ void Cmd_Escape( char *newCommand, const char *oldCommand, int len );
 // zone.c
 //
 void Memory_Init( void );
-void *_Mem_Realloc( poolhandle_t poolptr, void *memptr, size_t size, qboolean clear, const char *filename, int fileline ) ALLOC_CHECK( 3 );
-void *_Mem_Alloc( poolhandle_t poolptr, size_t size, qboolean clear, const char *filename, int fileline ) ALLOC_CHECK( 2 );
+void *_Mem_Realloc( poolhandle_t poolptr, void *memptr, size_t size, qboolean clear, const char *filename, int fileline );
+void *_Mem_Alloc( poolhandle_t poolptr, size_t size, qboolean clear, const char *filename, int fileline );
 poolhandle_t _Mem_AllocPool( const char *name, const char *filename, int fileline );
 void _Mem_FreePool( poolhandle_t *poolptr, const char *filename, int fileline );
 void _Mem_EmptyPool( poolhandle_t poolptr, const char *filename, int fileline );
@@ -457,12 +459,13 @@ void FS_FreeImage( rgbdata_t *pack );
 extern const bpc_desc_t PFDesc[];	// image get pixelformat
 qboolean Image_Process( rgbdata_t **pix, int width, int height, uint flags, float reserved );
 void Image_PaletteHueReplace( byte *palSrc, int newHue, int start, int end, int pal_size );
+void Image_PaletteTranslate( byte *palSrc, int top, int bottom, int pal_size );
 void Image_SetForceFlags( uint flags );	// set image force flags on loading
+size_t Image_DXTGetLinearSize( int type, int width, int height, int depth );
 qboolean Image_CustomPalette( void );
 void Image_ClearForceFlags( void );
 void Image_SetMDLPointer( byte *p );
 void Image_CheckPaletteQ1( void );
-
 /*
 ========================================================================
 
@@ -479,6 +482,14 @@ typedef enum
 	WF_TOTALCOUNT,	// must be last
 } sndformat_t;
 
+// soundlib global settings
+typedef enum
+{
+	SL_USE_LERPING	= BIT(0),		// lerping sounds during resample
+	SL_KEEP_8BIT	= BIT(1),		// don't expand 8bit sounds automatically up to 16 bit
+	SL_ALLOW_OVERWRITE	= BIT(2),		// allow to overwrite stored sounds
+} slFlags_t;
+
 // wavdata output flags
 typedef enum
 {
@@ -487,20 +498,21 @@ typedef enum
 	SOUND_STREAM	= BIT( 1 ),	// this is a streaminfo, not a real sound
 
 	// Sound_Process manipulation flags
-	SOUND_RESAMPLE	= BIT( 12 ),	// resample sound to specified rate
+	SOUND_RESAMPLE	= BIT(12),	// resample sound to specified rate
+	SOUND_CONVERT16BIT	= BIT(13),	// change sound resolution from 8 bit to 16
 } sndFlags_t;
 
 typedef struct
 {
-	word    rate;      // num samples per second (e.g. 11025 - 11 khz)
-	byte    width;     // resolution - bum bits divided by 8 (8 bit is 1, 16 bit is 2)
-	byte    channels;  // num channels (1 - mono, 2 - stereo)
-	uint    loopStart; // offset at this point sound will be looping while playing more than only once
-	uint    samples;   // total samplecount in wav
-	uint    type;      // compression type
-	uint    flags;     // misc sound flags
-	byte   *buffer;    // sound buffer
-	size_t  size;      // for bounds checking
+	word	rate;		// num samples per second (e.g. 11025 - 11 khz)
+	byte	width;		// resolution - bum bits divided by 8 (8 bit is 1, 16 bit is 2)
+	byte	channels;		// num channels (1 - mono, 2 - stereo)
+	int	loopStart;	// offset at this point sound will be looping while playing more than only once
+	int	samples;		// total samplecount in wav
+	uint	type;		// compression type
+	uint	flags;		// misc sound flags
+	byte	*buffer;		// sound buffer
+	size_t	size;		// for bounds checking
 } wavdata_t;
 
 //
@@ -529,6 +541,7 @@ qboolean Host_IsQuakeCompatible( void );
 void EXPORT Host_Shutdown( void );
 int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGame, pfnChangeGame func );
 int Host_CompareFileTime( int ft1, int ft2 );
+void Host_NewInstance( const char *name, const char *finalmsg );
 void Host_EndGame( qboolean abort, const char *message, ... ) _format( 2 );
 void Host_AbortCurrentFrame( void ) NORETURN;
 void Host_WriteServerConfig( const char *name );
@@ -539,8 +552,9 @@ qboolean Host_IsLocalGame( void );
 qboolean Host_IsLocalClient( void );
 void Host_ShutdownServer( void );
 void Host_Error( const char *error, ... ) _format( 1 );
-void Host_ValidateEngineFeatures( uint32_t features );
+void Host_PrintEngineFeatures( void );
 void Host_Frame( float time );
+void Host_InitDecals( void );
 void Host_Credits( void );
 
 //
@@ -584,6 +598,7 @@ void COM_HexConvert( const char *pszInput, int nInputLength, byte *pOutput );
 int COM_SaveFile( const char *filename, const void *data, int len );
 byte* COM_LoadFileForMe( const char *filename, int *pLength );
 qboolean COM_IsSafeFileToDownload( const char *filename );
+const char *COM_GetResourceTypeName( resourcetype_t restype );
 cvar_t *pfnCVarGetPointer( const char *szVarName );
 int pfnDrawConsoleString( int x, int y, char *string );
 void pfnDrawSetTextColor( float r, float g, float b );
@@ -591,6 +606,7 @@ void pfnDrawConsoleStringLen( const char *pText, int *length, int *height );
 void *Cache_Check( poolhandle_t mempool, struct cache_user_s *c );
 void COM_TrimSpace( const char *source, char *dest );
 void pfnGetModelBounds( model_t *mod, float *mins, float *maxs );
+void pfnCVarDirectSet( cvar_t *var, const char *szValue );
 int COM_CheckParm( char *parm, char **ppnext );
 void pfnGetGameDir( char *szGetGameDir );
 int pfnGetModelType( model_t *mod );
@@ -632,6 +648,7 @@ void pfnResetTutorMessageDecayData( void );
 //
 // con_utils.c
 //
+qboolean Cmd_AutocompleteName( const char *source, int arg, char *buffer, size_t bufsize );
 void Con_CompleteCommand( field_t *field );
 void Cmd_AutoComplete( char *complete_string );
 void Cmd_AutoCompleteClear( void );
@@ -687,15 +704,24 @@ void CL_LegacyUpdateInfo( void );
 void CL_CharEvent( int key );
 qboolean CL_DisableVisibility( void );
 byte *COM_LoadFile( const char *filename, int usehunk, int *pLength );
+int CL_GetDemoComment( const char *demoname, char *comment );
+void COM_AddAppDirectoryToSearchPath( const char *pszBaseDir, const char *appName );
+int COM_ExpandFilename( const char *fileName, char *nameOutBuffer, int nameOutBufferSize );
 struct cmd_s *Cmd_GetFirstFunctionHandle( void );
 struct cmd_s *Cmd_GetNextFunctionHandle( struct cmd_s *cmd );
 struct cmdalias_s *Cmd_AliasGetList( void );
 const char *Cmd_GetName( struct cmd_s *cmd );
+void SV_StartSound( edict_t *ent, int chan, const char *sample, float vol, float attn, int flags, int pitch );
+void SV_CreateDecal( sizebuf_t *msg, const float *origin, int decalIndex, int entityIndex, int modelIndex, int flags, float scale );
 void Log_Printf( const char *fmt, ... ) _format( 1 );
 void SV_BroadcastCommand( const char *fmt, ... ) _format( 1 );
+qboolean SV_RestoreCustomDecal( struct decallist_s *entry, edict_t *pEdict, qboolean adjacent );
 void SV_BroadcastPrintf( struct sv_client_s *ignore, const char *fmt, ... ) _format( 2 );
+int R_CreateDecalList( struct decallist_s *pList );
+void R_ClearAllDecals( void );
 void CL_ClearStaticEntities( void );
-qboolean S_StreamGetCurrentState( char *currentTrack, size_t currentTrackSize, char *loopTrack, size_t loopTrackSize, int *position );
+qboolean S_StreamGetCurrentState( char *currentTrack, char *loopTrack, int *position );
+struct cl_entity_s *CL_GetEntityByIndex( int index );
 void CL_ServerCommand( qboolean reliable, const char *fmt, ... ) _format( 2 );
 void CL_HudMessage( const char *pMessage );
 const char *CL_MsgInfo( int cmd );
@@ -704,14 +730,17 @@ void SV_DrawOrthoTriangles( void );
 double CL_GetDemoFramerate( void );
 qboolean UI_CreditsActive( void );
 void CL_StopPlayback( void );
+void CL_ExtraUpdate( void );
 int CL_GetMaxClients( void );
 int SV_GetMaxClients( void );
 qboolean CL_IsRecordDemo( void );
 qboolean CL_IsTimeDemo( void );
 qboolean CL_IsPlaybackDemo( void );
 qboolean SV_Initialized( void );
+qboolean CL_LoadProgs( const char *name );
 void CL_ProcessFile( qboolean successfully_received, const char *filename );
 int SV_GetSaveComment( const char *savename, char *comment );
+qboolean SV_NewGame( const char *mapName, qboolean loadGame );
 void SV_ClipPMoveToEntity( struct physent_s *pe, const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end, struct pmtrace_s *tr );
 void CL_ClipPMoveToEntity( struct physent_s *pe, const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end, struct pmtrace_s *tr );
 void SV_SysError( const char *error_string );
@@ -720,9 +749,11 @@ void SV_ExecLoadLevel( void );
 void SV_ExecLoadGame( void );
 void SV_ExecChangeLevel( void );
 void CL_WriteMessageHistory( void );
+void CL_SendCmd( void );
 void CL_Disconnect( void );
 void CL_ClearEdicts( void );
 void CL_Crashed( void );
+qboolean CL_NextDemo( void );
 char *SV_Serverinfo( void );
 void CL_Drop( void );
 void Con_Init( void );
@@ -747,6 +778,7 @@ qboolean Info_SetValueForStarKey( char *s, const char *key, const char *value, i
 qboolean Info_IsValid( const char *s );
 void Info_WriteVars( file_t *f );
 void Info_Print( const char *s );
+void Cmd_WriteVariables( file_t *f );
 int Cmd_CheckMapsList( int fRefresh );
 void COM_SetRandomSeed( int lSeed );
 int COM_RandomLong( int lMin, int lMax );
@@ -761,14 +793,13 @@ void VID_Init( void );
 void UI_SetActiveMenu( qboolean fActive );
 void UI_ShowConnectionWarning( void );
 void Cmd_Null_f( void );
-void Rcon_Print( host_redirect_t *rd, const char *pMsg );
+void Rcon_Print( const char *pMsg );
 qboolean COM_ParseVector( char **pfile, float *v, size_t size );
 void COM_NormalizeAngles( vec3_t angles );
 int COM_FileSize( const char *filename );
 void COM_FreeFile( void *buffer );
 int COM_CompareFileTime( const char *filename1, const char *filename2, int *iCompare );
 char *va( const char *format, ... ) _format( 1 );
-qboolean CRC32_MapFile( dword *crcvalue, const char *filename, qboolean multiplayer );
 
 // soundlib shared exports
 qboolean S_Init( void );
@@ -779,14 +810,8 @@ void S_StopBackgroundTrack( void );
 void S_StopAllSounds( qboolean ambient );
 
 // gamma routines
+void BuildGammaTable( float gamma, float brightness );
 byte LightToTexGamma( byte b );
-byte TextureToGamma( byte );
-uint LightToTexGammaEx( uint );
-uint ScreenGammaTable( uint );
-uint LinearGammaTable( uint );
-void V_Init( void );
-void V_CheckGamma( void );
-void V_CheckGammaEnd( void );
 
 //
 // identification.c
@@ -808,32 +833,14 @@ void NET_MasterShutdown( void );
 qboolean NET_GetMaster( netadr_t from, uint *challenge, double *last_heartbeat );
 
 //
-// sounds.c
+// munge.c
 //
-typedef enum soundlst_group_e
-{
-	BouncePlayerShell = 0,
-	BounceWeaponShell,
-	BounceConcrete,
-	BounceGlass,
-	BounceMetal,
-	BounceFlesh,
-	BounceWood,
-	Ricochet,
-	Explode,
-	PlayerWaterEnter,
-	PlayerWaterExit,
-	EntityWaterEnter,
-	EntityWaterExit,
-
-	SoundList_Groups // must be last
-} soundlst_group_t;
-
-int SoundList_Count( soundlst_group_t group );
-const char *SoundList_GetRandom( soundlst_group_t group );
-const char *SoundList_Get( soundlst_group_t group, int idx );
-void SoundList_Init( void );
-void SoundList_Shutdown( void );
+void COM_Munge( byte *data, size_t len, int seq );
+void COM_UnMunge( byte *data, size_t len, int seq );
+void COM_Munge2( byte *data, size_t len, int seq );
+void COM_UnMunge2( byte *data, size_t len, int seq );
+void COM_Munge3( byte *data, size_t len, int seq );
+void COM_UnMunge3( byte *data, size_t len, int seq );
 
 #ifdef REF_DLL
 #error "common.h in ref_dll"

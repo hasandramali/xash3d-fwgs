@@ -41,8 +41,13 @@ typedef	int	fixed16_t;
 
 #include <stdio.h>
 
+#define WORLD (gEngfuncs.GetWorld())
+#define WORLDMODEL (gEngfuncs.pfnGetModelByIndex( 1 ))
+#define MOVEVARS (gEngfuncs.pfnGetMoveVars())
+
 // make mod_ref.h?
 #define LM_SAMPLE_SIZE             16
+
 
 extern poolhandle_t r_temppool;
 
@@ -66,7 +71,7 @@ extern poolhandle_t r_temppool;
 #define MAX_DRAW_STACK	2		// normal view and menu view
 
 #define SHADEDOT_QUANT 	16		// precalculated dot products for quantized angles
-#define SHADE_LAMBERT	1.4953241
+#define SHADE_LAMBERT	1.495f
 #define DEFAULT_ALPHATEST	0.0f
 
 // refparams
@@ -78,10 +83,10 @@ extern poolhandle_t r_temppool;
 #define RP_NONVIEWERREF	(RP_ENVVIEW)
 #define R_ModelOpaque( rm )	( rm == kRenderNormal )
 #define R_StaticEntity( ent )	( VectorIsNull( ent->origin ) && VectorIsNull( ent->angles ))
-#define RP_LOCALCLIENT( e )	((e) != NULL && (e)->index == ( gp_cl->playernum + 1 ) && e->player )
+#define RP_LOCALCLIENT( e )	((e) != NULL && (e)->index == gEngfuncs.GetPlayerIndex() && e->player )
 #define RP_NORMALPASS()	( FBitSet( RI.params, RP_NONVIEWERREF ) == 0 )
 
-#define CL_IsViewEntityLocalPlayer() ( gp_cl->viewentity == ( gp_cl->playernum + 1 ))
+#define CL_IsViewEntityLocalPlayer() ( ENGINE_GET_PARM( PARM_VIEWENT_INDEX ) == ENGINE_GET_PARM( PARM_PLAYER_INDEX ) )
 
 #define CULL_VISIBLE	0		// not culled
 #define CULL_BACKSIDE	1		// backside of transparent wall
@@ -270,6 +275,7 @@ typedef struct
 	int		realframecount;	// not including viewpasses
 	int		framecount;
 
+	qboolean		ignore_lightgamma;
 	qboolean		fCustomRendering;
 	qboolean		fResetVis;
 	qboolean		fFlipViewModel;
@@ -288,17 +294,10 @@ typedef struct
 	// cull info
 	vec3_t		modelorg;		// relative to viewpoint
 
+	qboolean fCustomSkybox;
 	int sample_size;
 	uint sample_bits;
 	qboolean map_unload;
-
-	// get from engine
-	cl_entity_t *entities;
-	movevars_t *movevars;
-	color24 *palette;
-	cl_entity_t *viewent;
-
-	uint max_entities;
 } gl_globals_t;
 
 typedef struct
@@ -408,7 +407,6 @@ float *R_DecalSetupVerts( decal_t *pDecal, msurface_t *surf, int texture, int *o
 void R_EntityRemoveDecals( model_t *mod );
 //void DrawDecalsBatch( void );
 void R_ClearDecals( void );
-void R_DecalComputeBasis( msurface_t *surf, int flags, vec3_t textureSpaceBasis[3] );
 
 #if 0
 
@@ -462,6 +460,7 @@ void R_AnimateLight( void );
 void R_GetLightSpot( vec3_t lightspot );
 void R_MarkLights( dlight_t *light, int bit, mnode_t *node );
 colorVec R_LightVec( const vec3_t start, const vec3_t end, vec3_t lightspot, vec3_t lightvec );
+int R_CountSurfaceDlights( msurface_t *surf );
 colorVec R_LightPoint( const vec3_t p0 );
 #endif
 //
@@ -475,7 +474,6 @@ void R_SetupRefParams( const struct ref_viewpass_s *rvp );
 void R_TranslateForEntity( cl_entity_t *e );
 void R_RotateForEntity( cl_entity_t *e );
 void R_SetupGL( qboolean set_gl_state );
-qboolean R_OpaqueEntity( cl_entity_t *ent );
 void R_AllowFog( qboolean allowed );
 void R_SetupFrustum( void );
 void R_FindViewLeaf( void );
@@ -591,27 +589,6 @@ void VGUI_DrawQuad( const vpoint_t *ul, const vpoint_t *lr );
 void VGUI_GetTextureSizes( int *width, int *height );
 int VGUI_GenerateTexture( void );
 
-//
-// r_polyse.c
-//
-// !!! if this is changed, it must be changed in asm_draw.h too !!!
-typedef struct {
-	void			*pdest;
-	short			*pz;
-	int				count;
-	pixel_t			*ptex;
-	int				sfrac, tfrac, light, zi;
-} spanpackage_t;
-
-extern void (*d_pdrawspans)( spanpackage_t * );
-void R_PolysetFillSpans8( spanpackage_t * );
-void R_PolysetDrawSpans8_33( spanpackage_t * );
-void R_PolysetDrawSpansConstant8_33( spanpackage_t *pspanpackage);
-void R_PolysetDrawSpansTextureBlended( spanpackage_t *pspanpackage);
-void R_PolysetDrawSpansBlended( spanpackage_t *pspanpackage);
-void R_PolysetDrawSpansAdditive( spanpackage_t *pspanpackage);
-void R_PolysetDrawSpansGlow( spanpackage_t *pspanpackage);
-
 //#include "vid_common.h"
 
 //
@@ -627,7 +604,6 @@ int GL_LoadTexture( const char *name, const byte *buf, size_t size, int flags );
 void GL_FreeImage( const char *name );
 qboolean VID_ScreenShot( const char *filename, int shot_type );
 qboolean VID_CubemapShot( const char *base, uint size, const float *vieworg, qboolean skyshot );
-void R_GammaChanged( qboolean do_reset_gamma );
 void R_BeginFrame( qboolean clearScene );
 void R_RenderFrame( const struct ref_viewpass_s *vp );
 void R_EndFrame( void );
@@ -698,31 +674,8 @@ void TriBrightness( float brightness );
 
 extern ref_api_t      gEngfuncs;
 extern ref_globals_t *gpGlobals;
-extern ref_client_t  *gp_cl;
-extern ref_host_t    *gp_host;
 
 DECLARE_ENGINE_SHARED_CVAR_LIST()
-
-//
-// helper funcs
-//
-static inline cl_entity_t *CL_GetEntityByIndex( int index )
-{
-	if( unlikely( index < 0 || index >= tr.max_entities || !tr.entities ))
-		return NULL;
-
-	return &tr.entities[index];
-}
-
-static inline model_t *CL_ModelHandle( int index )
-{
-	if( unlikely( index < 0 || index >= gp_cl->nummodels ))
-		return NULL;
-
-	return gp_cl->models[index];
-}
-
-#define WORLDMODEL (gp_cl->models[1])
 
 // todo: gl_cull.c
 #define R_CullModel(...) 0
@@ -1077,10 +1030,6 @@ void D_DrawSpans16 (espan_t *pspans);
 void D_DrawZSpans (espan_t *pspans);
 void Turbulent8 (espan_t *pspan);
 void NonTurbulent8 (espan_t *pspan);	//PGM
-void D_BlendSpans16( espan_t *pspan, int alpha );
-void D_AlphaSpans16( espan_t *pspan );
-void D_AddSpans16( espan_t *pspan );
-void TurbulentZ8( espan_t *pspan, int alpha );
 
 surfcache_t     *D_CacheSurface (msurface_t *surface, int miplevel);
 

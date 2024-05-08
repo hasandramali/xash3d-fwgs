@@ -43,7 +43,7 @@ struct qfrustum_s qfrustum;
 D_Patch
 ================
 */
-static void D_Patch (void)
+void D_Patch (void)
 {
 #if id386
 	extern void D_Aff8Patch( void );
@@ -159,7 +159,7 @@ void TransformVector (vec3_t in, vec3_t out)
 R_SetUpFrustumIndexes
 ===============
 */
-static void R_SetUpFrustumIndexes (void)
+void R_SetUpFrustumIndexes (void)
 {
 	int		i, j, *pindex;
 
@@ -195,7 +195,7 @@ Called every time the vid structure or r_refdef changes.
 Guaranteed to be called before the first refresh
 ===============
 */
-static void R_ViewChanged (vrect_t *vr)
+void R_ViewChanged (vrect_t *vr)
 {
 	int		i;
 	float verticalFieldOfView, horizontalFieldOfView, xOrigin, yOrigin;

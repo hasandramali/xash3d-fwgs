@@ -583,7 +583,7 @@ void Mod_PrintWorldStats_f( void )
 Mod_DecompressPVS
 ===================
 */
-static byte *Mod_DecompressPVS( const byte *in, int visbytes )
+byte *Mod_DecompressPVS( const byte *in, int visbytes )
 {
 	byte	*out;
 	int	c;
@@ -980,7 +980,7 @@ Mod_SampleSizeForFace
 return the current lightmap resolution per face
 ==================
 */
-int Mod_SampleSizeForFace( const msurface_t *surf )
+int Mod_SampleSizeForFace( msurface_t *surf )
 {
 	if( !surf || !surf->texinfo )
 		return LM_SAMPLE_SIZE;
@@ -1823,8 +1823,8 @@ static void Mod_LoadEntities( model_t *mod, dbspmodel_t *bmod )
 			{
 				char	*pszWadFile;
 
-				Q_strncpy( wadstring, token, sizeof( wadstring ) - 2 );
-				wadstring[sizeof( wadstring ) - 2] = 0;
+				Q_strncpy( wadstring, token, MAX_TOKEN - 2 );
+				wadstring[MAX_TOKEN - 2] = 0;
 
 				if( !Q_strchr( wadstring, ';' ))
 					Q_strncat( wadstring, ";", sizeof( wadstring ));
@@ -2998,7 +2998,6 @@ static qboolean Mod_LoadBmodelLumps( model_t *mod, const byte *mod_base, qboolea
 
 	if( isworld )
 	{
-		world.version = bmod->version;
 #if !XASH_DEDICATED
 		Mod_InitDebugHulls( mod );	// FIXME: build hulls for separate bmodels (shells, medkits etc)
 		world.deluxedata = bmod->deluxedata_out;	// deluxemap data pointer

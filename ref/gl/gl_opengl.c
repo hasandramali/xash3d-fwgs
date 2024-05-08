@@ -19,7 +19,6 @@ CVAR_DEFINE_AUTO( gl_nosort, "0", FCVAR_GLCONFIG, "disable sorting of translucen
 CVAR_DEFINE_AUTO( gl_test, "0", 0, "engine developer cvar for quick testing new features" );
 CVAR_DEFINE_AUTO( gl_msaa, "1", FCVAR_GLCONFIG, "enable or disable multisample anti-aliasing" );
 CVAR_DEFINE_AUTO( gl_stencilbits, "8", FCVAR_GLCONFIG|FCVAR_READ_ONLY, "pixelformat stencil bits (0 - auto)" );
-CVAR_DEFINE_AUTO( gl_overbright, "1", FCVAR_GLCONFIG, "overbrights" );
 CVAR_DEFINE_AUTO( r_lighting_extended, "1", FCVAR_GLCONFIG, "allow to get lighting from world and bmodels" );
 CVAR_DEFINE_AUTO( r_lighting_ambient, "0.3", FCVAR_GLCONFIG, "map ambient lighting scale" );
 CVAR_DEFINE_AUTO( r_detailtextures, "1", FCVAR_ARCHIVE, "enable detail textures support" );
@@ -30,9 +29,7 @@ CVAR_DEFINE_AUTO( r_lockfrustum, "0", FCVAR_CHEAT, "lock frustrum area at curren
 CVAR_DEFINE_AUTO( r_traceglow, "0", FCVAR_GLCONFIG, "cull flares behind models" );
 CVAR_DEFINE_AUTO( gl_round_down, "2", FCVAR_GLCONFIG|FCVAR_READ_ONLY, "round texture sizes to nearest POT value" );
 CVAR_DEFINE( r_vbo, "gl_vbo", "0", FCVAR_ARCHIVE, "draw world using VBO (known to be glitchy)" );
-CVAR_DEFINE( r_vbo_detail, "gl_vbo_detail", "0", FCVAR_ARCHIVE, "detail vbo mode (0: disable, 1: multipass, 2: singlepass, broken decal dlights)" );
 CVAR_DEFINE( r_vbo_dlightmode, "gl_vbo_dlightmode", "1", FCVAR_ARCHIVE, "vbo dlight rendering mode (0-1)" );
-CVAR_DEFINE( r_vbo_overbrightmode, "gl_vbo_overbrightmode", "0", FCVAR_ARCHIVE, "vbo overbright rendering mode (0-1)" );
 CVAR_DEFINE_AUTO( r_ripple, "0", FCVAR_GLCONFIG, "enable software-like water texture ripple simulation" );
 CVAR_DEFINE_AUTO( r_ripple_updatetime, "0.05", FCVAR_GLCONFIG, "how fast ripple simulation is" );
 CVAR_DEFINE_AUTO( r_ripple_spawntime, "0.1", FCVAR_GLCONFIG, "how fast new ripples spawn" );
@@ -625,7 +622,6 @@ GL_GetProcAddress
 defined just for nanogl/glwes, so it don't link to SDL2 directly, nor use dlsym
 ==============
 */
-void GAME_EXPORT *GL_GetProcAddress( const char *name ); // keep defined for nanogl/wes
 void GAME_EXPORT *GL_GetProcAddress( const char *name )
 {
 	return gEngfuncs.GL_GetProcAddress( name );
@@ -717,7 +713,7 @@ static void GL_SetDefaults( void )
 R_RenderInfo_f
 =================
 */
-static void R_RenderInfo_f( void )
+void R_RenderInfo_f( void )
 {
 	gEngfuncs.Con_Printf( "\n" );
 	gEngfuncs.Con_Printf( "GL_VENDOR: %s\n", glConfig.vendor_string );
@@ -775,7 +771,7 @@ static void R_RenderInfo_f( void )
 }
 
 #ifdef XASH_GLES
-static void GL_InitExtensionsGLES( void )
+void GL_InitExtensionsGLES( void )
 {
 	int extid;
 
@@ -893,7 +889,7 @@ static void GL_InitExtensionsGLES( void )
 #endif
 }
 #else
-static void GL_InitExtensionsBigGL( void )
+void GL_InitExtensionsBigGL( void )
 {
 	// intialize wrapper type
 	glConfig.context = gEngfuncs.Sys_CheckParm( "-glcore" )? CONTEXT_TYPE_GL_CORE : CONTEXT_TYPE_GL;
@@ -917,7 +913,13 @@ static void GL_InitExtensionsBigGL( void )
 
 	// gl4es may be used system-wide
 	if( Q_stristr( glConfig.renderer_string, "gl4es" ))
+	{
+		const char *vendor = (const char *)pglGetString( GL_VENDOR | 0x10000 );
+		const char *renderer = (const char *)pglGetString( GL_RENDERER | 0x10000 );
+		const char *version = (const char *)pglGetString( GL_VERSION | 0x10000 );
+		const char *extensions = (const char *)pglGetString( GL_EXTENSIONS | 0x10000 );
 		glConfig.wrapper = GLES_WRAPPER_GL4ES;
+	}
 
 	// multitexture
 	glConfig.max_texture_units = glConfig.max_texture_coords = glConfig.max_teximage_units = 1;
@@ -1174,7 +1176,7 @@ void GL_ClearExtensions( void )
 GL_InitCommands
 =================
 */
-static void GL_InitCommands( void )
+void GL_InitCommands( void )
 {
 	RETRIEVE_ENGINE_SHARED_CVAR_LIST();
 
@@ -1206,7 +1208,6 @@ static void GL_InitCommands( void )
 	gEngfuncs.Cvar_RegisterVariable( &gl_msaa );
 	gEngfuncs.Cvar_RegisterVariable( &gl_stencilbits );
 	gEngfuncs.Cvar_RegisterVariable( &gl_round_down );
-	gEngfuncs.Cvar_RegisterVariable( &gl_overbright );
 
 	// these cvar not used by engine but some mods requires this
 	gEngfuncs.Cvar_RegisterVariable( &gl_polyoffset );
@@ -1249,8 +1250,6 @@ static void R_CheckVBO( void )
 
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo );
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo_dlightmode );
-	gEngfuncs.Cvar_RegisterVariable( &r_vbo_overbrightmode );
-	gEngfuncs.Cvar_RegisterVariable( &r_vbo_detail );
 }
 
 /*
@@ -1258,7 +1257,7 @@ static void R_CheckVBO( void )
 GL_RemoveCommands
 =================
 */
-static void GL_RemoveCommands( void )
+void GL_RemoveCommands( void )
 {
 	gEngfuncs.Cmd_RemoveCommand( "r_info" );
 }
@@ -1290,12 +1289,6 @@ qboolean R_Init( void )
 		Mem_FreePool( &r_temppool );
 		return false;
 	}
-
-	// see R_ProcessEntData for tr.entities initialization
-	tr.world = (struct world_static_s *)ENGINE_GET_PARM( PARM_GET_WORLD_PTR );
-	tr.movevars = (movevars_t *)ENGINE_GET_PARM( PARM_GET_MOVEVARS_PTR );
-	tr.palette = (color24 *)ENGINE_GET_PARM( PARM_GET_PALETTE_PTR );
-	tr.viewent = (cl_entity_t *)ENGINE_GET_PARM( PARM_GET_VIEWENT_PTR );
 
 	GL_SetDefaults();
 	R_CheckVBO();
@@ -1519,13 +1512,12 @@ void GL_SetupAttributes( int safegl )
 void wes_init( const char *gles2 );
 int nanoGL_Init( void );
 #ifdef XASH_GL4ES
-static void GL4ES_GetMainFBSize( int *width, int *height )
+void GL4ES_GetMainFBSize( int *width, int *height )
 {
 	*width = gpGlobals->width;
 	*height = gpGlobals->height;
 }
-
-static void *GL4ES_GetProcAddress( const char *name )
+void *GL4ES_GetProcAddress( const char *name )
 {
 	if( !Q_strcmp(name, "glShadeModel") )
 		// combined gles/gles2/gl implementation exports this, but it is invalid

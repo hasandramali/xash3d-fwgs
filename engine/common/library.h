@@ -24,8 +24,7 @@ typedef struct dll_user_s
 	qboolean	custom_loader;		// a bit who indicated loader type
 	qboolean	encrypted;		// dll is crypted (some client.dll in HL, CS etc)
 	char	dllName[32];		// for debug messages
-	char fullPath[2048];
-	string shortPath;	// actual dll paths
+	string	fullPath, shortPath;	// actual dll paths
 
 	// ordinals stuff, valid only on Win32
 	word	*ordinals;

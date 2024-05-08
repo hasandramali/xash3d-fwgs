@@ -34,7 +34,7 @@ static hash_pack_queue_t	*gp_hpak_queue = NULL;
 static hpak_header_t	hash_pack_header;
 static hpak_info_t	hash_pack_info;
 
-static const char *HPAK_TypeFromIndex( int type )
+const char *HPAK_TypeFromIndex( int type )
 {
 	switch( type )
 	{
@@ -94,7 +94,7 @@ void HPAK_FlushHostQueue( void )
 	gp_hpak_queue = NULL;
 }
 
-static void HPAK_CreatePak( const char *filename, resource_t *pResource, byte *pData, file_t *fin )
+void HPAK_CreatePak( const char *filename, resource_t *pResource, byte *pData, file_t *fin )
 {
 	int		filelocation;
 	string		pakname;
@@ -400,8 +400,7 @@ static qboolean HPAK_Validate( const char *filename, qboolean quiet, qboolean de
 	f = FS_Open( pakname, "rb", true );
 	if( !f )
 	{
-		if( !quiet )
-			Con_DPrintf( S_ERROR "Couldn't find %s.\n", pakname );
+		Con_DPrintf( S_ERROR "Couldn't find %s.\n", pakname );
 		return true;
 	}
 
@@ -873,7 +872,7 @@ void HPAK_RemoveLump( const char *name, resource_t *pResource )
 	FS_Rename( save_path, read_path );
 }
 
-static void HPAK_List_f( void )
+void HPAK_List_f( void )
 {
 	int		nCurrent;
 	hpak_header_t	header;
@@ -951,7 +950,7 @@ static void HPAK_List_f( void )
 	FS_Close( f );
 }
 
-static void HPAK_Extract_f( void )
+void HPAK_Extract_f( void )
 {
 	int		nCurrent;
 	hpak_header_t	header;
@@ -1062,7 +1061,7 @@ static void HPAK_Extract_f( void )
 	FS_Close( f );
 }
 
-static void HPAK_Remove_f( void )
+void HPAK_Remove_f( void )
 {
 	resource_t	resource;
 
@@ -1084,7 +1083,7 @@ static void HPAK_Remove_f( void )
 	}
 }
 
-static void HPAK_Validate_f( void )
+void HPAK_Validate_f( void )
 {
 	if( Cmd_Argc() != 2 )
 	{

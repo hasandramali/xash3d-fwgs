@@ -48,6 +48,8 @@ qboolean  R_Init_Video( const int type )
 {
 	qboolean retval;
 
+	VID_StartupGamma();
+
 	if( type != REF_SOFTWARE )
 		return false; /// glide???
 

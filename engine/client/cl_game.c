@@ -357,23 +357,20 @@ void SPR_AdjustSize( float *x, float *y, float *w, float *h )
 	*h *= yscale;
 }
 
-static void SPR_AdjustTexCoords( int texnum, float width, float height, float *s1, float *t1, float *s2, float *t2 )
+void SPR_AdjustTexCoords( float width, float height, float *s1, float *t1, float *s2, float *t2 )
 {
-	if( REF_GET_PARM( PARM_TEX_FILTERING, texnum ))
+	if( refState.width != clgame.scrInfo.iWidth )
 	{
-		if( refState.width != clgame.scrInfo.iWidth )
-		{
-			// align to texel if scaling
-			*s1 += 0.5f;
-			*s2 -= 0.5f;
-		}
+		// align to texel if scaling
+		*s1 += 0.5f;
+		*s2 -= 0.5f;
+	}
 
-		if( refState.height != clgame.scrInfo.iHeight )
-		{
-			// align to texel if scaling
-			*t1 += 0.5f;
-			*t2 -= 0.5f;
-		}
+	if( refState.height != clgame.scrInfo.iHeight )
+	{
+		// align to texel if scaling
+		*t1 += 0.5f;
+		*t2 -= 0.5f;
 	}
 
 	*s1 /= width;
@@ -405,8 +402,6 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 		height = h;
 	}
 
-	texnum = ref.dllFuncs.R_GetSpriteTexture( clgame.ds.pSprite, frame );
-
 	if( prc )
 	{
 		wrect_t	rc = *prc;
@@ -423,7 +418,7 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 		t2 = rc.bottom;
 
 		// calc user-defined rectangle
-		SPR_AdjustTexCoords( texnum, width, height, &s1, &t1, &s2, &t2 );
+		SPR_AdjustTexCoords( width, height, &s1, &t1, &s2, &t2 );
 		width = rc.right - rc.left;
 		height = rc.bottom - rc.top;
 	}
@@ -439,6 +434,7 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 
 	// scale for screen sizes
 	SPR_AdjustSize( &x, &y, &width, &height );
+	texnum = ref.dllFuncs.R_GetSpriteTexture( clgame.ds.pSprite, frame );
 	ref.dllFuncs.Color4ub( clgame.ds.spriteColor[0], clgame.ds.spriteColor[1], clgame.ds.spriteColor[2], clgame.ds.spriteColor[3] );
 	ref.dllFuncs.R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, texnum );
 }
@@ -474,7 +470,8 @@ void CL_DrawCenterPrint( void )
 	pText = clgame.centerPrint.message;
 
 	CL_DrawCharacterLen( font, 0, NULL, &charHeight );
-	CL_SetFontRendermode( font );
+
+	ref.dllFuncs.GL_SetRenderMode( font->rendermode );
 	for( i = 0; i < clgame.centerPrint.lines; i++ )
 	{
 		lineLength = 0;
@@ -550,7 +547,7 @@ fill screen with specfied color
 can be modulated
 =============
 */
-static void CL_DrawScreenFade( void )
+void CL_DrawScreenFade( void )
 {
 	screenfade_t	*sf = &clgame.fade;
 	int		alpha;
@@ -766,7 +763,7 @@ CL_SoundFromIndex
 return soundname from index
 ====================
 */
-static const char *CL_SoundFromIndex( int index )
+const char *CL_SoundFromIndex( int index )
 {
 	sfx_t	*sfx = NULL;
 	int	hSound;
@@ -912,7 +909,7 @@ CL_DrawCrosshair
 Render crosshair
 ====================
 */
-static void CL_DrawCrosshair( void )
+void CL_DrawCrosshair( void )
 {
 	int	x, y, width, height;
 	float xscale, yscale;
@@ -1112,12 +1109,12 @@ void CL_InitEdicts( int maxclients )
 		clgame.remap_info = (remap_info_t **)Mem_Calloc( clgame.mempool, sizeof( remap_info_t* ) * clgame.maxRemapInfos );
 	}
 
-	ref.dllFuncs.R_ProcessEntData( true, clgame.entities, clgame.maxEntities );
+	ref.dllFuncs.R_ProcessEntData( true );
 }
 
 void CL_FreeEdicts( void )
 {
-	ref.dllFuncs.R_ProcessEntData( false, NULL, 0 );
+	ref.dllFuncs.R_ProcessEntData( false );
 
 	if( clgame.entities )
 		Mem_Free( clgame.entities );
@@ -1238,7 +1235,11 @@ static model_t *CL_LoadSpriteModel( const char *filename, uint type, uint texFla
 {
 	char	name[MAX_QPATH];
 	model_t	*mod;
-	int	i, start;
+	int	i;
+
+	// use high indices for client sprites
+	// for GoldSrc bug-compatibility
+	const int start = type != SPR_HUDSPRITE ? MAX_CLIENT_SPRITES / 2 : 0;
 
 	if( !COM_CheckString( filename ))
 	{
@@ -1249,7 +1250,7 @@ static model_t *CL_LoadSpriteModel( const char *filename, uint type, uint texFla
 	Q_strncpy( name, filename, sizeof( name ));
 	COM_FixSlashes( name );
 
-	for( i = 0, mod = clgame.sprites; i < MAX_CLIENT_SPRITES; i++, mod++ )
+	for( i = 0, mod = clgame.sprites + start; i < MAX_CLIENT_SPRITES / 2; i++, mod++ )
 	{
 		if( !Q_stricmp( mod->name, name ))
 		{
@@ -1266,15 +1267,8 @@ static model_t *CL_LoadSpriteModel( const char *filename, uint type, uint texFla
 	}
 
 	// find a free model slot spot
-	// use low indices only for HUD sprites
-	// for GoldSrc bug compatibility
-	start = type == SPR_HUDSPRITE ? 0 : MAX_CLIENT_SPRITES / 2;
-
-	for( i = 0, mod = &clgame.sprites[start]; i < MAX_CLIENT_SPRITES / 2; i++, mod++ )
-	{
-		if( !mod->name[0] )
-			break; // this is a valid spot
-	}
+	for( i = 0, mod = clgame.sprites + start; i < MAX_CLIENT_SPRITES / 2; i++, mod++ )
+		if( !mod->name[0] ) break; // this is a valid spot
 
 	if( i == MAX_CLIENT_SPRITES / 2 )
 	{
@@ -1326,11 +1320,9 @@ HSPRITE pfnSPR_LoadExt( const char *szPicName, uint texFlags )
 =========
 pfnSPR_Load
 
-function exported for support GoldSrc Monitor utility
 =========
 */
-HSPRITE EXPORT pfnSPR_Load( const char *szPicName );
-HSPRITE EXPORT pfnSPR_Load( const char *szPicName )
+static HSPRITE GAME_EXPORT pfnSPR_Load( const char *szPicName )
 {
 	model_t	*spr;
 
@@ -1376,11 +1368,9 @@ static const model_t *CL_GetSpritePointer( HSPRITE hSprite )
 =========
 pfnSPR_Frames
 
-function exported for support GoldSrc Monitor utility
 =========
 */
-int EXPORT pfnSPR_Frames( HSPRITE hPic );
-int EXPORT pfnSPR_Frames( HSPRITE hPic )
+static int GAME_EXPORT pfnSPR_Frames( HSPRITE hPic )
 {
 	int	numFrames = 0;
 
@@ -1448,7 +1438,7 @@ pfnSPR_Draw
 */
 static void GAME_EXPORT pfnSPR_Draw( int frame, int x, int y, const wrect_t *prc )
 {
-	ref.dllFuncs.GL_SetRenderMode( kRenderTransAlpha );
+	ref.dllFuncs.GL_SetRenderMode( kRenderNormal );
 	SPR_DrawGeneric( frame, x, y, -1, -1, prc );
 }
 
@@ -1598,7 +1588,7 @@ CL_FillRGBA
 
 =============
 */
-static void GAME_EXPORT CL_FillRGBA( int x, int y, int w, int h, int r, int g, int b, int a )
+void GAME_EXPORT CL_FillRGBA( int x, int y, int w, int h, int r, int g, int b, int a )
 {
 	float _x = x, _y = y, _w = w, _h = h;
 
@@ -1640,7 +1630,6 @@ get actual screen info
 */
 int GAME_EXPORT CL_GetScreenInfo( SCREENINFO *pscrinfo )
 {
-	qboolean apply_scale_factor = false;
 	float scale_factor = hud_scale.value;
 
 	if( FBitSet( hud_fontscale.flags, FCVAR_CHANGED ))
@@ -1655,24 +1644,17 @@ int GAME_EXPORT CL_GetScreenInfo( SCREENINFO *pscrinfo )
 	clgame.scrInfo.iSize = sizeof( clgame.scrInfo );
 	clgame.scrInfo.iFlags = SCRINFO_SCREENFLASH;
 
-	if( scale_factor && scale_factor != 1.0f )
-	{
-		float scaled_width = (float)refState.width / scale_factor;
-		if( scaled_width >= hud_scale_minimal_width.value )
-			apply_scale_factor = true;
-	}
-
-	if( apply_scale_factor )
+	if( scale_factor && scale_factor != 1.0f)
 	{
 		clgame.scrInfo.iWidth = (float)refState.width / scale_factor;
 		clgame.scrInfo.iHeight = (float)refState.height / scale_factor;
-		SetBits( clgame.scrInfo.iFlags, SCRINFO_STRETCHED );
+		clgame.scrInfo.iFlags |= SCRINFO_STRETCHED;
 	}
 	else
 	{
 		clgame.scrInfo.iWidth = refState.width;
 		clgame.scrInfo.iHeight = refState.height;
-		ClearBits( clgame.scrInfo.iFlags, SCRINFO_STRETCHED );
+		clgame.scrInfo.iFlags &= ~SCRINFO_STRETCHED;
 	}
 
 	if( !pscrinfo ) return 0;
@@ -1713,8 +1695,7 @@ pfnCvar_RegisterVariable
 static cvar_t *GAME_EXPORT pfnCvar_RegisterClientVariable( const char *szName, const char *szValue, int flags )
 {
 	// a1ba: try to mitigate outdated client.dll vulnerabilities
-	if( !Q_stricmp( szName, "motdfile" )
-		|| !Q_stricmp( szName, "sensitivity" ))
+	if( !Q_stricmp( szName, "motdfile" ))
 		flags |= FCVAR_PRIVILEGED;
 
 	return (cvar_t *)Cvar_Get( szName, szValue, flags|FCVAR_CLIENTDLL, Cvar_BuildAutoDescription( szName, flags|FCVAR_CLIENTDLL ));
@@ -2135,7 +2116,7 @@ pfnGetViewModel
 
 =============
 */
-static cl_entity_t* GAME_EXPORT CL_GetViewModel( void )
+cl_entity_t* GAME_EXPORT CL_GetViewModel( void )
 {
 	return &clgame.viewent;
 }
@@ -2484,36 +2465,6 @@ static physent_t *pfnGetVisent( int idx )
 	return NULL;
 }
 
-static int GAME_EXPORT CL_TestLine( const vec3_t start, const vec3_t end, int flags )
-{
-	return PM_TestLineExt( clgame.pmove, clgame.pmove->physents, clgame.pmove->numphysent, start, end, flags );
-}
-
-/*
-=============
-CL_PushTraceBounds
-
-=============
-*/
-static void GAME_EXPORT CL_PushTraceBounds( int hullnum, const float *mins, const float *maxs )
-{
-	hullnum = bound( 0, hullnum, 3 );
-	VectorCopy( mins, clgame.pmove->player_mins[hullnum] );
-	VectorCopy( maxs, clgame.pmove->player_maxs[hullnum] );
-}
-
-/*
-=============
-CL_PopTraceBounds
-
-=============
-*/
-static void GAME_EXPORT CL_PopTraceBounds( void )
-{
-	memcpy( clgame.pmove->player_mins, host.player_mins, sizeof( host.player_mins ));
-	memcpy( clgame.pmove->player_maxs, host.player_maxs, sizeof( host.player_maxs ));
-}
-
 /*
 =============
 pfnSetTraceHull
@@ -2707,48 +2658,6 @@ static model_t *pfnLoadMapSprite( const char *filename )
 		return mod;
 
 	return NULL;
-}
-
-/*
-=============
-COM_AddAppDirectoryToSearchPath
-
-=============
-*/
-static void GAME_EXPORT COM_AddAppDirectoryToSearchPath( const char *pszBaseDir, const char *appName )
-{
-	FS_AddGameHierarchy( pszBaseDir, FS_NOWRITE_PATH );
-}
-
-
-/*
-===========
-COM_ExpandFilename
-
-Finds the file in the search path, copies over the name with the full path name.
-This doesn't search in the pak file.
-===========
-*/
-static int GAME_EXPORT COM_ExpandFilename( const char *fileName, char *nameOutBuffer, int nameOutBufferSize )
-{
-	char		result[MAX_SYSPATH];
-
-	if( !COM_CheckString( fileName ) || !nameOutBuffer || nameOutBufferSize <= 0 )
-		return 0;
-
-	// filename examples:
-	// media\sierra.avi - D:\Xash3D\valve\media\sierra.avi
-	// models\barney.mdl - D:\Xash3D\bshift\models\barney.mdl
-	if( g_fsapi.GetFullDiskPath( result, sizeof( result ), fileName, false ))
-	{
-		// check for enough room
-		if( Q_strlen( result ) > nameOutBufferSize )
-			return 0;
-
-		Q_strncpy( nameOutBuffer, result, nameOutBufferSize );
-		return 1;
-	}
-	return 0;
 }
 
 /*

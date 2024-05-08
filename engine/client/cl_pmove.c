@@ -55,6 +55,31 @@ void GAME_EXPORT CL_PopPMStates( void )
 }
 
 /*
+=============
+CL_PushTraceBounds
+
+=============
+*/
+void GAME_EXPORT CL_PushTraceBounds( int hullnum, const float *mins, const float *maxs )
+{
+	hullnum = bound( 0, hullnum, 3 );
+	VectorCopy( mins, clgame.pmove->player_mins[hullnum] );
+	VectorCopy( maxs, clgame.pmove->player_maxs[hullnum] );
+}
+
+/*
+=============
+CL_PopTraceBounds
+
+=============
+*/
+void GAME_EXPORT CL_PopTraceBounds( void )
+{
+	memcpy( clgame.pmove->player_mins, host.player_mins, sizeof( host.player_mins ));
+	memcpy( clgame.pmove->player_maxs, host.player_maxs, sizeof( host.player_maxs ));
+}
+
+/*
 ===============
 CL_IsPredicted
 ===============
@@ -392,7 +417,7 @@ CL_AddLinksToPmove
 collect solid entities
 ====================
 */
-static void CL_AddLinksToPmove( frame_t *frame )
+void CL_AddLinksToPmove( frame_t *frame )
 {
 	entity_state_t	*state;
 	model_t		*model;
@@ -662,6 +687,11 @@ cl_entity_t *CL_GetWaterEntity( const float *rgflPos )
 	return CL_GetEntityByIndex( entnum );
 }
 
+int GAME_EXPORT CL_TestLine( const vec3_t start, const vec3_t end, int flags )
+{
+	return PM_TestLineExt( clgame.pmove, clgame.pmove->physents, clgame.pmove->numphysent, start, end, flags );
+}
+
 static int GAME_EXPORT pfnTestPlayerPosition( float *pos, pmtrace_t *ptrace )
 {
 	return PM_TestPlayerPosition( clgame.pmove, pos, ptrace, NULL );
@@ -794,16 +824,6 @@ static void CL_SetupPMove( playermove_t *pmove, const local_state_t *from, const
 	cd = &from->client;
 
 	pmove->player_index = ps->number - 1;
-
-	// a1ba: workaround bug where the server refuse to send our local player in delta
-	// cl.playernum, in theory, must be equal to our local player index anyway
-	//
-	// this might not be a real solution, since everything else will be bogus
-	// but we need to properly run prediction and avoid potential memory
-	// corruption
-	if( pmove->player_index < 0 )
-		pmove->player_index = bound( 0, cl.playernum, cl.maxclients - 1 );
-
 	pmove->multiplayer = (cl.maxclients > 1);
 	pmove->runfuncs = runfuncs;
 	pmove->time = time * 1000.0f;
@@ -853,10 +873,10 @@ static void CL_SetupPMove( playermove_t *pmove, const local_state_t *from, const
 	VectorCopy( cd->vuser4, pmove->vuser4 );
 	pmove->cmd = *ucmd;	// copy current cmds
 
-	Q_strncpy( pmove->physinfo, cls.physinfo, sizeof( pmove->physinfo ));
+	Q_strncpy( pmove->physinfo, cls.physinfo, MAX_INFO_STRING );
 }
 
-static const void CL_FinishPMove( const playermove_t *pmove, local_state_t *to )
+const void CL_FinishPMove( const playermove_t *pmove, local_state_t *to )
 {
 	entity_state_t	*ps;
 	clientdata_t	*cd;
@@ -909,7 +929,7 @@ CL_RunUsercmd
 Runs prediction code for user cmd
 =================
 */
-static void CL_RunUsercmd( local_state_t *from, local_state_t *to, usercmd_t *u, qboolean runfuncs, double *time, unsigned int random_seed )
+void CL_RunUsercmd( local_state_t *from, local_state_t *to, usercmd_t *u, qboolean runfuncs, double *time, unsigned int random_seed )
 {
 	usercmd_t		cmd;
 

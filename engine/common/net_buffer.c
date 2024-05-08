@@ -81,7 +81,7 @@ const char *svc_strings[svc_lastmsg+1] =
 	"svc_director",
 	"svc_voiceinit",
 	"svc_voicedata",
-	"svc_deltapacketbones",
+	"svc_unused54",
 	"svc_unused55",
 	"svc_resourcelocation",
 	"svc_querycvarvalue",
@@ -137,6 +137,91 @@ void MSG_InitMasks( void )
 
 	for( maskBit = 0; maskBit < 32; maskBit++ )
 		ExtraMasks[maskBit] = (uint)BIT( maskBit ) - 1;
+}
+
+void MSG_InitExt( sizebuf_t *sb, const char *pDebugName, void *pData, int nBytes, int nMaxBits )
+{
+	MSG_StartWriting( sb, pData, nBytes, 0, nMaxBits );
+
+	sb->pDebugName = pDebugName;
+}
+
+void MSG_StartWriting( sizebuf_t *sb, void *pData, int nBytes, int iStartBit, int nBits )
+{
+	// make sure it's dword aligned and padded.
+	Assert(((uint32_t)pData & 3 ) == 0 );
+
+	sb->pDebugName = "Unnamed";
+	sb->pData = (byte *)pData;
+
+	if( nBits == -1 )
+	{
+		sb->nDataBits = nBytes << 3;
+	}
+	else
+	{
+		Assert( nBits <= nBytes * 8 );
+		sb->nDataBits = nBits;
+	}
+
+	sb->iCurBit = iStartBit;
+	sb->bOverflow = false;
+	sb->iAlternateSign = 0;
+}
+
+/*
+=======================
+MSG_Clear
+
+for clearing overflowed buffer
+=======================
+*/
+void MSG_Clear( sizebuf_t *sb )
+{
+	sb->iCurBit = 0;
+	sb->bOverflow = false;
+}
+
+static qboolean MSG_Overflow( sizebuf_t *sb, int nBits )
+{
+	if( sb->iCurBit + nBits > sb->nDataBits )
+		sb->bOverflow = true;
+	return sb->bOverflow;
+}
+
+qboolean MSG_CheckOverflow( sizebuf_t *sb )
+{
+	return MSG_Overflow( sb, 0 );
+}
+
+int MSG_SeekToBit( sizebuf_t *sb, int bitPos, int whence )
+{
+	// compute the file offset
+	switch( whence )
+	{
+	case SEEK_CUR:
+		bitPos += sb->iCurBit;
+		break;
+	case SEEK_SET:
+		break;
+	case SEEK_END:
+		bitPos += sb->nDataBits;
+		break;
+	default:
+		return -1;
+	}
+
+	if( bitPos < 0 || bitPos > sb->nDataBits )
+		return -1;
+
+	sb->iCurBit = bitPos;
+
+	return 0;
+}
+
+void MSG_SeekToByte( sizebuf_t *sb, int bytePos )
+{
+	sb->iCurBit = bytePos << 3;
 }
 
 void MSG_WriteOneBit( sizebuf_t *sb, int nValue )
@@ -203,17 +288,35 @@ void MSG_WriteSBitLong( sizebuf_t *sb, int data, int numbits )
 	// do we have a valid # of bits to encode with?
 	Assert( numbits >= 1 && numbits <= 32 );
 
-	// NOTE: it does this wierdness here so it's bit-compatible with regular integer data in the buffer.
-	// (Some old code writes direct integers right into the buffer).
-	if( data < 0 )
+	if( sb->iAlternateSign )
 	{
-		MSG_WriteUBitLong( sb, (uint)( 0x80000000 + data ), numbits - 1 );
-		MSG_WriteOneBit( sb, 1 );
+		// NOTE: it does this wierdness here so it's bit-compatible with regular integer data in the buffer.
+		// (Some old code writes direct integers right into the buffer).
+		if( data < 0 )
+		{
+			MSG_WriteOneBit( sb, 1 );
+			MSG_WriteUBitLong( sb, (uint)( 0x80000000 + data ), numbits - 1 );
+		}
+		else
+		{
+			MSG_WriteOneBit( sb, 0 );
+			MSG_WriteUBitLong( sb, (uint)data, numbits - 1 );
+		}
 	}
 	else
 	{
-		MSG_WriteUBitLong( sb, (uint)data, numbits - 1 );
-		MSG_WriteOneBit( sb, 0 );
+		// NOTE: it does this wierdness here so it's bit-compatible with regular integer data in the buffer.
+		// (Some old code writes direct integers right into the buffer).
+		if( data < 0 )
+		{
+			MSG_WriteUBitLong( sb, (uint)( 0x80000000 + data ), numbits - 1 );
+			MSG_WriteOneBit( sb, 1 );
+		}
+		else
+		{
+			MSG_WriteUBitLong( sb, (uint)data, numbits - 1 );
+			MSG_WriteOneBit( sb, 0 );
+		}
 	}
 }
 
@@ -518,12 +621,24 @@ int MSG_ReadSBitLong( sizebuf_t *sb, int numbits )
 {
 	int	r, sign;
 
-	r = MSG_ReadUBitLong( sb, numbits - 1 );
+	if( sb->iAlternateSign )
+	{
+		sign = MSG_ReadOneBit( sb );
+		r = MSG_ReadUBitLong( sb, numbits - 1 );
 
-	// NOTE: it does this wierdness here so it's bit-compatible with regular integer data in the buffer.
-	// (Some old code writes direct integers right into the buffer).
-	sign = MSG_ReadOneBit( sb );
-	if( sign ) r = -( BIT( numbits - 1 ) - r );
+		if( sign )
+			r = -r;
+	}
+	else
+	{
+		r = MSG_ReadUBitLong( sb, numbits - 1 );
+
+		// NOTE: it does this wierdness here so it's bit-compatible with regular integer data in the buffer.
+		// (Some old code writes direct integers right into the buffer).
+		sign = MSG_ReadOneBit( sb );
+
+		if( sign ) r = -( BIT( numbits - 1 ) - r );
+	}
 
 	return r;
 }
@@ -554,7 +669,14 @@ int MSG_ReadCmd( sizebuf_t *sb, netsrc_t type )
 
 int MSG_ReadChar( sizebuf_t *sb )
 {
-	return MSG_ReadSBitLong( sb, sizeof( int8_t ) << 3 );
+	int alt = sb->iAlternateSign;
+	int ret;
+
+	sb->iAlternateSign = 0;
+	ret = MSG_ReadSBitLong( sb, sizeof( int8_t ) << 3 );
+	sb->iAlternateSign = alt;
+
+	return ret;
 }
 
 int MSG_ReadByte( sizebuf_t *sb )
@@ -564,7 +686,14 @@ int MSG_ReadByte( sizebuf_t *sb )
 
 int MSG_ReadShort( sizebuf_t *sb )
 {
-	return MSG_ReadSBitLong( sb, sizeof( int16_t ) << 3 );
+	int alt = sb->iAlternateSign;
+	int ret;
+
+	sb->iAlternateSign = 0;
+	ret = MSG_ReadSBitLong( sb, sizeof( int16_t ) << 3 );
+	sb->iAlternateSign = alt;
+
+	return ret;
 }
 
 int MSG_ReadWord( sizebuf_t *sb )
@@ -596,7 +725,14 @@ void MSG_ReadVec3Angles( sizebuf_t *sb, vec3_t fa )
 
 int MSG_ReadLong( sizebuf_t *sb )
 {
-	return MSG_ReadSBitLong( sb, sizeof( int32_t ) << 3 );
+	int alt = sb->iAlternateSign;
+	int ret;
+
+	sb->iAlternateSign = 0;
+	ret = MSG_ReadSBitLong( sb, sizeof( int32_t ) << 3 );
+	sb->iAlternateSign = alt;
+
+	return ret;
 }
 
 uint MSG_ReadDword( sizebuf_t *sb )
@@ -620,7 +756,7 @@ qboolean MSG_ReadBytes( sizebuf_t *sb, void *pOut, int nBytes )
 	return MSG_ReadBits( sb, pOut, nBytes << 3 );
 }
 
-static char *MSG_ReadStringExt( sizebuf_t *sb, qboolean bLine )
+char *MSG_ReadStringExt( sizebuf_t *sb, qboolean bLine )
 {
 	static char	string[4096];
 	int		l = 0, c;
@@ -644,16 +780,6 @@ static char *MSG_ReadStringExt( sizebuf_t *sb, qboolean bLine )
 	string[l] = 0; // terminator
 
 	return string;
-}
-
-char *MSG_ReadString( sizebuf_t *sb )
-{
-	return MSG_ReadStringExt( sb, false );
-}
-
-char *MSG_ReadStringLine( sizebuf_t *sb )
-{
-	return MSG_ReadStringExt( sb, true );
 }
 
 void MSG_ExciseBits( sizebuf_t *sb, int startbit, int bitstoremove )

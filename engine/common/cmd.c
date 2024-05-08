@@ -53,7 +53,7 @@ static void Cmd_ExecuteStringWithPrivilegeCheck( const char *text, qboolean isPr
 Cbuf_Init
 ============
 */
-static void Cbuf_Init( void )
+void Cbuf_Init( void )
 {
 	cmd_text.data = cmd_text_buf;
 	filteredcmd_text.data = filteredcmd_text_buf;
@@ -79,7 +79,7 @@ void Cbuf_Clear( void )
 Cbuf_GetSpace
 ============
 */
-static void *Cbuf_GetSpace( cmdbuf_t *buf, int length )
+void *Cbuf_GetSpace( cmdbuf_t *buf, int length )
 {
 	void    *data;
 
@@ -176,7 +176,7 @@ void Cbuf_InsertText( const char *text )
 Cbuf_Execute
 ============
 */
-static void Cbuf_ExecuteCommandsFromBuffer( cmdbuf_t *buf, qboolean isPrivileged, int cmdsToExecute )
+void Cbuf_ExecuteCommandsFromBuffer( cmdbuf_t *buf, qboolean isPrivileged, int cmdsToExecute )
 {
 	char	*text;
 	char	line[MAX_CMD_LINE];
@@ -356,7 +356,7 @@ hl.exe -dev 3 +map c1a0d
 hl.exe -nosound -game bshift
 ===============
 */
-static void Cmd_StuffCmds_f( void )
+void Cmd_StuffCmds_f( void )
 {
 	host.stuffcmds_pending = true;
 }
@@ -370,7 +370,7 @@ next frame.  This allows commands like:
 bind g "cmd use rocket ; +attack ; wait ; -attack ; cmd use blaster"
 ============
 */
-static void Cmd_Wait_f( void )
+void Cmd_Wait_f( void )
 {
 	cmd_wait = true;
 }
@@ -382,7 +382,7 @@ Cmd_Echo_f
 Just prints the rest of the line to the console
 ===============
 */
-static void Cmd_Echo_f( void )
+void Cmd_Echo_f( void )
 {
 	int	i;
 
@@ -398,7 +398,7 @@ Cmd_Alias_f
 Creates a new command that executes a command string (possibly ; seperated)
 ===============
 */
-static void Cmd_Alias_f( void )
+void Cmd_Alias_f( void )
 {
 	cmdalias_t	*a;
 	char		cmd[MAX_CMD_LINE];
@@ -529,6 +529,7 @@ typedef struct cmd_s
 static int		cmd_argc;
 static const char	*cmd_args = NULL;
 static char		*cmd_argv[MAX_CMD_TOKENS];
+static char		cmd_tokenized[MAX_CMD_BUFFER];	// will have 0 bytes inserted
 static cmd_t		*cmd_functions;			// possible commands to execute
 
 /*
@@ -881,7 +882,7 @@ Cmd_If_f
 Compare and et condition bit if true
 ============
 */
-static void Cmd_If_f( void )
+void Cmd_If_f( void )
 {
 	// reset bit first
 	cmd_condition &= ~BIT( cmd_condlevel );
@@ -942,14 +943,14 @@ Cmd_Else_f
 Invert condition bit
 ============
 */
-static void Cmd_Else_f( void )
+void Cmd_Else_f( void )
 {
 	cmd_condition ^= BIT( cmd_condlevel );
 }
 
 static qboolean Cmd_ShouldAllowCommand( cmd_t *cmd, qboolean isPrivileged )
 {
-	const char *prefixes[] = { "cl_", "gl_", "r_", "m_", "hud_", "joy_" };
+	const char *prefixes[] = { "cl_", "gl_", "r_", "m_", "hud_" };
 	int i;
 
 	// always allow local commands
@@ -1015,7 +1016,7 @@ static void Cmd_ExecuteStringWithPrivilegeCheck( const char *text, qboolean isPr
 					*ptoken++ = *text++;
 				*ptoken = 0;
 
-				len += Q_strncpy( pcmd, Cvar_VariableString( token ), sizeof( token ) - len );
+				len += Q_strncpy( pcmd, Cvar_VariableString( token ), MAX_CMD_LINE - len );
 				pcmd = command + len;
 
 				if( !*text ) break;
@@ -1178,7 +1179,7 @@ void Cmd_ForwardToServer( void )
 Cmd_List_f
 ============
 */
-static void Cmd_List_f( void )
+void Cmd_List_f( void )
 {
 	cmd_t	*cmd;
 	int	i = 0;

@@ -143,7 +143,7 @@ static void R_GetDecalDimensions( int texture, int *width, int *height )
 //-----------------------------------------------------------------------------
 // compute the decal basis based on surface normal
 //-----------------------------------------------------------------------------
-static void R_DecalComputeBasis( msurface_t *surf, int flags, vec3_t textureSpaceBasis[3] )
+void R_DecalComputeBasis( msurface_t *surf, int flags, vec3_t textureSpaceBasis[3] )
 {
 	vec3_t	surfaceNormal;
 
@@ -179,7 +179,7 @@ static void R_DecalComputeBasis( msurface_t *surf, int flags, vec3_t textureSpac
 	VectorNormalize2( surf->texinfo->vecs[1], textureSpaceBasis[1] );
 }
 
-static void R_SetupDecalTextureSpaceBasis( decal_t *pDecal, msurface_t *surf, int texture, vec3_t textureSpaceBasis[3], float decalWorldScale[2] )
+void R_SetupDecalTextureSpaceBasis( decal_t *pDecal, msurface_t *surf, int texture, vec3_t textureSpaceBasis[3], float decalWorldScale[2] )
 {
 	int	width, height;
 
@@ -199,7 +199,7 @@ static void R_SetupDecalTextureSpaceBasis( decal_t *pDecal, msurface_t *surf, in
 }
 
 // Build the initial list of vertices from the surface verts into the global array, 'verts'.
-static void R_SetupDecalVertsForMSurface( decal_t *pDecal, msurface_t *surf,	vec3_t textureSpaceBasis[3], float *verts )
+void R_SetupDecalVertsForMSurface( decal_t *pDecal, msurface_t *surf,	vec3_t textureSpaceBasis[3], float *verts )
 {
 	float	*v;
 	int	i;
@@ -214,7 +214,7 @@ static void R_SetupDecalVertsForMSurface( decal_t *pDecal, msurface_t *surf,	vec
 }
 
 // Figure out where the decal maps onto the surface.
-static void R_SetupDecalClip( decal_t *pDecal, msurface_t *surf, int texture, vec3_t textureSpaceBasis[3], float decalWorldScale[2] )
+void R_SetupDecalClip( decal_t *pDecal, msurface_t *surf, int texture, vec3_t textureSpaceBasis[3], float decalWorldScale[2] )
 {
 	R_SetupDecalTextureSpaceBasis( pDecal, surf, texture, textureSpaceBasis, decalWorldScale );
 
@@ -229,7 +229,7 @@ static void R_SetupDecalClip( decal_t *pDecal, msurface_t *surf, int texture, ve
 // Clip polygon to decal in texture space
 // JAY: This code is lame, change it later.  It does way too much work per frame
 // It can be made to recursively call the clipping code and only copy the vertex list once
-static int R_ClipInside( float *vert, int edge )
+int R_ClipInside( float *vert, int edge )
 {
 	switch( edge )
 	{
@@ -253,7 +253,7 @@ static int R_ClipInside( float *vert, int edge )
 	return 0;
 }
 
-static void R_ClipIntersect( float *one, float *two, float *out, int edge )
+void R_ClipIntersect( float *one, float *two, float *out, int edge )
 {
 	float	t;
 
@@ -354,7 +354,7 @@ static int SHClip( float *vert, int vertCount, float *out, int edge )
 	return outCount;
 }
 
-static float *R_DoDecalSHClip( float *pInVerts, decal_t *pDecal, int nStartVerts, int *pVertCount )
+float *R_DoDecalSHClip( float *pInVerts, decal_t *pDecal, int nStartVerts, int *pVertCount )
 {
 	float	*pOutVerts = g_DecalClipVerts[0];
 	int	outCount;
@@ -374,7 +374,7 @@ static float *R_DoDecalSHClip( float *pInVerts, decal_t *pDecal, int nStartVerts
 //-----------------------------------------------------------------------------
 // Generate clipped vertex list for decal pdecal projected onto polygon psurf
 //-----------------------------------------------------------------------------
-static float *R_DecalVertsClip( decal_t *pDecal, msurface_t *surf, int texture, int *pVertCount )
+float *R_DecalVertsClip( decal_t *pDecal, msurface_t *surf, int texture, int *pVertCount )
 {
 	float	decalWorldScale[2];
 	vec3_t	textureSpaceBasis[3];
@@ -391,15 +391,30 @@ static float *R_DecalVertsClip( decal_t *pDecal, msurface_t *surf, int texture, 
 // Generate lighting coordinates at each vertex for decal vertices v[] on surface psurf
 static void R_DecalVertsLight( float *v, msurface_t *surf, int vertCount )
 {
+	float		s, t;
+	mtexinfo_t	*tex;
+	mextrasurf_t	*info = surf->info;
 	float		sample_size;
 	int		j;
 
 	sample_size = gEngfuncs.Mod_SampleSizeForFace( surf );
+	tex = surf->texinfo;
 
 	for( j = 0; j < vertCount; j++, v += VERTEXSIZE )
 	{
 		// lightmap texture coordinates
-		R_LightmapCoord( v, surf, sample_size, &v[5] );
+		s = DotProduct( v, info->lmvecs[0] ) + info->lmvecs[0][3] - info->lightmapmins[0];
+		s += surf->light_s * sample_size;
+		s += sample_size * 0.5f;
+		s /= BLOCK_SIZE * sample_size; //fa->texinfo->texture->width;
+
+		t = DotProduct( v, info->lmvecs[1] ) + info->lmvecs[1][3] - info->lightmapmins[1];
+		t += surf->light_t * sample_size;
+		t += sample_size * 0.5f;
+		t /= BLOCK_SIZE * sample_size; //fa->texinfo->texture->height;
+
+		v[5] = s;
+		v[6] = t;
 	}
 }
 
@@ -492,7 +507,7 @@ R_DecalCreatePoly
 creates mesh for decal on first rendering
 ====================
 */
-static glpoly_t *R_DecalCreatePoly( decalinfo_t *decalinfo, decal_t *pdecal, msurface_t *surf )
+glpoly_t *R_DecalCreatePoly( decalinfo_t *decalinfo, decal_t *pdecal, msurface_t *surf )
 {
 	int		lnumverts;
 	glpoly_t	*poly;
@@ -595,7 +610,7 @@ static void R_DecalCreate( decalinfo_t *decalinfo, msurface_t *surf, float x, fl
 	R_AddDecalToSurface( pdecal, surf, decalinfo );
 }
 
-static void R_DecalSurface( msurface_t *surf, decalinfo_t *decalinfo )
+void R_DecalSurface( msurface_t *surf, decalinfo_t *decalinfo )
 {
 	// get the texture associated with this surface
 	mtexinfo_t	*tex = surf->texinfo;
@@ -750,15 +765,15 @@ void R_DecalShoot( int textureIndex, int entityIndex, int modelIndex, vec3_t pos
 
 	if( entityIndex > 0 )
 	{
-		ent = CL_GetEntityByIndex( entityIndex );
+		ent = gEngfuncs.GetEntityByIndex( entityIndex );
 
-		if( modelIndex > 0 ) model = CL_ModelHandle( modelIndex );
-		else if( ent != NULL ) model = CL_ModelHandle( ent->curstate.modelindex );
+		if( modelIndex > 0 ) model = gEngfuncs.pfnGetModelByIndex( modelIndex );
+		else if( ent != NULL ) model = gEngfuncs.pfnGetModelByIndex( ent->curstate.modelindex );
 		else return;
 	}
 	else if( modelIndex > 0 )
-		model = CL_ModelHandle( modelIndex );
-	else model = CL_ModelHandle( 1 );
+		model = gEngfuncs.pfnGetModelByIndex( modelIndex );
+	else model = WORLDMODEL;
 
 	if( !model ) return;
 

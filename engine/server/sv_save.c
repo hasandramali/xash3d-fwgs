@@ -652,7 +652,7 @@ static void DirectoryCopy( const char *pPath, file_t *pFile )
 		fileSize = FS_FileLength( pCopy );
 
 		memset( szName, 0, sizeof( szName )); // clearing the string to prevent garbage in output file
-		Q_strncpy( szName, COM_FileWithoutPath( t->filenames[i] ), sizeof( szName ));
+		Q_strncpy( szName, COM_FileWithoutPath( t->filenames[i] ), MAX_OSPATH );
 		FS_Write( pFile, szName, MAX_OSPATH );
 		FS_Write( pFile, &fileSize, sizeof( int ));
 		FS_FileCopy( pFile, pCopy, fileSize );
@@ -764,6 +764,33 @@ static void SaveFinish( SAVERESTOREDATA *pSaveData )
 
 	svgame.globals->pSaveData = NULL;
 	Mem_Free( pSaveData );
+}
+
+/*
+=============
+DumpHashStrings
+
+debug thing
+=============
+*/
+static void DumpHashStrings( SAVERESTOREDATA *pSaveData, const char *pMessage )
+{
+	int	i, count = 0;
+
+	if( pSaveData && pSaveData->pTokens )
+	{
+		Con_Printf( "%s\n", pMessage );
+
+		for( i = 0; i < pSaveData->tokenCount; i++ )
+		{
+			if( !pSaveData->pTokens[i] )
+				continue;
+
+			Con_Printf( "#%i %s\n", count, pSaveData->pTokens[i] );
+			count++;
+		}
+		Con_Printf( "total %i actual %i\n", pSaveData->tokenCount, count );
+	}
 }
 
 /*
@@ -957,10 +984,7 @@ static void ParseSaveTables( SAVERESTOREDATA *pSaveData, SAVE_HEADER *pHeader, i
 	InitEntityTable( pSaveData, pSaveData->tableCount );
 
 	for( i = 0; i < pSaveData->tableCount; i++ )
-	{
 		svgame.dllFuncs.pfnSaveReadFields( pSaveData, "ETABLE", &pSaveData->pTable[i], gEntityTable, ARRAYSIZE( gEntityTable ));
-		pSaveData->pTable[i].pent = NULL;
-	}
 
 	pSaveData->pBaseData = pSaveData->pCurrentData;
 	pSaveData->size = 0;
@@ -1202,7 +1226,7 @@ static void SaveClientState( SAVERESTOREDATA *pSaveData, const char *level, int 
 		header.soundCount = S_GetCurrentDynamicSounds( soundInfo, MAX_CHANNELS );
 #if !XASH_DEDICATED
 		// music not reqiured to save position: it's just continue playing on a next level
-		S_StreamGetCurrentState( header.introTrack, sizeof( header.introTrack ), header.mainTrack, sizeof( header.mainTrack ), &header.trackPosition );
+		S_StreamGetCurrentState( header.introTrack, header.mainTrack, &header.trackPosition );
 #endif
 	}
 
@@ -2110,7 +2134,7 @@ qboolean SV_LoadGame( const char *pPath )
 		if( validload )
 		{
 			// now check for map problems
-			flags = SV_MapIsValid( gameHeader.mapName, NULL );
+			flags = SV_MapIsValid( gameHeader.mapName, GI->sp_entity, NULL );
 
 			if( FBitSet( flags, MAP_INVALID_VERSION ))
 			{
@@ -2386,7 +2410,7 @@ int GAME_EXPORT SV_GetSaveComment( const char *savename, char *comment )
 		uint		flags;
 
 		// now check for map problems
-		flags = SV_MapIsValid( mapName, NULL );
+		flags = SV_MapIsValid( mapName, GI->sp_entity, NULL );
 
 		if( FBitSet( flags, MAP_INVALID_VERSION ))
 		{

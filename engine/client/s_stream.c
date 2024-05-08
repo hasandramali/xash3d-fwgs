@@ -96,7 +96,6 @@ void S_StartBackgroundTrack( const char *introTrack, const char *mainTrack, int 
 
 	// open stream
 	s_bgTrack.stream = FS_OpenStream( introTrack );
-
 	Q_strncpy( s_bgTrack.current, introTrack, sizeof( s_bgTrack.current ));
 	memset( &musicfade, 0, sizeof( musicfade )); // clear any soundfade
 	s_bgTrack.source = cls.key_dest;
@@ -142,7 +141,7 @@ S_StreamGetCurrentState
 save\restore code
 =================
 */
-qboolean S_StreamGetCurrentState( char *currentTrack, size_t currentTrackSize, char *loopTrack, size_t loopTrackSize, int *position )
+qboolean S_StreamGetCurrentState( char *currentTrack, char *loopTrack, int *position )
 {
 	if( !s_bgTrack.stream )
 		return false; // not active
@@ -150,15 +149,15 @@ qboolean S_StreamGetCurrentState( char *currentTrack, size_t currentTrackSize, c
 	if( currentTrack )
 	{
 		if( s_bgTrack.current[0] )
-			Q_strncpy( currentTrack, s_bgTrack.current, currentTrackSize );
-		else Q_strncpy( currentTrack, "*", currentTrackSize ); // no track
+			Q_strncpy( currentTrack, s_bgTrack.current, MAX_STRING );
+		else Q_strncpy( currentTrack, "*", MAX_STRING ); // no track
 	}
 
 	if( loopTrack )
 	{
 		if( s_bgTrack.loopName[0] )
-			Q_strncpy( loopTrack, s_bgTrack.loopName, loopTrackSize );
-		else Q_strncpy( loopTrack, "*", loopTrackSize ); // no track
+			Q_strncpy( loopTrack, s_bgTrack.loopName, MAX_STRING );
+		else Q_strncpy( loopTrack, "*", MAX_STRING ); // no track
 	}
 
 	if( position )

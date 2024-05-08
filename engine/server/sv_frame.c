@@ -180,7 +180,7 @@ SV_FindBestBaseline
 trying to deltas with previous entities
 =============
 */
-static int SV_FindBestBaseline( sv_client_t *cl, int index, entity_state_t **baseline, entity_state_t *to, client_frame_t *frame, qboolean player )
+int SV_FindBestBaseline( sv_client_t *cl, int index, entity_state_t **baseline, entity_state_t *to, client_frame_t *frame, qboolean player )
 {
 	int	bestBitCount;
 	int	i, bitCount;
@@ -515,7 +515,7 @@ SV_EmitPings
 
 =============
 */
-static void SV_EmitPings( sizebuf_t *msg )
+void SV_EmitPings( sizebuf_t *msg )
 {
 	sv_client_t	*cl;
 	int		packet_loss;
@@ -547,7 +547,7 @@ SV_WriteClientdataToMessage
 
 ==================
 */
-static void SV_WriteClientdataToMessage( sv_client_t *cl, sizebuf_t *msg )
+void SV_WriteClientdataToMessage( sv_client_t *cl, sizebuf_t *msg )
 {
 	clientdata_t	nullcd;
 	clientdata_t	*from_cd, *to_cd;
@@ -634,7 +634,7 @@ SV_WriteEntitiesToClient
 
 ==================
 */
-static void SV_WriteEntitiesToClient( sv_client_t *cl, sizebuf_t *msg )
+void SV_WriteEntitiesToClient( sv_client_t *cl, sizebuf_t *msg )
 {
 	client_frame_t	*frame;
 	entity_state_t	*state;
@@ -706,7 +706,7 @@ FRAME UPDATES
 SV_SendClientDatagram
 =======================
 */
-static void SV_SendClientDatagram( sv_client_t *cl )
+void SV_SendClientDatagram( sv_client_t *cl )
 {
 	byte	msg_buf[MAX_DATAGRAM];
 	sizebuf_t	msg;
@@ -752,7 +752,7 @@ static void SV_SendClientDatagram( sv_client_t *cl )
 SV_UpdateUserInfo
 =======================
 */
-static void SV_UpdateUserInfo( sv_client_t *cl )
+void SV_UpdateUserInfo( sv_client_t *cl )
 {
 	SV_FullClientUpdate( cl, &sv.reliable_datagram );
 	ClearBits( cl->flags, FCL_RESEND_USERINFO );
@@ -764,7 +764,7 @@ static void SV_UpdateUserInfo( sv_client_t *cl )
 SV_UpdateToReliableMessages
 =======================
 */
-static void SV_UpdateToReliableMessages( void )
+void SV_UpdateToReliableMessages( void )
 {
 	sv_client_t	*cl;
 	int		i;
@@ -811,17 +811,17 @@ static void SV_UpdateToReliableMessages( void )
 			continue;	// reliables go to all connected or spawned
 
 		if( MSG_GetNumBytesWritten( &sv.reliable_datagram ) < MSG_GetNumBytesLeft( &cl->netchan.message ))
-			MSG_WriteBits( &cl->netchan.message, MSG_GetData( &sv.reliable_datagram ), MSG_GetNumBitsWritten( &sv.reliable_datagram ));
+			MSG_WriteBits( &cl->netchan.message, MSG_GetBuf( &sv.reliable_datagram ), MSG_GetNumBitsWritten( &sv.reliable_datagram ));
 		else Netchan_CreateFragments( &cl->netchan, &sv.reliable_datagram );
 
 		if( MSG_GetNumBytesWritten( &sv.datagram ) < MSG_GetNumBytesLeft( &cl->datagram ))
-			MSG_WriteBits( &cl->datagram, MSG_GetData( &sv.datagram ), MSG_GetNumBitsWritten( &sv.datagram ));
+			MSG_WriteBits( &cl->datagram, MSG_GetBuf( &sv.datagram ), MSG_GetNumBitsWritten( &sv.datagram ));
 		else Con_DPrintf( S_WARN "Ignoring unreliable datagram for %s, would overflow\n", cl->name );
 
 		if( FBitSet( cl->flags, FCL_HLTV_PROXY ))
 		{
 			if( MSG_GetNumBytesWritten( &sv.spec_datagram ) < MSG_GetNumBytesLeft( &cl->datagram ))
-				MSG_WriteBits( &cl->datagram, MSG_GetData( &sv.spec_datagram ), MSG_GetNumBitsWritten( &sv.spec_datagram ));
+				MSG_WriteBits( &cl->datagram, MSG_GetBuf( &sv.spec_datagram ), MSG_GetNumBitsWritten( &sv.spec_datagram ));
 			else Con_DPrintf( S_WARN "Ignoring spectator datagram for %s, would overflow\n", cl->name );
 		}
 	}

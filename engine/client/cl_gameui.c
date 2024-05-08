@@ -414,15 +414,11 @@ static void UI_ConvertGameInfo( GAMEINFO *out, gameinfo_t *in )
 	out->gamemode = in->gamemode;
 
 	if( in->nomodels )
-		SetBits( out->flags, GFL_NOMODELS );
+		out->flags |= GFL_NOMODELS;
 	if( in->noskills )
-		SetBits( out->flags, GFL_NOSKILLS );
+		out->flags |= GFL_NOSKILLS;
 	if( in->render_picbutton_text )
-		SetBits( out->flags, GFL_RENDER_PICBUTTON_TEXT );
-	if( in->hd_background )
-		SetBits( out->flags, GFL_HD_BACKGROUND );
-	if( in->animated_title )
-		SetBits( out->flags, GFL_ANIMATED_TITLE );
+		out->flags |= GFL_RENDER_PICBUTTON_TEXT;
 }
 
 /*
@@ -542,7 +538,7 @@ pfnPIC_Set
 
 =========
 */
-static void GAME_EXPORT pfnPIC_Set( HIMAGE hPic, int r, int g, int b, int a )
+void GAME_EXPORT pfnPIC_Set( HIMAGE hPic, int r, int g, int b, int a )
 {
 	gameui.ds.gl_texturenum = hPic;
 	r = bound( 0, r, 255 );
@@ -558,7 +554,7 @@ pfnPIC_Draw
 
 =========
 */
-static void GAME_EXPORT pfnPIC_Draw( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_Draw( int x, int y, int width, int height, const wrect_t *prc )
 {
 	ref.dllFuncs.GL_SetRenderMode( kRenderNormal );
 	PIC_DrawGeneric( x, y, width, height, prc );
@@ -570,7 +566,7 @@ pfnPIC_DrawTrans
 
 =========
 */
-static void GAME_EXPORT pfnPIC_DrawTrans( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_DrawTrans( int x, int y, int width, int height, const wrect_t *prc )
 {
 	ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
 	PIC_DrawGeneric( x, y, width, height, prc );
@@ -582,7 +578,7 @@ pfnPIC_DrawHoles
 
 =========
 */
-static void GAME_EXPORT pfnPIC_DrawHoles( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_DrawHoles( int x, int y, int width, int height, const wrect_t *prc )
 {
 	ref.dllFuncs.GL_SetRenderMode( kRenderTransAlpha );
 	PIC_DrawGeneric( x, y, width, height, prc );
@@ -594,7 +590,7 @@ pfnPIC_DrawAdditive
 
 =========
 */
-static void GAME_EXPORT pfnPIC_DrawAdditive( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_DrawAdditive( int x, int y, int width, int height, const wrect_t *prc )
 {
 	ref.dllFuncs.GL_SetRenderMode( kRenderTransAdd );
 	PIC_DrawGeneric( x, y, width, height, prc );
@@ -984,7 +980,7 @@ pfnCheckGameDll
 
 =========
 */
-static int GAME_EXPORT pfnCheckGameDll( void )
+int GAME_EXPORT pfnCheckGameDll( void )
 {
 #ifdef XASH_INTERNAL_GAMELIBS
 	return true;
@@ -1092,11 +1088,6 @@ static int pfnDelete( const char *path )
 	return FS_Delete( path );
 }
 
-static void GAME_EXPORT pfnCon_DefaultColor( int r, int g, int b )
-{
-	Con_DefaultColor( r, g, b, true );
-}
-
 // engine callbacks
 static ui_enginefuncs_t gEngfuncs =
 {
@@ -1136,7 +1127,7 @@ static ui_enginefuncs_t gEngfuncs =
 	UI_DrawConsoleString,
 	UI_DrawSetTextColor,
 	Con_DrawStringLen,
-	pfnCon_DefaultColor,
+	Con_DefaultColor,
 	pfnGetPlayerModel,
 	pfnSetPlayerModel,
 	pfnClearScene,
@@ -1220,7 +1211,6 @@ static ui_extendedfuncs_t gExtendedfuncs =
 	pfnParseFileSafe,
 	NET_AdrToString,
 	NET_CompareAdrSort,
-	Sys_GetNativeObject,
 };
 
 void UI_UnloadProgs( void )

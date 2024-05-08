@@ -50,10 +50,6 @@ GNU General Public License for more details.
 #define LUMP_SAVE_NO_DATA		7
 #define LUMP_SAVE_CORRUPTED		8
 
-#ifndef ALLOC_CHECK
-#define ALLOC_CHECK( x )
-#endif
-
 typedef struct areanode_s
 {
 	int		axis;		// -1 = leaf node
@@ -90,7 +86,7 @@ typedef struct server_physics_api_s
 	const byte	*(*pfnGetTextureData)( unsigned int texnum );
 
 	// static allocations
-	void		*(*pfnMemAlloc)( size_t cb, const char *filename, const int fileline ) ALLOC_CHECK( 1 );
+	void		*(*pfnMemAlloc)( size_t cb, const char *filename, const int fileline );
 	void		(*pfnMemFree)( void *mem, const char *filename, const int fileline );
 
 	// trace & contents
@@ -111,10 +107,7 @@ typedef struct server_physics_api_s
 	int		(*pfnSaveFile)( const char *filename, const void *data, int len );
 	const byte	*(*pfnLoadImagePixels)( const char *filename, int *width, int *height );
 
-	const char *(*pfnGetModelName)( int modelindex );
-
-	// FWGS extension
-	void       *(*pfnGetNativeObject)( const char *object );
+	const char*	(*pfnGetModelName)( int modelindex );
 } server_physics_api_t;
 
 // physic callbacks

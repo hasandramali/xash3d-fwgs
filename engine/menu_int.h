@@ -143,7 +143,7 @@ typedef struct ui_enginefuncs_s
 	void	*(*pfnKeyGetState)( const char *name );			// for mlook, klook etc
 
 	// engine memory manager
-	void*	(*pfnMemAlloc)( size_t cb, const char *filename, const int fileline ) ALLOC_CHECK( 1 );
+	void*	(*pfnMemAlloc)( size_t cb, const char *filename, const int fileline );
 	void	(*pfnMemFree)( void *mem, const char *filename, const int fileline );
 
 	// collect info from engine
@@ -215,7 +215,6 @@ typedef struct ui_extendedfuncs_s {
 	// network address funcs
 	const char *(*pfnAdrToString)( const struct netadr_s a );
 	int (*pfnCompareAdr)( const void *a, const void *b ); // netadr_t
-	void *(*pfnGetNativeObject)( const char *name );
 } ui_extendedfuncs_t;
 
 // deprecated export from old engine

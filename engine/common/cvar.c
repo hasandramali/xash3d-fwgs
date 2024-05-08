@@ -152,10 +152,8 @@ static qboolean Cvar_UpdateInfo( convar_t *var, const char *value, qboolean noti
 		if ( Host_IsDedicated() )
 		{
 			// g-cont. this is a very strange behavior...
-			char *info = SV_Serverinfo();
-
-			Info_SetValueForKey( info, var->name, value, MAX_SERVERINFO_STRING ),
-			SV_BroadcastCommand( "fullserverinfo \"%s\"\n", info );
+			Info_SetValueForKey( SV_Serverinfo(), var->name, value, MAX_SERVERINFO_STRING ),
+			SV_BroadcastCommand( "fullserverinfo \"%s\"\n", SV_Serverinfo( ));
 		}
 #if !XASH_DEDICATED
 		else
@@ -197,7 +195,7 @@ Cvar_ValidateString
 deal with userinfo etc
 ============
 */
-static const char *Cvar_ValidateString( convar_t *var, const char *value )
+const char *Cvar_ValidateString( convar_t *var, const char *value )
 {
 	const char	*pszValue;
 	static char	szNew[MAX_STRING];
@@ -280,7 +278,7 @@ Cvar_UnlinkVar
 unlink the variable
 ============
 */
-static int Cvar_UnlinkVar( const char *var_name, int group )
+int Cvar_UnlinkVar( const char *var_name, int group )
 {
 	int	count = 0;
 	convar_t	**prev;
@@ -565,27 +563,6 @@ void Cvar_RegisterVariable( convar_t *var )
 #endif
 }
 
-static qboolean Cvar_CanSet( const convar_t *cv )
-{
-	if( FBitSet( cv->flags, FCVAR_READ_ONLY ))
-	{
-		Con_Printf( "%s is read-only.\n", cv->name );
-		return false;
-	}
-
-	if( FBitSet( cv->flags, FCVAR_CHEAT ) && !host.allow_cheats )
-	{
-		Con_Printf( "%s is cheat protected.\n", cv->name );
-		return false;
-	}
-
-	// just tell user about deferred changes
-	if( FBitSet( cv->flags, FCVAR_LATCH ) && ( SV_Active() || CL_Active( )))
-		Con_Printf( "%s will be changed upon restarting.\n", cv->name );
-
-	return true;
-}
-
 /*
 ============
 Cvar_Set2
@@ -655,9 +632,22 @@ static convar_t *Cvar_Set2( const char *var_name, const char *value )
 		force = true;
 
 	if( !force )
-	{
-		if( !Cvar_CanSet( var ))
+	{ 
+		if( FBitSet( var->flags, FCVAR_READ_ONLY ))
+		{
+			Con_Printf( "%s is read-only.\n", var->name );
 			return var;
+		}
+
+		if( FBitSet( var->flags, FCVAR_CHEAT ) && !host.allow_cheats )
+		{
+			Con_Printf( "%s is cheat protected.\n", var->name );
+			return var;
+		}
+
+		// just tell user about deferred changes
+		if( FBitSet( var->flags, FCVAR_LATCH ) && ( SV_Active() || CL_Active( )))
+			Con_Printf( "%s will be changed upon restarting.\n", var->name );
 	}
 
 	pszValue = Cvar_ValidateString( var, value );
@@ -687,7 +677,7 @@ Cvar_DirectSet
 way to change value for many cvars
 ============
 */
-void GAME_EXPORT Cvar_DirectSet( convar_t *var, const char *value )
+void Cvar_DirectSet( convar_t *var, const char *value )
 {
 	const char	*pszValue;
 
@@ -704,8 +694,21 @@ void GAME_EXPORT Cvar_DirectSet( convar_t *var, const char *value )
 			return; // how this possible?
 	}
 
-	if( !Cvar_CanSet( var ))
+	if( FBitSet( var->flags, FCVAR_READ_ONLY ))
+	{
+		Con_Printf( "%s is read-only.\n", var->name );
 		return;
+	}
+
+	if( FBitSet( var->flags, FCVAR_CHEAT ) && !host.allow_cheats )
+	{
+		Con_Printf( "%s is cheat protected.\n", var->name );
+		return;
+	}
+
+	// just tell user about deferred changes
+	if( FBitSet( var->flags, FCVAR_LATCH ) && ( SV_Active() || CL_Active( )))
+		Con_Printf( "%s will be changed upon restarting.\n", var->name );
 
 	// check value
 	if( !value )
@@ -736,24 +739,6 @@ void GAME_EXPORT Cvar_DirectSet( convar_t *var, const char *value )
 
 	// tell engine about changes
 	Cvar_Changed( var );
-}
-
-/*
-============
-Cvar_DirectSetValue
-
-functionally is the same as Cvar_SetValue but for direct cvar access
-============
-*/
-void Cvar_DirectSetValue( convar_t *var, float value )
-{
-	char	val[32];
-
-	if( fabs( value - (int)value ) < 0.000001 )
-		Q_snprintf( val, sizeof( val ), "%d", (int)value );
-	else Q_snprintf( val, sizeof( val ), "%f", value );
-
-	Cvar_DirectSet( var, val );
 }
 
 /*
@@ -955,7 +940,7 @@ static void Cvar_SetGL( const char *name, const char *value )
 
 static qboolean Cvar_ShouldSetCvar( convar_t *v, qboolean isPrivileged )
 {
-	const char *prefixes[] = { "cl_", "gl_", "m_", "r_", "hud_", "joy_" };
+	const char *prefixes[] = { "cl_", "gl_", "m_", "r_", "hud_" };
 	int i;
 
 	if( isPrivileged )
@@ -1093,7 +1078,7 @@ Cvar_Toggle_f
 Toggles a cvar for easy single key binding
 ============
 */
-static void Cvar_Toggle_f( void )
+void Cvar_Toggle_f( void )
 {
 	int	v;
 
@@ -1116,7 +1101,7 @@ Allows setting and defining of arbitrary cvars from console, even if they
 weren't declared in C code.
 ============
 */
-static void Cvar_Set_f( void )
+void Cvar_Set_f( void )
 {
 	int	i, c, l = 0, len;
 	char	combined[MAX_CMD_TOKENS];
@@ -1149,8 +1134,10 @@ Cvar_SetGL_f
 As Cvar_Set, but also flags it as glconfig
 ============
 */
-static void Cvar_SetGL_f( void )
+void Cvar_SetGL_f( void )
 {
+	convar_t *var;
+
 	if( Cmd_Argc() != 3 )
 	{
 		Con_Printf( S_USAGE "setgl <variable> <value>\n" );
@@ -1165,7 +1152,7 @@ static void Cvar_SetGL_f( void )
 Cvar_Reset_f
 ============
 */
-static void Cvar_Reset_f( void )
+void Cvar_Reset_f( void )
 {
 	if( Cmd_Argc() != 2 )
 	{
@@ -1181,7 +1168,7 @@ static void Cvar_Reset_f( void )
 Cvar_List_f
 ============
 */
-static void Cvar_List_f( void )
+void Cvar_List_f( void )
 {
 	convar_t	*var;
 	const char	*match = NULL;

@@ -31,7 +31,7 @@ typedef struct OpusCustomMode OpusCustomMode;
 #define VOICE_PCM_CHANNELS 1 // always mono
 
 // never change these parameters when using opuscustom
-#define VOICE_OPUS_CUSTOM_SAMPLERATE 44100
+#define VOICE_OPUS_CUSTOM_SAMPLERATE SOUND_44k
 // must follow opus custom requirements
 // also be divisible with MAX_RAW_SAMPLES
 #define VOICE_OPUS_CUSTOM_FRAME_SIZE 1024
@@ -53,7 +53,6 @@ typedef struct voice_state_s
 
 	qboolean initialized;
 	qboolean is_recording;
-	qboolean device_opened;
 	double start_time;
 
 	voice_status_t local;
@@ -62,7 +61,7 @@ typedef struct voice_state_s
 	// opus stuff
 	OpusCustomMode    *custom_mode;
 	OpusCustomEncoder *encoder;
-	OpusCustomDecoder *decoders[MAX_CLIENTS];
+	OpusCustomDecoder *decoder;
 
 	// audio info
 	uint width;
@@ -71,7 +70,7 @@ typedef struct voice_state_s
 
 	// buffers
 	byte input_buffer[MAX_RAW_SAMPLES];
-	byte compress_buffer[MAX_RAW_SAMPLES];
+	byte output_buffer[MAX_RAW_SAMPLES];
 	byte decompress_buffer[MAX_RAW_SAMPLES];
 	fs_offset_t input_buffer_pos; // in bytes
 
@@ -93,7 +92,7 @@ extern voice_state_t voice;
 void CL_AddVoiceToDatagram( void );
 
 void Voice_RegisterCvars( void );
-qboolean Voice_Init( const char *pszCodecName, int quality, qboolean preinit );
+qboolean Voice_Init( const char *pszCodecName, int quality );
 void Voice_Idle( double frametime );
 qboolean Voice_IsRecording( void );
 void Voice_RecordStop( void );

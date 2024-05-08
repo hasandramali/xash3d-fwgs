@@ -57,7 +57,35 @@ const char *cl_default_sprites[] =
 	"sprites/shellchrome.spr",
 };
 
-static void CL_PlayerDecal( int playerIndex, int textureIndex, int entityIndex, float *pos );
+const char *cl_player_shell_sounds[] =
+{
+	"player/pl_shell1.wav",
+	"player/pl_shell2.wav",
+	"player/pl_shell3.wav",
+};
+
+const char *cl_weapon_shell_sounds[] =
+{
+	"weapons/sshell1.wav",
+	"weapons/sshell2.wav",
+	"weapons/sshell3.wav",
+};
+
+const char *cl_ricochet_sounds[] =
+{
+	"weapons/ric1.wav",
+	"weapons/ric2.wav",
+	"weapons/ric3.wav",
+	"weapons/ric4.wav",
+	"weapons/ric5.wav",
+};
+
+const char *cl_explode_sounds[] =
+{
+	"weapons/explode3.wav",
+	"weapons/explode4.wav",
+	"weapons/explode5.wav",
+};
 
 /*
 ================
@@ -118,7 +146,6 @@ client resources not precached by server
 */
 void CL_AddClientResources( void )
 {
-	const char *snd;
 	char	filepath[MAX_QPATH];
 	int	i;
 
@@ -134,37 +161,37 @@ void CL_AddClientResources( void )
 	}
 
 	// then check sounds
-	for( i = 0; ( snd = SoundList_Get( BouncePlayerShell, i )); i++ )
+	for( i = 0; i < ARRAYSIZE( cl_player_shell_sounds ); i++ )
 	{
-		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", snd );
+		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", cl_player_shell_sounds[i] );
 
 		if( !FS_FileExists( filepath, false ))
-			CL_AddClientResource( snd, t_sound );
+			CL_AddClientResource( cl_player_shell_sounds[i], t_sound );
 	}
 
-	for( i = 0; ( snd = SoundList_Get( BounceWeaponShell, i )); i++ )
+	for( i = 0; i < ARRAYSIZE( cl_weapon_shell_sounds ); i++ )
 	{
-		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", snd );
+		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", cl_weapon_shell_sounds[i] );
 
 		if( !FS_FileExists( filepath, false ))
-			CL_AddClientResource( snd, t_sound );
+			CL_AddClientResource( cl_weapon_shell_sounds[i], t_sound );
 	}
 
-	for( i = 0; ( snd = SoundList_Get( Explode, i )); i++ )
+	for( i = 0; i < ARRAYSIZE( cl_explode_sounds ); i++ )
 	{
-		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", snd );
+		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", cl_explode_sounds[i] );
 
 		if( !FS_FileExists( filepath, false ))
-			CL_AddClientResource( snd, t_sound );
+			CL_AddClientResource( cl_explode_sounds[i], t_sound );
 	}
 
 #if 0	// ric sounds was precached by server-side
-	for( i = 0; ( snd = SoundList_Get( Ricochet, i )); i++ )
+	for( i = 0; i < ARRAYSIZE( cl_ricochet_sounds ); i++ )
 	{
-		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", snd );
+		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", cl_ricochet_sounds[i] );
 
 		if( !FS_FileExists( filepath, false ))
-			CL_AddClientResource( snd, t_sound );
+			CL_AddClientResource( cl_ricochet_sounds[i], t_sound );
 	}
 #endif
 }
@@ -228,7 +255,7 @@ CL_PrepareTEnt
 set default values
 ==============
 */
-static void CL_PrepareTEnt( TEMPENTITY *pTemp, model_t *pmodel )
+void CL_PrepareTEnt( TEMPENTITY *pTemp, model_t *pmodel )
 {
 	int	frameCount = 0;
 	int	modelIndex = 0;
@@ -269,10 +296,10 @@ CL_TempEntPlaySound
 play collide sound
 ==============
 */
-static void CL_TempEntPlaySound( TEMPENTITY *pTemp, float damp )
+void CL_TempEntPlaySound( TEMPENTITY *pTemp, float damp )
 {
 	float	fvol;
-	const char	*soundname = NULL;
+	char	soundname[32];
 	qboolean	isshellcasing = false;
 	int	zvel;
 
@@ -283,38 +310,35 @@ static void CL_TempEntPlaySound( TEMPENTITY *pTemp, float damp )
 	switch( pTemp->hitSound )
 	{
 	case BOUNCE_GLASS:
-		soundname = SoundList_GetRandom( BounceGlass );
+		Q_snprintf( soundname, sizeof( soundname ), "debris/glass%i.wav", COM_RandomLong( 1, 4 ));
 		break;
 	case BOUNCE_METAL:
-		soundname = SoundList_GetRandom( BounceMetal );
+		Q_snprintf( soundname, sizeof( soundname ), "debris/metal%i.wav", COM_RandomLong( 1, 6 ));
 		break;
 	case BOUNCE_FLESH:
-		soundname = SoundList_GetRandom( BounceFlesh );
+		Q_snprintf( soundname, sizeof( soundname ), "debris/flesh%i.wav", COM_RandomLong( 1, 7 ));
 		break;
 	case BOUNCE_WOOD:
-		soundname = SoundList_GetRandom( BounceWood );
+		Q_snprintf( soundname, sizeof( soundname ), "debris/wood%i.wav", COM_RandomLong( 1, 4 ));
 		break;
 	case BOUNCE_SHRAP:
-		soundname = SoundList_GetRandom( Ricochet );
+		Q_strncpy( soundname, cl_ricochet_sounds[COM_RandomLong( 0, 4 )], sizeof( soundname ) );
 		break;
 	case BOUNCE_SHOTSHELL:
-		soundname = SoundList_GetRandom( BounceWeaponShell );
+		Q_strncpy( soundname, cl_weapon_shell_sounds[COM_RandomLong( 0, 2 )], sizeof( soundname ) );
 		isshellcasing = true; // shell casings have different playback parameters
 		fvol = 0.5f;
 		break;
 	case BOUNCE_SHELL:
-		soundname = SoundList_GetRandom( BouncePlayerShell );
+		Q_strncpy( soundname, cl_player_shell_sounds[COM_RandomLong( 0, 2 )], sizeof( soundname ) );
 		isshellcasing = true; // shell casings have different playback parameters
 		break;
 	case BOUNCE_CONCRETE:
-		soundname = SoundList_GetRandom( BounceConcrete );
+		Q_snprintf( soundname, sizeof( soundname ), "debris/concrete%i.wav", COM_RandomLong( 1, 3 ));
 		break;
 	default:	// null sound
 		return;
 	}
-
-	if( !soundname )
-		return;
 
 	zvel = abs( pTemp->entity.baseline.origin[2] );
 
@@ -356,7 +380,7 @@ CL_TEntAddEntity
 add entity to renderlist
 ==============
 */
-static int CL_TempEntAddEntity( cl_entity_t *pEntity )
+int CL_TempEntAddEntity( cl_entity_t *pEntity )
 {
 	vec3_t mins, maxs;
 
@@ -408,7 +432,7 @@ CL_TEntAddEntity
 free the first low priority tempent it finds.
 ==============
 */
-static qboolean CL_FreeLowPriorityTempEnt( void )
+qboolean CL_FreeLowPriorityTempEnt( void )
 {
 	TEMPENTITY	*pActive = cl_active_tents;
 	TEMPENTITY	*pPrev = NULL;
@@ -1465,7 +1489,7 @@ void GAME_EXPORT R_FunnelSprite( const vec3_t org, int modelIndex, int reverse )
 ===============
 R_SparkEffect
 
-Create a streaks + ricochet sprite
+Create a streaks + richochet sprite
 ===============
 */
 void GAME_EXPORT R_SparkEffect( const vec3_t pos, int count, int velocityMin, int velocityMax )
@@ -1481,25 +1505,18 @@ R_RicochetSound
 Make a random ricochet sound
 ==============
 */
-static void R_RicochetSoundByName( const vec3_t pos, const char *name )
+static void R_RicochetSound_( const vec3_t pos, int sound )
 {
-	sound_t handle;
-	handle = S_RegisterSound( name );
-	S_StartSound( pos, 0, CHAN_AUTO, handle, VOL_NORM, 1.0, 100, 0 );
-}
+	sound_t	handle;
 
-static void R_RicochetSoundByIndex( const vec3_t pos, int idx )
-{
-	const char *name = SoundList_Get( Ricochet, idx );
-	if( name )
-		R_RicochetSoundByName( pos, name );
+	handle = S_RegisterSound( cl_ricochet_sounds[sound] );
+
+	S_StartSound( pos, 0, CHAN_AUTO, handle, VOL_NORM, 1.0, 100, 0 );
 }
 
 void GAME_EXPORT R_RicochetSound( const vec3_t pos )
 {
-	const char *name = SoundList_GetRandom( Ricochet );
-	if( name )
-		R_RicochetSoundByName( pos, name );
+	R_RicochetSound_( pos, COM_RandomLong( 0, 4 ));
 }
 
 /*
@@ -1646,12 +1663,8 @@ void GAME_EXPORT R_Explosion( vec3_t pos, int model, float scale, float framerat
 
 	if( !FBitSet( flags, TE_EXPLFLAG_NOSOUND ))
 	{
-		const char *name = SoundList_GetRandom( Explode );
-		if( name )
-		{
-			hSound = S_RegisterSound( name );
-			S_StartSound( pos, 0, CHAN_STATIC, hSound, VOL_NORM, 0.3f, PITCH_NORM, 0 );
-		}
+		hSound = S_RegisterSound( cl_explode_sounds[COM_RandomLong( 0, 2 )] );
+		S_StartSound( pos, 0, CHAN_STATIC, hSound, VOL_NORM, 0.3f, PITCH_NORM, 0 );
 	}
 }
 
@@ -1881,8 +1894,8 @@ handle temp-entity messages
 */
 void CL_ParseTempEntity( sizebuf_t *msg )
 {
-	sizebuf_t		buf;
-	byte		pbuf[2048];
+	sizebuf_t		buf, *pbuf;
+	byte		msg_data[2048];
 	int		iSize;
 	int		type, color, count, flags;
 	int		decalIndex, modelIndex, entityIndex;
@@ -1894,25 +1907,33 @@ void CL_ParseTempEntity( sizebuf_t *msg )
 	cl_entity_t	*pEnt;
 	dlight_t		*dl;
 	sound_t	hSound;
-	const char *name;
-
-	if( cls.legacymode )
-		iSize = MSG_ReadByte( msg );
-	else iSize = MSG_ReadWord( msg );
 
 	decalIndex = modelIndex = entityIndex = 0;
 
-	// this will probably be fatal anyway
-	if( iSize > sizeof( pbuf ))
-		Con_Printf( S_ERROR "%s: Temp buffer overflow!\n", __FUNCTION__ );
+	if( cls.legacymode != PROTO_GOLDSRC )
+	{
+		if( cls.legacymode == PROTO_LEGACY )
+			iSize = MSG_ReadByte( msg );
+		else iSize = MSG_ReadWord( msg );
 
-	// parse user message into buffer
-	MSG_ReadBytes( msg, pbuf, iSize );
+		// this will probably be fatal anyway
+		if( iSize > sizeof( pbuf ))
+			Con_Printf( S_ERROR "%s: Temp buffer overflow!\n", __FUNCTION__ );
 
-	// init a safe tempbuffer
-	MSG_Init( &buf, "TempEntity", pbuf, iSize );
+		// parse user message into buffer
+		MSG_ReadBytes( msg, msg_data, iSize );
 
-	type = MSG_ReadByte( &buf );
+		// init a safe tempbuffer
+		MSG_Init( &buf, "TempEntity", msg_data, iSize );
+
+		pbuf = &buf;
+	}
+	else
+	{
+		pbuf = msg; // no safe guards!
+	}
+
+	type = MSG_ReadByte( pbuf );
 
 	switch( type )
 	{
@@ -1929,80 +1950,77 @@ void CL_ParseTempEntity( sizebuf_t *msg )
 	case TE_BEAMRING:
 	case TE_BEAMHOSE:
 	case TE_KILLBEAM:
-		CL_ParseViewBeam( &buf, type );
+		CL_ParseViewBeam( pbuf, type );
 		break;
 	case TE_GUNSHOT:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
 		R_RicochetSound( pos );
 		R_RunParticleEffect( pos, vec3_origin, 0, 20 );
 		break;
 	case TE_EXPLOSION:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		scale = (float)(MSG_ReadByte( &buf ) * 0.1f);
-		frameRate = MSG_ReadByte( &buf );
-		flags = MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		scale = (float)(MSG_ReadByte( pbuf ) * 0.1f);
+		frameRate = MSG_ReadByte( pbuf );
+		flags = MSG_ReadByte( pbuf );
 		R_Explosion( pos, modelIndex, scale, frameRate, flags );
 		break;
 	case TE_TAREXPLOSION:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
 		R_BlobExplosion( pos );
 
-		if(( name = SoundList_Get( Explode, 0 )))
-		{
-			hSound = S_RegisterSound( name );
-			S_StartSound( pos, -1, CHAN_AUTO, hSound, VOL_NORM, 1.0f, PITCH_NORM, 0 );
-		}
+		hSound = S_RegisterSound( cl_explode_sounds[0] );
+		S_StartSound( pos, -1, CHAN_AUTO, hSound, VOL_NORM, 1.0f, PITCH_NORM, 0 );
 		break;
 	case TE_SMOKE:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		scale = (float)(MSG_ReadByte( &buf ) * 0.1f);
-		frameRate = MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		scale = (float)(MSG_ReadByte( pbuf ) * 0.1f);
+		frameRate = MSG_ReadByte( pbuf );
 		pTemp = R_DefaultSprite( pos, modelIndex, frameRate );
 		R_Sprite_Smoke( pTemp, scale );
 		break;
 	case TE_TRACER:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
 		R_TracerEffect( pos, pos2 );
 		break;
 	case TE_SPARKS:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
 		R_SparkShower( pos );
 		break;
 	case TE_LAVASPLASH:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
 		R_LavaSplash( pos );
 		break;
 	case TE_TELEPORT:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
 		R_TeleportSplash( pos );
 		break;
 	case TE_EXPLOSION2:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		color = MSG_ReadByte( &buf );
-		count = MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		color = MSG_ReadByte( pbuf );
+		count = MSG_ReadByte( pbuf );
 		R_ParticleExplosion2( pos, color, count );
 
 		dl = CL_AllocDlight( 0 );
@@ -2011,36 +2029,33 @@ void CL_ParseTempEntity( sizebuf_t *msg )
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
 
-		if(( name = SoundList_Get( Explode, 0 )))
-		{
-			hSound = S_RegisterSound( name );
-			S_StartSound( pos, -1, CHAN_AUTO, hSound, VOL_NORM, 1.0f, PITCH_NORM, 0 );
-		}
+		hSound = S_RegisterSound( cl_explode_sounds[0] );
+		S_StartSound( pos, -1, CHAN_AUTO, hSound, VOL_NORM, 0.6f, PITCH_NORM, 0 );
 		break;
 	case TE_BSPDECAL:
 	case TE_DECAL:
 	case TE_WORLDDECAL:
 	case TE_WORLDDECALHIGH:
 	case TE_DECALHIGH:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
 		if( type == TE_BSPDECAL )
 		{
-			decalIndex = MSG_ReadShort( &buf );
-			entityIndex = MSG_ReadShort( &buf );
+			decalIndex = MSG_ReadShort( pbuf );
+			entityIndex = MSG_ReadShort( pbuf );
 			if( entityIndex )
-				modelIndex = MSG_ReadShort( &buf );
+				modelIndex = MSG_ReadShort( pbuf );
 			else modelIndex = 0;
 		}
 		else
 		{
-			decalIndex = MSG_ReadByte( &buf );
+			decalIndex = MSG_ReadByte( pbuf );
 			if( type == TE_DECALHIGH || type == TE_WORLDDECALHIGH )
 				decalIndex += 256;
 
 			if( type == TE_DECALHIGH || type == TE_DECAL )
-				entityIndex = MSG_ReadShort( &buf );
+				entityIndex = MSG_ReadShort( pbuf );
 			else entityIndex = 0;
 
 			pEnt = CL_GetEntityByIndex( entityIndex );
@@ -2049,338 +2064,338 @@ void CL_ParseTempEntity( sizebuf_t *msg )
 		CL_DecalShoot( CL_DecalIndex( decalIndex ), entityIndex, modelIndex, pos, type == TE_BSPDECAL ? FDECAL_PERMANENT : 0 );
 		break;
 	case TE_IMPLOSION:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		scale = MSG_ReadByte( &buf );
-		count = MSG_ReadByte( &buf );
-		life = (float)(MSG_ReadByte( &buf ) * 0.1f);
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		scale = MSG_ReadByte( pbuf );
+		count = MSG_ReadByte( pbuf );
+		life = (float)(MSG_ReadByte( pbuf ) * 0.1f);
 		R_Implosion( pos, scale, count, life );
 		break;
 	case TE_SPRITETRAIL:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		count = MSG_ReadByte( &buf );
-		life = (float)MSG_ReadByte( &buf ) * 0.1f;
-		scale = (float)MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		count = MSG_ReadByte( pbuf );
+		life = (float)MSG_ReadByte( pbuf ) * 0.1f;
+		scale = (float)MSG_ReadByte( pbuf );
 		if( !scale ) scale = 1.0f;
 		else scale *= 0.1f;
-		vel = (float)MSG_ReadByte( &buf ) * 10;
-		random = (float)MSG_ReadByte( &buf ) * 10;
+		vel = (float)MSG_ReadByte( pbuf ) * 10;
+		random = (float)MSG_ReadByte( pbuf ) * 10;
 		R_Sprite_Trail( type, pos, pos2, modelIndex, count, life, scale, random, 255, vel );
 		break;
 	case TE_SPRITE:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		scale = (float)MSG_ReadByte( &buf ) * 0.1f;
-		brightness = (float)MSG_ReadByte( &buf ) / 255.0f;
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		scale = (float)MSG_ReadByte( pbuf ) * 0.1f;
+		brightness = (float)MSG_ReadByte( pbuf ) / 255.0f;
 
 		R_TempSprite( pos, vec3_origin, scale, modelIndex,
 			kRenderTransAdd, kRenderFxNone, brightness, 0.0, FTENT_SPRANIMATE );
 		break;
 	case TE_GLOWSPRITE:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		life = (float)MSG_ReadByte( &buf ) * 0.1f;
-		scale = (float)MSG_ReadByte( &buf ) * 0.1f;
-		brightness = (float)MSG_ReadByte( &buf ) / 255.0f;
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		life = (float)MSG_ReadByte( pbuf ) * 0.1f;
+		scale = (float)MSG_ReadByte( pbuf ) * 0.1f;
+		brightness = (float)MSG_ReadByte( pbuf ) / 255.0f;
 
 		R_TempSprite( pos, vec3_origin, scale, modelIndex,
 			kRenderGlow, kRenderFxNoDissipation, brightness, life, FTENT_FADEOUT );
 		break;
 	case TE_STREAK_SPLASH:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		color = MSG_ReadByte( &buf );
-		count = MSG_ReadShort( &buf );
-		vel = (float)MSG_ReadShort( &buf );
-		random = (float)MSG_ReadShort( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		color = MSG_ReadByte( pbuf );
+		count = MSG_ReadShort( pbuf );
+		vel = (float)MSG_ReadShort( pbuf );
+		random = (float)MSG_ReadShort( pbuf );
 		R_StreakSplash( pos, pos2, color, count, vel, -random, random );
 		break;
 	case TE_DLIGHT:
 		dl = CL_AllocDlight( 0 );
-		dl->origin[0] = MSG_ReadCoord( &buf );
-		dl->origin[1] = MSG_ReadCoord( &buf );
-		dl->origin[2] = MSG_ReadCoord( &buf );
-		dl->radius = (float)(MSG_ReadByte( &buf ) * 10.0f);
-		dl->color.r = MSG_ReadByte( &buf );
-		dl->color.g = MSG_ReadByte( &buf );
-		dl->color.b = MSG_ReadByte( &buf );
-		dl->die = cl.time + (float)(MSG_ReadByte( &buf ) * 0.1f);
-		dl->decay = (float)(MSG_ReadByte( &buf ) * 10.0f);
+		dl->origin[0] = MSG_ReadCoord( pbuf );
+		dl->origin[1] = MSG_ReadCoord( pbuf );
+		dl->origin[2] = MSG_ReadCoord( pbuf );
+		dl->radius = (float)(MSG_ReadByte( pbuf ) * 10.0f);
+		dl->color.r = MSG_ReadByte( pbuf );
+		dl->color.g = MSG_ReadByte( pbuf );
+		dl->color.b = MSG_ReadByte( pbuf );
+		dl->die = cl.time + (float)(MSG_ReadByte( pbuf ) * 0.1f);
+		dl->decay = (float)(MSG_ReadByte( pbuf ) * 10.0f);
 		break;
 	case TE_ELIGHT:
-		dl = CL_AllocElight( MSG_ReadShort( &buf ));
-		dl->origin[0] = MSG_ReadCoord( &buf );
-		dl->origin[1] = MSG_ReadCoord( &buf );
-		dl->origin[2] = MSG_ReadCoord( &buf );
-		dl->radius = MSG_ReadCoord( &buf );
-		dl->color.r = MSG_ReadByte( &buf );
-		dl->color.g = MSG_ReadByte( &buf );
-		dl->color.b = MSG_ReadByte( &buf );
-		life = (float)MSG_ReadByte( &buf ) * 0.1f;
+		dl = CL_AllocElight( MSG_ReadShort( pbuf ));
+		dl->origin[0] = MSG_ReadCoord( pbuf );
+		dl->origin[1] = MSG_ReadCoord( pbuf );
+		dl->origin[2] = MSG_ReadCoord( pbuf );
+		dl->radius = MSG_ReadCoord( pbuf );
+		dl->color.r = MSG_ReadByte( pbuf );
+		dl->color.g = MSG_ReadByte( pbuf );
+		dl->color.b = MSG_ReadByte( pbuf );
+		life = (float)MSG_ReadByte( pbuf ) * 0.1f;
 		dl->die = cl.time + life;
-		dl->decay = MSG_ReadCoord( &buf );
+		dl->decay = MSG_ReadCoord( pbuf );
 		if( life != 0 ) dl->decay /= life;
 		break;
 	case TE_TEXTMESSAGE:
-		CL_ParseTextMessage( &buf );
+		CL_ParseTextMessage( pbuf );
 		break;
 	case TE_LINE:
 	case TE_BOX:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		life = (float)(MSG_ReadShort( &buf ) * 0.1f);
-		r = MSG_ReadByte( &buf );
-		g = MSG_ReadByte( &buf );
-		b = MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		life = (float)(MSG_ReadShort( pbuf ) * 0.1f);
+		r = MSG_ReadByte( pbuf );
+		g = MSG_ReadByte( pbuf );
+		b = MSG_ReadByte( pbuf );
 		if( type == TE_LINE ) R_ParticleLine( pos, pos2, r, g, b, life );
 		else R_ParticleBox( pos, pos2, r, g, b, life );
 		break;
 	case TE_LARGEFUNNEL:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		flags = MSG_ReadShort( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		flags = MSG_ReadShort( pbuf );
 		R_LargeFunnel( pos, flags );
 		R_FunnelSprite( pos, modelIndex, flags );
 		break;
 	case TE_BLOODSTREAM:
 	case TE_BLOOD:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		color = MSG_ReadByte( &buf );
-		count = MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		color = MSG_ReadByte( pbuf );
+		count = MSG_ReadByte( pbuf );
 		if( type == TE_BLOOD ) R_Blood( pos, pos2, color, count );
 		else R_BloodStream( pos, pos2, color, count );
 		break;
 	case TE_SHOWLINE:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
 		R_ShowLine( pos, pos2 );
 		break;
 	case TE_FIZZ:
-		entityIndex = MSG_ReadShort( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		scale = MSG_ReadByte( &buf );	// same as density
+		entityIndex = MSG_ReadShort( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		scale = MSG_ReadByte( pbuf );	// same as density
 		pEnt = CL_GetEntityByIndex( entityIndex );
 		R_FizzEffect( pEnt, modelIndex, scale );
 		break;
 	case TE_MODEL:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
 		ang[0] = 0.0f;
-		ang[1] = MSG_ReadAngle( &buf ); // yaw angle
+		ang[1] = MSG_ReadAngle( pbuf ); // yaw angle
 		ang[2] = 0.0f;
-		modelIndex = MSG_ReadShort( &buf );
-		flags = MSG_ReadByte( &buf );	// sound flags
-		life = (float)(MSG_ReadByte( &buf ) * 0.1f);
+		modelIndex = MSG_ReadShort( pbuf );
+		flags = MSG_ReadByte( pbuf );	// sound flags
+		life = (float)(MSG_ReadByte( pbuf ) * 0.1f);
 		R_TempModel( pos, pos2, ang, life, modelIndex, flags );
 		break;
 	case TE_EXPLODEMODEL:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		vel = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		count = MSG_ReadShort( &buf );
-		life = (float)(MSG_ReadByte( &buf ) * 0.1f);
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		vel = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		count = MSG_ReadShort( pbuf );
+		life = (float)(MSG_ReadByte( pbuf ) * 0.1f);
 		R_TempSphereModel( pos, vel, life, count, modelIndex );
 		break;
 	case TE_BREAKMODEL:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		ang[0] = MSG_ReadCoord( &buf );
-		ang[1] = MSG_ReadCoord( &buf );
-		ang[2] = MSG_ReadCoord( &buf );
-		random = (float)MSG_ReadByte( &buf ) * 10.0f;
-		modelIndex = MSG_ReadShort( &buf );
-		count = MSG_ReadByte( &buf );
-		life = (float)(MSG_ReadByte( &buf ) * 0.1f);
-		flags = MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		ang[0] = MSG_ReadCoord( pbuf );
+		ang[1] = MSG_ReadCoord( pbuf );
+		ang[2] = MSG_ReadCoord( pbuf );
+		random = (float)MSG_ReadByte( pbuf ) * 10.0f;
+		modelIndex = MSG_ReadShort( pbuf );
+		count = MSG_ReadByte( pbuf );
+		life = (float)(MSG_ReadByte( pbuf ) * 0.1f);
+		flags = MSG_ReadByte( pbuf );
 		R_BreakModel( pos, pos2, ang, random, life, count, modelIndex, (char)flags );
 		break;
 	case TE_GUNSHOTDECAL:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		entityIndex = MSG_ReadShort( &buf );
-		decalIndex = MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		entityIndex = MSG_ReadShort( pbuf );
+		decalIndex = MSG_ReadByte( pbuf );
 		CL_DecalShoot( CL_DecalIndex( decalIndex ), entityIndex, 0, pos, 0 );
 		R_BulletImpactParticles( pos );
 		flags = COM_RandomLong( 0, 0x7fff );
-		if( flags < 0x3fff && ( count = SoundList_Count( Ricochet )))
-			R_RicochetSoundByIndex( pos, flags % count );
+		if( flags < 0x3fff )
+			R_RicochetSound_( pos, flags % 5 );
 		break;
 	case TE_SPRAY:
 	case TE_SPRITE_SPRAY:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		count = MSG_ReadByte( &buf );
-		vel = (float)MSG_ReadByte( &buf );
-		random = (float)MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		count = MSG_ReadByte( pbuf );
+		vel = (float)MSG_ReadByte( pbuf );
+		random = (float)MSG_ReadByte( pbuf );
 		if( type == TE_SPRAY )
 		{
-			flags = MSG_ReadByte( &buf );	// rendermode
+			flags = MSG_ReadByte( pbuf );	// rendermode
 			R_Spray( pos, pos2, modelIndex, count, vel, random, flags );
 		}
 		else R_Sprite_Spray( pos, pos2, modelIndex, count, vel * 2.0f, random );
 		break;
 	case TE_ARMOR_RICOCHET:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		scale = (float)(MSG_ReadByte( &buf ) * 0.1f);
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		scale = (float)(MSG_ReadByte( pbuf ) * 0.1f);
 		R_RicochetSprite( pos, cl_sprite_ricochet, 0.1f, scale );
 		R_RicochetSound( pos );
 		break;
 	case TE_PLAYERDECAL:
-		color = MSG_ReadByte( &buf ) - 1; // playernum
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		entityIndex = MSG_ReadShort( &buf );
-		decalIndex = MSG_ReadByte( &buf );
+		color = MSG_ReadByte( pbuf ) - 1; // playernum
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		entityIndex = MSG_ReadShort( pbuf );
+		decalIndex = MSG_ReadByte( pbuf );
 		CL_PlayerDecal( color, decalIndex, entityIndex, pos );
 		break;
 	case TE_BUBBLES:
 	case TE_BUBBLETRAIL:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		scale = MSG_ReadCoord( &buf );	// water height
-		modelIndex = MSG_ReadShort( &buf );
-		count = MSG_ReadByte( &buf );
-		vel = MSG_ReadCoord( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		scale = MSG_ReadCoord( pbuf );	// water height
+		modelIndex = MSG_ReadShort( pbuf );
+		count = MSG_ReadByte( pbuf );
+		vel = MSG_ReadCoord( pbuf );
 		if( type == TE_BUBBLES ) R_Bubbles( pos, pos2, scale, modelIndex, count, vel );
 		else R_BubbleTrail( pos, pos2, scale, modelIndex, count, vel );
 		break;
 	case TE_BLOODSPRITE:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );	// sprite #1
-		decalIndex = MSG_ReadShort( &buf );	// sprite #2
-		color = MSG_ReadByte( &buf );
-		scale = (float)MSG_ReadByte( &buf );
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );	// sprite #1
+		decalIndex = MSG_ReadShort( pbuf );	// sprite #2
+		color = MSG_ReadByte( pbuf );
+		scale = (float)MSG_ReadByte( pbuf );
 		R_BloodSprite( pos, color, modelIndex, decalIndex, scale );
 		break;
 	case TE_PROJECTILE:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		life = MSG_ReadByte( &buf );
-		color = MSG_ReadByte( &buf );	// playernum
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		life = MSG_ReadByte( pbuf );
+		color = MSG_ReadByte( pbuf );	// playernum
 		R_Projectile( pos, pos2, modelIndex, life, color, NULL );
 		break;
 	case TE_PLAYERSPRITES:
-		color = MSG_ReadShort( &buf );	// entitynum
-		modelIndex = MSG_ReadShort( &buf );
-		count = MSG_ReadByte( &buf );
-		random = (float)MSG_ReadByte( &buf );
+		color = MSG_ReadShort( pbuf );	// entitynum
+		modelIndex = MSG_ReadShort( pbuf );
+		count = MSG_ReadByte( pbuf );
+		random = (float)MSG_ReadByte( pbuf );
 		R_PlayerSprites( color, modelIndex, count, random );
 		break;
 	case TE_PARTICLEBURST:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		scale = (float)MSG_ReadShort( &buf );
-		color = MSG_ReadByte( &buf );
-		life = (float)(MSG_ReadByte( &buf ) * 0.1f);
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		scale = (float)MSG_ReadShort( pbuf );
+		color = MSG_ReadByte( pbuf );
+		life = (float)(MSG_ReadByte( pbuf ) * 0.1f);
 		R_ParticleBurst( pos, scale, color, life );
 		break;
 	case TE_FIREFIELD:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		scale = (float)MSG_ReadShort( &buf );
-		modelIndex = MSG_ReadShort( &buf );
-		count = MSG_ReadByte( &buf );
-		flags = MSG_ReadByte( &buf );
-		life = (float)(MSG_ReadByte( &buf ) * 0.1f);
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		scale = (float)MSG_ReadShort( pbuf );
+		modelIndex = MSG_ReadShort( pbuf );
+		count = MSG_ReadByte( pbuf );
+		flags = MSG_ReadByte( pbuf );
+		life = (float)(MSG_ReadByte( pbuf ) * 0.1f);
 		R_FireField( pos, scale, modelIndex, count, flags, life );
 		break;
 	case TE_PLAYERATTACHMENT:
-		color = MSG_ReadByte( &buf );	// playernum
-		scale = MSG_ReadCoord( &buf );	// height
-		modelIndex = MSG_ReadShort( &buf );
-		life = (float)(MSG_ReadShort( &buf ) * 0.1f);
+		color = MSG_ReadByte( pbuf );	// playernum
+		scale = MSG_ReadCoord( pbuf );	// height
+		modelIndex = MSG_ReadShort( pbuf );
+		life = (float)(MSG_ReadShort( pbuf ) * 0.1f);
 		R_AttachTentToPlayer( color, modelIndex, scale, life );
 		break;
 	case TE_KILLPLAYERATTACHMENTS:
-		color = MSG_ReadByte( &buf );	// playernum
+		color = MSG_ReadByte( pbuf );	// playernum
 		R_KillAttachedTents( color );
 		break;
 	case TE_MULTIGUNSHOT:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf ) * 0.1f;
-		pos2[1] = MSG_ReadCoord( &buf ) * 0.1f;
-		pos2[2] = MSG_ReadCoord( &buf ) * 0.1f;
-		ang[0] = MSG_ReadCoord( &buf ) * 0.01f;
-		ang[1] = MSG_ReadCoord( &buf ) * 0.01f;
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf ) * 0.1f;
+		pos2[1] = MSG_ReadCoord( pbuf ) * 0.1f;
+		pos2[2] = MSG_ReadCoord( pbuf ) * 0.1f;
+		ang[0] = MSG_ReadCoord( pbuf ) * 0.01f;
+		ang[1] = MSG_ReadCoord( pbuf ) * 0.01f;
 		ang[2] = 0.0f;
-		count = MSG_ReadByte( &buf );
-		decalIndices[0] = MSG_ReadByte( &buf );
+		count = MSG_ReadByte( pbuf );
+		decalIndices[0] = MSG_ReadByte( pbuf );
 		R_MultiGunshot( pos, pos2, ang, count, 1, decalIndices );
 		break;
 	case TE_USERTRACER:
-		pos[0] = MSG_ReadCoord( &buf );
-		pos[1] = MSG_ReadCoord( &buf );
-		pos[2] = MSG_ReadCoord( &buf );
-		pos2[0] = MSG_ReadCoord( &buf );
-		pos2[1] = MSG_ReadCoord( &buf );
-		pos2[2] = MSG_ReadCoord( &buf );
-		life = (float)(MSG_ReadByte( &buf ) * 0.1f);
-		color = MSG_ReadByte( &buf );
-		scale = (float)(MSG_ReadByte( &buf ) * 0.1f);
+		pos[0] = MSG_ReadCoord( pbuf );
+		pos[1] = MSG_ReadCoord( pbuf );
+		pos[2] = MSG_ReadCoord( pbuf );
+		pos2[0] = MSG_ReadCoord( pbuf );
+		pos2[1] = MSG_ReadCoord( pbuf );
+		pos2[2] = MSG_ReadCoord( pbuf );
+		life = (float)(MSG_ReadByte( pbuf ) * 0.1f);
+		color = MSG_ReadByte( pbuf );
+		scale = (float)(MSG_ReadByte( pbuf ) * 0.1f);
 		R_UserTracerParticle( pos, pos2, life, color, scale, 0, NULL );
 		break;
 	default:
@@ -2389,7 +2404,7 @@ void CL_ParseTempEntity( sizebuf_t *msg )
 	}
 
 	// throw warning
-	if( MSG_CheckOverflow( &buf ))
+	if( MSG_CheckOverflow( pbuf ))
 		Con_DPrintf( S_WARN "ParseTempEntity: overflow TE message %i\n", type );
 }
 
@@ -2408,7 +2423,7 @@ LIGHT STYLE MANAGEMENT
 CL_ClearLightStyles
 ================
 */
-static void CL_ClearLightStyles( void )
+void CL_ClearLightStyles( void )
 {
 	memset( cl.lightstyles, 0, sizeof( cl.lightstyles ));
 }
@@ -2448,7 +2463,8 @@ void CL_SetLightstyle( int style, const char *s, float f )
 		}
 	}
 
-	Con_Reportf( "Lightstyle %i (%s), interp %s\n", style, ls->pattern, ls->interp ? "Yes" : "No" );
+	if( COM_CheckStringEmpty( ls->pattern ))
+		Con_Reportf( "Lightstyle %i (%s), interp %s\n", style, ls->pattern, ls->interp ? "Yes" : "No" );
 }
 
 /*
@@ -2466,7 +2482,7 @@ dlight_t	cl_elights[MAX_ELIGHTS];
 CL_ClearDlights
 ================
 */
-static void CL_ClearDlights( void )
+void CL_ClearDlights( void )
 {
 	memset( cl_dlights, 0, sizeof( cl_dlights ));
 	memset( cl_elights, 0, sizeof( cl_elights ));
@@ -2618,7 +2634,7 @@ CL_UpdateFlashlight
 update client flashlight
 ================
 */
-static void CL_UpdateFlashlight( cl_entity_t *ent )
+void CL_UpdateFlashlight( cl_entity_t *ent )
 {
 	vec3_t		forward, view_ofs;
 	vec3_t		vecSrc, vecEnd;
@@ -2659,7 +2675,7 @@ static void CL_UpdateFlashlight( cl_entity_t *ent )
 	// update flashlight endpos
 	dl = CL_AllocDlight( ent->index );
 #if 1
-	hit = CL_GetEntityByIndex( clgame.pmove->physents[trace.ent].info );
+	hit = CL_GetEntityByIndex( clgame.pmove->visents[trace.ent].info );
 	if( hit && hit->model && ( hit->model->type == mod_alias || hit->model->type == mod_studio ))
 		VectorCopy( hit->origin, dl->origin );
 	else VectorCopy( trace.endpos, dl->origin );
@@ -2678,41 +2694,6 @@ static void CL_UpdateFlashlight( cl_entity_t *ent )
 	dl->radius = 80;
 }
 
-static void R_EntityDimlight( cl_entity_t *ent, int key )
-{
-	dlight_t *dl = CL_AllocDlight( key );
-
-	VectorCopy( ent->origin, dl->origin );
-	dl->color.r = dl->color.g = dl->color.b = 100;
-	dl->radius = COM_RandomFloat( 200.0f, 231.0f );
-	dl->die = cl.time + 0.001;
-}
-
-static void R_EntityLight( cl_entity_t *ent, int key )
-{
-	dlight_t *dl = CL_AllocDlight( key );
-
-	VectorCopy( ent->origin, dl->origin );
-	dl->color.r = dl->color.g = dl->color.b = 100;
-	dl->radius = 200;
-	dl->die = cl.time + 0.001;
-
-	R_RocketFlare( ent->origin );
-}
-
-static void R_EntityBrightlight( cl_entity_t *ent, int key, int radius )
-{
-	dlight_t *dl = CL_AllocDlight( key );
-
-	VectorCopy( ent->origin, dl->origin );
-	dl->origin[2] += 16.0f;
-	dl->color.r = dl->color.g = dl->color.b = 250;
-	if( !radius )
-		dl->radius = COM_RandomFloat( 400.0f, 431.0f );
-	else dl->radius = 400;
-	dl->die = cl.time + 0.001;
-}
-
 /*
 ================
 CL_AddEntityEffects
@@ -2722,41 +2703,50 @@ apply various effects to entity origin or attachment
 */
 void CL_AddEntityEffects( cl_entity_t *ent )
 {
-	// players have special set of effects, from CL_LinkPlayers
-	if( ent->player && ent->index != cl.viewentity )
-	{
-		if( FBitSet( ent->curstate.effects, EF_BRIGHTLIGHT ))
-			R_EntityBrightlight( ent, ent->index /* 4 in GoldSrc */, 0 );
+	// yellow flies effect 'monster stuck in the wall'
+	if( FBitSet( ent->curstate.effects, EF_BRIGHTFIELD ) && !RP_LOCALCLIENT( ent ))
+		R_EntityParticles( ent );
 
-		if( FBitSet( ent->curstate.effects, EF_DIMLIGHT ))
-			R_EntityDimlight( ent, ent->index /* 4 in GoldSrc */ );
-	}
-	else if( RP_LOCALCLIENT( ent ))
+	if( FBitSet( ent->curstate.effects, EF_DIMLIGHT ))
 	{
-		// from CL_PlayerFlashlight
-		if( FBitSet( ent->curstate.effects, EF_BRIGHTLIGHT ))
-			R_EntityBrightlight( ent, ent->index /* 1 in GoldSrc */, 400 );
-		else if( FBitSet( ent->curstate.effects, EF_DIMLIGHT ))
+		if( ent->player && !Host_IsQuakeCompatible( ))
+		{
 			CL_UpdateFlashlight( ent );
+		}
+		else
+		{
+			dlight_t	*dl = CL_AllocDlight( ent->index );
+			dl->color.r = dl->color.g = dl->color.b = 100;
+			dl->radius = COM_RandomFloat( 200, 231 );
+			VectorCopy( ent->origin, dl->origin );
+			dl->die = cl.time + 0.001;
+		}
 	}
-	else
+
+	if( FBitSet( ent->curstate.effects, EF_BRIGHTLIGHT ))
 	{
-		// from CL_LinkPacketEntities
-		if( FBitSet( ent->curstate.effects, EF_BRIGHTFIELD ))
-			R_EntityParticles( ent );
+		dlight_t	*dl = CL_AllocDlight( ent->index );
+		dl->color.r = dl->color.g = dl->color.b = 250;
+		if( ent->player ) dl->radius = 400; // don't flickering
+		else dl->radius = COM_RandomFloat( 400, 431 );
+		VectorCopy( ent->origin, dl->origin );
+		dl->die = cl.time + 0.001;
+		dl->origin[2] += 16.0f;
+	}
 
-		if( FBitSet( ent->curstate.effects, EF_BRIGHTLIGHT ))
-			R_EntityBrightlight( ent, ent->index, 0 );
-
-		if( FBitSet( ent->curstate.effects, EF_DIMLIGHT ))
-			R_EntityDimlight( ent, ent->index );
-
-		if( FBitSet( ent->curstate.effects, EF_LIGHT ))
-			R_EntityLight( ent, ent->curstate.number );
+	// add light effect
+	if( FBitSet( ent->curstate.effects, EF_LIGHT ))
+	{
+		dlight_t	*dl = CL_AllocDlight( ent->index );
+		dl->color.r = dl->color.g = dl->color.b = 100;
+		VectorCopy( ent->origin, dl->origin );
+		R_RocketFlare( ent->origin );
+		dl->die = cl.time + 0.001;
+		dl->radius = 200;
 	}
 
 	// studio models are handle muzzleflashes difference
-	if( FBitSet( ent->curstate.effects, EF_MUZZLEFLASH ) && ent->model && ent->model->type == mod_alias )
+	if( FBitSet( ent->curstate.effects, EF_MUZZLEFLASH ) && Mod_AliasExtradata( ent->model ))
 	{
 		dlight_t	*dl = CL_AllocDlight( ent->index );
 		vec3_t	fv;
@@ -2785,11 +2775,15 @@ void CL_AddModelEffects( cl_entity_t *ent )
 	vec3_t	neworigin;
 	vec3_t	oldorigin;
 
-	if( !ent->model || ent->player )
-		return;
+	if( !ent->model ) return;
 
-	if( ent->model->type != mod_alias && ent->model->type != mod_studio )
-		return;
+	switch( ent->model->type )
+	{
+	case mod_alias:
+	case mod_studio:
+		break;
+	default:	return;
+	}
 
 	if( cls.demoplayback == DEMO_QUAKE1 )
 	{
@@ -2809,15 +2803,19 @@ void CL_AddModelEffects( cl_entity_t *ent )
 
 	if( FBitSet( ent->model->flags, STUDIO_GIB ))
 		R_RocketTrail( oldorigin, neworigin, 2 );
-	else if( FBitSet( ent->model->flags, STUDIO_ZOMGIB ))
+
+	if( FBitSet( ent->model->flags, STUDIO_ZOMGIB ))
 		R_RocketTrail( oldorigin, neworigin, 4 );
-	else if( FBitSet( ent->model->flags, STUDIO_TRACER ))
+
+	if( FBitSet( ent->model->flags, STUDIO_TRACER ))
 		R_RocketTrail( oldorigin, neworigin, 3 );
-	else if( FBitSet( ent->model->flags, STUDIO_TRACER2 ))
+
+	if( FBitSet( ent->model->flags, STUDIO_TRACER2 ))
 		R_RocketTrail( oldorigin, neworigin, 5 );
-	else if( FBitSet( ent->model->flags, STUDIO_ROCKET ))
+
+	if( FBitSet( ent->model->flags, STUDIO_ROCKET ))
 	{
-		dlight_t	*dl = CL_AllocDlight( ent->curstate.number );
+		dlight_t	*dl = CL_AllocDlight( ent->index );
 
 		dl->color.r = dl->color.g = dl->color.b = 200;
 		VectorCopy( ent->origin, dl->origin );
@@ -2831,9 +2829,11 @@ void CL_AddModelEffects( cl_entity_t *ent )
 
 		R_RocketTrail( oldorigin, neworigin, 0 );
 	}
-	else if( FBitSet( ent->model->flags, STUDIO_GRENADE ))
+
+	if( FBitSet( ent->model->flags, STUDIO_GRENADE ))
 		R_RocketTrail( oldorigin, neworigin, 1 );
-	else if( FBitSet( ent->model->flags, STUDIO_TRACER3 ))
+
+	if( FBitSet( ent->model->flags, STUDIO_TRACER3 ))
 		R_RocketTrail( oldorigin, neworigin, 6 );
 }
 
@@ -2913,7 +2913,7 @@ CL_PlayerDecal
 spray custom colored decal (clan logo etc)
 ===============
 */
-static void CL_PlayerDecal( int playernum, int customIndex, int entityIndex, float *pos )
+void CL_PlayerDecal( int playernum, int customIndex, int entityIndex, float *pos )
 {
 	int		textureIndex = 0;
 	customization_t	*pCust = NULL;

@@ -34,7 +34,6 @@ GNU General Public License for more details.
 #include <stdio.h>
 #include <stdarg.h>
 #include "port.h"
-#include "defaults.h"
 #include "const.h"
 #include "crtlib.h"
 #include "crclib.h"
@@ -72,10 +71,8 @@ const fs_archive_t g_archives[] =
 static const fs_archive_t g_directory_archive =
 { NULL, SEARCHPATH_PLAIN, FS_AddDir_Fullpath, false };
 
-#if XASH_ANDROID
-static const fs_archive_t g_android_archive =
-{ NULL, SEARCHPATH_ANDROID_ASSETS, FS_AddAndroidAssets_Fullpath, false };
-#endif
+// static const fs_archive_t g_android_archive =
+// { NULL, SEARCHPATH_ANDROID, FS_AddAndroid_Fullpath, false, false };
 
 #ifdef XASH_REDUCE_FD
 static file_t *fs_last_readfile;
@@ -157,7 +154,7 @@ void stringlistfreecontents( stringlist_t *list )
 	list->strings = NULL;
 }
 
-void stringlistappend( stringlist_t *list, const char *text )
+void stringlistappend( stringlist_t *list, char *text )
 {
 	size_t	textlen;
 
@@ -406,10 +403,6 @@ void FS_AddGameDirectory( const char *dir, uint flags )
 
 	stringlistfreecontents( &list );
 
-#if XASH_ANDROID
-	FS_AddArchive_Fullpath( &g_android_archive, dir, flags );
-#endif
-
 	// add the directory to the search path
 	// (unpacked files have the priority over packed files)
 	search = FS_AddArchive_Fullpath( &g_directory_archive, dir, flags );
@@ -603,7 +596,7 @@ static void FS_WriteGameInfo( const char *filepath, gameinfo_t *GameInfo )
 	}
 
 	if( GameInfo->noskills )
-		FS_Printf( f, "noskills\t\t\"%i\"\n", GameInfo->noskills );
+		FS_Printf( f, "noskills\t\t\"%i\"\n", GameInfo->nomodels );
 
 #define SAVE_AGED_COUNT 2 // the default count of quick and auto saves
 	if( GameInfo->quicksave_aged_count != SAVE_AGED_COUNT )
@@ -613,13 +606,6 @@ static void FS_WriteGameInfo( const char *filepath, gameinfo_t *GameInfo )
 		FS_Printf( f, "autosave_aged_count\t\t%d\n", GameInfo->autosave_aged_count );
 #undef SAVE_AGED_COUNT
 
-	// HL25 compatibility
-	if( GameInfo->animated_title )
-		FS_Printf( f, "animated_title\t\t%i\n", GameInfo->animated_title );
-
-	if( GameInfo->hd_background )
-		FS_Printf( f, "hd_background\t\t%i\n", GameInfo->hd_background );
-
 	// always expose our extensions :)
 	FS_Printf( f, "internal_vgui_support\t\t%s\n", GameInfo->internal_vgui_support ? "1" : "0" );
 	FS_Printf( f, "render_picbutton_text\t\t%s\n", GameInfo->render_picbutton_text ? "1" : "0" );
@@ -627,31 +613,38 @@ static void FS_WriteGameInfo( const char *filepath, gameinfo_t *GameInfo )
 	FS_Close( f );	// all done
 }
 
-static void FS_InitGameInfo( gameinfo_t *GameInfo, const char *gamedir )
+void FS_InitGameInfo( gameinfo_t *GameInfo, const char *gamedir )
 {
 	memset( GameInfo, 0, sizeof( *GameInfo ));
 
 	// filesystem info
-	Q_strncpy( GameInfo->title, "New Game", sizeof( GameInfo->title ));
 	Q_strncpy( GameInfo->gamefolder, gamedir, sizeof( GameInfo->gamefolder ));
-	Q_strncpy( GameInfo->basedir, fs_basedir, sizeof( GameInfo->basedir ));
-	Q_strncpy( GameInfo->sp_entity, "info_player_start", sizeof( GameInfo->sp_entity ));
-	Q_strncpy( GameInfo->mp_entity, "info_player_deathmatch", sizeof( GameInfo->mp_entity ));
-	Q_strncpy( GameInfo->startmap, "newmap", sizeof( GameInfo->startmap ));
+	Q_strncpy( GameInfo->basedir, "valve", sizeof( GameInfo->basedir ));
+	GameInfo->falldir[0] = 0;
+	Q_strncpy( GameInfo->startmap, "c0a0", sizeof( GameInfo->startmap ));
+	Q_strncpy( GameInfo->trainmap, "t0a0", sizeof( GameInfo->trainmap ));
+	Q_strncpy( GameInfo->title, "New Game", sizeof( GameInfo->title ));
+	GameInfo->version = 1.0f;
+
+	// .dll pathes
 	Q_strncpy( GameInfo->dll_path, "cl_dlls", sizeof( GameInfo->dll_path ));
 	Q_strncpy( GameInfo->game_dll, "dlls/hl.dll", sizeof( GameInfo->game_dll ));
 	Q_strncpy( GameInfo->game_dll_linux, "dlls/hl.so", sizeof( GameInfo->game_dll_linux ));
 	Q_strncpy( GameInfo->game_dll_osx, "dlls/hl.dylib", sizeof( GameInfo->game_dll_osx ));
+
+	// .ico path
 	Q_strncpy( GameInfo->iconpath, "game.ico", sizeof( GameInfo->iconpath ));
 
-	GameInfo->max_edicts     = DEFAULT_MAX_EDICTS; // default value if not specified
+	Q_strncpy( GameInfo->sp_entity, "info_player_start", sizeof( GameInfo->sp_entity ));
+	Q_strncpy( GameInfo->mp_entity, "info_player_deathmatch", sizeof( GameInfo->mp_entity ));
+
+	GameInfo->max_edicts     = 900; // default value if not specified
 	GameInfo->max_tents      = 500;
 	GameInfo->max_beams      = 128;
 	GameInfo->max_particles  = 4096;
-	GameInfo->version        = 1.0f;
 }
 
-static void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, const qboolean isGameInfo )
+void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, const qboolean isGameInfo )
 {
 	char *pfile = (char*) buf;
 	qboolean found_linux = false, found_osx = false;
@@ -790,17 +783,6 @@ static void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, cons
 			pfile = COM_ParseFile( pfile, token, sizeof( token ));
 			GameInfo->max_edicts = bound( MIN_EDICTS, Q_atoi( token ), MAX_EDICTS );
 		}
-		// valid for both
-		else if( !Q_stricmp( token, "hd_background" ))
-		{
-			pfile = COM_ParseFile( pfile, token, sizeof( token ));
-			GameInfo->hd_background = Q_atoi( token ) ? true : false;
-		}
-		else if( !Q_stricmp( token, "animated_title" ))
-		{
-			pfile = COM_ParseFile( pfile, token, sizeof( token ));
-			GameInfo->animated_title = Q_atoi( token ) ? true : false;
-		}
 		// only for gameinfo
 		else if( isGameInfo )
 		{
@@ -912,7 +894,7 @@ static void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, cons
 FS_CreateDefaultGameInfo
 ================
 */
-static void FS_CreateDefaultGameInfo( const char *filename )
+void FS_CreateDefaultGameInfo( const char *filename )
 {
 	gameinfo_t	defGI;
 
@@ -1071,39 +1053,29 @@ static qboolean FS_ParseGameInfo( const char *gamedir, gameinfo_t *GameInfo )
 		roGameInfoTime = FS_SysFileTime( gameinfo_ro );
 		rwGameInfoTime = FS_SysFileTime( gameinfo_path );
 
-		// if rodir's liblist.gam newer than rwdir's gameinfo.txt, then convert it
 		if( roLibListTime > rwGameInfoTime )
 		{
 			haveUpdate = FS_ConvertGameInfo( gamedir, gameinfo_path, liblist_ro );
 		}
-		// if rodir's gameinfo.txt newer than rwdir's gameinfo.txt, just copy the file
 		else if( roGameInfoTime > rwGameInfoTime )
 		{
-			file_t *ro, *rw;
-			fs_offset_t ro_size;
+			fs_offset_t len;
+			char *afile_ro = (char *)FS_LoadDirectFile( gameinfo_ro, &len );
 
-			// read & write as binary to copy the exact file
-			ro = FS_SysOpen( gameinfo_ro, "rb" );
-			rw = FS_SysOpen( gameinfo_path, "wb" );
-
-			FS_Seek( ro, 0, SEEK_END );
-			ro_size = FS_Tell( ro );
-			FS_Seek( ro, 0, SEEK_SET );
-
-			FS_FileCopy( rw, ro, ro_size );
-
-			FS_Close( rw );
-			FS_Close( ro );
-
-			haveUpdate = true;
+			if( afile_ro )
+			{
+				Con_DPrintf( "Copy rodir %s to rwdir %s\n", gameinfo_ro, gameinfo_path );
+				haveUpdate = true;
+				FS_WriteFile( gameinfo_path, afile_ro, len );
+				Mem_Free( afile_ro );
+			}
 		}
 
 		FS_AllowDirectPaths( false );
 	}
 
-	// do not update gameinfo.txt, if it was just copied from rodir's
 	// if user change liblist.gam update the gameinfo.txt
-	if( !haveUpdate && FS_FileTime( liblist_path, false ) > FS_FileTime( gameinfo_path, false ))
+	if( FS_FileTime( liblist_path, false ) > FS_FileTime( gameinfo_path, false ))
 		FS_ConvertGameInfo( gamedir, gameinfo_path, liblist_path );
 
 	// force to create gameinfo for specified game if missing
@@ -1280,26 +1252,6 @@ static qboolean FS_CheckForCrypt( const char *dllname )
 	return ( key == 0x12345678 ) ? true : false;
 }
 
-static int FS_StripIdiotRelativePath( const char *dllname, const char *gamefolder )
-{
-	string idiot_relpath;
-	int len;
-
-	if(( len = Q_snprintf( idiot_relpath, sizeof( idiot_relpath ), "../%s/", gamefolder )) >= 4 )
-	{
-		if( !Q_strnicmp( dllname, idiot_relpath, len ))
-			return len;
-
-		// try backslashes
-		idiot_relpath[1] = '\\';
-		idiot_relpath[len - 1] = '\\';
-		if( !Q_strnicmp( dllname, idiot_relpath, len ))
-			return len;
-	}
-
-	return 0;
-}
-
 /*
 ==================
 FS_FindLibrary
@@ -1319,16 +1271,9 @@ static qboolean FS_FindLibrary( const char *dllname, qboolean directpath, fs_dll
 
 	fs_ext_path = directpath;
 
-	// HACKHACK remove relative path to game folder
-	if( !Q_strnicmp( dllname, "..", 2 ))
-	{
-		// some modders put relative path to themselves???
-		len = FS_StripIdiotRelativePath( dllname, GI->gamefolder );
-
-		if( len == 0 ) // or put relative path to Half-Life game libs
-			len = FS_StripIdiotRelativePath( dllname, "valve" );
-		start += len;
-	}
+	// HACKHACK remove absoulte path to valve folder
+	if( !Q_strnicmp( dllname, "..\\valve\\", 9 ) || !Q_strnicmp( dllname, "../valve/", 9 ))
+		start += 9;
 
 	// replace all backward slashes
 	len = Q_strlen( dllname );
@@ -1363,13 +1308,8 @@ static qboolean FS_FindLibrary( const char *dllname, qboolean directpath, fs_dll
 
 	if( index >= 0 && !dllInfo->encrypted && search )
 	{
-		// gamedll might resolve it's own path using dladdr()
-		// combine it with engine returned path to gamedir
-		// it might lead to double gamedir like this
-		// - valve/valve/dlls/hl.so
-		// instead of expected
-		// - valve/dlls/hl.so
-		Q_snprintf( dllInfo->fullPath, sizeof( dllInfo->fullPath ), "%s/%s%s", fs_rootdir, search->filename, dllInfo->shortPath );
+		Q_snprintf( dllInfo->fullPath, sizeof( dllInfo->fullPath ),
+			"%s%s", search->filename, dllInfo->shortPath );
 		dllInfo->custom_loader = false;	// we can loading from disk and use normal debugging
 	}
 	else
@@ -1465,10 +1405,6 @@ qboolean FS_InitStdio( qboolean unused_set_to_true, const char *rootdir, const c
 	char		buf[MAX_VA_STRING];
 
 	FS_InitMemory();
-
-#if XASH_ANDROID
-	FS_InitAndroid();
-#endif
 
 	Q_strncpy( fs_rootdir, rootdir, sizeof( fs_rootdir ));
 	Q_strncpy( fs_gamedir, gamedir, sizeof( fs_gamedir ));
@@ -1702,9 +1638,6 @@ file_t *FS_SysOpen( const char *filepath, const char *mode )
 
 	if( file->handle < 0 )
 	{
-		if( errno != ENOENT )
-			Con_Printf( S_ERROR "%s: can't open file %s: %s\n", __func__, filepath, strerror( errno ));
-
 		Mem_Free( file );
 		return NULL;
 	}
@@ -2417,16 +2350,6 @@ static void FS_Purge( file_t *file )
 	file->ungetc = EOF;
 }
 
-static void *FS_CustomAlloc( size_t size )
-{
-	return Mem_Malloc( fs_mempool, size );
-}
-
-static void FS_CustomFree( void *data )
-{
-	return Mem_Free( data );
-}
-
 /*
 ============
 FS_LoadFile
@@ -2435,16 +2358,12 @@ Filename are relative to the xash directory.
 Always appends a 0 byte.
 ============
 */
-static byte *FS_LoadFile_( const char *path, fs_offset_t *filesizeptr, const qboolean gamedironly, const qboolean custom_alloc )
+byte *FS_LoadFile( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly )
 {
 	searchpath_t *search;
-	fs_offset_t	filesize;
 	file_t *file;
-	byte *buf;
 	char netpath[MAX_SYSPATH];
 	int pack_ind;
-	void *( *pfnAlloc )( size_t ) = custom_alloc ? FS_CustomAlloc : malloc;
-	void ( *pfnFree )( void * ) = custom_alloc ? FS_CustomFree : free;
 
 	// some mappers used leading '/' or '\' in path to models or sounds
 	if( path[0] == '/' || path[0] == '\\' )
@@ -2463,39 +2382,27 @@ static byte *FS_LoadFile_( const char *path, fs_offset_t *filesizeptr, const qbo
 
 	// custom load file function for compressed files
 	if( search->pfnLoadFile )
-		return search->pfnLoadFile( search, netpath, pack_ind, filesizeptr, pfnAlloc, pfnFree );
+		return search->pfnLoadFile( search, netpath, pack_ind, filesizeptr );
 
 	file = search->pfnOpenFile( search, netpath, "rb", pack_ind );
 
-	if( !file ) // TODO: indicate errors
-		return NULL;
-
-	filesize = file->real_length;
-	buf = (byte *)pfnAlloc( filesize + 1 );
-
-	if( unlikely( !buf )) // TODO: indicate errors
+	if( file )
 	{
-		Con_Reportf( "%s: can't alloc %d bytes, no free memory\n", __func__, filesize + 1 );
+		fs_offset_t	filesize = file->real_length;
+		byte *buf;
+
+		buf = (byte *)Mem_Malloc( fs_mempool, filesize + 1 );
+		buf[filesize] = '\0';
+		FS_Read( file, buf, filesize );
 		FS_Close( file );
-		return NULL;
+
+		if( filesizeptr )
+			*filesizeptr = filesize;
+
+		return buf;
 	}
 
-	buf[filesize] = '\0';
-	FS_Read( file, buf, filesize );
-	FS_Close( file );
-	if( filesizeptr ) *filesizeptr = filesize;
-
-	return buf;
-}
-
-byte *FS_LoadFileMalloc( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly )
-{
-	return FS_LoadFile_( path, filesizeptr, gamedironly, false );
-}
-
-byte *FS_LoadFile( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly )
-{
-	return FS_LoadFile_( path, filesizeptr, gamedironly, g_engfuncs._Mem_Alloc != _Mem_Alloc );
+	return NULL;
 }
 
 qboolean CRC32_File( dword *crcvalue, const char *filename )
@@ -3044,10 +2951,8 @@ fs_api_t g_api =
 	(void *)FS_MountArchive_Fullpath,
 
 	FS_GetFullDiskPath,
-	FS_LoadFileMalloc,
 };
 
-int EXPORT GetFSAPI( int version, fs_api_t *api, fs_globals_t **globals, fs_interface_t *engfuncs );
 int EXPORT GetFSAPI( int version, fs_api_t *api, fs_globals_t **globals, fs_interface_t *engfuncs )
 {
 	if( engfuncs && !FS_InitInterface( version, engfuncs ))

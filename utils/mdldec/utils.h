@@ -17,10 +17,8 @@ GNU General Public License for more details.
 #define UTILS_H
 
 qboolean	 MakeDirectory( const char *path );
-qboolean	 MakeFullPath( const char *path );
-void		 ExtractFileName( char *name, size_t size );
 off_t		 GetSizeOfFile( FILE *fp );
-byte		*LoadFile( const char *filename, off_t *size );
+byte		*LoadFile( const char *filename );
 
 #endif // UTILS_H
 

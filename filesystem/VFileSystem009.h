@@ -40,7 +40,8 @@ public:
 	virtual ~IBaseInterface() {}
 };
 
-class IVFileSystem009 : public IBaseInterface {
+class IVFileSystem009 : public IBaseInterface
+{
 public:
 	virtual void Mount() = 0; /* linkage=_ZN11IFileSystem5MountEv */
 
@@ -147,8 +148,6 @@ public:
 	virtual FileHandle_t OpenFromCacheForRead(const char *, const char *, const char *) = 0; /* linkage=_ZN11IFileSystem20OpenFromCacheForReadEPKcS1_S1_ */
 
 	virtual void AddSearchPathNoWrite(const char *, const char *) = 0; /* linkage=_ZN11IFileSystem20AddSearchPathNoWriteEPKcS1_ */
-
-	virtual long int GetFileModificationTime(const char *) = 0; /* linkage=_ZN11IFileSystem23GetFileModificationTimeEPKc */
 };
 
 #endif // VFILESYSTEM009_H

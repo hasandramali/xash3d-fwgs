@@ -74,10 +74,7 @@ static uint32_t Sound_ParseSynchInteger( uint32_t v )
 static void Sound_HandleCustomID3Comment( const char *key, const char *value )
 {
 	if( !Q_strcmp( key, "LOOP_START" ) || !Q_strcmp( key, "LOOPSTART" ))
-	{
 		sound.loopstart = Q_atoi( value );
-		SetBits( sound.flags, SOUND_LOOPED );
-	}
 	// unknown comment is not an error
 }
 
@@ -189,7 +186,6 @@ static qboolean Sound_ParseID3Tag( const byte *buffer, fs_offset_t filesize )
 }
 
 #if XASH_ENGINE_TESTS
-int EXPORT Fuzz_Sound_ParseID3Tag( const uint8_t *Data, size_t Size );
 int EXPORT Fuzz_Sound_ParseID3Tag( const uint8_t *Data, size_t Size )
 {
 	memset( &sound, 0, sizeof( sound ));
@@ -236,6 +232,7 @@ qboolean Sound_LoadMPG( const char *name, const byte *buffer, fs_offset_t filesi
 	sound.channels = sc.channels;
 	sound.rate = sc.rate;
 	sound.width = 2; // always 16-bit PCM
+	sound.loopstart = -1;
 	sound.size = ( sound.channels * sound.rate * sound.width ) * ( sc.playtime / 1000 ); // in bytes
 	padsize = sound.size % FRAME_SIZE;
 	pos += FRAME_SIZE; // evaluate pos
@@ -243,6 +240,7 @@ qboolean Sound_LoadMPG( const char *name, const byte *buffer, fs_offset_t filesi
 	if( !Sound_ParseID3Tag( buffer, filesize ))
 	{
 		Con_DPrintf( S_WARN "Sound_LoadMPG: (%s) failed to extract LOOP_START tag\n", name );
+		sound.loopstart = -1;
 	}
 
 	if( !sound.size )
@@ -296,7 +294,7 @@ qboolean Sound_LoadMPG( const char *name, const byte *buffer, fs_offset_t filesi
 FS_SeekEx
 =================
 */
-static fs_offset_t FS_SeekEx( file_t *file, fs_offset_t offset, int whence )
+fs_offset_t FS_SeekEx( file_t *file, fs_offset_t offset, int whence )
 {
 	return FS_Seek( file, offset, whence ) == -1 ? -1 : FS_Tell( file );
 }

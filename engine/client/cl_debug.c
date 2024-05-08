@@ -49,15 +49,17 @@ const char *CL_MsgInfo( int cmd )
 
 	if( cmd >= 0 && cmd <= svc_lastmsg )
 	{
-		// get engine message name
 		const char *svc_string = NULL;
 
-		if( cls.legacymode )
+		if( cls.legacymode == PROTO_LEGACY )
 			svc_string = svc_legacy_strings[cmd];
+		else if( cls.legacymode == PROTO_GOLDSRC )
+			svc_string = svc_goldsrc_strings[cmd];
 
 		if( !svc_string )
 			svc_string = svc_strings[cmd];
 
+		// get engine message name
 		Q_strncpy( sz, svc_string, sizeof( sz ));
 	}
 	else if( cmd > svc_lastmsg && cmd <= ( svc_lastmsg + MAX_USER_MESSAGES ))

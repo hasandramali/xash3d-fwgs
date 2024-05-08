@@ -73,7 +73,7 @@ GNU General Public License for more details.
 #define svc_director		51	// <variable sized>
 #define svc_voiceinit		52	// <see code>
 #define svc_voicedata		53	// [byte][short][...]
-#define svc_deltapacketbones		54	// [short][byte][...]
+// reserved
 // reserved
 #define svc_resourcelocation		56	// [string]
 #define svc_querycvarvalue		57	// [string]
@@ -127,7 +127,7 @@ GNU General Public License for more details.
 #define MAX_CUSTOM			(1<<MAX_CUSTOM_BITS)// 10 bits == 1024 generic file
 #define MAX_USER_MESSAGES		197		// another 58 messages reserved for engine routines
 #define MAX_DLIGHTS			32		// dynamic lights (rendered per one frame)
-#define MAX_ELIGHTS			128		// a1ba: increased from 64 to 128, entity only point lights
+#define MAX_ELIGHTS			64		// entity only point lights
 #define MAX_LIGHTSTYLES		256		// a1ba: increased from 64 to 256, protocol limit
 #define MAX_RENDER_DECALS		4096		// max rendering decals per a level
 
@@ -286,16 +286,16 @@ extern const char	*clc_strings[clc_lastmsg+1];
 #define NET_EXT_SPLITSIZE (1U<<0) // set splitsize by cl_dlmax
 
 // legacy protocol definitons
-#define PROTOCOL_LEGACY_VERSION		48
-#define svc_legacy_modelindex		31	// [index][modelpath]
-#define svc_legacy_soundindex		28	// [index][soundpath]
-#define svc_legacy_eventindex		34	// [index][eventname]
-#define svc_legacy_ambientsound		29
-#define svc_legacy_chokecount 42		// old client specified count, new just sends svc_choke
-#define svc_legacy_event			27	// playback event queue
-#define svc_legacy_changing			3	// changelevel by server request
+#define PROTOCOL_LEGACY_VERSION     48
+#define svc_legacy_changing         svc_event // changelevel by server request
+#define svc_legacy_event            27        // playback event queue
+#define svc_legacy_soundindex       28        // [index][soundpath]
+#define svc_legacy_ambientsound     29
+#define svc_legacy_modelindex       svc_finale   // [index][modelpath]
+#define svc_legacy_eventindex       svc_cutscene // [index][eventname]
+#define svc_legacy_chokecount       svc_choke    // old client specified count, new just sends svc_choke
 
-#define clc_legacy_userinfo		6	// [[userinfo string]
+#define clc_legacy_userinfo         6	// [[userinfo string]
 
 #define SND_LEGACY_LARGE_INDEX		(1<<2)	// a send sound as short
 #define MAX_LEGACY_ENTITY_BITS		12
@@ -306,14 +306,6 @@ extern const char	*clc_strings[clc_lastmsg+1];
 
 #define MAX_LEGACY_EDICTS (1 << MAX_LEGACY_ENTITY_BITS) // 4096 edicts
 #define MIN_LEGACY_EDICTS 30
-
-// legacy engine features that can be implemented through currently supported features
-#define ENGINE_LEGACY_FEATURES_MASK   \
-	( ENGINE_WRITE_LARGE_COORD    \
-	| ENGINE_LOAD_DELUXEDATA      \
-	| ENGINE_LARGE_LIGHTMAPS      \
-	| ENGINE_COMPENSATE_QUAKE_BUG \
-	| ENGINE_COMPUTE_STUDIO_LERP  )
 
 // Master Server protocol
 #define MS_SCAN_REQUEST "1\xFF" "0.0.0.0:0\0" // TODO: implement IP filter

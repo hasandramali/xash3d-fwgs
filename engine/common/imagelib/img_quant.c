@@ -65,7 +65,7 @@ static int		bias[netsize];		// bias and freq arrays for learning
 static int		freq[netsize];
 static int		radpower[initrad];		// radpower for precomputation
 
-static void initnet( byte *thepic, int len, int sample )
+void initnet( byte *thepic, int len, int sample )
 {
 	register int	i, *p;
 
@@ -83,7 +83,7 @@ static void initnet( byte *thepic, int len, int sample )
 }
 
 // Unbias network to give byte values 0..255 and record position i to prepare for sort
-static void unbiasnet( void )
+void unbiasnet( void )
 {
 	int	i, j, temp;
 
@@ -103,7 +103,7 @@ static void unbiasnet( void )
 }
 
 // Insertion sort of network and building of netindex[0..255] (to do after unbias)
-static void inxbuild( void )
+void inxbuild( void )
 {
 	register int	*p, *q;
 	register int	i, j, smallpos, smallval;
@@ -162,7 +162,7 @@ static void inxbuild( void )
 
 
 // Search for BGR values 0..255 (after net is unbiased) and return colour index
-static int inxsearch( int r, int g, int b )
+int inxsearch( int r, int g, int b )
 {
 	register int	i, j, dist, a, bestd;
 	register int	*p;
@@ -243,7 +243,7 @@ static int inxsearch( int r, int g, int b )
 }
 
 // Search for biased BGR values
-static int contest( int r, int g, int b )
+int contest( int r, int g, int b )
 {
 	register int	*p, *f, *n;
 	register int	i, dist, a, biasdist, betafreq;
@@ -298,7 +298,7 @@ static int contest( int r, int g, int b )
 }
 
 // Move neuron i towards biased (b,g,r) by factor alpha
-static void altersingle( int alpha, int i, int r, int g, int b )
+void altersingle( int alpha, int i, int r, int g, int b )
 {
 	register int	*n;
 
@@ -311,7 +311,7 @@ static void altersingle( int alpha, int i, int r, int g, int b )
 }
 
 // Move adjacent neurons by precomputed alpha*(1-((i-j)^2/[r]^2)) in radpower[|i-j|]
-static void alterneigh( int rad, int i, int r, int g, int b )
+void alterneigh( int rad, int i, int r, int g, int b )
 {
 	register int	j, k, lo, hi, a;
 	register int	*p, *q;
@@ -354,7 +354,7 @@ static void alterneigh( int rad, int i, int r, int g, int b )
 }
 
 // Main Learning Loop
-static void learn( void )
+void learn( void )
 {
 	register byte	*p;
 	register int	i, j, r, g, b;

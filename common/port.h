@@ -35,6 +35,7 @@ GNU General Public License for more details.
 	#define __cdecl
 	#define __stdcall
 	#define _inline	static inline
+	#define FORCEINLINE inline __attribute__((always_inline))
 
 	#if XASH_POSIX
 		#include <unistd.h>
@@ -62,6 +63,13 @@ GNU General Public License for more details.
 		int x, y;
 	} POINT;
 #else // WIN32
+	#ifdef __MINGW32__
+		#define _inline static inline
+		#define FORCEINLINE inline __attribute__((always_inline))
+	#else
+		#define FORCEINLINE __forceinline
+	#endif
+
 	#define open _open
 	#define read _read
 	#define alloca _alloca

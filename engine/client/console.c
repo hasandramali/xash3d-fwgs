@@ -25,13 +25,11 @@ GNU General Public License for more details.
 static CVAR_DEFINE_AUTO( scr_conspeed, "600", FCVAR_ARCHIVE, "console moving speed" );
 static CVAR_DEFINE_AUTO( con_notifytime, "3", FCVAR_ARCHIVE, "notify time to live" );
 CVAR_DEFINE_AUTO( con_fontsize, "1", FCVAR_ARCHIVE, "console font number (0, 1 or 2)" );
-static CVAR_DEFINE_AUTO( con_fontrender, "2", FCVAR_ARCHIVE, "console font render mode (0: additive, 1: holes, 2: trans)" );
 static CVAR_DEFINE_AUTO( con_charset, "cp1251", FCVAR_ARCHIVE, "console font charset (only cp1251 supported now)" );
 static CVAR_DEFINE_AUTO( con_fontscale, "1.0", FCVAR_ARCHIVE, "scale font texture" );
 static CVAR_DEFINE_AUTO( con_fontnum, "-1", FCVAR_ARCHIVE, "console font number (0, 1 or 2), -1 for autoselect" );
 static CVAR_DEFINE_AUTO( con_color, "240 180 24", FCVAR_ARCHIVE, "set a custom console color" );
-static CVAR_DEFINE_AUTO( scr_drawversion, "1", FCVAR_ARCHIVE, "draw version in menu or screenshots, doesn't affect console" );
-static CVAR_DEFINE_AUTO( con_oldfont, "0", 0, "use legacy font from gfx.wad, might be missing or broken" );
+
 
 static int g_codepage = 0;
 static qboolean g_utf8 = false;
@@ -141,9 +139,8 @@ typedef struct
 
 static console_t		con;
 
-static void Con_ClearField( field_t *edit );
-static void Field_CharEvent( field_t *edit, int ch );
-static void Con_InvalidateFonts( void );
+void Con_ClearField( field_t *edit );
+void Field_CharEvent( field_t *edit, int ch );
 
 static void Con_LoadHistory( con_history_t *self );
 static void Con_SaveHistory( con_history_t *self );
@@ -153,7 +150,7 @@ static void Con_SaveHistory( con_history_t *self );
 Con_Clear_f
 ================
 */
-static void Con_Clear_f( void )
+void Con_Clear_f( void )
 {
 	con.lines_count = 0;
 	con.backscroll = 0; // go to end
@@ -177,10 +174,10 @@ static void Con_SetColor( void )
 	switch( num )
 	{
 	case 1:
-		Con_DefaultColor( r, r, r, false );
+		Con_DefaultColor( r, r, r );
 		break;
 	case 3:
-		Con_DefaultColor( r, g, b, false );
+		Con_DefaultColor( r, g, b );
 		break;
 	default:
 		Cvar_DirectSet( &con_color, con_color.def_string );
@@ -208,7 +205,7 @@ void Con_ClearNotify( void )
 Con_ClearTyping
 ================
 */
-static void Con_ClearTyping( void )
+void Con_ClearTyping( void )
 {
 	Con_ClearField( &con.input );
 	con.input.widthInChars = con.linewidth;
@@ -221,7 +218,7 @@ static void Con_ClearTyping( void )
 Con_MessageMode_f
 ================
 */
-static void Con_MessageMode_f( void )
+void Con_MessageMode_f( void )
 {
 	g_messagemode_privileged = Cmd_CurrentCommandIsPrivileged();
 
@@ -237,7 +234,7 @@ static void Con_MessageMode_f( void )
 Con_MessageMode2_f
 ================
 */
-static void Con_MessageMode2_f( void )
+void Con_MessageMode2_f( void )
 {
 	g_messagemode_privileged = Cmd_CurrentCommandIsPrivileged();
 
@@ -282,7 +279,7 @@ void Con_ToggleConsole_f( void )
 Con_SetTimes_f
 ================
 */
-static void Con_SetTimes_f( void )
+void Con_SetTimes_f( void )
 {
 	int	newtimes;
 
@@ -305,7 +302,7 @@ Notifies the console code about the current time
 went backwards)
 ================
 */
-static void Con_FixTimes( void )
+void Con_FixTimes( void )
 {
 	double	diff;
 	int	i;
@@ -326,7 +323,7 @@ Con_DeleteLine
 Deletes the first line from the console history.
 ================
 */
-static void Con_DeleteLine( void )
+void Con_DeleteLine( void )
 {
 	if( con.lines_count == 0 )
 		return;
@@ -341,7 +338,7 @@ Con_DeleteLastLine
 Deletes the last line from the console history.
 ================
 */
-static void Con_DeleteLastLine( void )
+void Con_DeleteLastLine( void )
 {
 	if( con.lines_count == 0 )
 		return;
@@ -400,7 +397,7 @@ Con_AddLine
 Appends a given string as a new line to the console.
 ================
 */
-static void Con_AddLine( const char *line, int length, qboolean newline )
+void Con_AddLine( const char *line, int length, qboolean newline )
 {
 	char		*putpos;
 	con_lineinfo_t	*p;
@@ -446,7 +443,7 @@ Con_CheckResize
 If the line width has changed, reformat the buffer.
 ================
 */
-static void Con_CheckResize( void )
+void Con_CheckResize( void )
 {
 	int	charWidth = 8;
 	int	i, width;
@@ -495,7 +492,7 @@ void Con_PageDown( int lines )
 Con_Top
 ================
 */
-static void Con_Top( void )
+void Con_Top( void )
 {
 	con.backscroll = CON_MAXLINES;
 }
@@ -546,9 +543,10 @@ static void Con_LoadConsoleFont( int fontNumber, cl_font_t *font )
 	if( font->valid )
 		return; // already loaded
 
-	if( con_oldfont.value )
+	// loading conchars
+	if( Sys_CheckParm( "-oldfont" ))
 	{
-		success = Con_LoadVariableWidthFont( "gfx/conchars.fnt", font, scale, &con_fontrender, TF_FONT|TF_NEAREST );
+		success = Con_LoadVariableWidthFont( "gfx/conchars.fnt", font, scale, kRenderTransTexture, TF_FONT|TF_NEAREST );
 	}
 	else
 	{
@@ -561,14 +559,14 @@ static void Con_LoadConsoleFont( int fontNumber, cl_font_t *font )
 			if( Q_snprintf( path, sizeof( path ),
 				"font%i_%s.fnt", fontNumber, Cvar_VariableString( "con_charset" )) > 0 )
 			{
-				success = Con_LoadVariableWidthFont( path, font, scale, &con_fontrender, TF_FONT|TF_NEAREST );
+				success = Con_LoadVariableWidthFont( path, font, scale, kRenderTransTexture, TF_FONT|TF_NEAREST );
 			}
 		}
 
 		if( !success )
 		{
 			Q_snprintf( path, sizeof( path ), "fonts/font%i", fontNumber );
-			success = Con_LoadVariableWidthFont( path, font, scale, &con_fontrender, TF_FONT|TF_NEAREST );
+			success = Con_LoadVariableWidthFont( path, font, scale, kRenderTransTexture, TF_FONT|TF_NEAREST );
 		}
 	}
 
@@ -576,7 +574,7 @@ static void Con_LoadConsoleFont( int fontNumber, cl_font_t *font )
 	{
 		// quake fixed font as fallback
 		// keep source to print directly into conback image
-		if( !Con_LoadFixedWidthFont( "gfx/conchars", font, scale, &con_fontrender, TF_FONT|TF_NEAREST|TF_KEEP_SOURCE ))
+		if( !Con_LoadFixedWidthFont( "gfx/conchars", font, scale, kRenderTransTexture, TF_FONT|TF_KEEP_SOURCE ))
 			Con_DPrintf( S_ERROR "failed to load console font\n" );
 	}
 }
@@ -841,11 +839,8 @@ void Con_Init( void )
 	Cvar_RegisterVariable( &con_fontsize );
 	Cvar_RegisterVariable( &con_charset );
 	Cvar_RegisterVariable( &con_fontscale );
-	Cvar_RegisterVariable( &con_fontrender );
 	Cvar_RegisterVariable( &con_fontnum );
 	Cvar_RegisterVariable( &con_color );
-	Cvar_RegisterVariable( &scr_drawversion );
-	Cvar_RegisterVariable( &con_oldfont );
 
 	// init the console buffer
 	con.bufsize = CON_TEXTSIZE;
@@ -1123,9 +1118,9 @@ EDIT FIELDS
 Con_ClearField
 ================
 */
-static void Con_ClearField( field_t *edit )
+void Con_ClearField( field_t *edit )
 {
-	memset( edit->buffer, 0, sizeof( edit->buffer ));
+	memset( edit->buffer, 0, MAX_STRING );
 	edit->cursor = 0;
 	edit->scroll = 0;
 }
@@ -1138,7 +1133,7 @@ Field_Set
 static void Field_Set( field_t *f, const char *string )
 {
 	f->scroll = 0;
-	f->cursor = Q_strncpy( f->buffer, string, sizeof( f->buffer ));
+	f->cursor = Q_strncpy( f->buffer, string, MAX_STRING );
 }
 
 /*
@@ -1146,7 +1141,7 @@ static void Field_Set( field_t *f, const char *string )
 Field_Paste
 ================
 */
-static void Field_Paste( field_t *edit )
+void Field_Paste( field_t *edit )
 {
 	char	*cbd;
 	int	i, pasteLen;
@@ -1182,7 +1177,7 @@ in-game talk, and menu fields
 Key events are used for non-printable characters, others are gotten from char events.
 =================
 */
-static void Field_KeyDownEvent( field_t *edit, int key )
+void Field_KeyDownEvent( field_t *edit, int key )
 {
 	int	len;
 
@@ -1253,7 +1248,7 @@ static void Field_KeyDownEvent( field_t *edit, int key )
 Field_CharEvent
 ==================
 */
-static void Field_CharEvent( field_t *edit, int ch )
+void Field_CharEvent( field_t *edit, int ch )
 {
 	int	len;
 
@@ -1314,7 +1309,7 @@ static void Field_CharEvent( field_t *edit, int ch )
 Field_DrawInputLine
 ==================
 */
-static void Field_DrawInputLine( int x, int y, field_t *edit )
+void Field_DrawInputLine( int x, int y, field_t *edit )
 {
 	int	len, cursorChar;
 	int	drawLen;
@@ -1444,49 +1439,36 @@ static void Con_HistoryAppend( con_history_t *self, field_t *from )
 
 static void Con_LoadHistory( con_history_t *self )
 {
+	const byte *aFile = FS_LoadFile( "console_history.txt", NULL, true );
+	const char *pLine, *pFile;
+	int i, len;
 	field_t *f;
-	file_t *fd;
-	int i;
 
-	fd = FS_Open( "console_history.txt", "rb", true );
-
-	if( !fd )
+	if( !aFile )
 		return;
 
-	while( !FS_Eof( fd ))
+	for( pFile = pLine = (char *)aFile; *pFile; pFile++ )
 	{
-		f = &self->lines[self->next % CON_HISTORY];
-
-		Con_ClearField( f );
-		f->widthInChars = con.linewidth;
-
-		FS_Gets( fd, f->buffer, sizeof( f->buffer ));
-		f->cursor = Q_strlen( f->buffer );
-
-		// skip empty lines
-		if( f->cursor == 0 )
+		if( *pFile != '\n' )
 			continue;
 
-		// skip repeating lines
-		if( self->next > 0 )
-		{
-			field_t *prev;
-			prev = &self->lines[(self->next - 1) % CON_HISTORY];
-			if( !Q_stricmp( prev->buffer, f->buffer ))
-				continue;
-		}
+		Con_ClearField( &self->lines[self->next] );
+
+		len = Q_min( pFile - pLine + 1, sizeof( f->buffer ));
+		f = &self->lines[self->next % CON_HISTORY];
+		f->widthInChars = con.linewidth;
+		f->cursor = len - 1;
+		Q_strncpy( f->buffer, pLine, len);
 
 		self->next++;
-	}
 
-	FS_Close( fd );
+		pLine = pFile + 1;
+	}
 
 	for( i = self->next; i < CON_HISTORY; i++ )
 	{
-		f = &self->lines[i];
-
-		Con_ClearField( f );
-		f->widthInChars = con.linewidth;
+		Con_ClearField( &self->lines[i] );
+		self->lines[i].widthInChars = con.linewidth;
 	}
 
 	self->line = self->next;
@@ -1504,7 +1486,7 @@ static void Con_SaveHistory( con_history_t *self )
 	if( historyStart < 0 )
 		historyStart = 0;
 
-	f = FS_Open( "console_history.txt", "wb", true );
+	f = FS_Open( "console_history.txt", "w", true );
 
 	for( i = historyStart; i < self->next; i++ )
 		FS_Printf( f, "%s\n", self->lines[i % CON_HISTORY].buffer );
@@ -1699,7 +1681,7 @@ Con_DrawInput
 The input line scrolls horizontally if typing goes beyond the right edge
 ================
 */
-static void Con_DrawInput( int lines )
+void Con_DrawInput( int lines )
 {
 	int	y;
 
@@ -1719,7 +1701,7 @@ Con_DrawDebugLines
 Custom debug messages
 ================
 */
-static int Con_DrawDebugLines( void )
+int Con_DrawDebugLines( void )
 {
 	notify_t *notify = con.notify;
 	int	i, count = 0;
@@ -1804,7 +1786,7 @@ Con_DrawNotify
 Draws the last few lines of output transparently over the game top
 ================
 */
-static void Con_DrawNotify( void )
+void Con_DrawNotify( void )
 {
 	double	time = cl.time;
 	int	i, x, y = 0;
@@ -1856,7 +1838,7 @@ If alpha is 0, the line is not drawn, but still wrapped and its height
 returned.
 ================
 */
-static int Con_DrawConsoleLine( int y, int lineno )
+int Con_DrawConsoleLine( int y, int lineno )
 {
 	con_lineinfo_t	*li = &CON_LINES( lineno );
 
@@ -1911,7 +1893,7 @@ Con_DrawConsole
 Draws the console with the solid background
 ================
 */
-static void Con_DrawSolidConsole( int lines )
+void Con_DrawSolidConsole( int lines )
 {
 	int	i, x, y;
 	float	fraction;
@@ -2065,30 +2047,26 @@ void Con_DrawVersion( void )
 	byte	*color = g_color_table[7];
 	int	stringLen, charH = 0;
 	int	start, height = refState.height;
+	qboolean	draw_version = false;
 	string	curbuild;
 
-	if( !scr_drawversion.value || CL_IsDevOverviewMode() == 2 || net_graph.value )
+	switch( cls.scrshot_action )
+	{
+	case scrshot_normal:
+	case scrshot_snapshot:
+		draw_version = true;
+		break;
+	}
+
+	if( host.force_draw_version_time > host.realtime )
+		draw_version = true;
+
+	if(( cls.key_dest != key_menu && !draw_version ) || CL_IsDevOverviewMode() == 2 || net_graph.value )
 		return;
 
-	if( cls.key_dest == key_menu )
-	{
-		Q_snprintf( curbuild, sizeof( curbuild ),
-			"v%i/" XASH_VERSION " (%s-%s build %i)", PROTOCOL_VERSION, Q_buildos(), Q_buildarch(), Q_buildnum( ));
-	}
-	else
-	{
-		qboolean draw_version;
-
-		draw_version = cls.scrshot_action == scrshot_normal
-			|| cls.scrshot_action == scrshot_snapshot
-			|| host.force_draw_version_time > host.realtime;
-
-		if( !draw_version )
-			return;
-
-		Q_snprintf( curbuild, sizeof( curbuild ),
-			XASH_ENGINE_NAME " v%i/" XASH_VERSION " (%s-%s build %i)", PROTOCOL_VERSION, Q_buildos(), Q_buildarch(), Q_buildnum( ));
-	}
+	if( draw_version )
+		Q_snprintf( curbuild, MAX_STRING, XASH_ENGINE_NAME " v%i/" XASH_VERSION " (%s-%s build %i)", PROTOCOL_VERSION, Q_buildos(), Q_buildarch(), Q_buildnum( ));
+	else Q_snprintf( curbuild, MAX_STRING, "v%i/" XASH_VERSION " (%s-%s build %i)", PROTOCOL_VERSION, Q_buildos(), Q_buildarch(), Q_buildnum( ));
 
 	Con_DrawStringLen( curbuild, &stringLen, &charH );
 	start = refState.width - stringLen * 1.05f;
@@ -2113,13 +2091,9 @@ void Con_RunConsole( void )
 	// decide on the destination height of the console
 	if( host.allow_console && cls.key_dest == key_console )
 	{
-#if XASH_MOBILE_PLATFORM
-		con.showlines = refState.height; // always full screen on mobile devices
-#else
 		if( cls.state < ca_active || cl.first_frame )
 			con.showlines = refState.height;	// full screen
 		else con.showlines = (refState.height >> 1);	// half screen
-#endif
 	}
 	else con.showlines = 0; // none visible
 
@@ -2138,7 +2112,10 @@ void Con_RunConsole( void )
 			con.vislines = con.showlines;
 	}
 
-	if( FBitSet( con_charset.flags|con_fontscale.flags|con_fontnum.flags|cl_charset.flags|con_oldfont.flags,  FCVAR_CHANGED ))
+	if( FBitSet( con_charset.flags,  FCVAR_CHANGED ) ||
+		FBitSet( con_fontscale.flags, FCVAR_CHANGED ) ||
+		FBitSet( con_fontnum.flags,   FCVAR_CHANGED ) ||
+		FBitSet( cl_charset.flags,    FCVAR_CHANGED ))
 	{
 		// update codepage parameters
 		if( !Q_stricmp( con_charset.string, "cp1251" ))
@@ -2164,7 +2141,6 @@ void Con_RunConsole( void )
 		ClearBits( con_fontnum.flags,   FCVAR_CHANGED );
 		ClearBits( con_fontscale.flags, FCVAR_CHANGED );
 		ClearBits( cl_charset.flags,    FCVAR_CHANGED );
-		ClearBits( con_oldfont.flags,   FCVAR_CHANGED );
 	}
 }
 
@@ -2204,16 +2180,11 @@ INTERNAL RESOURCE
 */
 void Con_VidInit( void )
 {
-	const uint flags = TF_IMAGE|TF_ALLOW_NEAREST;
-
 	if( !con.historyLoaded )
 	{
 		Con_LoadHistory( &con.history );
 		con.historyLoaded = true;
 	}
-
-	if( Sys_CheckParm( "-oldfont" ))
-		Cvar_DirectSet( &con_oldfont, "1" );
 
 	Con_LoadConchars();
 	Con_CheckResize();
@@ -2225,28 +2196,28 @@ void Con_VidInit( void )
 	{
 		// trying to load truecolor image first
 		if( FS_FileExists( "gfx/shell/conback.bmp", false ) || FS_FileExists( "gfx/shell/conback.tga", false ))
-			con.background = ref.dllFuncs.GL_LoadTexture( "gfx/shell/conback", NULL, 0, flags );
+			con.background = ref.dllFuncs.GL_LoadTexture( "gfx/shell/conback", NULL, 0, TF_IMAGE );
 
 		if( !con.background )
 		{
 			if( FS_FileExists( "cached/conback640", false ))
-				con.background = ref.dllFuncs.GL_LoadTexture( "cached/conback640", NULL, 0, flags );
+				con.background = ref.dllFuncs.GL_LoadTexture( "cached/conback640", NULL, 0, TF_IMAGE );
 			else if( FS_FileExists( "cached/conback", false ))
-				con.background = ref.dllFuncs.GL_LoadTexture( "cached/conback", NULL, 0, flags );
+				con.background = ref.dllFuncs.GL_LoadTexture( "cached/conback", NULL, 0, TF_IMAGE );
 		}
 	}
 	else
 	{
 		// trying to load truecolor image first
 		if( FS_FileExists( "gfx/shell/loading.bmp", false ) || FS_FileExists( "gfx/shell/loading.tga", false ))
-			con.background = ref.dllFuncs.GL_LoadTexture( "gfx/shell/loading", NULL, 0, flags );
+			con.background = ref.dllFuncs.GL_LoadTexture( "gfx/shell/loading", NULL, 0, TF_IMAGE );
 
 		if( !con.background )
 		{
 			if( FS_FileExists( "cached/loading640", false ))
-				con.background = ref.dllFuncs.GL_LoadTexture( "cached/loading640", NULL, 0, flags );
+				con.background = ref.dllFuncs.GL_LoadTexture( "cached/loading640", NULL, 0, TF_IMAGE );
 			else if( FS_FileExists( "cached/loading", false ))
-				con.background = ref.dllFuncs.GL_LoadTexture( "cached/loading", NULL, 0, flags );
+				con.background = ref.dllFuncs.GL_LoadTexture( "cached/loading", NULL, 0, TF_IMAGE );
 		}
 	}
 
@@ -2332,20 +2303,11 @@ Con_DefaultColor
 called from MainUI
 =========
 */
-void Con_DefaultColor( int r, int g, int b, qboolean gameui )
+void GAME_EXPORT Con_DefaultColor( int r, int g, int b )
 {
 	r = bound( 0, r, 255 );
 	g = bound( 0, g, 255 );
 	b = bound( 0, b, 255 );
-
-	// gameui wants to override console color... check if it's not default
-	if( gameui && ( g_color_table[7][0] != r || g_color_table[7][1] != g || g_color_table[7][2] != b ))
-	{
-		// yes, different from default orange, disable con_color
-		SetBits( con_color.flags, FCVAR_READ_ONLY );
-		ClearBits( con_color.flags, FCVAR_CHANGED );
-	}
-
 	MakeRGBA( g_color_table[7], r, g, b, 255 );
 }
 

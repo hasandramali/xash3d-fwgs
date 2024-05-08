@@ -107,7 +107,7 @@ void IN_LockInputDevices( qboolean lock )
 IN_StartupMouse
 ===========
 */
-static void IN_StartupMouse( void )
+void IN_StartupMouse( void )
 {
 	Cvar_RegisterVariable( &m_ignore );
 
@@ -172,6 +172,8 @@ void IN_ToggleClientMouse( int newstate, int oldstate )
 {
 	if( newstate == oldstate )
 		return;
+	if( m_ignore.value )
+		return;
 
 	// since SetCursorType controls cursor visibility
 	// execute it first, and then check mouse grab state
@@ -192,10 +194,6 @@ void IN_ToggleClientMouse( int newstate, int oldstate )
 #endif
 	}
 
-	// don't leave the user without cursor if they enabled m_ignore
-	if( m_ignore.value )
-		return;
-
 	if( oldstate == key_game )
 	{
 		IN_DeactivateMouse();
@@ -206,7 +204,7 @@ void IN_ToggleClientMouse( int newstate, int oldstate )
 	}
 }
 
-static void IN_CheckMouseState( qboolean active )
+void IN_CheckMouseState( qboolean active )
 {
 	static qboolean s_bRawInput, s_bMouseGrab;
 
@@ -313,7 +311,7 @@ void IN_DeactivateMouse( void )
 IN_MouseMove
 ================
 */
-static void IN_MouseMove( void )
+void IN_MouseMove( void )
 {
 	int x, y;
 
@@ -588,7 +586,7 @@ void IN_EngineAppendMove( float frametime, void *cmd1, qboolean active )
 	}
 }
 
-static void IN_Commands( void )
+void IN_Commands( void )
 {
 #if XASH_USE_EVDEV
 	IN_EvdevFrame();

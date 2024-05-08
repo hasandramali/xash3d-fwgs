@@ -24,7 +24,7 @@ GNU General Public License for more details.
 #include "sound.h"
 #include "input.h"
 
-// #define STUDIO_INTERPOLATION_FIX
+#define STUDIO_INTERPOLATION_FIX
 
 /*
 ==================
@@ -52,30 +52,19 @@ CL_UpdatePositions
 Store another position into interpolation circular buffer
 ==================
 */
-static void CL_UpdatePositions( cl_entity_t *ent )
+void CL_UpdatePositions( cl_entity_t *ent )
 {
-	position_history_t	*ph, *prev;
-
-	prev = &ent->ph[ent->current_position];
+	position_history_t	*ph;
 
 	ent->current_position = (ent->current_position + 1) & HISTORY_MASK;
 	ph = &ent->ph[ent->current_position];
 	VectorCopy( ent->curstate.origin, ph->origin );
 	VectorCopy( ent->curstate.angles, ph->angles );
 
-	ph->animtime = ent->curstate.animtime;
-
-	// a1ba: for some reason, this sometimes still may happen
-	// at this time, I'm not sure whether this bug happens in delta readwrite code
-	// or server just decides to go backwards and really sends these values
-	if( ph->animtime < prev->animtime )
-	{
-		// try to deduce real animtime by looking up the difference between
-		// server messages (cl.mtime is never modified ny the interpolation code)
-		float diff = Q_max( 0, ent->curstate.msg_time - ent->prevstate.msg_time );
-
-		ph->animtime = prev->animtime + diff;
-	}
+	if( ent->model && ent->model->type == mod_brush )
+		ph->animtime = ent->curstate.animtime;
+	else
+		ph->animtime = cl.time;
 }
 
 /*
@@ -85,7 +74,7 @@ CL_ResetPositions
 Interpolation init or reset after teleporting
 ==================
 */
-static void CL_ResetPositions( cl_entity_t *ent )
+void CL_ResetPositions( cl_entity_t *ent )
 {
 	position_history_t	store;
 
@@ -107,7 +96,7 @@ check for instant movement in case
 we don't want interpolate this
 ==================
 */
-static qboolean CL_EntityTeleported( cl_entity_t *ent )
+qboolean CL_EntityTeleported( cl_entity_t *ent )
 {
 	float	len, maxlen;
 	vec3_t	delta;
@@ -128,7 +117,7 @@ CL_CompareTimestamps
 round-off floating errors
 ==================
 */
-static qboolean CL_CompareTimestamps( float t1, float t2 )
+qboolean CL_CompareTimestamps( float t1, float t2 )
 {
 	int	iTime1 = t1 * 1000;
 	int	iTime2 = t2 * 1000;
@@ -143,7 +132,7 @@ CL_EntityIgnoreLerp
 some ents will be ignore lerping
 ==================
 */
-static qboolean CL_EntityIgnoreLerp( cl_entity_t *e )
+qboolean CL_EntityIgnoreLerp( cl_entity_t *e )
 {
 	if( cl_nointerp.value > 0.f )
 		return true;
@@ -160,7 +149,7 @@ CL_EntityCustomLerp
 
 ==================
 */
-static qboolean CL_EntityCustomLerp( cl_entity_t *e )
+qboolean CL_EntityCustomLerp( cl_entity_t *e )
 {
 	switch( e->curstate.movetype )
 	{
@@ -170,13 +159,6 @@ static qboolean CL_EntityCustomLerp( cl_entity_t *e )
 	case MOVETYPE_FLY:
 	case MOVETYPE_COMPOUND:
 		return false;
-
-	// ABSOLUTELY STUPID HACK TO ALLOW MONSTERS
-	// INTERPOLATION IN GRAVGUNMOD COOP
-	// MUST BE REMOVED ONCE WE REMOVE 48 PROTO SUPPORT
-	case MOVETYPE_TOSS:
-		if( cls.legacymode && e->model && e->model->type == mod_studio )
-			return false;
 	}
 
 	return true;
@@ -189,7 +171,7 @@ CL_ParametricMove
 check for parametrical moved entities
 ==================
 */
-static qboolean CL_ParametricMove( cl_entity_t *ent )
+qboolean CL_ParametricMove( cl_entity_t *ent )
 {
 	float	frac, dt, t;
 	vec3_t	delta;
@@ -226,7 +208,7 @@ CL_UpdateLatchedVars
 
 ====================
 */
-static void CL_UpdateLatchedVars( cl_entity_t *ent )
+void CL_UpdateLatchedVars( cl_entity_t *ent )
 {
 	if( !ent->model || ( ent->model->type != mod_alias && ent->model->type != mod_studio ))
 		return; // below fields used only for alias and studio interpolation
@@ -321,7 +303,7 @@ CL_ProcessEntityUpdate
 apply changes since new frame received
 ==================
 */
-static void CL_ProcessEntityUpdate( cl_entity_t *ent )
+void CL_ProcessEntityUpdate( cl_entity_t *ent )
 {
 	qboolean	parametric;
 
@@ -367,10 +349,11 @@ CL_FindInterpolationUpdates
 find two timestamps
 ==================
 */
-static qboolean CL_FindInterpolationUpdates( cl_entity_t *ent, double targettime, position_history_t **ph0, position_history_t **ph1 )
+qboolean CL_FindInterpolationUpdates( cl_entity_t *ent, float targettime, position_history_t **ph0, position_history_t **ph1 )
 {
 	qboolean	extrapolate = true;
 	uint		i, i0, i1, imod;
+	float	at;
 
 	imod = ent->current_position;
 	i0 = (imod - 0) & HISTORY_MASK;	// curpos (lerp end)
@@ -378,10 +361,8 @@ static qboolean CL_FindInterpolationUpdates( cl_entity_t *ent, double targettime
 
 	for( i = 1; i < HISTORY_MAX - 1; i++ )
 	{
-		double at = ent->ph[( imod - i ) & HISTORY_MASK].animtime;
-
-		if( at == 0.0f )
-			break;
+		at = ent->ph[( imod - i ) & HISTORY_MASK].animtime;
+		if( at == 0.0f ) break;
 
 		if( targettime > at )
 		{
@@ -406,14 +387,15 @@ CL_PureOrigin
 non-local players interpolation
 ==================
 */
-static void CL_PureOrigin( cl_entity_t *ent, double t, vec3_t outorigin, vec3_t outangles )
+void CL_PureOrigin( cl_entity_t *ent, float t, vec3_t outorigin, vec3_t outangles )
 {
-	double		t1, t0, frac;
+	qboolean		extrapolate;
+	float		t1, t0, frac;
 	position_history_t	*ph0, *ph1;
 	vec3_t		delta;
 
 	// NOTE: ph0 is next, ph1 is a prev
-	CL_FindInterpolationUpdates( ent, t, &ph0, &ph1 );
+	extrapolate = CL_FindInterpolationUpdates( ent, t, &ph0, &ph1 );
 
 	if ( !ph0 || !ph1 )
 		return;
@@ -421,7 +403,7 @@ static void CL_PureOrigin( cl_entity_t *ent, double t, vec3_t outorigin, vec3_t 
 	t0 = ph0->animtime;
 	t1 = ph1->animtime;
 
-	if( t0 != 0.0 )
+	if( t0 != 0.0f )
 	{
 		vec4_t	q, q1, q2;
 
@@ -429,9 +411,9 @@ static void CL_PureOrigin( cl_entity_t *ent, double t, vec3_t outorigin, vec3_t 
 
 		if( !Q_equal( t0, t1 ))
 			frac = ( t - t1 ) / ( t0 - t1 );
-		else frac = 1.0;
+		else frac = 1.0f;
 
-		frac = bound( 0.0, frac, 1.2 );
+		frac = bound( 0.0f, frac, 1.2f );
 
 		VectorMA( ph1->origin, frac, delta, outorigin );
 
@@ -455,11 +437,11 @@ CL_InterpolateModel
 non-players interpolation
 ==================
 */
-static int CL_InterpolateModel( cl_entity_t *e )
+int CL_InterpolateModel( cl_entity_t *e )
 {
 	position_history_t  *ph0 = NULL, *ph1 = NULL;
 	vec3_t		origin, angles, delta;
-	double		t, t1, t2, frac;
+	float		t, t1, t2, frac;
 	vec4_t		q, q1, q2;
 
 	VectorCopy( e->curstate.origin, e->origin );
@@ -507,7 +489,9 @@ static int CL_InterpolateModel( cl_entity_t *e )
 		return 0;
 	}
 
-	if( Q_equal( t2, t1 ))
+	// HACKHACK: workaround buggy position history animtime
+	// going backward sometimes
+	if( Q_equal( t2, t1 ) || t2 < t1 )
 	{
 		VectorCopy( ph0->origin, e->origin );
 		VectorCopy( ph0->angles, e->angles );
@@ -545,7 +529,7 @@ interpolate non-local clients
 */
 void CL_ComputePlayerOrigin( cl_entity_t *ent )
 {
-	double	targettime;
+	float	targettime;
 	vec4_t	q, q1, q2;
 	vec3_t	origin;
 	vec3_t	angles;
@@ -585,7 +569,7 @@ CL_ProcessPlayerState
 process player states after the new packet has received
 =================
 */
-static void CL_ProcessPlayerState( int playerindex, entity_state_t *state )
+void CL_ProcessPlayerState( int playerindex, entity_state_t *state )
 {
 	entity_state_t	*ps;
 
@@ -605,7 +589,7 @@ reset latched state if this frame entity was teleported
 or just EF_NOINTERP was set
 =================
 */
-static void CL_ResetLatchedState( int pnum, frame_t *frame, cl_entity_t *ent )
+void CL_ResetLatchedState( int pnum, frame_t *frame, cl_entity_t *ent )
 {
 	if( CHECKVISBIT( frame->flags, pnum ))
 	{
@@ -672,7 +656,7 @@ FRAME PARSING
 */
 static qboolean CL_ParseEntityNumFromPacket( sizebuf_t *msg, int *newnum )
 {
-	if( cls.legacymode )
+	if( cls.legacymode == PROTO_LEGACY )
 	{
 		*newnum = MSG_ReadWord( msg );
 		if( *newnum == 0 )
@@ -725,7 +709,7 @@ CL_DeltaEntity
 processing delta update
 =================
 */
-static void CL_DeltaEntity( sizebuf_t *msg, frame_t *frame, int newnum, entity_state_t *old, qboolean has_update )
+void CL_DeltaEntity( sizebuf_t *msg, frame_t *frame, int newnum, entity_state_t *old, qboolean has_update )
 {
 	cl_entity_t	*ent;
 	entity_state_t	*state;
@@ -780,6 +764,47 @@ static void CL_DeltaEntity( sizebuf_t *msg, frame_t *frame, int newnum, entity_s
 	frame->num_entities++;
 }
 
+qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe )
+{
+	int subtracted = ( cls.netchan.incoming_sequence - oldpacket ) & 0xFF;
+
+	if( subtracted == 0 )
+	{
+		Con_NPrintf( 2, "^3Warning:^1 update too old\n^7\n" );
+		return false;
+	}
+
+	if( subtracted >= CL_UPDATE_MASK )
+	{
+		// we can't use this, it is too old
+		Con_NPrintf( 2, "^3Warning:^1 delta frame is too old^7\n" );
+		return false;
+	}
+
+	if(( cls.next_client_entities - oldframe->first_entity ) > ( cls.num_client_entities - NUM_PACKET_ENTITIES ))
+	{
+		Con_NPrintf( 2, "^3Warning:^1 delta frame is too old^7\n" );
+		return false;
+	}
+
+	return true;
+}
+
+int CL_UpdateOldEntNum( int oldindex, frame_t *oldframe, entity_state_t **oldent )
+{
+	if( !oldframe )
+	{
+		*oldent = NULL;
+		return MAX_ENTNUMBER;
+	}
+
+	if( oldindex >= oldframe->num_entities )
+		return MAX_ENTNUMBER;
+
+	*oldent = &cls.packet_entities[(oldframe->first_entity + oldindex) % cls.num_client_entities];
+	return (*oldent)->number;
+}
+
 /*
 ==================
 CL_ParsePacketEntities
@@ -793,7 +818,6 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 	frame_t		*newframe, *oldframe;
 	int		oldindex, newnum, oldnum;
 	int		playerbytes = 0;
-	int		oldpacket;
 	int		bufStart;
 	entity_state_t	*oldent;
 	qboolean		player;
@@ -804,7 +828,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 		CL_WriteDemoJumpTime();
 
 	// sentinel count. save it for debug checking
-	if( cls.legacymode )
+	if( cls.legacymode == PROTO_LEGACY )
 		count = MSG_ReadWord( msg );
 	else count = MSG_ReadUBitLong( msg, MAX_VISIBLE_PACKET_BITS ) + 1;
 
@@ -818,31 +842,11 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 
 	if( delta )
 	{
-		int	subtracted;
-
-		oldpacket = MSG_ReadByte( msg );
-		subtracted = ( cls.netchan.incoming_sequence - oldpacket ) & 0xFF;
-
-		if( subtracted == 0 )
-		{
-			Con_NPrintf( 2, "^3Warning:^1 update too old\n^7\n" );
-			CL_FlushEntityPacket( msg );
-			return playerbytes;
-		}
-
-		if( subtracted >= CL_UPDATE_MASK )
-		{
-			// we can't use this, it is too old
-			Con_NPrintf( 2, "^3Warning:^1 delta frame is too old^7\n" );
-			CL_FlushEntityPacket( msg );
-			return playerbytes;
-		}
-
+		uint oldpacket = MSG_ReadByte( msg );
 		oldframe = &cl.frames[oldpacket & CL_UPDATE_MASK];
 
-		if(( cls.next_client_entities - oldframe->first_entity ) > ( cls.num_client_entities - NUM_PACKET_ENTITIES ))
+		if( !CL_ValidateDeltaPacket( oldpacket, oldframe ))
 		{
-			Con_NPrintf( 2, "^3Warning:^1 delta frame is too old^7\n" );
 			CL_FlushEntityPacket( msg );
 			return playerbytes;
 		}
@@ -851,7 +855,6 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 	{
 		// this is a full update that we can start delta compressing from now
 		oldframe = NULL;
-		oldpacket = -1;		// delta too old or is initial message
 		cl.send_reply = true;	// send reply
 		cls.demowaiting = false;	// we can start recording now
 	}
@@ -861,23 +864,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 
 	oldent = NULL;
 	oldindex = 0;
-
-	if( !oldframe )
-	{
-		oldnum = MAX_ENTNUMBER;
-	}
-	else
-	{
-		if( oldindex >= oldframe->num_entities )
-		{
-			oldnum = MAX_ENTNUMBER;
-		}
-		else
-		{
-			oldent = &cls.packet_entities[(oldframe->first_entity+oldindex) % cls.num_client_entities];
-			oldnum = oldent->number;
-		}
-	}
+	oldnum = CL_UpdateOldEntNum( oldindex, oldframe, &oldent );
 
 	while( 1 )
 	{
@@ -893,17 +880,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 		{
 			// one or more entities from the old packet are unchanged
 			CL_DeltaEntity( msg, newframe, oldnum, oldent, false );
-			oldindex++;
-
-			if( oldindex >= oldframe->num_entities )
-			{
-				oldnum = MAX_ENTNUMBER;
-			}
-			else
-			{
-				oldent = &cls.packet_entities[(oldframe->first_entity+oldindex) % cls.num_client_entities];
-				oldnum = oldent->number;
-			}
+			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 
 		if( oldnum == newnum )
@@ -912,17 +889,8 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 			bufStart = MSG_GetNumBytesRead( msg );
 			CL_DeltaEntity( msg, newframe, newnum, oldent, true );
 			if( player ) playerbytes += MSG_GetNumBytesRead( msg ) - bufStart;
-			oldindex++;
 
-			if( oldindex >= oldframe->num_entities )
-			{
-				oldnum = MAX_ENTNUMBER;
-			}
-			else
-			{
-				oldent = &cls.packet_entities[(oldframe->first_entity+oldindex) % cls.num_client_entities];
-				oldnum = oldent->number;
-			}
+			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 			continue;
 		}
 
@@ -941,17 +909,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 	{
 		// one or more entities from the old packet are unchanged
 		CL_DeltaEntity( msg, newframe, oldnum, oldent, false );
-		oldindex++;
-
-		if( oldindex >= oldframe->num_entities )
-		{
-			oldnum = MAX_ENTNUMBER;
-		}
-		else
-		{
-			oldent = &cls.packet_entities[(oldframe->first_entity+oldindex) % cls.num_client_entities];
-			oldnum = oldent->number;
-		}
+		oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 	}
 
 	if( newframe->num_entities != count && newframe->num_entities != 0 )
@@ -1057,7 +1015,7 @@ CL_LinkCustomEntity
 Add server beam to draw list
 =============
 */
-static void CL_LinkCustomEntity( cl_entity_t *ent, entity_state_t *state )
+void CL_LinkCustomEntity( cl_entity_t *ent, entity_state_t *state )
 {
 	ent->curstate.movetype = state->modelindex; // !!!
 
@@ -1080,7 +1038,7 @@ Create visible entities in the correct position
 for all current players
 =============
 */
-static void CL_LinkPlayers( frame_t *frame )
+void CL_LinkPlayers( frame_t *frame )
 {
 	entity_state_t	*state;
 	cl_entity_t	*ent;
@@ -1163,7 +1121,7 @@ CL_LinkPacketEntities
 
 ===============
 */
-static void CL_LinkPacketEntities( frame_t *frame )
+void CL_LinkPacketEntities( frame_t *frame )
 {
 	cl_entity_t	*ent;
 	entity_state_t	*state;
@@ -1228,33 +1186,17 @@ static void CL_LinkPacketEntities( frame_t *frame )
 #else
 					if( ent->lastmove >= cl.time )
 					{
-						float at = ent->curstate.animtime;
-
 						CL_ResetLatchedVars( ent, true );
-
-						if( cl_fixmodelinterpolationartifacts.value )
-							ent->latched.prevanimtime = ent->curstate.animtime = at;
-
 						VectorCopy( ent->curstate.origin, ent->latched.prevorigin );
 						VectorCopy( ent->curstate.angles, ent->latched.prevangles );
 
-						if( !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
-						{
-							// disable step interpolation in client.dll
-							ent->curstate.movetype = MOVETYPE_NONE;
-						}
+						// disable step interpolation in client.dll
+						ent->curstate.movetype = MOVETYPE_NONE;
 					}
 					else
 					{
-						if( FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
-						{
-							interpolate = true;
-						}
-						else
-						{
-							// restore step interpolation in client.dll
-							ent->curstate.movetype = MOVETYPE_STEP;
-						}
+						// restore step interpolation in client.dll
+						ent->curstate.movetype = MOVETYPE_STEP;
 					}
 #endif
 				}
@@ -1279,24 +1221,11 @@ static void CL_LinkPacketEntities( frame_t *frame )
 				if ( !CL_InterpolateModel( ent ))
 					continue;
 			}
-			// a1ba: in GoldSrc this is done for cstrike and czero
-			// but let modders use this as an engine feature
-			else if( FBitSet( host.features, ENGINE_STEP_POSHISTORY_LERP ) &&
-				ent->curstate.movetype == MOVETYPE_STEP && !NET_IsLocalAddress( cls.netchan.remote_address ))
+			else if( ent->curstate.movetype == MOVETYPE_STEP && !NET_IsLocalAddress( cls.netchan.remote_address ))
 			{
 				if( !CL_InterpolateModel( ent ))
 					continue;
 			}
-#if 0
-			// ABSOLUTELY STUPID HACK TO ALLOW MONSTERS
-			// INTERPOLATION IN GRAVGUNMOD COOP
-			// MUST BE REMOVED ONCE WE REMOVE 48 PROTO SUPPORT
-			else if( cls.legacymode && ent->model->type == mod_studio && ent->curstate.movetype == MOVETYPE_TOSS )
-			{
-				if( !CL_InterpolateModel( ent ))
-					continue;
-			}
-#endif
 			else
 			{
 				// no interpolation right now
@@ -1491,4 +1420,10 @@ qboolean CL_GetMovieSpatialization( rawchan_t *ch )
 	}
 
 	return true;
+}
+
+void CL_ExtraUpdate( void )
+{
+	clgame.dllFuncs.IN_Accumulate();
+	S_ExtraUpdate();
 }

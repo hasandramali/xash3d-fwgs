@@ -29,7 +29,7 @@ V_CalcViewRect
 calc frame rectangle (Quake1 style)
 ===============
 */
-static void V_CalcViewRect( void )
+void V_CalcViewRect( void )
 {
 	qboolean	full = false;
 	int	sb_lines;
@@ -88,7 +88,7 @@ static void V_CalcViewRect( void )
 V_SetupViewModel
 ===============
 */
-static void V_SetupViewModel( void )
+void V_SetupViewModel( void )
 {
 	cl_entity_t	*view = &clgame.viewent;
 	player_info_t	*info = &cl.players[cl.playernum];
@@ -118,7 +118,7 @@ static void V_SetupViewModel( void )
 V_SetRefParams
 ===============
 */
-static void V_SetRefParams( ref_params_t *fd )
+void V_SetRefParams( ref_params_t *fd )
 {
 	memset( fd, 0, sizeof( ref_params_t ));
 
@@ -182,7 +182,7 @@ V_MergeOverviewRefdef
 merge refdef with overview settings
 ===============
 */
-static void V_RefApplyOverview( ref_viewpass_t *rvp )
+void V_RefApplyOverview( ref_viewpass_t *rvp )
 {
 	ref_overview_t	*ov = &clgame.overView;
 	float		aspect;
@@ -281,7 +281,7 @@ static void V_AdjustFov( float *fov_x, float *fov_y, float width, float height, 
 V_GetRefParams
 =============
 */
-static void V_GetRefParams( ref_params_t *fd, ref_viewpass_t *rvp )
+void V_GetRefParams( ref_params_t *fd, ref_viewpass_t *rvp )
 {
 	// part1: deniable updates
 	VectorCopy( fd->simvel, cl.simvel );
@@ -347,8 +347,6 @@ qboolean V_PreRender( void )
 		return false;
 	}
 
-	V_CheckGamma();
-
 	ref.dllFuncs.R_BeginFrame( !cl.paused && ( cls.state == ca_active ));
 
 	GL_UpdateSwapInterval( );
@@ -408,14 +406,14 @@ void V_RenderView( void )
 #define NODE_INTERVAL_X(x)	(x * 16.0f)
 #define NODE_INTERVAL_Y(x)	(x * 16.0f)
 
-static void R_DrawLeafNode( float x, float y, float scale )
+void R_DrawLeafNode( float x, float y, float scale )
 {
 	float downScale = scale * 0.25f;// * POINT_SIZE;
 
 	ref.dllFuncs.R_DrawStretchPic( x - downScale * 0.5f, y - downScale * 0.5f, downScale, downScale, 0, 0, 1, 1, R_GetBuiltinTexture( REF_PARTICLE_TEXTURE ) );
 }
 
-static void R_DrawNodeConnection( float x, float y, float x2, float y2 )
+void R_DrawNodeConnection( float x, float y, float x2, float y2 )
 {
 	ref.dllFuncs.Begin( TRI_LINES );
 		ref.dllFuncs.Vertex3f( x, y, 0 );
@@ -423,7 +421,7 @@ static void R_DrawNodeConnection( float x, float y, float x2, float y2 )
 	ref.dllFuncs.End( );
 }
 
-static void R_ShowTree_r( mnode_t *node, float x, float y, float scale, int shownodes, mleaf_t *viewleaf )
+void R_ShowTree_r( mnode_t *node, float x, float y, float scale, int shownodes, mleaf_t *viewleaf )
 {
 	float	downScale = scale * 0.8f;
 
@@ -470,7 +468,7 @@ static void R_ShowTree_r( mnode_t *node, float x, float y, float scale, int show
 	world.recursion_level--;
 }
 
-static void R_ShowTree( void )
+void R_ShowTree( void )
 {
 	float	x = (float)((refState.width - (int)POINT_SIZE) >> 1);
 	float	y = NODE_INTERVAL_Y(1.0f);
@@ -551,8 +549,5 @@ void V_PostRender( void )
 
 	SCR_MakeScreenShot();
 	ref.dllFuncs.R_AllowFog( true );
-	Platform_SetTimer( 0.0f );
 	ref.dllFuncs.R_EndFrame();
-
-	V_CheckGammaEnd();
 }

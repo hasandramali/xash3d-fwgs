@@ -211,7 +211,7 @@ static void CL_ParseQuakeServerInfo( sizebuf_t *msg )
 	clgame.maxEntities = GI->max_edicts;
 	clgame.maxEntities = bound( 600, clgame.maxEntities, MAX_EDICTS );
 	clgame.maxModels = MAX_MODELS;
-	Q_strncpy( clgame.maptitle, MSG_ReadString( msg ), sizeof( clgame.maptitle ));
+	Q_strncpy( clgame.maptitle, MSG_ReadString( msg ), MAX_STRING );
 
 	// Re-init hud video, especially if we changed game directories
 	clgame.dllFuncs.pfnVidInit();
@@ -414,7 +414,7 @@ If an entities model or origin changes from frame to frame, it must be
 relinked.  Other attributes can change without relinking.
 ==================
 */
-static void CL_ParseQuakeEntityData( sizebuf_t *msg, int bits )
+void CL_ParseQuakeEntityData( sizebuf_t *msg, int bits )
 {
 	int		i, newnum, pack;
 	qboolean		forcelink;
@@ -565,7 +565,7 @@ CL_ParseQuakeParticles
 
 ==================
 */
-static void CL_ParseQuakeParticle( sizebuf_t *msg )
+void CL_ParseQuakeParticle( sizebuf_t *msg )
 {
 	int	count, color;
 	vec3_t	org, dir;
@@ -587,7 +587,7 @@ CL_ParseQuakeStaticSound
 
 ===================
 */
-static void CL_ParseQuakeStaticSound( sizebuf_t *msg )
+void CL_ParseQuakeStaticSound( sizebuf_t *msg )
 {
 	int	sound_num;
 	float 	vol, attn;
@@ -816,7 +816,7 @@ CL_QuakeStuffText
 
 ==================
 */
-static void CL_QuakeStuffText( const char *text )
+void CL_QuakeStuffText( const char *text )
 {
 	Q_strncat( cmd_buf, text, sizeof( cmd_buf ));
 
@@ -831,7 +831,7 @@ CL_QuakeExecStuff
 
 ==================
 */
-static void CL_QuakeExecStuff( void )
+void CL_QuakeExecStuff( void )
 {
 	char	*text = cmd_buf;
 	char	token[256];

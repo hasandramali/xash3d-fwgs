@@ -373,7 +373,7 @@ R_DrawTorus
 Draw beamtours
 ================
 */
-static void R_DrawTorus( vec3_t source, vec3_t delta, float width, float scale, float freq, float speed, int segments )
+void R_DrawTorus( vec3_t source, vec3_t delta, float width, float scale, float freq, float speed, int segments )
 {
 	int	i, noiseIndex, noiseStep;
 	float	div, length, fraction, factor, vLast, vStep;
@@ -462,7 +462,7 @@ R_DrawDisk
 Draw beamdisk
 ================
 */
-static void R_DrawDisk( vec3_t source, vec3_t delta, float width, float scale, float freq, float speed, int segments )
+void R_DrawDisk( vec3_t source, vec3_t delta, float width, float scale, float freq, float speed, int segments )
 {
 	float	div, length, fraction;
 	float	w, vLast, vStep;
@@ -520,7 +520,7 @@ R_DrawCylinder
 Draw beam cylinder
 ================
 */
-static void R_DrawCylinder( vec3_t source, vec3_t delta, float width, float scale, float freq, float speed, int segments )
+void R_DrawCylinder( vec3_t source, vec3_t delta, float width, float scale, float freq, float speed, int segments )
 {
 	float	div, length, fraction;
 	float	vLast, vStep;
@@ -577,7 +577,7 @@ R_DrawBeamFollow
 drawi followed beam
 ==============
 */
-static void R_DrawBeamFollow( BEAM *pbeam, float frametime )
+void R_DrawBeamFollow( BEAM *pbeam, float frametime )
 {
 	particle_t	*pnew, *particles;
 	float		fraction, div, vLast, vStep, saved_fraction;
@@ -611,7 +611,7 @@ static void R_DrawBeamFollow( BEAM *pbeam, float frametime )
 	if( pnew )
 	{
 		VectorCopy( pbeam->source, pnew->org );
-		pnew->die = gp_cl->time + pbeam->amplitude;
+		pnew->die = gpGlobals->time + pbeam->amplitude;
 		VectorClear( pnew->vel );
 
 		pnew->next = particles;
@@ -658,7 +658,7 @@ static void R_DrawBeamFollow( BEAM *pbeam, float frametime )
 	VectorMA( delta, -pbeam->width, normal, last2 );
 
 	div = 1.0f / pbeam->amplitude;
-	fraction = ( pbeam->die - gp_cl->time ) * div;
+	fraction = ( pbeam->die - gpGlobals->time ) * div;
 
 	vLast = 0.0f;
 	vStep = 1.0f;
@@ -694,7 +694,7 @@ static void R_DrawBeamFollow( BEAM *pbeam, float frametime )
 
 		if( particles->next != NULL )
 		{
-			fraction = (particles->die - gp_cl->time) * div;
+			fraction = (particles->die - gpGlobals->time) * div;
 		}
 		else
 		{
@@ -737,7 +737,7 @@ R_DrawRing
 Draw beamring
 ================
 */
-static void R_DrawRing( vec3_t source, vec3_t delta, float width, float amplitude, float freq, float speed, int segments )
+void R_DrawRing( vec3_t source, vec3_t delta, float width, float amplitude, float freq, float speed, int segments )
 {
 	int	i, j, noiseIndex, noiseStep;
 	float	div, length, fraction, factor, vLast, vStep;
@@ -880,8 +880,12 @@ static qboolean R_BeamComputePoint( int beamEnt, vec3_t pt )
 	// get attachment
 	if( attach > 0 )
 		VectorCopy( ent->attachment[attach - 1], pt );
-	else if( ent->index == ( gp_cl->playernum + 1 ))
-		VectorCopy( gp_cl->simorg, pt );
+	else if( ent->index == ENGINE_GET_PARM( PARM_PLAYER_INDEX ) )
+	{
+		vec3_t simorg;
+		gEngfuncs.GetPredictedOrigin( simorg );
+		VectorCopy( simorg, pt );
+	}
 	else VectorCopy( ent->origin, pt );
 
 	return true;
@@ -894,7 +898,7 @@ R_BeamRecomputeEndpoints
 Recomputes beam endpoints..
 ==============
 */
-static qboolean R_BeamRecomputeEndpoints( BEAM *pbeam )
+qboolean R_BeamRecomputeEndpoints( BEAM *pbeam )
 {
 	if( FBitSet( pbeam->flags, FBEAM_STARTENTITY ))
 	{
@@ -925,7 +929,7 @@ static qboolean R_BeamRecomputeEndpoints( BEAM *pbeam )
 		else if( !FBitSet( pbeam->flags, FBEAM_FOREVER ))
 		{
 			ClearBits( pbeam->flags, FBEAM_ENDENTITY );
-			pbeam->die = gp_cl->time;
+			pbeam->die = gpGlobals->time;
 			return false;
 		}
 		else
@@ -947,18 +951,18 @@ R_BeamDraw
 Update beam vars and draw it
 ==============
 */
-static void R_BeamDraw( BEAM *pbeam, float frametime )
+void R_BeamDraw( BEAM *pbeam, float frametime )
 {
 	model_t	*model;
 	vec3_t	delta;
 
-	model = CL_ModelHandle( pbeam->modelIndex );
+	model = gEngfuncs.pfnGetModelByIndex( pbeam->modelIndex );
 	SetBits( pbeam->flags, FBEAM_ISACTIVE );
 
 	if( !model || model->type != mod_sprite )
 	{
 		pbeam->flags &= ~FBEAM_ISACTIVE; // force to ignore
-		pbeam->die = gp_cl->time;
+		pbeam->die = gpGlobals->time;
 		return;
 	}
 
@@ -1016,7 +1020,7 @@ static void R_BeamDraw( BEAM *pbeam, float frametime )
 	if( pbeam->flags & ( FBEAM_FADEIN|FBEAM_FADEOUT ))
 	{
 		// update life cycle
-		pbeam->t = pbeam->freq + ( pbeam->die - gp_cl->time );
+		pbeam->t = pbeam->freq + ( pbeam->die - gpGlobals->time );
 		if( pbeam->t != 0.0f ) pbeam->t = 1.0f - pbeam->freq / pbeam->t;
 	}
 
@@ -1064,7 +1068,7 @@ static void R_BeamDraw( BEAM *pbeam, float frametime )
 
 	TriRenderMode( FBitSet( pbeam->flags, FBEAM_SOLID ) ? kRenderNormal : kRenderTransAdd );
 
-	if( !TriSpriteTexture( model, (int)(pbeam->frame + pbeam->frameRate * gp_cl->time) % pbeam->frameCount ))
+	if( !TriSpriteTexture( model, (int)(pbeam->frame + pbeam->frameRate * gpGlobals->time) % pbeam->frameCount ))
 	{
 		ClearBits( pbeam->flags, FBEAM_ISACTIVE );
 		return;
@@ -1155,7 +1159,7 @@ passed through this
 */
 static void R_BeamSetup( BEAM *pbeam, vec3_t start, vec3_t end, int modelIndex, float life, float width, float amplitude, float brightness, float speed )
 {
-	model_t	*sprite = CL_ModelHandle( modelIndex );
+	model_t	*sprite = gEngfuncs.pfnGetModelByIndex( modelIndex );
 
 	if( !sprite ) return;
 
@@ -1169,8 +1173,8 @@ static void R_BeamSetup( BEAM *pbeam, vec3_t start, vec3_t end, int modelIndex, 
 	VectorCopy( end, pbeam->target );
 	VectorSubtract( end, start, pbeam->delta );
 
-	pbeam->freq = speed * gp_cl->time;
-	pbeam->die = life + gp_cl->time;
+	pbeam->freq = speed * gpGlobals->time;
+	pbeam->die = life + gpGlobals->time;
 	pbeam->amplitude = amplitude;
 	pbeam->brightness = brightness;
 	pbeam->width = width;
@@ -1193,7 +1197,7 @@ R_BeamDrawCustomEntity
 initialize beam from server entity
 ==============
 */
-static void R_BeamDrawCustomEntity( cl_entity_t *ent )
+void R_BeamDrawCustomEntity( cl_entity_t *ent )
 {
 	BEAM	beam;
 	float	amp = ent->curstate.body / 100.0f;
@@ -1300,7 +1304,7 @@ void GAME_EXPORT CL_DrawBeams( int fTrans, BEAM *active_beams )
 		if( !fTrans && !FBitSet( pBeam->flags, FBEAM_SOLID ))
 			continue;
 
-		R_BeamDraw( pBeam, gp_cl->time -   gp_cl->oldtime );
+		R_BeamDraw( pBeam, gpGlobals->time -   gpGlobals->oldtime );
 	}
 
 	//pglShadeModel( GL_FLAT );

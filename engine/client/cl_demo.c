@@ -107,8 +107,6 @@ struct
 	int		angle_position;
 } demo;
 
-static qboolean CL_NextDemo( void );
-
 /*
 ====================
 CL_StartupDemoHeader
@@ -158,7 +156,7 @@ CL_GetDemoRecordClock
 write time while demo is recording
 ====================
 */
-static float CL_GetDemoRecordClock( void )
+float CL_GetDemoRecordClock( void )
 {
 	return cl.mtime[0];
 }
@@ -170,7 +168,7 @@ CL_GetDemoPlaybackClock
 overwrite host.realtime
 ====================
 */
-static float CL_GetDemoPlaybackClock( void )
+float CL_GetDemoPlaybackClock( void )
 {
 	return host.realtime + host.frametime;
 }
@@ -196,7 +194,7 @@ CL_WriteDemoCmdHeader
 Writes the demo command header and time-delta
 ====================
 */
-static void CL_WriteDemoCmdHeader( byte cmd, file_t *file )
+void CL_WriteDemoCmdHeader( byte cmd, file_t *file )
 {
 	float	dt;
 
@@ -269,7 +267,7 @@ Save state of cls.netchan sequences
 so that we can play the demo correctly.
 ====================
 */
-static void CL_WriteDemoSequence( file_t *file )
+void CL_WriteDemoSequence( file_t *file )
 {
 	Assert( file != NULL );
 
@@ -350,7 +348,7 @@ CL_WriteDemoHeader
 Write demo header
 ====================
 */
-static void CL_WriteDemoHeader( const char *name )
+void CL_WriteDemoHeader( const char *name )
 {
 	int	copysize;
 	int	savepos;
@@ -374,7 +372,7 @@ static void CL_WriteDemoHeader( const char *name )
 	demo.header.id = IDEMOHEADER;
 	demo.header.dem_protocol = DEMO_PROTOCOL;
 	demo.header.net_protocol = cls.legacymode ? PROTOCOL_LEGACY_VERSION : PROTOCOL_VERSION;
-	demo.header.host_fps = host_maxfps.value ? bound( MIN_FPS, host_maxfps.value, MAX_FPS ) : MAX_FPS;
+	demo.header.host_fps = bound( MIN_FPS, host_maxfps.value, MAX_FPS );
 	Q_strncpy( demo.header.mapname, clgame.mapname, sizeof( demo.header.mapname ));
 	Q_strncpy( demo.header.comment, clgame.maptitle, sizeof( demo.header.comment ));
 	Q_strncpy( demo.header.gamedir, FS_Gamedir(), sizeof( demo.header.gamedir ));
@@ -438,7 +436,7 @@ CL_StopRecord
 finish recording demo
 =================
 */
-static void CL_StopRecord( void )
+void CL_StopRecord( void )
 {
 	int	i, curpos;
 	float	stoptime;
@@ -520,7 +518,7 @@ CL_ReadDemoCmdHeader
 read the demo command
 =================
 */
-static qboolean CL_ReadDemoCmdHeader( byte *cmd, float *dt )
+qboolean CL_ReadDemoCmdHeader( byte *cmd, float *dt )
 {
 	// read the command
 	// HACKHACK: skip NOPs
@@ -550,7 +548,7 @@ read the demo usercmd for predicting
 and smooth movement during playback the demo
 =================
 */
-static void CL_ReadDemoUserCmd( qboolean discard )
+void CL_ReadDemoUserCmd( qboolean discard )
 {
 	byte	data[1024];
 	int	cmdnumber;
@@ -571,9 +569,6 @@ static void CL_ReadDemoUserCmd( qboolean discard )
 
 		memset( &nullcmd, 0, sizeof( nullcmd ));
 		MSG_Init( &buf, "UserCmd", data, sizeof( data ));
-
-		// a1ba: I have no proper explanation why
-		cmdnumber++;
 
 		pcmd = &cl.commands[cmdnumber & CL_UPDATE_MASK];
 		pcmd->processedfuncs = false;
@@ -615,7 +610,7 @@ CL_ReadDemoSequence
 read netchan sequences
 =================
 */
-static void CL_ReadDemoSequence( qboolean discard )
+void CL_ReadDemoSequence( qboolean discard )
 {
 	int	incoming_sequence;
 	int	incoming_acknowledged;
@@ -649,7 +644,7 @@ static void CL_ReadDemoSequence( qboolean discard )
 CL_DemoStartPlayback
 =================
 */
-static void CL_DemoStartPlayback( int mode )
+void CL_DemoStartPlayback( int mode )
 {
 	if( cls.changedemo )
 	{
@@ -679,7 +674,7 @@ static void CL_DemoStartPlayback( int mode )
 
 	demo.starttime = CL_GetDemoPlaybackClock(); // for determining whether to read another message
 
-	Netchan_Setup( NS_CLIENT, &cls.netchan, net_from, Cvar_VariableInteger( "net_qport" ), NULL, CL_GetFragmentSize );
+	Netchan_Setup( NS_CLIENT, &cls.netchan, net_from, Cvar_VariableInteger( "net_qport" ), NULL, CL_GetFragmentSize, 0 );
 
 	memset( demo.cmds, 0, sizeof( demo.cmds ));
 	demo.angle_position = 1;
@@ -694,7 +689,7 @@ static void CL_DemoStartPlayback( int mode )
 CL_DemoAborted
 =================
 */
-static void CL_DemoAborted( void )
+void CL_DemoAborted( void )
 {
 	if( cls.demofile )
 		FS_Close( cls.demofile );
@@ -734,7 +729,7 @@ returns true on success, false on failure
 g-cont. probably captain obvious mode is ON
 =================
 */
-static qboolean CL_DemoMoveToNextSection( void )
+qboolean CL_DemoMoveToNextSection( void )
 {
 	if( ++demo.entryIndex >= demo.directory.numentries )
 	{
@@ -756,7 +751,7 @@ static qboolean CL_DemoMoveToNextSection( void )
 	return true;
 }
 
-static qboolean CL_ReadRawNetworkData( byte *buffer, size_t *length )
+qboolean CL_ReadRawNetworkData( byte *buffer, size_t *length )
 {
 	int	msglen = 0;
 
@@ -807,7 +802,7 @@ CL_DemoReadMessageQuake
 reads demo data and write it to client
 =================
 */
-static qboolean CL_DemoReadMessageQuake( byte *buffer, size_t *length )
+qboolean CL_DemoReadMessageQuake( byte *buffer, size_t *length )
 {
 	vec3_t		viewangles;
 	int		msglen = 0;
@@ -1022,7 +1017,7 @@ qboolean CL_DemoReadMessage( byte *buffer, size_t *length )
 	return CL_ReadRawNetworkData( buffer, length );
 }
 
-static void CL_DemoFindInterpolatedViewAngles( float t, float *frac, demoangle_t **prev, demoangle_t **next )
+void CL_DemoFindInterpolatedViewAngles( float t, float *frac, demoangle_t **prev, demoangle_t **next )
 {
 	int	i, i0, i1, imod;
 	float	at;
@@ -1117,7 +1112,7 @@ CL_FinishTimeDemo
 show stats
 ==============
 */
-static void CL_FinishTimeDemo( void )
+void CL_FinishTimeDemo( void )
 {
 	int	frames;
 	double	time;
@@ -1266,7 +1261,7 @@ CL_NextDemo
 Called when a demo finishes
 ==================
 */
-static qboolean CL_NextDemo( void )
+qboolean CL_NextDemo( void )
 {
 	char	str[MAX_QPATH];
 

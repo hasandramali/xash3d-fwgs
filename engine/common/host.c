@@ -52,7 +52,7 @@ struct tests_stats_s tests_stats;
 #endif
 
 CVAR_DEFINE( host_developer, "developer", "0", FCVAR_FILTERABLE, "engine is in development-mode" );
-CVAR_DEFINE_AUTO( sys_timescale, "1.0", FCVAR_FILTERABLE, "scale frame time" );
+CVAR_DEFINE_AUTO( sys_timescale, "1.0", FCVAR_CHEAT|FCVAR_FILTERABLE, "scale frame time" );
 CVAR_DEFINE_AUTO( sys_ticrate, "100", 0, "framerate in dedicated mode" );
 
 static CVAR_DEFINE_AUTO( host_serverstate, "0", FCVAR_READ_ONLY, "displays current server state" );
@@ -62,37 +62,9 @@ CVAR_DEFINE_AUTO( host_limitlocal, "0", 0, "apply cl_cmdrate and rate to loopbac
 CVAR_DEFINE( host_maxfps, "fps_max", "72", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "host fps upper limit" );
 static CVAR_DEFINE_AUTO( host_framerate, "0", FCVAR_FILTERABLE, "locks frame timing to this value in seconds" );
 static CVAR_DEFINE( host_sleeptime, "sleeptime", "1", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "milliseconds to sleep for each frame. higher values reduce fps accuracy" );
-static CVAR_DEFINE_AUTO( host_sleeptime_debug, "0", 0, "print sleeps between frames" );
 CVAR_DEFINE( con_gamemaps, "con_mapfilter", "1", FCVAR_ARCHIVE, "when true show only maps in game folder" );
 
-typedef struct feature_message_s
-{
-	uint32_t mask;
-	const char *msg;
-	const char *arg;
-} feature_message_t;
-
-static feature_message_t bugcomp_features[] =
-{
-{ BUGCOMP_PENTITYOFENTINDEX_FLAG, "pfnPEntityOfEntIndex bugfix revert", "peoei" },
-{ BUGCOMP_MESSAGE_REWRITE_FACILITY_FLAG, "GoldSrc Message Rewrite Facility", "gsmrf" },
-};
-
-static feature_message_t engine_features[] =
-{
-{ ENGINE_WRITE_LARGE_COORD, "Big World Support" },
-{ ENGINE_QUAKE_COMPATIBLE, "Quake Compatibility" },
-{ ENGINE_LOAD_DELUXEDATA, "Deluxemap Support" },
-{ ENGINE_PHYSICS_PUSHER_EXT, "Improved MOVETYPE_PUSH" },
-{ ENGINE_LARGE_LIGHTMAPS, "Large Lightmaps" },
-{ ENGINE_COMPENSATE_QUAKE_BUG, "Stupid Quake Bug Compensation" },
-{ ENGINE_IMPROVED_LINETRACE, "Improved Trace Line" },
-{ ENGINE_COMPUTE_STUDIO_LERP, "Studio MOVETYPE_STEP Lerping" },
-{ ENGINE_LINEAR_GAMMA_SPACE, "Linear Gamma Space" },
-{ ENGINE_STEP_POSHISTORY_LERP, "MOVETYPE_STEP Position History Based Lerping" },
-};
-
-static void Sys_PrintUsage( void )
+void Sys_PrintUsage( void )
 {
 	string version_str;
 	const char *usage_str;
@@ -119,9 +91,8 @@ static void Sys_PrintUsage( void )
 	O("-minidumps       ", "enable writing minidumps when game is crashed")
 #endif
 	O("-rodir <path>    ", "set read-only base directory")
-	O("-bugcomp [opts]  ", "enable precise bug compatibility")
-	O("                 ", "will break games that don't require it")
-	O("                 ", "refer to engine documentation for more info")
+	O("-bugcomp         ", "enable precise bug compatibility. Will break games that don't require it")
+	O("                 ", "Refer to engine documentation for more info")
 	O("-disablehelp     ", "disable this message")
 #if !XASH_DEDICATED
 	O("-dedicated       ", "run engine in dedicated mode")
@@ -134,11 +105,9 @@ static void Sys_PrintUsage( void )
 	O("-noip6           ", "disable IPv6")
 	O("-ip6 <ip>        ", "set IPv6 address")
 	O("-port6 <port>    ", "set IPv6 port")
-	O("-clockwindow <cw>", "adjust clockwindow used to ignore client commands")
-	O("                 ", "to prevent speed hacks")
+	O("-clockwindow <cw>", "adjust clockwindow used to ignore client commands to prevent speed hacks")
 
 "\nGame options:\n"
-	O("-game <directory>", "set game directory to start engine with")
 	O("-dll <path>      ", "override server DLL path")
 #if !XASH_DEDICATED
 	O("-clientlib <path>", "override client DLL path")
@@ -170,7 +139,7 @@ static void Sys_PrintUsage( void )
 	O("-sdl_joy_old_api ","use SDL legacy joystick API")
 	O("-sdl_renderer <n>","use alternative SDL_Renderer for software")
 #endif // XASH_SDL
-#if XASH_ANDROID && !XASH_SDL
+#if XASH_ANDROID
 	O("-nativeegl       ","use native egl implementation. Use if screen does not update or black")
 #endif // XASH_ANDROID
 #if XASH_DOS
@@ -220,49 +189,22 @@ void Host_ShutdownServer( void )
 Host_PrintEngineFeatures
 ================
 */
-static void Host_PrintFeatures( uint32_t flags,	const char *s, feature_message_t *features, size_t size )
+void Host_PrintEngineFeatures( void )
 {
-	size_t i;
+	if( FBitSet( host.features, ENGINE_WRITE_LARGE_COORD ))
+		Con_Reportf( "^3EXT:^7 big world support enabled\n" );
 
-	for( i = 0; i < size; i++ )
-	{
-		if( FBitSet( flags, features[i].mask ))
-			Con_Printf( "^3%s:^7 %s is enabled\n", s, features[i].msg );
-	}
-}
+	if( FBitSet( host.features, ENGINE_LOAD_DELUXEDATA ))
+		Con_Reportf( "^3EXT:^7 deluxemap support enabled\n" );
 
-/*
-==============
-Host_ValidateEngineFeatures
+	if( FBitSet( host.features, ENGINE_PHYSICS_PUSHER_EXT ))
+		Con_Reportf( "^3EXT:^7 Improved MOVETYPE_PUSH is used\n" );
 
-validate features bits and set host.features
-==============
-*/
-void Host_ValidateEngineFeatures( uint32_t features )
-{
-	uint32_t mask = ENGINE_FEATURES_MASK;
+	if( FBitSet( host.features, ENGINE_LARGE_LIGHTMAPS ))
+		Con_Reportf( "^3EXT:^7 Large lightmaps enabled\n" );
 
-#if !HOST_DEDICATED
-	if( !Host_IsDedicated( ) && cls.legacymode )
-		mask = ENGINE_LEGACY_FEATURES_MASK;
-#endif
-
-	// don't allow unsupported bits
-	features &= mask;
-
-	// force bits for some games
-	if( !Q_stricmp( GI->gamefolder, "cstrike" ) || !Q_stricmp( GI->gamefolder, "czero" ))
-		SetBits( features, ENGINE_STEP_POSHISTORY_LERP );
-
-	// print requested first
-	Host_PrintFeatures( features, "EXT", engine_features, ARRAYSIZE( engine_features ));
-
-	// now warn about incompatible bits
-	if( FBitSet( features, ENGINE_STEP_POSHISTORY_LERP|ENGINE_COMPUTE_STUDIO_LERP ) == ( ENGINE_STEP_POSHISTORY_LERP|ENGINE_COMPUTE_STUDIO_LERP ))
-		Con_Printf( S_WARN "%s: incompatible ENGINE_STEP_POSHISTORY_LERP and ENGINE_COMPUTE_STUDIO_LERP are enabled!\n", __func__ );
-
-	// finally set global variable
-	host.features = features;
+	if( FBitSet( host.features, ENGINE_COMPENSATE_QUAKE_BUG ))
+		Con_Reportf( "^3EXT:^7 Compensate quake bug enabled\n" );
 }
 
 /*
@@ -361,7 +303,7 @@ static int Host_CalcSleep( void )
 	return host_sleeptime.value;
 }
 
-static void Host_NewInstance( const char *name, const char *finalmsg )
+void Host_NewInstance( const char *name, const char *finalmsg )
 {
 	if( !pChangeGame ) return;
 
@@ -379,7 +321,7 @@ Host_ChangeGame_f
 Change game modification
 =================
 */
-static void Host_ChangeGame_f( void )
+void Host_ChangeGame_f( void )
 {
 	int	i;
 
@@ -418,7 +360,7 @@ static void Host_ChangeGame_f( void )
 Host_Exec_f
 ===============
 */
-static void Host_Exec_f( void )
+void Host_Exec_f( void )
 {
 	string cfgpath;
 	byte *f;
@@ -504,7 +446,7 @@ static void Host_Exec_f( void )
 Host_MemStats_f
 ===============
 */
-static void Host_MemStats_f( void )
+void Host_MemStats_f( void )
 {
 	switch( Cmd_Argc( ))
 	{
@@ -522,7 +464,7 @@ static void Host_MemStats_f( void )
 	}
 }
 
-static void Host_Minimize_f( void )
+void Host_Minimize_f( void )
 {
 #ifdef XASH_SDL
 	if( host.hWnd ) SDL_MinimizeWindow( host.hWnd );
@@ -561,7 +503,7 @@ qboolean Host_IsLocalClient( void )
 Host_RegisterDecal
 =================
 */
-static qboolean Host_RegisterDecal( const char *name, int *count )
+qboolean Host_RegisterDecal( const char *name, int *count )
 {
 	char	shortname[MAX_QPATH];
 	int	i;
@@ -595,7 +537,7 @@ static qboolean Host_RegisterDecal( const char *name, int *count )
 Host_InitDecals
 =================
 */
-static void Host_InitDecals( void )
+void Host_InitDecals( void )
 {
 	int	i, num_decals = 0;
 	search_t	*t;
@@ -626,7 +568,7 @@ Host_GetCommands
 Add them exactly as if they had been typed at the console
 ===================
 */
-static void Host_GetCommands( void )
+void Host_GetCommands( void )
 {
 	char	*cmd;
 
@@ -644,7 +586,7 @@ Host_CalcFPS
 compute actual FPS for various modes
 ===================
 */
-static double Host_CalcFPS( void )
+double Host_CalcFPS( void )
 {
 	double	fps = 0.0;
 
@@ -676,84 +618,6 @@ static double Host_CalcFPS( void )
 	return fps;
 }
 
-static qboolean Host_Autosleep( double dt, double scale )
-{
-	double targetframetime, fps;
-	int sleep;
-
-	fps = Host_CalcFPS();
-
-	if( fps <= 0 )
-		return true;
-
-	// limit fps to withing tolerable range
-	fps = bound( MIN_FPS, fps, MAX_FPS );
-
-	if( Host_IsDedicated( ))
-		targetframetime = ( 1.0 / ( fps + 1.0 ));
-	else targetframetime = ( 1.0 / fps );
-
-	sleep = Host_CalcSleep();
-	if( sleep == 0 ) // no sleeps between frames, much simpler code
-	{
-		if( dt < targetframetime * scale )
-			return false;
-	}
-	else
-	{
-		static double timewindow; // allocate a time window for sleeps
-		static int counter; // for debug
-		static double realsleeptime;
-		const double sleeptime = sleep * 0.001;
-
-		if( dt < targetframetime * scale )
-		{
-			// if we have allocated time window, try to sleep
-			if( timewindow > realsleeptime )
-			{
-				// Sys_Sleep isn't guaranteed to sleep an exact amount of milliseconds
-				// so we measure the real sleep time and use it to decrease the window
-				double t1 = Sys_DoubleTime(), t2;
-				Sys_Sleep( sleep ); // in msec!
-				t2 = Sys_DoubleTime();
-				realsleeptime = t2 - t1;
-
-				timewindow -= realsleeptime;
-
-				if( host_sleeptime_debug.value )
-				{
-					counter++;
-
-					Con_NPrintf( counter, "%d: %.4f %.4f", counter, timewindow, realsleeptime );
-				}
-			}
-
-			return false;
-		}
-
-		// if we exhausted this time window, allocate a new one after new frame
-		if( timewindow <= realsleeptime )
-		{
-			double targetsleeptime = targetframetime - host.pureframetime * 2;
-
-			if( targetsleeptime > 0 )
-				timewindow = targetsleeptime;
-			else timewindow = 0;
-
-			realsleeptime = sleeptime; // reset in case CPU was too busy
-
-			if( host_sleeptime_debug.value )
-			{
-				counter = 0;
-
-				Con_NPrintf( 0, "tgt = %.4f, pft = %.4f, wnd = %.4f", targetframetime, host.pureframetime, timewindow );
-			}
-		}
-	}
-
-	return true;
-}
-
 /*
 ===================
 Host_FilterTime
@@ -761,18 +625,58 @@ Host_FilterTime
 Returns false if the time is too short to run a frame
 ===================
 */
-static qboolean Host_FilterTime( float time )
+qboolean Host_FilterTime( float time )
 {
 	static double	oldtime;
-	double dt;
-	double scale = sys_timescale.value;
+	double fps, scale = sys_timescale.value;
 
 	host.realtime += time * scale;
-	dt = host.realtime - oldtime;
+	fps = Host_CalcFPS();
 
 	// clamp the fps in multiplayer games
-	if( !Host_Autosleep( dt, scale ))
-		return false;
+	if( fps != 0.0 )
+	{
+		static int sleeps;
+		double targetframetime;
+		int sleeptime = Host_CalcSleep();
+
+		// limit fps to withing tolerable range
+		fps = bound( MIN_FPS, fps, MAX_FPS );
+
+		if( Host_IsDedicated( ))
+			targetframetime = ( 1.0 / ( fps + 1.0 ));
+		else targetframetime = ( 1.0 / fps );
+
+		if(( host.realtime - oldtime ) < targetframetime * scale )
+		{
+			if( sleeptime > 0 && sleeps > 0 )
+			{
+				Sys_Sleep( sleeptime );
+				sleeps--;
+			}
+
+			return false;
+		}
+
+		if( sleeptime > 0 && sleeps <= 0 )
+		{
+			if( host.status == HOST_FRAME )
+			{
+				// give few sleeps this frame with small margin
+				double targetsleeptime = targetframetime - host.pureframetime * 2;
+
+				// don't sleep if we can't keep up with the framerate
+				if( targetsleeptime > 0 )
+					sleeps = targetsleeptime / ( sleeptime * 0.001 );
+				else sleeps = 0;
+			}
+			else
+			{
+				// always sleep at least once in minimized/nofocus state
+				sleeps = 1;
+			}
+		}
+	}
 
 	host.frametime = host.realtime - oldtime;
 	host.realframetime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
@@ -852,7 +756,7 @@ void GAME_EXPORT Host_Error( const char *error, ... )
 			Key_SetKeyDest( key_console );
 			Con_Printf( "Host_Error: %s", hosterror1 );
 		}
-		else Platform_MessageBox( "Host Error", hosterror1, true );
+		else MSGBOX2( hosterror1 );
 	}
 
 	// host is shutting down. don't invoke infinite loop
@@ -865,7 +769,7 @@ void GAME_EXPORT Host_Error( const char *error, ... )
 	}
 
 	recursive = true;
-	Q_strncpy( hosterror2, hosterror1, sizeof( hosterror2 ));
+	Q_strncpy( hosterror2, hosterror1, MAX_SYSPATH );
 	host.errorframe = host.framecount; // to avoid multply calls per frame
 	Q_snprintf( host.finalmsg, sizeof( host.finalmsg ), "Server crashed: %s", hosterror1 );
 
@@ -886,7 +790,7 @@ void GAME_EXPORT Host_Error( const char *error, ... )
 	Host_AbortCurrentFrame();
 }
 
-static void Host_Error_f( void )
+void Host_Error_f( void )
 {
 	const char *error = Cmd_Argv( 1 );
 
@@ -894,7 +798,7 @@ static void Host_Error_f( void )
 	Host_Error( "%s\n", error );
 }
 
-static void Sys_Error_f( void )
+void Sys_Error_f( void )
 {
 	const char *error = Cmd_Argv( 1 );
 
@@ -917,7 +821,7 @@ static void Host_Crash_f( void )
 Host_Userconfigd_f
 =================
 */
-static void Host_Userconfigd_f( void )
+void Host_Userconfigd_f( void )
 {
 	search_t *t;
 	int i;
@@ -951,71 +855,23 @@ static void Host_RunTests( int stage )
 		TEST_LIST_1_CLIENT;
 #endif
 		Msg( "Done! %d passed, %d failed\n", tests_stats.passed, tests_stats.failed );
-		error_on_exit = tests_stats.failed > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 		Sys_Quit();
 	}
 }
 #endif
-
-static uint32_t Host_CheckBugcomp( void )
-{
-	const char *prev, *next;
-	uint32_t flags = 0;
-	string args, arg;
-	size_t i;
-
-	if( !Sys_CheckParm( "-bugcomp" ))
-		return 0;
-
-	if( Sys_GetParmFromCmdLine( "-bugcomp", args ) && isalpha( args[0] ))
-	{
-		for( prev = args, next = Q_strchrnul( prev, '+' ); ; prev = next + 1, next = Q_strchrnul( prev, '+' ))
-		{
-			Q_strncpy( arg, prev, next - prev + 1 );
-			for( i = 0; i < ARRAYSIZE( bugcomp_features ); i++ )
-			{
-				if( !Q_stricmp( bugcomp_features[i].arg, arg ))
-				{
-					SetBits( flags, bugcomp_features[i].mask );
-					break;
-				}
-			}
-
-			if( i == ARRAYSIZE( bugcomp_features ))
-			{
-				Con_Printf( S_ERROR "Unknown bugcomp flag %s\n", arg );
-				Con_Printf( "Valid flags are:\n" );
-				for( i = 0; i < ARRAYSIZE( bugcomp_features ); i++ )
-					Con_Printf( "\t%s: %s\n", bugcomp_features[i].arg, bugcomp_features[i].msg );
-			}
-
-			if( !*next )
-				break;
-		}
-	}
-	else
-	{
-		// no argument specified -bugcomp just enables everything
-		flags = -1;
-	}
-
-	Host_PrintFeatures( flags, "BUGCOMP", bugcomp_features, ARRAYSIZE( bugcomp_features ));
-
-	return flags;
-}
 
 /*
 =================
 Host_InitCommon
 =================
 */
-static void Host_InitCommon( int argc, char **argv, const char *progname, qboolean bChangeGame )
+void Host_InitCommon( int argc, char **argv, const char *progname, qboolean bChangeGame )
 {
 	char		dev_level[4];
 	int		developer = DEFAULT_DEV;
 	const char *baseDir;
 	char ticrate[16];
-	int len, i;
+	int len;
 
 	// some commands may turn engine into infinite loop,
 	// e.g. xash.exe +game xash -game xash
@@ -1090,7 +946,7 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 		progname++;
 
 	Q_strncpy( SI.exeName, progname, sizeof( SI.exeName ));
-	Q_strncpy( SI.basedirName, progname, sizeof( SI.basedirName ));
+	Q_strncpy( SI.basedirName, progname, sizeof( SI.exeName ));
 
 	if( Host_IsDedicated() )
 	{
@@ -1107,6 +963,13 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 
 	// member console allowing
 	host.allow_console_init = host.allow_console;
+
+	if( Sys_CheckParm( "-bugcomp" ))
+	{
+		// add argument check here when we add other levels
+		// of bugcompatibility
+		host.bugcomp = BUGCOMP_GOLDSRC;
+	}
 
 	// timeBeginPeriod( 1 ); // a1ba: Do we need this?
 
@@ -1234,11 +1097,11 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 
 	Sys_InitLog();
 
-	// print current developer level to simplify processing users feedback
-	if( developer > 0 )
-		Con_Printf( "Developer level: ^3%i\n", developer );
-
-	host.bugcomp = Host_CheckBugcomp();
+	// print bugcompatibility level here, after log was initialized
+	if( host.bugcomp == BUGCOMP_GOLDSRC )
+	{
+		Con_Printf( "^3BUGCOMP^7: GoldSrc bug-compatibility enabled\n" );
+	}
 
 	Cmd_AddCommand( "exec", Host_Exec_f, "execute a script file" );
 	Cmd_AddCommand( "memlist", Host_MemStats_f, "prints memory pool information" );
@@ -1255,24 +1118,11 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 	FS_LoadGameInfo( NULL );
 	Cvar_PostFSInit();
 
+	if( FS_FileExists( va( "%s.rc", SI.basedirName ), false ))
+		Q_strncpy( SI.rcName, SI.basedirName, sizeof( SI.rcName ));	// e.g. valve.rc
+	else Q_strncpy( SI.rcName, SI.exeName, sizeof( SI.rcName ));	// e.g. quake.rc
+
 	Q_strncpy( host.gamefolder, GI->gamefolder, sizeof( host.gamefolder ));
-
-	for( i = 0; i < 3; i++ )
-	{
-		const char *rcName;
-		switch( i )
-		{
-		case 0: rcName = SI.basedirName; break; // e.g. valve.rc
-		case 1: rcName = SI.exeName; break;     // e.g. quake.rc
-		case 2: rcName = host.gamefolder; break; // e.g. game.rc (ran from default launcher)
-		}
-
-		if( FS_FileExists( va( "%s.rc", rcName ), false ))
-		{
-			Q_strncpy( SI.rcName, rcName, sizeof( SI.rcName ));
-			break;
-		}
-	}
 
 	Image_CheckPaletteQ1 ();
 	Host_InitDecals ();	// reload decals
@@ -1294,7 +1144,7 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 	Key_Init();
 }
 
-static void Host_FreeCommon( void )
+void Host_FreeCommon( void )
 {
 	Image_Shutdown();
 	Sound_Shutdown();
@@ -1331,7 +1181,6 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 	Cvar_RegisterVariable( &host_maxfps );
 	Cvar_RegisterVariable( &host_framerate );
 	Cvar_RegisterVariable( &host_sleeptime );
-	Cvar_RegisterVariable( &host_sleeptime_debug );
 	Cvar_RegisterVariable( &host_gameloaded );
 	Cvar_RegisterVariable( &host_clientloaded );
 	Cvar_RegisterVariable( &host_limitlocal );
@@ -1364,7 +1213,6 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 
 	HTTP_Init();
 	ID_Init();
-	SoundList_Init();
 
 	if( Host_IsDedicated() )
 	{
@@ -1422,11 +1270,7 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 		host.status = HOST_FRAME;
 
 		if( GameState->nextstate == STATE_RUNFRAME )
-#if XASH_WIN32 // FIXME: implement autocomplete on *nix
 			Con_Printf( "Type 'map <mapname>' to start game... (TAB-autocomplete is working too)\n" );
-#else // !XASH_WIN32
-			Con_Printf( "Type 'map <mapname>' to start game...\n" );
-#endif // !XASH_WIN32
 
 		// execute server.cfg after commandline
 		// so we have a chance to set servercfgfile
@@ -1453,8 +1297,6 @@ Host_Shutdown
 */
 void EXPORT Host_Shutdown( void )
 {
-	qboolean error = host.status == HOST_ERR_FATAL;
-
 	if( host.shutdown_issued ) return;
 	host.shutdown_issued = true;
 
@@ -1462,7 +1304,7 @@ void EXPORT Host_Shutdown( void )
 	if( !host.change_game ) Q_strncpy( host.finalmsg, "Server shutdown", sizeof( host.finalmsg ));
 
 #if !XASH_DEDICATED
-	if( host.type == HOST_NORMAL && !error )
+	if( host.type == HOST_NORMAL )
 		Host_WriteConfig();
 #endif
 
@@ -1471,7 +1313,6 @@ void EXPORT Host_Shutdown( void )
 	SV_ShutdownFilter();
 	CL_Shutdown();
 
-	SoundList_Shutdown();
 	Mod_Shutdown();
 	NET_Shutdown();
 	HTTP_Shutdown();

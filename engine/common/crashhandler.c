@@ -320,9 +320,7 @@ void Sys_RestoreCrashHandler( void )
 
 #elif XASH_FREEBSD || XASH_NETBSD || XASH_OPENBSD || XASH_ANDROID || XASH_LINUX
 // Posix signal handler
-#ifndef XASH_OPENBSD
 #include <ucontext.h>
-#endif
 #include <signal.h>
 #include <sys/mman.h>
 #include "library.h"
@@ -372,9 +370,9 @@ static void Sys_Crash( int signal, siginfo_t *si, void *context)
 		bp = (void**)ucontext->uc_mcontext.mc_rbp;
 		sp = (void**)ucontext->uc_mcontext.mc_rsp;
 	#elif XASH_NETBSD
-		pc = (void*)ucontext->uc_mcontext.__gregs[_REG_RIP];
-		bp = (void**)ucontext->uc_mcontext.__gregs[_REG_RBP];
-		sp = (void**)ucontext->uc_mcontext.__gregs[_REG_RSP];
+		pc = (void*)ucontext->uc_mcontext.__gregs[REG_RIP];
+		bp = (void**)ucontext->uc_mcontext.__gregs[REG_RBP];
+		sp = (void**)ucontext->uc_mcontext.__gregs[REG_RSP];
 	#elif XASH_OPENBSD
 		pc = (void*)ucontext->sc_rip;
 		bp = (void**)ucontext->sc_rbp;
@@ -490,14 +488,13 @@ static void Sys_Crash( int signal, siginfo_t *si, void *context)
 #ifdef XASH_SDL
 	SDL_SetWindowGrab( host.hWnd, SDL_FALSE );
 #endif
-	host.crashed = true;
-	Platform_MessageBox( "Xash Error", message, false );
+	MSGBOX( message );
 
 	// log saved, now we can try to save configs and close log correctly, it may crash
 	if( host.type == HOST_NORMAL )
 		CL_Crashed();
 	host.status = HOST_CRASHED;
-
+	host.crashed = true;
 
 	Sys_Quit();
 }

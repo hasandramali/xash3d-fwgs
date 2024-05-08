@@ -95,6 +95,8 @@ const char *Q_PlatformStringByID( const int platform )
 		return "win32";
 	case PLATFORM_ANDROID:
 		return "android";
+	case PLATFORM_LINUX_UNKNOWN:
+		return "linuxunkabi";
 	case PLATFORM_LINUX:
 		return "linux";
 	case PLATFORM_APPLE:
@@ -237,25 +239,19 @@ const char *Q_buildarch( void )
 =============
 Q_buildcommit
 
-Returns a short hash of current commit in VCS as string
+Returns a short hash of current commit in VCS as string.
 XASH_BUILD_COMMIT must be passed in quotes
+
+if XASH_BUILD_COMMIT is not defined,
+Q_buildcommit will identify this build as "notset"
 =============
 */
 const char *Q_buildcommit( void )
 {
+#ifdef XASH_BUILD_COMMIT
 	return XASH_BUILD_COMMIT;
-}
-
-/*
-=============
-Q_buildbranch
-
-Returns current branch name in VCS as string
-XASH_BUILD_BRANCH must be passed in quotes
-=============
-*/
-const char *Q_buildbranch( void )
-{
-	return XASH_BUILD_BRANCH;
+#else
+	return "notset";
+#endif
 }
 

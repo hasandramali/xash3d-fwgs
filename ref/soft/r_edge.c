@@ -144,7 +144,7 @@ sentinel at the end (actually, this is the active edge table starting at
 edge_head.next).
 ==============
 */
-static void R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
+void R_InsertNewEdges (edge_t *edgestoadd, edge_t *edgelist)
 {
 	edge_t	*next_edge;
 
@@ -192,7 +192,7 @@ addedge:
 R_RemoveEdges
 ==============
 */
-static void R_RemoveEdges (edge_t *pedge)
+void R_RemoveEdges (edge_t *pedge)
 {
 
 	do
@@ -212,7 +212,7 @@ static void R_RemoveEdges (edge_t *pedge)
 R_StepActiveU
 ==============
 */
-static void R_StepActiveU (edge_t *pedge)
+void R_StepActiveU (edge_t *pedge)
 {
 	edge_t		*pnext_edge, *pwedge;
 
@@ -284,7 +284,7 @@ pushback:
 R_CleanupSpan
 ==============
 */
-static void R_CleanupSpan (void)
+void R_CleanupSpan (void)
 {
 	surf_t	*surf;
 	int		iu;
@@ -752,7 +752,7 @@ vec3_t			local_modelorg;
 D_MipLevelForScale
 =============
 */
-static int D_MipLevelForScale (float scale)
+int D_MipLevelForScale (float scale)
 {
 	int		lmiplevel;
 
@@ -779,7 +779,7 @@ D_FlatFillSurface
 Simple single color fill with no texture mapping
 ==============
 */
-static void D_FlatFillSurface (surf_t *surf, int color)
+void D_FlatFillSurface (surf_t *surf, int color)
 {
 	espan_t	*span;
 	pixel_t	*pdest;
@@ -801,7 +801,7 @@ static void D_FlatFillSurface (surf_t *surf, int color)
 D_CalcGradients
 ==============
 */
-static void D_CalcGradients (msurface_t *pface)
+void D_CalcGradients (msurface_t *pface)
 {
 	mplane_t	*pplane;
 	float		mipscale;
@@ -864,9 +864,9 @@ static void D_CalcGradients (msurface_t *pface)
 	{
 
 		if(pface->flags & SURF_DRAWTURB)
-			sadjust += 0x10000 * (-128 * ( (gp_cl->time * 0.25f) - (int)(gp_cl->time * 0.25f) ));
+			sadjust += 0x10000 * (-128 * ( (gpGlobals->time * 0.25f) - (int)(gpGlobals->time * 0.25f) ));
 		else
-			sadjust += 0x10000 * (-128 * ( (gp_cl->time * 0.77f) - (int)(gp_cl->time * 0.77f) ));
+			sadjust += 0x10000 * (-128 * ( (gpGlobals->time * 0.77f) - (int)(gpGlobals->time * 0.77f) ));
 		bbextents = ((pface->extents[0] << 16) >> miplevel) - 1;
 	}
 	else
@@ -888,7 +888,7 @@ D_BackgroundSurf
 The grey background filler seen when there is a hole in the map
 ==============
 */
-static void D_BackgroundSurf (surf_t *s)
+void D_BackgroundSurf (surf_t *s)
 {
 // set up a gradient for the background surface that places it
 // effectively at infinity distance from the viewpoint
@@ -905,7 +905,7 @@ static void D_BackgroundSurf (surf_t *s)
 D_TurbulentSurf
 =================
 */
-static void D_TurbulentSurf (surf_t *s)
+void D_TurbulentSurf (surf_t *s)
 {
 	d_zistepu = s->d_zistepu;
 	d_zistepv = s->d_zistepv;
@@ -966,6 +966,12 @@ static void D_TurbulentSurf (surf_t *s)
 }
 
 qboolean alphaspans;
+
+
+void D_AlphaSpans16 (espan_t *pspan);
+void D_AddSpans16 (espan_t *pspan);
+void D_BlendSpans16 (espan_t *pspan, int alpha );
+void TurbulentZ8 (espan_t *pspan, int alpha );
 /*
 ==============
 D_SolidSurf
@@ -973,7 +979,7 @@ D_SolidSurf
 Normal surface cached, texture mapped surface
 ==============
 */
-static void D_AlphaSurf (surf_t *s)
+void D_AlphaSurf (surf_t *s)
 {
 	int alpha;
 
@@ -1080,7 +1086,7 @@ D_SolidSurf
 Normal surface cached, texture mapped surface
 ==============
 */
-static void D_SolidSurf (surf_t *s)
+void D_SolidSurf (surf_t *s)
 {
 	d_zistepu = s->d_zistepu;
 	d_zistepv = s->d_zistepv;
@@ -1112,7 +1118,7 @@ static void D_SolidSurf (surf_t *s)
 	{
 		if( alphaspans )
 			return;
-		RI.currententity = CL_GetEntityByIndex(0); //r_worldentity;
+		RI.currententity = gEngfuncs.GetEntityByIndex(0); //r_worldentity;
 		tr.modelviewIdentity = true;
 	}
 
@@ -1191,7 +1197,7 @@ D_DrawflatSurfaces
 To allow developers to see the polygon carving of the world
 =============
 */
-static void D_DrawflatSurfaces (void)
+void D_DrawflatSurfaces (void)
 {
 	surf_t			*s;
 

@@ -70,7 +70,6 @@ static qboolean Image_KTX2Parse( const ktx2_header_t *header, const byte *buffer
 	ktx2_index_t index;
 	size_t total_size = 0;
 	size_t max_offset = 0;
-	int mip, cursor;
 	const byte *const levels_begin = buffer + KTX2_LEVELS_OFFSET;
 
 	// Sets image.type and image.flags
@@ -85,12 +84,6 @@ static qboolean Image_KTX2Parse( const ktx2_header_t *header, const byte *buffer
 	if( !Image_CheckFlag( IL_DDS_HARDWARE ) && ImageCompressed( image.type ))
 	{
 		Con_DPrintf( S_WARN "%s: has compressed format, but support is not advertized\n", __FUNCTION__ );
-		return false;
-	}
-
-	if( header->levelCount == 0 )
-	{
-		Con_DPrintf( S_ERROR "%s: file has no mip levels\n", __FUNCTION__ );
 		return false;
 	}
 
@@ -126,7 +119,7 @@ static qboolean Image_KTX2Parse( const ktx2_header_t *header, const byte *buffer
 
 	memcpy( &index, buffer + KTX2_IDENTIFIER_SIZE + sizeof( ktx2_header_t ), sizeof( index ));
 
-	for( mip = 0; mip < header->levelCount; ++mip )
+	for( int mip = 0; mip < header->levelCount; ++mip )
 	{
 		const uint32_t width = Q_max( 1, ( header->pixelWidth >> mip ));
 		const uint32_t height = Q_max( 1, ( header->pixelHeight >> mip ));
@@ -155,7 +148,7 @@ static qboolean Image_KTX2Parse( const ktx2_header_t *header, const byte *buffer
 	image.rgba = Mem_Malloc( host.imagepool, image.size );
 	memcpy( image.rgba, buffer, image.size );
 
-	for( mip = 0, cursor = 0; mip < header->levelCount; ++mip )
+	for( int mip = 0, cursor = 0; mip < header->levelCount; ++mip )
 	{
 		ktx2_level_t level;
 		memcpy( &level, levels_begin + mip * sizeof( level ), sizeof( level ));

@@ -50,7 +50,7 @@ static net_gai_state_t NET_GetMasterHostByName( master_t *m )
 	if( res == NET_EAI_OK )
 		return res;
 
-	m->adr.type = 0;
+	m->adr.type = NA_UNUSED;
 	if( res == NET_EAI_NONAME )
 		Con_Reportf( "Can't resolve adr: %s\n", m->address );
 
@@ -118,7 +118,7 @@ static void NET_AnnounceToMaster( master_t *m )
 	MSG_WriteBytes( &msg, "q\xFF", 2 );
 	MSG_WriteDword( &msg, m->heartbeat_challenge );
 
-	NET_SendPacket( NS_SERVER, MSG_GetNumBytesWritten( &msg ), MSG_GetData( &msg ), m->adr );
+	NET_SendPacket( NS_SERVER, MSG_GetNumBytesWritten( &msg ), MSG_GetBuf( &msg ), m->adr );
 
 	if( sv_verbose_heartbeats.value )
 	{
@@ -262,11 +262,11 @@ static void NET_AddMaster( const char *addr, qboolean save )
 	}
 
 	master = Mem_Malloc( host.mempool, sizeof( master_t ) );
-	Q_strncpy( master->address, addr, sizeof( master->address ));
+	Q_strncpy( master->address, addr, MAX_STRING );
 	master->sent = false;
 	master->save = save;
 	master->next = NULL;
-	master->adr.type = 0;
+	master->adr.type = NA_UNUSED;
 
 	// link in
 	if( last )
@@ -322,7 +322,7 @@ static void NET_ListMasters_f( void )
 	for( i = 1, list = ml.list; list; i++, list = list->next )
 	{
 		Msg( "%d\t%s", i, list->address );
-		if( list->adr.type != 0 )
+		if( list->adr.type != NA_UNUSED )
 			Msg( "\t%s\n", NET_AdrToString( list->adr ));
 		else Msg( "\n" );
 	}

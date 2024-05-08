@@ -63,7 +63,7 @@ int GAME_EXPORT R_GetSpriteTexture( const model_t *m_pSpriteModel, int frame )
 Draw_StretchPicImplementation
 =============
 */
-static void R_DrawStretchPicImplementation( int x, int y, int w, int h, int s1, int t1, int s2, int t2, image_t	*pic )
+void R_DrawStretchPicImplementation( int x, int y, int w, int h, int s1, int t1, int s2, int t2, image_t	*pic )
 {
 	pixel_t *source, *dest;
 	unsigned int				v, u, sv;
@@ -95,11 +95,7 @@ static void R_DrawStretchPicImplementation( int x, int y, int w, int h, int s1, 
 	//gEngfuncs.Con_Printf ("pixels is %p\n", pic->pixels[0] );
 
 	height = h;
-
-	if( y < -h ) // out of display, out of bounds
-		return;
-
-	if( y < 0 )
+	if (y < 0)
 	{
 		skip = -y;
 		height += y;

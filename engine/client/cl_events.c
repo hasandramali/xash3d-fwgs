@@ -40,7 +40,7 @@ CL_CalcPlayerVelocity
 compute velocity for a given client
 =============
 */
-static void CL_CalcPlayerVelocity( int idx, vec3_t velocity )
+void CL_CalcPlayerVelocity( int idx, vec3_t velocity )
 {
 	clientdata_t	*pcd;
 	vec3_t		delta;
@@ -78,7 +78,7 @@ CL_DescribeEvent
 
 =============
 */
-static void CL_DescribeEvent( event_info_t *ei, int slot )
+void CL_DescribeEvent( event_info_t *ei, int slot )
 {
 	int		idx = (slot & 63) * 2;
 	con_nprint_t	info;
@@ -192,7 +192,7 @@ void CL_RegisterEvent( int lastnum, const char *szEvName, pfnEventHook func )
 	ev = clgame.events[lastnum];
 
 	// NOTE: ev->index will be set later
-	Q_strncpy( ev->name, szEvName, sizeof( ev->name ));
+	Q_strncpy( ev->name, szEvName, MAX_QPATH );
 	ev->func = func;
 }
 
@@ -202,7 +202,7 @@ CL_FireEvent
 
 =============
 */
-static qboolean CL_FireEvent( event_info_t *ei, int slot )
+qboolean CL_FireEvent( event_info_t *ei, int slot )
 {
 	cl_user_event_t	*ev;
 	const char	*name;
@@ -292,7 +292,7 @@ CL_FindEvent
 find first empty event
 =============
 */
-static event_info_t *CL_FindEmptyEvent( void )
+event_info_t *CL_FindEmptyEvent( void )
 {
 	int		i;
 	event_state_t	*es;
@@ -320,7 +320,7 @@ CL_FindEvent
 replace only unreliable events
 =============
 */
-static event_info_t *CL_FindUnreliableEvent( void )
+event_info_t *CL_FindUnreliableEvent( void )
 {
 	event_state_t	*es;
 	event_info_t	*ei;
@@ -350,7 +350,7 @@ CL_QueueEvent
 
 =============
 */
-static void CL_QueueEvent( int flags, int index, float delay, event_args_t *args )
+void CL_QueueEvent( int flags, int index, float delay, event_args_t *args )
 {
 	event_info_t	*ei;
 
@@ -390,11 +390,19 @@ void CL_ParseReliableEvent( sizebuf_t *msg )
 
 	event_index = MSG_ReadUBitLong( msg, MAX_EVENT_BITS );
 
-	if( MSG_ReadOneBit( msg ))
-		delay = (float)MSG_ReadWord( msg ) * (1.0f / 100.0f);
-
 	// reliable events not use delta-compression just null-compression
-	MSG_ReadDeltaEvent( msg, &nullargs, &args );
+	if( cls.legacymode == PROTO_GOLDSRC )
+	{
+		Delta_ReadGSFields( msg, DT_EVENT_T, &nullargs, &args, 0.0f );
+		if( MSG_ReadOneBit( msg ))
+			delay = (float)MSG_ReadWord( msg ) * (1.0f / 100.0f);
+	}
+	else
+	{
+		if( MSG_ReadOneBit( msg ))
+			delay = (float)MSG_ReadWord( msg ) * (1.0f / 100.0f);
+		MSG_ReadDeltaEvent( msg, &nullargs, &args );
+	}
 
 	if( args.entindex > 0 && args.entindex <= cl.maxclients )
 		args.angles[PITCH] *= -3.0f;
@@ -426,15 +434,25 @@ void CL_ParseEvent( sizebuf_t *msg )
 	// parse events queue
 	for( i = 0 ; i < num_events; i++ )
 	{
+		int entity_bits;
+		if( cls.legacymode == PROTO_GOLDSRC )
+			entity_bits = MAX_GOLDSRC_ENTITY_BITS;
+		else if( cls.legacymode == PROTO_LEGACY )
+			entity_bits = MAX_LEGACY_ENTITY_BITS;
+		else
+			entity_bits = MAX_ENTITY_BITS;
+
 		event_index = MSG_ReadUBitLong( msg, MAX_EVENT_BITS );
 
 		if( MSG_ReadOneBit( msg ))
-			packet_index = MSG_ReadUBitLong( msg, cls.legacymode ? MAX_LEGACY_ENTITY_BITS : MAX_ENTITY_BITS );
+			packet_index = MSG_ReadUBitLong( msg, entity_bits );
 		else packet_index = -1;
 
 		if( MSG_ReadOneBit( msg ))
 		{
-			MSG_ReadDeltaEvent( msg, &nullargs, &args );
+			if( cls.legacymode == PROTO_GOLDSRC )
+				Delta_ReadGSFields( msg, DT_EVENT_T, &nullargs, &args, 0.0f );
+			else MSG_ReadDeltaEvent( msg, &nullargs, &args );
 		}
 
 		if( MSG_ReadOneBit( msg ))

@@ -127,7 +127,7 @@ void CL_MoveToOnHandList( resource_t *pResource )
 	CL_AddToResourceList( pResource, &cl.resourcesonhand );
 }
 
-static void CL_ClearResourceList( resource_t *pList )
+void CL_ClearResourceList( resource_t *pList )
 {
 	resource_t	*p, *n;
 

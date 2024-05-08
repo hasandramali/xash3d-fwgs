@@ -134,6 +134,15 @@ void Con_Init( void )
 
 }
 
+void R_ClearAllDecals( void )
+{
+
+}
+int R_CreateDecalList( struct decallist_s *pList )
+{
+	return 0;
+}
+
 void GAME_EXPORT S_StopSound(int entnum, int channel, const char *soundname)
 {
 
@@ -236,16 +245,6 @@ void CL_Crashed( void )
 void CL_HudMessage( const char *pMessage )
 {
 
-}
-
-byte TextureToGamma( byte b )
-{
-	return b;
-}
-
-byte LightToTexGamma( byte b )
-{
-	return b;
 }
 
 #endif // XASH_DEDICATED

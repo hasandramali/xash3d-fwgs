@@ -1475,6 +1475,7 @@ static qboolean SV_RecursiveLightPoint( model_t *model, mnode_t *node, const vec
 	float		ds, dt, s, t;
 	int		sample_size;
 	msurface_t	*surf;
+	mtexinfo_t	*tex;
 	mextrasurf_t	*info;
 	color24		*lm;
 	vec3_t		mid;
@@ -1509,6 +1510,7 @@ static qboolean SV_RecursiveLightPoint( model_t *model, mnode_t *node, const vec
 	{
 		int	smax, tmax;
 
+		tex = surf->texinfo;
 		info = surf->info;
 
 		if( FBitSet( surf->flags, SURF_DRAWTILED ))

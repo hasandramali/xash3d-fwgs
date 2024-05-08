@@ -18,31 +18,6 @@ CVAR_DEFINE_AUTO( r_showtree, "0", FCVAR_ARCHIVE, "build the graph of visible BS
 static CVAR_DEFINE_AUTO( r_refdll, "", FCVAR_RENDERINFO, "choose renderer implementation, if supported" );
 static CVAR_DEFINE_AUTO( r_refdll_loaded, "", FCVAR_READ_ONLY, "currently loaded renderer" );
 
-// there is no need to expose whole host and cl structs into the renderer
-// but we still need to update timings accurately as possible
-// this looks horrible but the only other option would be passing four
-// time pointers and then it's looks even worse with dereferences everywhere
-#define STATIC_OFFSET_CHECK( s1, s2, field, base, msg ) \
-	STATIC_ASSERT( offsetof( s1, field ) == offsetof( s2, field ) - offsetof( s2, base ), msg )
-#define REF_CLIENT_CHECK( field ) \
-	STATIC_OFFSET_CHECK( ref_client_t, client_t, field, time, "broken ref_client_t offset" ); \
-	STATIC_ASSERT_( szchk_##__LINE__, sizeof(((ref_client_t *)0)->field ) == sizeof( cl.field ), "broken ref_client_t size" )
-#define REF_HOST_CHECK( field ) \
-	STATIC_OFFSET_CHECK( ref_host_t, host_parm_t, field, realtime, "broken ref_client_t offset" ); \
-	STATIC_ASSERT_( szchk_##__LINE__, sizeof(((ref_host_t *)0)->field ) == sizeof( host.field ), "broken ref_client_t size" )
-
-REF_CLIENT_CHECK( time );
-REF_CLIENT_CHECK( oldtime );
-REF_CLIENT_CHECK( viewentity );
-REF_CLIENT_CHECK( playernum );
-REF_CLIENT_CHECK( maxclients );
-REF_CLIENT_CHECK( models );
-REF_CLIENT_CHECK( paused );
-REF_CLIENT_CHECK( simorg );
-REF_HOST_CHECK( realtime );
-REF_HOST_CHECK( frametime );
-REF_HOST_CHECK( features );
-
 void R_GetTextureParms( int *w, int *h, int texnum )
 {
 	if( w ) *w = REF_GET_PARM( PARM_TEX_WIDTH, texnum );
@@ -67,8 +42,18 @@ void GAME_EXPORT GL_FreeImage( const char *name )
 		 ref.dllFuncs.GL_FreeTexture( texnum );
 }
 
+void R_UpdateRefState( void )
+{
+	refState.time      = cl.time;
+	refState.oldtime   = cl.oldtime;
+	refState.realtime  = host.realtime;
+	refState.frametime = host.frametime;
+}
+
 void GL_RenderFrame( const ref_viewpass_t *rvp )
 {
+	R_UpdateRefState();
+
 	VectorCopy( rvp->vieworigin, refState.vieworg );
 	VectorCopy( rvp->viewangles, refState.viewangles );
 
@@ -78,6 +63,11 @@ void GL_RenderFrame( const ref_viewpass_t *rvp )
 static intptr_t pfnEngineGetParm( int parm, int arg )
 {
 	return CL_RenderGetParm( parm, arg, false ); // prevent recursion
+}
+
+static world_static_t *pfnGetWorld( void )
+{
+	return &world;
 }
 
 static void pfnStudioEvent( const mstudioevent_t *event, const cl_entity_t *e )
@@ -109,10 +99,14 @@ static void *pfnMod_Extradata( int type, model_t *m )
 	return NULL;
 }
 
-static void CL_ExtraUpdate( void )
+static void pfnGetPredictedOrigin( vec3_t v )
 {
-	clgame.dllFuncs.IN_Accumulate();
-	S_ExtraUpdate();
+	VectorCopy( cl.simorg, v );
+}
+
+static color24 *pfnCL_GetPaletteColor( int color ) // clgame.palette[color]
+{
+	return &clgame.palette[color];
 }
 
 static void pfnCL_GetScreenInfo( int *width, int *height ) // clgame.scrInfo, ptrs may be NULL
@@ -164,6 +158,11 @@ static int pfnGetStudioModelInterface( int version, struct r_studio_interface_s 
 		0;
 }
 
+static poolhandle_t pfnImage_GetPool( void )
+{
+	return host.imagepool;
+}
+
 static const bpc_desc_t *pfnImage_GetPFDesc( int idx )
 {
 	return &PFDesc[idx];
@@ -182,6 +181,25 @@ static void pfnDrawTransparentTriangles( void )
 static screenfade_t *pfnRefGetScreenFade( void )
 {
 	return &clgame.fade;
+}
+
+/*
+===============
+R_DoResetGamma
+gamma will be reset for
+some type of screenshots
+===============
+*/
+static qboolean R_DoResetGamma( void )
+{
+	switch( cls.scrshot_action )
+	{
+	case scrshot_envshot:
+	case scrshot_skyshot:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static qboolean R_Init_Video_( const int type )
@@ -228,12 +246,16 @@ static ref_api_t gEngfuncs =
 	Con_DrawString,
 	CL_DrawCenterPrint,
 
+	CL_GetLocalPlayer,
+	CL_GetViewModel,
+	CL_GetEntityByIndex,
 	R_BeamGetEntity,
 	CL_GetWaterEntity,
 	CL_AddVisibleEntity,
 
 	Mod_SampleSizeForFace,
 	Mod_BoxVisible,
+	pfnGetWorld,
 	Mod_PointInLeaf,
 	Mod_CreatePolygonsForHull,
 
@@ -250,9 +272,12 @@ static ref_api_t gEngfuncs =
 
 	Mod_ForName,
 	pfnMod_Extradata,
+	CL_ModelHandle,
 
-	CL_EntitySetRemapColors,
 	CL_GetRemapInfoForEntity,
+	CL_AllocRemapInfo,
+	CL_FreeRemapInfo,
+	CL_UpdateRemapInfo,
 
 	CL_ExtraUpdate,
 	Host_Error,
@@ -260,6 +285,9 @@ static ref_api_t gEngfuncs =
 	COM_RandomFloat,
 	COM_RandomLong,
 	pfnRefGetScreenFade,
+	CL_TextMessageGet,
+	pfnGetPredictedOrigin,
+	pfnCL_GetPaletteColor,
 	pfnCL_GetScreenInfo,
 	pfnSetLocalLightLevel,
 	Sys_CheckParm,
@@ -293,11 +321,9 @@ static ref_api_t gEngfuncs =
 	SW_LockBuffer,
 	SW_UnlockBuffer,
 
+	BuildGammaTable,
 	LightToTexGamma,
-	LightToTexGammaEx,
-	TextureToGamma,
-	ScreenGammaTable,
-	LinearGammaTable,
+	R_DoResetGamma,
 
 	CL_GetLightStyle,
 	CL_GetDynamicLight,
@@ -311,6 +337,7 @@ static ref_api_t gEngfuncs =
 	PM_CL_TraceLine,
 	CL_VisTraceLine,
 	CL_TraceLine,
+	pfnGetMoveVars,
 
 	Image_AddCmdFlags,
 	Image_SetForceFlags,
@@ -322,6 +349,7 @@ static ref_api_t gEngfuncs =
 	FS_CopyImage,
 	FS_FreeImage,
 	Image_SetMDLPointer,
+	pfnImage_GetPool,
 	pfnImage_GetPFDesc,
 
 	pfnDrawNormalTriangles,
@@ -403,7 +431,7 @@ static qboolean R_LoadProgs( const char *name )
 	// make local copy of engfuncs to prevent overwrite it with user dll
 	memcpy( &gpEngfuncs, &gEngfuncs, sizeof( gpEngfuncs ));
 
-	if( GetRefAPI( REF_API_VERSION, &ref.dllFuncs, &gpEngfuncs, &refState ) != REF_API_VERSION )
+	if( !GetRefAPI( REF_API_VERSION, &ref.dllFuncs, &gpEngfuncs, &refState ))
 	{
 		COM_FreeLibrary( ref.hInstance );
 		Con_Reportf( "R_LoadProgs: can't init renderer API: wrong version\n" );
@@ -541,9 +569,6 @@ static void R_CollectRendererNames( void )
 #if XASH_REF_GL4ES_ENABLED
 		"gl4es",
 #endif
-#if XASH_REF_GLES3COMPAT_ENABLED
-		"gles3compat",
-#endif
 #if XASH_REF_SOFT_ENABLED
 		"soft",
 #endif
@@ -563,9 +588,6 @@ static void R_CollectRendererNames( void )
 #endif
 #if XASH_REF_GL4ES_ENABLED
 		"GL4ES",
-#endif
-#if XASH_REF_GLES3COMPAT_ENABLED
-		"GLES3 (gl2_shim)",
 #endif
 #if XASH_REF_SOFT_ENABLED
 		"Software",
@@ -611,7 +633,6 @@ qboolean R_Init( void )
 
 	// cvars that are expected to exist by client.dll
 	// refdll should just get pointer to them
-	Cvar_Get( "r_lighting_modulate", "0.6", FCVAR_ARCHIVE, "compatibility cvar, does nothing" );
 	Cvar_Get( "r_drawentities", "1", FCVAR_CHEAT, "render entities" );
 	Cvar_Get( "cl_himodels", "1", FCVAR_ARCHIVE, "draw high-resolution player models in multiplayer" );
 

@@ -252,7 +252,7 @@ VID_WriteOverviewScript
 Create overview script file
 ===============
 */
-static void VID_WriteOverviewScript( void )
+void VID_WriteOverviewScript( void )
 {
 	ref_overview_t	*ov = &clgame.overView;
 	string		filename;
@@ -288,14 +288,9 @@ void SCR_MakeScreenShot( void )
 	qboolean	iRet = false;
 	int	viewsize;
 
-	if( cls.scrshot_action == scrshot_inactive )
-		return;
-
 	if( cls.envshot_viewsize > 0 )
 		viewsize = cls.envshot_viewsize;
 	else viewsize = cl_envshot_size.value;
-
-	V_CheckGamma();
 
 	switch( cls.scrshot_action )
 	{
@@ -322,6 +317,8 @@ void SCR_MakeScreenShot( void )
 		if( iRet )
 			VID_WriteOverviewScript(); // store overview script too
 		break;
+	case scrshot_inactive:
+		return;
 	}
 
 	// report
@@ -345,7 +342,7 @@ void SCR_MakeScreenShot( void )
 SCR_DrawPlaque
 ================
 */
-static void SCR_DrawPlaque( void )
+void SCR_DrawPlaque( void )
 {
 	if(( cl_allow_levelshots.value && !cls.changelevel ) || cl.background )
 	{
@@ -416,7 +413,7 @@ void SCR_EndLoadingPlaque( void )
 SCR_AddDirtyPoint
 =================
 */
-static void SCR_AddDirtyPoint( int x, int y )
+void SCR_AddDirtyPoint( int x, int y )
 {
 	if( x < scr_dirty.x1 ) scr_dirty.x1 = x;
 	if( x > scr_dirty.x2 ) scr_dirty.x2 = x;
@@ -573,15 +570,15 @@ void SCR_LoadCreditsFont( void )
 			"creditsfont_%s.fnt", Cvar_VariableString( "con_charset" )) > 0 )
 		{
 			if( FS_FileExists( charsetFnt, false ))
-				success = Con_LoadVariableWidthFont( charsetFnt, font, scale, &hud_fontrender, TF_FONT );
+				success = Con_LoadVariableWidthFont( charsetFnt, font, scale, kRenderTransAdd, TF_FONT );
 		}
 	}
 
 	if( !success )
-		success = Con_LoadVariableWidthFont( "gfx/creditsfont.fnt", font, scale, &hud_fontrender, TF_FONT );
+		success = Con_LoadVariableWidthFont( "gfx/creditsfont.fnt", font, scale, kRenderTransAdd, TF_FONT );
 
 	if( !success )
-		success = Con_LoadFixedWidthFont( "gfx/conchars", font, scale, &hud_fontrender, TF_FONT );
+		success = Con_LoadFixedWidthFont( "gfx/conchars", font, scale, kRenderTransAdd, TF_FONT );
 
 	// copy font size for client.dll
 	if( success )
@@ -603,7 +600,7 @@ SCR_InstallParticlePalette
 INTERNAL RESOURCE
 ================
 */
-static void SCR_InstallParticlePalette( void )
+void SCR_InstallParticlePalette( void )
 {
 	rgbdata_t	*pic;
 	int	i;
@@ -649,21 +646,21 @@ void SCR_RegisterTextures( void )
 	// register gfx.wad images
 
 	if( FS_FileExists( "gfx/paused.lmp", false ))
-		cls.pauseIcon = ref.dllFuncs.GL_LoadTexture( "gfx/paused.lmp", NULL, 0, TF_IMAGE|TF_ALLOW_NEAREST );
+		cls.pauseIcon = ref.dllFuncs.GL_LoadTexture( "gfx/paused.lmp", NULL, 0, TF_IMAGE );
 	else if( FS_FileExists( "gfx/pause.lmp", false ))
-		cls.pauseIcon = ref.dllFuncs.GL_LoadTexture( "gfx/pause.lmp", NULL, 0, TF_IMAGE|TF_ALLOW_NEAREST );
+		cls.pauseIcon = ref.dllFuncs.GL_LoadTexture( "gfx/pause.lmp", NULL, 0, TF_IMAGE );
 
 	if( FS_FileExists( "gfx/lambda.lmp", false ))
 	{
 		if( cl_allow_levelshots.value )
-			cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/lambda.lmp", NULL, 0, TF_IMAGE|TF_LUMINANCE|TF_ALLOW_NEAREST );
-		else cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/lambda.lmp", NULL, 0, TF_IMAGE|TF_ALLOW_NEAREST );
+			cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/lambda.lmp", NULL, 0, TF_IMAGE|TF_LUMINANCE );
+		else cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/lambda.lmp", NULL, 0, TF_IMAGE );
 	}
 	else if( FS_FileExists( "gfx/loading.lmp", false ))
 	{
 		if( cl_allow_levelshots.value )
-			cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/loading.lmp", NULL, 0, TF_IMAGE|TF_LUMINANCE|TF_ALLOW_NEAREST );
-		else cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/loading.lmp", NULL, 0, TF_IMAGE|TF_ALLOW_NEAREST );
+			cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/loading.lmp", NULL, 0, TF_IMAGE|TF_LUMINANCE );
+		else cls.loadingBar = ref.dllFuncs.GL_LoadTexture( "gfx/loading.lmp", NULL, 0, TF_IMAGE );
 	}
 
 	cls.tileImage = ref.dllFuncs.GL_LoadTexture( "gfx/backtile.lmp", NULL, 0, TF_NOMIPMAP );
@@ -676,7 +673,7 @@ SCR_SizeUp_f
 Keybinding command
 =================
 */
-static void SCR_SizeUp_f( void )
+void SCR_SizeUp_f( void )
 {
 	Cvar_SetValue( "viewsize", Q_min( scr_viewsize.value + 10, 120 ));
 }
@@ -689,7 +686,7 @@ SCR_SizeDown_f
 Keybinding command
 =================
 */
-static void SCR_SizeDown_f( void )
+void SCR_SizeDown_f( void )
 {
 	Cvar_SetValue( "viewsize", Q_max( scr_viewsize.value - 10, 30 ));
 }

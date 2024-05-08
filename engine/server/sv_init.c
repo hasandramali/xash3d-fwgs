@@ -28,17 +28,6 @@ server_static_t	svs;	// persistant server info
 svgame_static_t	svgame;	// persistant game info
 
 /*
-==================
-Host_SetServerState
-==================
-*/
-static void Host_SetServerState( int state )
-{
-	Cvar_FullSet( "host_serverstate", va( "%i", state ), FCVAR_READ_ONLY );
-	sv.state = state;
-}
-
-/*
 ================
 SV_AddResource
 
@@ -67,7 +56,7 @@ SV_SendSingleResource
 hot precache on a flying
 ================
 */
-static void SV_SendSingleResource( const char *name, resourcetype_t type, int index, byte flags )
+void SV_SendSingleResource( const char *name, resourcetype_t type, int index, byte flags )
 {
 	resource_t	*pResource = &sv.resources[sv.num_resources];
 	int		nSize = 0;
@@ -295,22 +284,7 @@ static resourcetype_t SV_DetermineResourceType( const char *filename )
 		return t_generic;
 }
 
-static const char *SV_GetResourceTypeName( resourcetype_t restype )
-{
-	switch( restype )
-	{
-		case t_decal: return "decal";
-		case t_eventscript: return "eventscript";
-		case t_generic: return "generic";
-		case t_model: return "model";
-		case t_skin: return "skin";
-		case t_sound: return "sound";
-		case t_world: return "world";
-		default: return "unknown";
-	}
-}
-
-static void SV_ReadResourceList( const char *filename )
+void SV_ReadResourceList( const char *filename )
 {
 	string token;
 	byte *afile;
@@ -332,7 +306,7 @@ static void SV_ReadResourceList( const char *filename )
 
 		COM_FixSlashes( token );
 		restype = SV_DetermineResourceType( token );
-		Con_DPrintf( "  %s (%s)\n", token, SV_GetResourceTypeName( restype ));
+		Con_DPrintf( "  %s (%s)\n", token, COM_GetResourceTypeName( restype ));
 		switch( restype )
 		{
 			// TODO do we need to handle other resource types specifically too?
@@ -360,7 +334,7 @@ SV_CreateGenericResources
 loads external resource list
 ================
 */
-static void SV_CreateGenericResources( void )
+void SV_CreateGenericResources( void )
 {
 	string	filename;
 
@@ -379,7 +353,7 @@ SV_CreateResourceList
 add resources to common list
 ================
 */
-static void SV_CreateResourceList( void )
+void SV_CreateResourceList( void )
 {
 	qboolean	ffirstsent = false;
 	int	i, nSize;
@@ -444,7 +418,7 @@ static void SV_CreateResourceList( void )
 SV_WriteVoiceCodec
 ================
 */
-static void SV_WriteVoiceCodec( sizebuf_t *msg )
+void SV_WriteVoiceCodec( sizebuf_t *msg )
 {
 	MSG_BeginServerCmd( msg, svc_voiceinit );
 	MSG_WriteString( msg, VOICE_DEFAULT_CODEC );
@@ -462,15 +436,14 @@ baseline will be transmitted
 INTERNAL RESOURCE
 ================
 */
-static void SV_CreateBaseline( void )
+void SV_CreateBaseline( void )
 {
 	entity_state_t	nullstate, *base;
 	int		playermodel;
 	int		delta_type;
 	int		entnum;
 
-	if( svs.maxclients > 1 )
-		SV_WriteVoiceCodec( &sv.signon );
+	SV_WriteVoiceCodec( &sv.signon );
 
 	if( FBitSet( host.features, ENGINE_QUAKE_COMPATIBLE ))
 		playermodel = SV_ModelIndex( DEFAULT_PLAYER_PATH_QUAKE );
@@ -572,7 +545,7 @@ void SV_FreeOldEntities( void )
 	}
 
 	// decrement svgame.numEntities if the highest number entities died
-	for( ; ( ent = EDICT_NUM( svgame.numEntities - 1 )) && ent->free; svgame.numEntities-- );
+	for( ; EDICT_NUM( svgame.numEntities - 1 )->free; svgame.numEntities-- );
 }
 
 /*
@@ -673,6 +646,14 @@ void SV_ActivateServer( int runPhysics )
 
 	if( sv.ignored_world_decals )
 		Con_Printf( S_WARN "%i static decals was rejected due buffer overflow\n", sv.ignored_world_decals );
+
+	if( svs.maxclients > 1 )
+	{
+		const char *cycle = Cvar_VariableString( "mapchangecfgfile" );
+
+		if( COM_CheckString( cycle ))
+			Cbuf_AddTextf( "exec %s\n", cycle );
+	}
 }
 
 /*
@@ -685,13 +666,6 @@ deactivate server, free edicts, strings etc
 void SV_DeactivateServer( void )
 {
 	int	i;
-	const char	*cycle = Cvar_VariableString( "disconcfgfile" );
-
-	if( COM_CheckString( cycle ))
-		Cbuf_AddTextf( "exec %s\n", cycle );
-
-	if( COM_CheckStringEmpty( sv.name ))
-		Cbuf_AddTextf( "exec maps/%s_unload.cfg\n", sv.name );
 
 	if( !svs.initialized || sv.state == ss_dead )
 		return;
@@ -784,7 +758,7 @@ SV_SetupClients
 determine the game type and prepare clients
 ================
 */
-static void SV_SetupClients( void )
+void SV_SetupClients( void )
 {
 	qboolean	changed_maxclients = false;
 
@@ -922,11 +896,11 @@ static void SV_GenerateTestPacket( void )
 	// testpacket already generated once, exit
 	// testpacket and lookup table takes ~300k of memory
 	// disable for low memory mode
-	if( svs.testpacket_buf || XASH_LOW_MEMORY > 0 )
+	if( svs.testpacket_buf || XASH_LOW_MEMORY >= 0 )
 		return;
 
 	// don't need in singleplayer with full client
-	if( svs.maxclients <= 1 )
+	if( svs.maxclients <= 1 && !Host_IsDedicated( ))
 		return;
 
 	file = FS_Open( "gfx.wad", "rb", false );
@@ -987,9 +961,8 @@ clients along with it.
 */
 qboolean SV_SpawnServer( const char *mapname, const char *startspot, qboolean background )
 {
-	int		i, current_skill;
-	edict_t		*ent;
-	const char	*cycle;
+	int	i, current_skill;
+	edict_t	*ent;
 
 	SV_SetupClients();
 
@@ -1006,13 +979,6 @@ qboolean SV_SpawnServer( const char *mapname, const char *startspot, qboolean ba
 
 	svs.timestart = Sys_DoubleTime();
 	svs.spawncount++; // any partially connected client will be restarted
-
-	cycle = Cvar_VariableString( "mapchangecfgfile" );
-
-	if( COM_CheckString( cycle ))
-		Cbuf_AddTextf( "exec %s\n", cycle );
-
-	Cbuf_AddTextf( "exec maps/%s_load.cfg\n", mapname );
 
 	// let's not have any servers with no name
 	if( !COM_CheckString( hostname.string ))

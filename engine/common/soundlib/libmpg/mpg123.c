@@ -15,7 +15,6 @@ GNU General Public License for more details.
 
 #include "mpg123.h"
 #include "sample.h"
-#include "libmpg.h"
 
 static int	initialized = 0;
 
@@ -84,7 +83,7 @@ mpg123_handle_t *mpg123_parnew( mpg123_parm_t *mp, int *error )
 	return fr;
 }
 
-static int mpg123_par( mpg123_parm_t *mp, enum mpg123_parms key, long val )
+int mpg123_par( mpg123_parm_t *mp, enum mpg123_parms key, long val )
 {
 	int	ret = MPG123_OK;
 
@@ -190,7 +189,7 @@ int mpg123_param( mpg123_handle_t *mh, enum mpg123_parms key, long val )
 	}
 }
 
-static int mpg123_close( mpg123_handle_t *mh )
+int mpg123_close( mpg123_handle_t *mh )
 {
 	if( mh == NULL )
 		return MPG123_BAD_HANDLE;
@@ -264,7 +263,7 @@ int mpg123_replace_reader_handle( mpg123_handle_t *mh, mpg_ssize_t (*fread)( voi
 // a) a new choice of decoder
 // b) a changed native format of the MPEG stream
 // ... calls are only valid after parsing some MPEG frame!
-static int decode_update( mpg123_handle_t *mh )
+int decode_update( mpg123_handle_t *mh )
 {
 	long	native_rate;
 	int	b;
@@ -321,13 +320,13 @@ static int decode_update( mpg123_handle_t *mh )
 	return 0;
 }
 
-static size_t mpg123_safe_buffer( void )
+size_t mpg123_safe_buffer( void )
 {
 	// real is the largest possible output
 	return sizeof( float ) * 2 * 1152;
 }
 
-static size_t mpg123_outblock( mpg123_handle_t *mh )
+size_t mpg123_outblock( mpg123_handle_t *mh )
 {
 	// try to be helpful and never return zero output block size.
 	if( mh != NULL && mh->outblock > 0 )
@@ -698,7 +697,7 @@ int mpg123_getformat( mpg123_handle_t *mh, int *rate, int *channels, int *encodi
 	return MPG123_OK;
 }
 
-static int mpg123_scan( mpg123_handle_t *mh )
+int mpg123_scan( mpg123_handle_t *mh )
 {
 	mpg_off_t	track_frames = 0;
 	mpg_off_t	track_samples = 0;
@@ -964,10 +963,8 @@ const char *mpg123_plain_strerror( int errcode )
 	}
 }
 
-const char *get_error( void *handle )
+const char *get_error( mpg123_handle_t *mh )
 {
-	mpg123_handle_t *mh = handle;
-
 	if( !mh ) return mpg123_plain_strerror( MPG123_BAD_HANDLE );
 	return mpg123_plain_strerror( mh->err );
 }

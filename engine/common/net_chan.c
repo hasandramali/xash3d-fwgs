@@ -18,6 +18,9 @@ GNU General Public License for more details.
 #include "xash3d_mathlib.h"
 #include "net_encode.h"
 #include "protocol.h"
+#if !XASH_DEDICATED
+#include "bzip2/bzlib.h"
+#endif // !XASH_DEDICATED
 
 #define MAKE_FRAGID( id, count )	((( id & 0xffff ) << 16 ) | ( count & 0xffff ))
 #define FRAG_GETID( fragid )		(( fragid >> 16 ) & 0xffff )
@@ -199,6 +202,44 @@ qboolean NetSplit_GetLong( netsplit_t *ns, netadr_t *from, byte *data, size_t *l
 }
 
 /*
+======================
+NetSplit_SendLong
+
+Send parts that are less or equal maxpacket
+======================
+*/
+void NetSplit_SendLong( netsrc_t sock, size_t length, void *data, netadr_t to, unsigned int maxpacket, unsigned int id)
+{
+	netsplit_packet_t packet = {0};
+	unsigned int part = maxpacket - NETSPLIT_HEADER_SIZE;
+
+	packet.signature = LittleLong(0xFFFFFFFE);
+	packet.id = LittleLong(id);
+	packet.length = LittleLong(length);
+	packet.part = LittleLong(part);
+	packet.count = ( length - 1 ) / part + 1;
+
+	//Con_Reportf( S_NOTE "NetSplit_SendLong: packet to %s, count %d, length %d\n", NET_AdrToString( to ), (int)packet.count, (int)packet.length );
+
+	while( packet.index < packet.count  )
+	{
+		unsigned int size = part;
+
+		if( size > length )
+			size = length;
+
+		length -= size;
+
+		memcpy( packet.data, (const byte*)data + packet.index * part, size );
+		//Con_Reportf( S_NOTE "NetSplit_SendLong: packet to %s, id %d, index %d\n", NET_AdrToString( to ), (int)packet.id, (int)packet.index );
+
+		NET_SendPacket( sock, size + NETSPLIT_HEADER_SIZE, &packet, to );
+		packet.index++;
+	}
+
+}
+
+/*
 ===============
 Netchan_Init
 ===============
@@ -265,7 +306,7 @@ Netchan_Setup
 called to open a channel to a remote system
 ==============
 */
-void Netchan_Setup( netsrc_t sock, netchan_t *chan, netadr_t adr, int qport, void *client, int (*pfnBlockSize)(void *, fragsize_t mode ))
+void Netchan_Setup( netsrc_t sock, netchan_t *chan, netadr_t adr, int qport, void *client, int (*pfnBlockSize)(void *, fragsize_t mode ), unsigned int flags )
 {
 	Netchan_Clear( chan );
 
@@ -281,6 +322,10 @@ void Netchan_Setup( netsrc_t sock, netchan_t *chan, netadr_t adr, int qport, voi
 	chan->qport = qport;
 	chan->client = client;
 	chan->pfnBlockSize = pfnBlockSize;
+	chan->split      = FBitSet( flags, NETCHAN_USE_LEGACY_SPLIT ) ? 1 : 0;
+	chan->use_munge  = FBitSet( flags, NETCHAN_USE_MUNGE ) ? 1 : 0;
+	chan->use_bz2    = FBitSet( flags, NETCHAN_USE_BZIP2 ) ? 1 : 0;
+	chan->gs_netchan = FBitSet( flags, NETCHAN_GOLDSRC ) ? 1 : 0;
 
 	MSG_Init( &chan->message, "NetData", chan->message_buf, sizeof( chan->message_buf ));
 }
@@ -329,7 +374,7 @@ Netchan_UnlinkFragment
 
 ==============================
 */
-static void Netchan_UnlinkFragment( fragbuf_t *buf, fragbuf_t **list )
+void Netchan_UnlinkFragment( fragbuf_t *buf, fragbuf_t **list )
 {
 	fragbuf_t	*search;
 
@@ -367,7 +412,7 @@ Netchan_ClearFragbufs
 
 ==============================
 */
-static void Netchan_ClearFragbufs( fragbuf_t **ppbuf )
+void Netchan_ClearFragbufs( fragbuf_t **ppbuf )
 {
 	fragbuf_t	*buf, *n;
 
@@ -393,7 +438,7 @@ Netchan_ClearFragments
 
 ==============================
 */
-static void Netchan_ClearFragments( netchan_t *chan )
+void Netchan_ClearFragments( netchan_t *chan )
 {
 	fragbufwaiting_t	*wait, *next;
 	int		i;
@@ -501,7 +546,7 @@ Netchan_AllocFragbuf
 
 ==============================
 */
-static fragbuf_t *Netchan_AllocFragbuf( int fragment_size )
+fragbuf_t *Netchan_AllocFragbuf( int fragment_size )
 {
 	fragbuf_t	*buf;
 
@@ -518,7 +563,7 @@ Netchan_AddFragbufToTail
 
 ==============================
 */
-static void Netchan_AddFragbufToTail( fragbufwaiting_t *wait, fragbuf_t *buf )
+void Netchan_AddFragbufToTail( fragbufwaiting_t *wait, fragbuf_t *buf )
 {
 	fragbuf_t	*p;
 
@@ -541,7 +586,7 @@ Netchan_UpdateFlow
 
 ==============================
 */
-static void Netchan_UpdateFlow( netchan_t *chan )
+void Netchan_UpdateFlow( netchan_t *chan )
 {
 	float	faccumulatedtime = 0.0;
 	int	i, bytes = 0;
@@ -680,7 +725,19 @@ static void Netchan_CreateFragments_( netchan_t *chan, sizebuf_t *msg )
 
 	wait = (fragbufwaiting_t *)Mem_Calloc( net_mempool, sizeof( fragbufwaiting_t ));
 
-	if( !LZSS_IsCompressed( MSG_GetData( msg )))
+	if( chan->use_bz2 && memcmp( MSG_GetData( msg ), "BZ2", 4 ))
+	{
+		byte pbOut[0x10000];
+		uint uCompressedSize = MSG_GetNumBytesWritten( msg ) - 4;
+		if( !BZ2_bzBuffToBuffCompress( pbOut, &uCompressedSize, MSG_GetData( msg ), MSG_GetNumBytesWritten( msg ), 9, 0, 30 ))
+		{
+			Con_Reportf( "Compressing split packet with BZip2 (%d -> %d bytes)\n", MSG_GetNumBytesWritten( msg ), uCompressedSize );
+			memcpy( msg->pData, "BZ2", 4 );
+			memcpy( msg->pData + 4, pbOut, uCompressedSize );
+			MSG_SeekToBit( msg, uCompressedSize << 3, SEEK_SET );
+		}
+	}
+	else if( !chan->use_bz2 && !LZSS_IsCompressed( MSG_GetData( msg )))
 	{
 		uint	uCompressedSize = 0;
 		uint	uSourceSize = MSG_GetNumBytesWritten( msg );
@@ -688,7 +745,7 @@ static void Netchan_CreateFragments_( netchan_t *chan, sizebuf_t *msg )
 
 		if( pbOut && uCompressedSize > 0 && uCompressedSize < uSourceSize )
 		{
-			Con_Reportf( "Compressing split packet (%d -> %d bytes)\n", uSourceSize, uCompressedSize );
+			Con_Reportf( "Compressing split packet with LZSS (%d -> %d bytes)\n", uSourceSize, uCompressedSize );
 			memcpy( msg->pData, pbOut, uCompressedSize );
 			MSG_SeekToBit( msg, uCompressedSize << 3, SEEK_SET );
 		}
@@ -753,7 +810,7 @@ Netchan_FindBufferById
 
 ==============================
 */
-static fragbuf_t *Netchan_FindBufferById( fragbuf_t **pplist, int id, qboolean allocate )
+fragbuf_t *Netchan_FindBufferById( fragbuf_t **pplist, int id, qboolean allocate )
 {
 	fragbuf_t	*list = *pplist;
 	fragbuf_t	*pnewbuf;
@@ -783,7 +840,7 @@ Netchan_CheckForCompletion
 
 ==============================
 */
-static void Netchan_CheckForCompletion( netchan_t *chan, int stream, int intotalbuffers )
+void Netchan_CheckForCompletion( netchan_t *chan, int stream, int intotalbuffers )
 {
 	int	c, id;
 	int	size;
@@ -1085,7 +1142,16 @@ qboolean Netchan_CopyNormalFragments( netchan_t *chan, sizebuf_t *msg, size_t *l
 		p = n;
 	}
 
-	if( LZSS_IsCompressed( MSG_GetData( msg )))
+	if( chan->use_bz2 && !memcmp( MSG_GetData( msg ), "BZ2", 4 ) )
+	{
+		byte buf[0x10000];
+		uint uDecompressedLen = sizeof( buf );
+
+		BZ2_bzBuffToBuffDecompress( buf, &uDecompressedLen, MSG_GetData( msg ) + 4, MSG_GetNumBytesWritten( msg ) - 4, 1, 0 );
+		memcpy( msg->pData, buf, uDecompressedLen );
+		size = uDecompressedLen;
+	}
+	else if( !chan->use_bz2 && LZSS_IsCompressed( MSG_GetData( msg )))
 	{
 		uint	uDecompressedLen = LZSS_GetActualSize( MSG_GetData( msg ));
 		byte	buf[NET_MAX_MESSAGE];
@@ -1122,7 +1188,8 @@ Netchan_CopyFileFragments
 */
 qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 {
-	char	filename[MAX_OSPATH];
+	char filename[MAX_OSPATH], compressor[32];
+	uint uncompressedSize;
 	int	nsize, pos;
 	byte	*buffer;
 	fragbuf_t	*p, *n;
@@ -1145,6 +1212,15 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 	MSG_Clear( msg );
 
 	Q_strncpy( filename, MSG_ReadString( msg ), sizeof( filename ));
+	if( chan->gs_netchan )
+	{
+		Q_strncpy( compressor, MSG_ReadString( msg ), sizeof( compressor ));
+		uncompressedSize = MSG_ReadLong( msg );
+	}
+	else
+	{
+		compressor[0] = 0;
+	}
 
 	if( !COM_CheckString( filename ))
 	{
@@ -1215,10 +1291,25 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 		p = n;
 	}
 
-	if( LZSS_IsCompressed( buffer ))
+	if( chan->gs_netchan && chan->use_bz2 )
 	{
-		uint	uncompressedSize = LZSS_GetActualSize( buffer ) + 1;
-		byte	*uncompressedBuffer = Mem_Calloc( net_mempool, uncompressedSize );
+		if( !Q_stricmp( compressor, "bz2" ))
+		{
+			byte *uncompressedBuffer = Mem_Calloc( net_mempool, uncompressedSize );
+
+			Con_DPrintf( "Decompressing file %s (%d -> %d bytes)\n", filename, nsize, uncompressedSize );
+			BZ2_bzBuffToBuffDecompress( uncompressedBuffer, &uncompressedSize, buffer, nsize, 1, 0 );
+			Mem_Free( buffer );
+			nsize = uncompressedSize;
+			buffer = uncompressedBuffer;
+		}
+	}
+	else if( LZSS_IsCompressed( buffer ))
+	{
+		byte	*uncompressedBuffer;
+
+		uncompressedSize = LZSS_GetActualSize( buffer ) + 1;
+		uncompressedBuffer = Mem_Calloc( net_mempool, uncompressedSize );
 
 		nsize = LZSS_Decompress( buffer, uncompressedBuffer );
 		Mem_Free( buffer );
@@ -1249,7 +1340,7 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 	return true;
 }
 
-static qboolean Netchan_Validate( netchan_t *chan, sizebuf_t *sb, qboolean *frag_message, uint *fragid, int *frag_offset, int *frag_length )
+qboolean Netchan_Validate( netchan_t *chan, sizebuf_t *sb, qboolean *frag_message, uint *fragid, int *frag_offset, int *frag_length )
 {
 	int	i, buffer, offset;
 	int	count, length;
@@ -1581,7 +1672,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, byte *data )
 	MSG_WriteLong( &send, w2 );
 
 	// send the qport if we are a client
-	if( chan->sock == NS_CLIENT )
+	if( chan->sock == NS_CLIENT && !chan->gs_netchan )
 	{
 		MSG_WriteWord( &send, Cvar_VariableInteger( "net_qport" ));
 	}
@@ -1594,8 +1685,16 @@ void Netchan_TransmitBits( netchan_t *chan, int length, byte *data )
 			{
 				MSG_WriteByte( &send, 1 );
 				MSG_WriteLong( &send, chan->reliable_fragid[i] );
-				MSG_WriteLong( &send, chan->frag_startpos[i] );
-				MSG_WriteLong( &send, chan->frag_length[i] );
+				if( chan->gs_netchan )
+				{
+					MSG_WriteShort( &send, chan->frag_startpos[i] >> 3 );
+					MSG_WriteShort( &send, chan->frag_length[i] >> 3 );
+				}
+				else
+				{
+					MSG_WriteLong( &send, chan->frag_startpos[i] );
+					MSG_WriteLong( &send, chan->frag_length[i] );
+				}
 			}
 			else
 			{
@@ -1652,6 +1751,10 @@ void Netchan_TransmitBits( netchan_t *chan, int length, byte *data )
 		int splitsize = 0;
 		if( chan->pfnBlockSize )
 			splitsize = chan->pfnBlockSize( chan->client, FRAGSIZE_SPLIT );
+
+		if( chan->use_munge )
+			COM_Munge2( send.pData + 8, MSG_GetNumBytesWritten( &send ) - 8, (byte)( chan->outgoing_sequence - 1 ));
+
 		NET_SendPacketEx( chan->sock, MSG_GetNumBytesWritten( &send ), MSG_GetData( &send ), chan->remote_address, splitsize );
 	}
 
@@ -1703,6 +1806,9 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 	sequence = MSG_ReadLong( msg );
 	sequence_ack = MSG_ReadLong( msg );
 
+	if( chan->use_munge )
+		COM_UnMunge2( msg->pData + 8, ( msg->nDataBits >> 3 ) - 8, sequence & 0xFF );
+
 	// read the qport if we are a server
 	if( chan->sock == NS_SERVER )
 		qport = MSG_ReadShort( msg );
@@ -1720,8 +1826,16 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 			{
 				frag_message[i] = true;
 				fragid[i] = MSG_ReadLong( msg );
-				frag_offset[i] = MSG_ReadLong( msg );
-				frag_length[i] = MSG_ReadLong( msg );
+				if( chan->gs_netchan )
+				{
+					frag_offset[i] = MSG_ReadShort( msg ) << 3;
+					frag_length[i] = MSG_ReadShort( msg ) << 3;
+				}
+				else
+				{
+					frag_offset[i] = MSG_ReadLong( msg );
+					frag_length[i] = MSG_ReadLong( msg );
+				}
 			}
 		}
 

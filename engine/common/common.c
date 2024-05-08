@@ -390,9 +390,6 @@ byte *LZSS_Compress( byte *pInput, int inputLength, uint *pOutputSize )
 	byte		*pFinal = NULL;
 	lzss_state_t	state;
 
-	if( !pStart )
-		return NULL;
-
 	memset( &state, 0, sizeof( state ));
 	state.window_size = LZSS_WINDOW_SIZE;
 
@@ -532,6 +529,47 @@ COM_FileSize
 int GAME_EXPORT COM_FileSize( const char *filename )
 {
 	return FS_FileSize( filename, false );
+}
+
+/*
+=============
+COM_AddAppDirectoryToSearchPath
+
+=============
+*/
+void GAME_EXPORT COM_AddAppDirectoryToSearchPath( const char *pszBaseDir, const char *appName )
+{
+	FS_AddGameHierarchy( pszBaseDir, FS_NOWRITE_PATH );
+}
+
+/*
+===========
+COM_ExpandFilename
+
+Finds the file in the search path, copies over the name with the full path name.
+This doesn't search in the pak file.
+===========
+*/
+int GAME_EXPORT COM_ExpandFilename( const char *fileName, char *nameOutBuffer, int nameOutBufferSize )
+{
+	char		result[MAX_SYSPATH];
+
+	if( !COM_CheckString( fileName ) || !nameOutBuffer || nameOutBufferSize <= 0 )
+		return 0;
+
+	// filename examples:
+	// media\sierra.avi - D:\Xash3D\valve\media\sierra.avi
+	// models\barney.mdl - D:\Xash3D\bshift\models\barney.mdl
+	if( g_fsapi.GetFullDiskPath( result, sizeof( result ), fileName, false ))
+	{
+		// check for enough room
+		if( Q_strlen( result ) > nameOutBufferSize )
+			return 0;
+
+		Q_strncpy( nameOutBuffer, result, nameOutBufferSize );
+		return 1;
+	}
+	return 0;
 }
 
 /*
@@ -696,7 +734,7 @@ COM_LoadFileForMe
 byte *GAME_EXPORT COM_LoadFileForMe( const char *filename, int *pLength )
 {
 	string	name;
-	byte	*pfile;
+	byte	*file, *pfile;
 	fs_offset_t	iLength;
 
 	if( !COM_CheckString( filename ))
@@ -709,8 +747,20 @@ byte *GAME_EXPORT COM_LoadFileForMe( const char *filename, int *pLength )
 	Q_strncpy( name, filename, sizeof( name ));
 	COM_FixSlashes( name );
 
-	pfile = g_fsapi.LoadFileMalloc( name, &iLength, false );
+	pfile = FS_LoadFile( name, &iLength, false );
 	if( pLength ) *pLength = (int)iLength;
+
+	if( pfile )
+	{
+		file = malloc( iLength + 1 );
+		if( file != NULL )
+		{
+			memcpy( file, pfile, iLength );
+			file[iLength] = '\0';
+		}
+		Mem_Free( pfile );
+		pfile = file;
+	}
 
 	return pfile;
 }
@@ -817,6 +867,18 @@ can return NULL
 cvar_t *GAME_EXPORT pfnCVarGetPointer( const char *szVarName )
 {
 	return (cvar_t *)Cvar_FindVar( szVarName );
+}
+
+/*
+=============
+pfnCVarDirectSet
+
+allow to set cvar directly
+=============
+*/
+void GAME_EXPORT pfnCVarDirectSet( cvar_t *var, const char *szValue )
+{
+	Cvar_DirectSet( (convar_t *)var, szValue );
 }
 
 /*
@@ -932,6 +994,21 @@ qboolean COM_IsSafeFileToDownload( const char *filename )
 	}
 
 	return true;
+}
+
+const char *COM_GetResourceTypeName( resourcetype_t restype )
+{
+	switch( restype )
+	{
+		case t_decal: return "decal";
+		case t_eventscript: return "eventscript";
+		case t_generic: return "generic";
+		case t_model: return "model";
+		case t_skin: return "skin";
+		case t_sound: return "sound";
+		case t_world: return "world";
+		default: return "unknown";
+	}
 }
 
 char *_copystring( poolhandle_t mempool, const char *s, const char *filename, int fileline )

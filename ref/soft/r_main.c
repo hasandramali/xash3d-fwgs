@@ -57,8 +57,8 @@ int		r_screenwidth;
 int                     r_viewcluster, r_oldviewcluster;
 
 CVAR_DEFINE_AUTO( sw_clearcolor, "48999", 0, "screen clear color");
-CVAR_DEFINE_AUTO( sw_drawflat, "0", FCVAR_CHEAT, "");
-CVAR_DEFINE_AUTO( sw_draworder, "0", FCVAR_CHEAT, "");
+CVAR_DEFINE_AUTO( sw_drawflat, "0", 0, "");
+CVAR_DEFINE_AUTO( sw_draworder, "0", 0, "");
 CVAR_DEFINE_AUTO( sw_maxedges, "32", 0, "");
 static CVAR_DEFINE_AUTO( sw_maxsurfs, "0", 0, "");
 CVAR_DEFINE_AUTO( sw_mipscale, "1", FCVAR_GLCONFIG, "nothing");
@@ -145,21 +145,12 @@ R_OpaqueEntity
 Opaque entity can be brush or studio model but sprite
 ===============
 */
-qboolean R_OpaqueEntity( cl_entity_t *ent )
+static qboolean R_OpaqueEntity( cl_entity_t *ent )
 {
 	int rendermode = R_GetEntityRenderMode( ent );
 
 	if( rendermode == kRenderNormal )
-	{
-		switch( ent->curstate.renderfx )
-		{
-		case kRenderFxNone:
-		case kRenderFxDeadPlayer:
-		case kRenderFxLightMultiplier:
-		case kRenderFxExplode:
-			return true;
-		}
-	}
+		return true;
 
 	if( sw_notransbrushes.value && ent->model && ent->model->type == mod_brush && rendermode == kRenderTransTexture )
 		return true;
@@ -434,7 +425,7 @@ R_GetFarClip
 static float R_GetFarClip( void )
 {
 	if( WORLDMODEL && RI.drawWorld )
-		return tr.movevars->zmax * 1.73f;
+		return MOVEVARS->zmax * 1.73f;
 	return 2048.0f;
 }
 
@@ -450,8 +441,8 @@ void R_SetupFrustum( void )
 
 	/*if( RP_NORMALPASS() && ( ENGINE_GET_PARM( PARM_WATER_LEVEL ) >= 3 ) && ENGINE_GET_PARM( PARM_QUAKE_COMPATIBLE ))
 	{
-		RI.fov_x = atan( tan( DEG2RAD( RI.fov_x ) / 2 ) * ( 0.97 + sin( gp_cl->time * 1.5 ) * 0.03 )) * 2 / (M_PI / 180.0);
-		RI.fov_y = atan( tan( DEG2RAD( RI.fov_y ) / 2 ) * ( 1.03 - sin( gp_cl->time * 1.5 ) * 0.03 )) * 2 / (M_PI / 180.0);
+		RI.fov_x = atan( tan( DEG2RAD( RI.fov_x ) / 2 ) * ( 0.97 + sin( gpGlobals->time * 1.5 ) * 0.03 )) * 2 / (M_PI / 180.0);
+		RI.fov_y = atan( tan( DEG2RAD( RI.fov_y ) / 2 ) * ( 1.03 - sin( gpGlobals->time * 1.5 ) * 0.03 )) * 2 / (M_PI / 180.0);
 	}*/
 
 	// build the transformation matrix for the given view angles
@@ -548,7 +539,7 @@ void R_RotateForEntity( cl_entity_t *e )
 #if 0
 	float	scale = 1.0f;
 
-	if( e == CL_GetEntityByIndex( 0 ) )
+	if( e == gEngfuncs.GetEntityByIndex( 0 ) )
 	{
 		R_LoadIdentity();
 		return;
@@ -576,7 +567,7 @@ void R_TranslateForEntity( cl_entity_t *e )
 #if 0
 	float	scale = 1.0f;
 
-	if( e == CL_GetEntityByIndex( 0 ) )
+	if( e == gEngfuncs.GetEntityByIndex( 0 ) )
 	{
 		R_LoadIdentity();
 		return;
@@ -776,19 +767,24 @@ static image_t *R_RecursiveFindWaterTexture( const mnode_t *node, const mnode_t 
 	return NULL;
 }
 
+extern void R_PolysetFillSpans8 ( void * );
+extern void R_PolysetDrawSpansConstant8_33( void *pspanpackage);
+extern void R_PolysetDrawSpans8_33( void *pspanpackage);
+
 /*
 =============
 R_DrawEntitiesOnList
 =============
 */
-static void R_DrawEntitiesOnList( void )
+void R_DrawEntitiesOnList( void )
 {
+	extern void	(*d_pdrawspans)(void *);
 	int	i;
 	//extern int d_aflatcolor;
 	//d_aflatcolor = 0;
 	tr.blend = 1.0f;
 //	GL_CheckForErrors();
-	//RI.currententity = CL_GetEntityByIndex(0);
+	//RI.currententity = gEngfuncs.GetEntityByIndex(0);
 	d_pdrawspans = R_PolysetFillSpans8;
 	GL_SetRenderMode(kRenderNormal);
 	// first draw solid entities
@@ -819,7 +815,7 @@ static void R_DrawEntitiesOnList( void )
 			extern void	(*d_pdrawspans)(void *);
 			extern void R_PolysetFillSpans8 ( void * );
 			d_pdrawspans = R_PolysetFillSpans8;
-			//RI.currententity = CL_GetEntityByIndex(0);
+			//RI.currententity = gEngfuncs.GetEntityByIndex(0);
 			R_AliasSetUpTransform();
 			image_t *image = R_GetTexture(GL_LoadTexture("gfx/env/desertbk", NULL, 0, 0));
 			r_affinetridesc.pskin = image->pixels[0];
@@ -998,7 +994,7 @@ int R_BmodelCheckBBox (float *minmaxs)
 R_FindTopNode
 ===================
 */
-static mnode_t *R_FindTopnode (vec3_t mins, vec3_t maxs)
+mnode_t *R_FindTopnode (vec3_t mins, vec3_t maxs)
 {
 		mplane_t        *splitplane;
 		int                     sides;
@@ -1100,7 +1096,7 @@ void RotatedBBox (vec3_t mins, vec3_t maxs, vec3_t angles, vec3_t tmins, vec3_t 
 R_DrawBEntitiesOnList
 =============
 */
-static void R_DrawBEntitiesOnList (void)
+void R_DrawBEntitiesOnList (void)
 {
 	int			i, clipflags;
 	vec3_t		oldorigin;
@@ -1175,7 +1171,7 @@ static void R_DrawBEntitiesOnList (void)
 			dlight_t *l = gEngfuncs.GetDynamicLight( k );
 			vec3_t origin_l, oldorigin;
 
-			if( l->die < gp_cl->time || !l->radius )
+			if( l->die < gpGlobals->time || !l->radius )
 				continue;
 
 			VectorCopy( l->origin, oldorigin ); // save lightorigin
@@ -1330,7 +1326,7 @@ void R_DrawBrushModel(cl_entity_t *pent)
 			dlight_t *l = gEngfuncs.GetDynamicLight( k );
 			vec3_t origin_l, oldorigin;
 
-			if( l->die < gp_cl->time || !l->radius )
+			if( l->die < gpGlobals->time || !l->radius )
 				continue;
 
 			VectorCopy( l->origin, oldorigin ); // save lightorigin
@@ -1386,7 +1382,7 @@ void R_DrawBrushModel(cl_entity_t *pent)
 R_EdgeDrawing
 ================
 */
-static void R_EdgeDrawing (void)
+void R_EdgeDrawing (void)
 {
 	edge_t	ledges[NUMSTACKEDGES +
 				((CACHE_SIZE - 1) / sizeof(edge_t)) + 1];
@@ -1515,7 +1511,7 @@ void R_MarkLeaves( void )
 R_MarkLeaves
 ===============
 */
-static void R_MarkLeaves (void)
+void R_MarkLeaves (void)
 {
 	byte	*vis;
 	mnode_t	*node;
@@ -1565,7 +1561,7 @@ void GAME_EXPORT R_RenderScene( void )
 
 	// frametime is valid only for normal pass
 	if( RP_NORMALPASS( ))
-		tr.frametime = gp_cl->time -   gp_cl->oldtime;
+		tr.frametime = gpGlobals->time -   gpGlobals->oldtime;
 	else tr.frametime = 0.0;
 
 	// begin a new frame
@@ -1605,12 +1601,39 @@ void GAME_EXPORT R_RenderScene( void )
 //	R_EndGL();
 }
 
-void R_GammaChanged( qboolean do_reset_gamma )
-{
-	if( do_reset_gamma ) // unused
-		return;
+/*
+===============
+R_DoResetGamma
 
-	D_FlushCaches( );
+gamma will be reset for
+some type of screenshots
+===============
+*/
+qboolean R_DoResetGamma( void )
+{
+	// FIXME: this looks ugly. apply the backward gamma changes to the output image
+	return false;
+#if 0
+	switch( cls.scrshot_action )
+	{
+	case scrshot_normal:
+		if( CL_IsDevOverviewMode( ))
+			return true;
+		return false;
+	case scrshot_snapshot:
+		if( CL_IsDevOverviewMode( ))
+			return true;
+		return false;
+	case scrshot_plaque:
+	case scrshot_savegame:
+	case scrshot_envshot:
+	case scrshot_skyshot:
+	case scrshot_mapshot:
+		return true;
+	default:
+		return false;
+	}
+#endif
 }
 
 /*
@@ -1620,6 +1643,28 @@ R_BeginFrame
 */
 void GAME_EXPORT R_BeginFrame( qboolean clearScene )
 {
+#if 0 // unused
+	if( R_DoResetGamma( ))
+	{
+		gEngfuncs.BuildGammaTable( 1.8f, 0.0f );
+		D_FlushCaches( );
+
+		// next frame will be restored gamma
+		SetBits( vid_brightness->flags, FCVAR_CHANGED );
+		SetBits( vid_gamma->flags, FCVAR_CHANGED );
+	}
+	else
+#endif
+	if( FBitSet( vid_gamma->flags, FCVAR_CHANGED ) || FBitSet( vid_brightness->flags, FCVAR_CHANGED ))
+	{
+		gEngfuncs.BuildGammaTable( vid_gamma->value, vid_brightness->value );
+
+		D_FlushCaches( );
+		// next frame will be restored gamma
+		ClearBits( vid_brightness->flags, FCVAR_CHANGED );
+		ClearBits( vid_gamma->flags, FCVAR_CHANGED );
+	}
+
 	R_Set2DMode( true );
 
 	// draw buffer stuff
@@ -1836,7 +1881,7 @@ void GAME_EXPORT R_NewMap (void)
 R_InitTurb
 ================
 */
-static void R_InitTurb (void)
+void R_InitTurb (void)
 {
 	int		i;
 
@@ -1893,11 +1938,6 @@ qboolean GAME_EXPORT R_Init( void )
 		return false;
 	}
 
-	// see R_ProcessEntData for tr.entities initialization
-	tr.movevars = (movevars_t *)ENGINE_GET_PARM( PARM_GET_MOVEVARS_PTR );
-	tr.palette = (color24 *)ENGINE_GET_PARM( PARM_GET_PALETTE_PTR );
-	tr.viewent = (cl_entity_t *)ENGINE_GET_PARM( PARM_GET_VIEWENT_PTR );
-
 	R_InitBlit( glblit );
 
 	R_InitImages();
@@ -1939,16 +1979,16 @@ int CL_FxBlend( cl_entity_t *e )
 	switch( e->curstate.renderfx )
 	{
 	case kRenderFxPulseSlowWide:
-		blend = e->curstate.renderamt + 0x40 * sin( gp_cl->time * 2 + offset );
+		blend = e->curstate.renderamt + 0x40 * sin( gpGlobals->time * 2 + offset );
 		break;
 	case kRenderFxPulseFastWide:
-		blend = e->curstate.renderamt + 0x40 * sin( gp_cl->time * 8 + offset );
+		blend = e->curstate.renderamt + 0x40 * sin( gpGlobals->time * 8 + offset );
 		break;
 	case kRenderFxPulseSlow:
-		blend = e->curstate.renderamt + 0x10 * sin( gp_cl->time * 2 + offset );
+		blend = e->curstate.renderamt + 0x10 * sin( gpGlobals->time * 2 + offset );
 		break;
 	case kRenderFxPulseFast:
-		blend = e->curstate.renderamt + 0x10 * sin( gp_cl->time * 8 + offset );
+		blend = e->curstate.renderamt + 0x10 * sin( gpGlobals->time * 8 + offset );
 		break;
 	case kRenderFxFadeSlow:
 		if( RP_NORMALPASS( ))
@@ -1987,27 +2027,27 @@ int CL_FxBlend( cl_entity_t *e )
 		blend = e->curstate.renderamt;
 		break;
 	case kRenderFxStrobeSlow:
-		blend = 20 * sin( gp_cl->time * 4 + offset );
+		blend = 20 * sin( gpGlobals->time * 4 + offset );
 		if( blend < 0 ) blend = 0;
 		else blend = e->curstate.renderamt;
 		break;
 	case kRenderFxStrobeFast:
-		blend = 20 * sin( gp_cl->time * 16 + offset );
+		blend = 20 * sin( gpGlobals->time * 16 + offset );
 		if( blend < 0 ) blend = 0;
 		else blend = e->curstate.renderamt;
 		break;
 	case kRenderFxStrobeFaster:
-		blend = 20 * sin( gp_cl->time * 36 + offset );
+		blend = 20 * sin( gpGlobals->time * 36 + offset );
 		if( blend < 0 ) blend = 0;
 		else blend = e->curstate.renderamt;
 		break;
 	case kRenderFxFlickerSlow:
-		blend = 20 * (sin( gp_cl->time * 2 ) + sin( gp_cl->time * 17 + offset ));
+		blend = 20 * (sin( gpGlobals->time * 2 ) + sin( gpGlobals->time * 17 + offset ));
 		if( blend < 0 ) blend = 0;
 		else blend = e->curstate.renderamt;
 		break;
 	case kRenderFxFlickerFast:
-		blend = 20 * (sin( gp_cl->time * 16 ) + sin( gp_cl->time * 23 + offset ));
+		blend = 20 * (sin( gpGlobals->time * 16 ) + sin( gpGlobals->time * 23 + offset ));
 		if( blend < 0 ) blend = 0;
 		else blend = e->curstate.renderamt;
 		break;

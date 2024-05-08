@@ -30,7 +30,7 @@ CL_ParseStaticEntity
 static client entity
 ==================
 */
-static void CL_LegacyParseStaticEntity( sizebuf_t *msg )
+void CL_LegacyParseStaticEntity( sizebuf_t *msg )
 {
 	int		i;
 	entity_state_t	state;
@@ -98,7 +98,7 @@ static void CL_LegacyParseStaticEntity( sizebuf_t *msg )
 	R_AddEfrags( ent );	// add link
 }
 
-static void CL_LegacyParseSoundPacket( sizebuf_t *msg, qboolean is_ambient )
+void CL_LegacyParseSoundPacket( sizebuf_t *msg, qboolean is_ambient )
 {
 	vec3_t	pos;
 	int 	chan, sound;
@@ -167,7 +167,7 @@ CL_PrecacheSound
 prceache sound from server
 ================
 */
-static void CL_LegacyPrecacheSound( sizebuf_t *msg )
+void CL_LegacyPrecacheSound( sizebuf_t *msg )
 {
 	int	soundIndex;
 
@@ -184,7 +184,7 @@ static void CL_LegacyPrecacheSound( sizebuf_t *msg )
 	cl.sound_index[soundIndex] = S_RegisterSound( cl.sound_precache[soundIndex] );
 }
 
-static void CL_LegacyPrecacheModel( sizebuf_t *msg )
+void CL_LegacyPrecacheModel( sizebuf_t *msg )
 {
 	int	modelIndex;
 	string model;
@@ -194,7 +194,7 @@ static void CL_LegacyPrecacheModel( sizebuf_t *msg )
 	if( modelIndex < 0 || modelIndex >= MAX_MODELS )
 		Host_Error( "CL_PrecacheModel: bad modelindex %i\n", modelIndex );
 
-	Q_strncpy( model, MSG_ReadString( msg ), sizeof( model ));
+	Q_strncpy( model, MSG_ReadString( msg ), MAX_STRING );
 	//Q_strncpy( cl.model_precache[modelIndex], BF_ReadString( msg ), sizeof( cl.model_precache[0] ));
 
 	// when we loading map all resources is precached sequentially
@@ -214,7 +214,7 @@ static void CL_LegacyPrecacheModel( sizebuf_t *msg )
 	cl.nummodels = Q_max( cl.nummodels, modelIndex  );
 }
 
-static void CL_LegacyPrecacheEvent( sizebuf_t *msg )
+void CL_LegacyPrecacheEvent( sizebuf_t *msg )
 {
 	int	eventIndex;
 
@@ -242,7 +242,7 @@ CL_ParseResourceList
 
 ==============
 */
-static void CL_LegacyParseResourceList( sizebuf_t *msg )
+void CL_LegacyParseResourceList( sizebuf_t *msg )
 {
 	int	i = 0;
 	static struct
@@ -261,7 +261,7 @@ static void CL_LegacyParseResourceList( sizebuf_t *msg )
 	for( i = 0; i < reslist.rescount; i++ )
 	{
 		reslist.restype[i] = MSG_ReadWord( msg );
-		Q_strncpy( reslist.resnames[i], MSG_ReadString( msg ), sizeof( reslist.resnames[i] ));
+		Q_strncpy( reslist.resnames[i], MSG_ReadString( msg ), MAX_QPATH );
 	}
 
 	if( CL_IsPlaybackDemo() )
@@ -443,17 +443,13 @@ void CL_ParseLegacyServerMessage( sizebuf_t *msg, qboolean normal_message )
 			break;
 		case svc_stufftext:
 			s = MSG_ReadString( msg );
-			if( cl_trace_stufftext.value )
-			{
-				size_t len = Q_strlen( s );
-				Con_Printf( "Stufftext: %s%c", s, len && s[len-1] == '\n' ? '\0' : '\n' );
-			}
-
 #ifdef HACKS_RELATED_HLMODS
 			// disable Cry Of Fear antisave protection
 			if( !Q_strnicmp( s, "disconnect", 10 ) && cls.signon != SIGNONS )
 				break; // too early
 #endif
+
+			Con_Reportf( "Stufftext: %s", s );
 			Cbuf_AddFilteredText( s );
 			break;
 		case svc_setangle:
@@ -461,13 +457,13 @@ void CL_ParseLegacyServerMessage( sizebuf_t *msg, qboolean normal_message )
 			break;
 		case svc_serverdata:
 			Cbuf_Execute(); // make sure any stuffed commands are done
-			CL_ParseServerData( msg, true );
+			CL_ParseServerData( msg, PROTOCOL_LEGACY_VERSION );
 			break;
 		case svc_lightstyle:
 			CL_ParseLightStyle( msg );
 			break;
 		case svc_updateuserinfo:
-			CL_UpdateUserinfo( msg, true );
+			CL_UpdateUserinfo( msg, PROTOCOL_LEGACY_VERSION );
 			break;
 		case svc_deltatable:
 			Delta_ParseTableField( msg );
@@ -497,7 +493,7 @@ void CL_ParseLegacyServerMessage( sizebuf_t *msg, qboolean normal_message )
 			cl.frames[cl.parsecountmod].graphdata.event += MSG_GetNumBytesRead( msg ) - bufStart;
 			break;
 		case svc_spawnbaseline:
-			CL_ParseBaseline( msg, true );
+			CL_ParseBaseline( msg, PROTOCOL_LEGACY_VERSION );
 			break;
 		case svc_temp_entity:
 			CL_ParseTempEntity( msg );
@@ -664,6 +660,9 @@ void CL_LegacyPrecache_f( void )
 	if( clgame.entities )
 		clgame.entities->model = cl.worldmodel;
 
+	// update the ref state.
+	R_UpdateRefState ();
+
 	// tell rendering system we have a new set of models.
 	ref.dllFuncs.R_NewMap ();
 
@@ -690,7 +689,7 @@ void CL_LegacyPrecache_f( void )
 
 void CL_LegacyUpdateInfo( void )
 {
-	if( !cls.legacymode )
+	if( cls.legacymode == PROTO_LEGACY )
 		return;
 
 	if( cls.state != ca_active )
@@ -702,5 +701,5 @@ void CL_LegacyUpdateInfo( void )
 
 qboolean CL_LegacyMode( void )
 {
-	return cls.legacymode;
+	return cls.legacymode == PROTO_LEGACY;
 }

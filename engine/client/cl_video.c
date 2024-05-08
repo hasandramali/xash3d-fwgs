@@ -68,7 +68,7 @@ qboolean SCR_NextMovie( void )
 	return true;
 }
 
-static void SCR_CreateStartupVids( void )
+void SCR_CreateStartupVids( void )
 {
 	file_t	*f;
 
@@ -202,6 +202,7 @@ SCR_PlayCinematic
 */
 qboolean SCR_PlayCinematic( const char *arg )
 {
+	string		path;
 	const char	*fullpath;
 
 	fullpath = FS_GetDiskPath( arg, false );

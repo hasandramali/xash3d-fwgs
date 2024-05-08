@@ -333,7 +333,7 @@ void Info_RemovePrefixedKeys( char *start, char prefix )
 	}
 }
 
-static qboolean Info_IsKeyImportant( const char *key )
+qboolean Info_IsKeyImportant( const char *key )
 {
 	if( key[0] == '*' )
 		return true;
@@ -358,7 +358,7 @@ static qboolean Info_IsKeyImportant( const char *key )
 	return false;
 }
 
-static char *Info_FindLargestKey( char *s )
+char *Info_FindLargestKey( char *s )
 {
 	char	key[MAX_KV_SIZE];
 	char	value[MAX_KV_SIZE];

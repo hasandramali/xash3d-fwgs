@@ -52,11 +52,8 @@ void S_SoundList_f( void )
 		{
 			totalSize += sc->size;
 
-			if( FBitSet( sc->flags, SOUND_LOOPED ))
-				Con_Printf( "L" );
-			else
-				Con_Printf( " " );
-
+			if( sc->loopStart >= 0 ) Con_Printf( "L" );
+			else Con_Printf( " " );
 			if( sfx->name[0] == '*' || !Q_strncmp( sfx->name, DEFAULT_SOUNDPATH, sizeof( DEFAULT_SOUNDPATH ) - 1 ))
 				Con_Printf( " (%2db) %s : %s\n", sc->width * 8, Q_memprint( sc->size ), sfx->name );
 			else Con_Printf( " (%2db) %s : " DEFAULT_SOUNDPATH "%s\n", sc->width * 8, Q_memprint( sc->size ), sfx->name );
@@ -113,7 +110,7 @@ static wavdata_t *S_CreateDefaultSound( void )
 
 	sc->width = 2;
 	sc->channels = 1;
-	sc->loopStart = 0;
+	sc->loopStart = -1;
 	sc->rate = SOUND_DMA_SPEED;
 	sc->samples = SOUND_DMA_SPEED;
 	sc->size = sc->samples * sc->width * sc->channels;
@@ -158,7 +155,7 @@ wavdata_t *S_LoadSound( sfx_t *sfx )
 		Sound_Process( &sc, SOUND_11k, sc->width, SOUND_RESAMPLE );
 	else if( sc->rate > SOUND_11k && sc->rate < SOUND_22k ) // some bad sounds
 		Sound_Process( &sc, SOUND_22k, sc->width, SOUND_RESAMPLE );
-	else if( sc->rate > SOUND_22k && sc->rate < SOUND_44k ) // some bad sounds
+	else if( sc->rate > SOUND_22k && sc->rate <= SOUND_32k ) // some bad sounds
 		Sound_Process( &sc, SOUND_44k, sc->width, SOUND_RESAMPLE );
 
 	sfx->cache = sc;
@@ -221,7 +218,7 @@ sfx_t *S_FindName( const char *pname, int *pfInCache )
 	sfx = &s_knownSfx[i];
 	memset( sfx, 0, sizeof( *sfx ));
 	if( pfInCache ) *pfInCache = false;
-	Q_strncpy( sfx->name, name, sizeof( sfx->name ));
+	Q_strncpy( sfx->name, name, MAX_STRING );
 	sfx->servercount = cl.servercount;
 	sfx->hashValue = COM_HashKey( sfx->name, MAX_SFX_HASH );
 
@@ -380,7 +377,7 @@ S_InitSounds
 void S_InitSounds( void )
 {
 	// create unused 0-entry
-	Q_strncpy( s_knownSfx->name, "*default", sizeof( s_knownSfx->name ));
+	Q_strncpy( s_knownSfx->name, "*default", MAX_QPATH );
 	s_knownSfx->hashValue = COM_HashKey( s_knownSfx->name, MAX_SFX_HASH );
 	s_knownSfx->hashNext = s_sfxHashList[s_knownSfx->hashValue];
 	s_sfxHashList[s_knownSfx->hashValue] = s_knownSfx;

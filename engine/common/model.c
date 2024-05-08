@@ -111,7 +111,6 @@ void Mod_FreeModel( model_t *mod )
 
 	if( mod->type == mod_brush && FBitSet( mod->flags, MODEL_WORLD ) )
 	{
-		world.version = 0;
 		world.shadowdata = NULL;
 		world.deluxedata = NULL;
 	}

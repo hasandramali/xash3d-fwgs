@@ -16,8 +16,6 @@ GNU General Public License for more details.
 #ifndef TEXTURE_H
 #define TEXTURE_H
 
-#define DEFAULT_TEXTUREPATH	"textures/"
-
 void	WriteTextures( void );
 
 #endif // TEXTURE_H

@@ -19,10 +19,6 @@ GNU General Public License for more details.
 #include <stdlib.h>
 #include <errno.h>
 
-#if _MSC_VER
-#include <intrin.h>
-#endif
-
 #ifdef XASH_SDL
 #include <SDL.h>
 #endif
@@ -53,7 +49,7 @@ GNU General Public License for more details.
 #include "library.h"
 #include "whereami.h"
 
-int error_on_exit = 0;	// arg for exit();
+qboolean	error_on_exit = false;	// arg for exit();
 
 /*
 ================
@@ -72,15 +68,17 @@ Sys_DebugBreak
 */
 void Sys_DebugBreak( void )
 {
+#if XASH_LINUX || ( XASH_WIN32 && !XASH_64BIT )
 #if _MSC_VER
-	if( Sys_DebuggerPresent( ))
-		__debugbreak();
-#else // !_MSC_VER
-	if( Sys_DebuggerPresent( ))
-	{
-		INLINE_RAISE( SIGINT );
-		INLINE_NANOSLEEP1(); // sometimes signal comes with delay, let it interrupt nanosleep
-	}
+	if( Sys_DebuggerPresent() )
+		_asm { int 3 }
+#elif XASH_X86
+	if( Sys_DebuggerPresent() )
+		asm volatile( "int $3;" );
+#else
+	if( Sys_DebuggerPresent() )
+		raise( SIGINT );
+#endif
 #endif
 }
 
@@ -364,7 +362,7 @@ Sys_WaitForQuit
 wait for 'Esc' key will be hit
 ================
 */
-static void Sys_WaitForQuit( void )
+void Sys_WaitForQuit( void )
 {
 #if XASH_WIN32
 	MSG	msg;
@@ -404,7 +402,7 @@ void Sys_Warn( const char *format, ... )
 	Msg( "Sys_Warn: %s\n", text );
 
 	if( !Host_IsDedicated() ) // dedicated server should not hang on messagebox
-		Platform_MessageBox( "Xash Warning", text, true );
+		MSGBOX(text);
 }
 
 /*
@@ -430,7 +428,7 @@ void Sys_Error( const char *error, ... )
 	// make sure that console received last message
 	if( host.change_game ) Sys_Sleep( 200 );
 
-	error_on_exit = 1;
+	error_on_exit = true;
 	host.status = HOST_ERR_FATAL;
 	va_start( argptr, error );
 	Q_vsnprintf( text, MAX_PRINT_MSG, error, argptr );
@@ -448,8 +446,8 @@ void Sys_Error( const char *error, ... )
 #if XASH_WIN32
 		Wcon_ShowConsole( false );
 #endif
+		MSGBOX( text );
 		Sys_Print( text );
-		Platform_MessageBox( "Xash Error", text, true );
 	}
 	else
 	{
@@ -564,7 +562,7 @@ void Sys_Print( const char *pMsg )
 
 	Sys_PrintLog( pMsg );
 
-	Rcon_Print( &host.rd, pMsg );
+	Rcon_Print( pMsg );
 }
 
 /*

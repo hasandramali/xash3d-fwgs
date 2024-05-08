@@ -32,6 +32,7 @@ static const struct in6_addr in6addr_any;
 
 #define NET_USE_FRAGMENTS
 
+#define PORT_ANY			-1
 #define MAX_LOOPBACK		4
 #define MASK_LOOPBACK		(MAX_LOOPBACK - 1)
 
@@ -83,6 +84,13 @@ typedef struct
 	int		sequence_number;
 	short		packet_id;
 } SPLITPACKET;
+
+typedef struct
+{
+	int		net_id;
+	int		sequence_number;
+	unsigned char	packet_id;
+} SPLITPACKETGS;
 #pragma pack(pop)
 
 typedef struct
@@ -131,7 +139,7 @@ static CVAR_DEFINE_AUTO( net6_address, "0", FCVAR_PRIVILEGED|FCVAR_READ_ONLY, "c
 NET_ErrorString
 ====================
 */
-static char *NET_ErrorString( void )
+char *NET_ErrorString( void )
 {
 #if XASH_WIN32
 	int	err = WSANOTINITIALISED;
@@ -225,17 +233,34 @@ _inline qboolean NET_IsSocketValid( int socket )
 
 void NET_NetadrToIP6Bytes( uint8_t *ip6, const netadr_t *adr )
 {
+#if XASH_LITTLE_ENDIAN
 	memcpy( ip6, adr->ip6, sizeof( adr->ip6 ));
+#elif XASH_BIG_ENDIAN
+	memcpy( ip6, adr->ip6_0, sizeof( adr->ip6_0 ));
+	memcpy( ip6 + sizeof( adr->ip6_0 ), adr->ip6_2, sizeof( adr->ip6_2 ));
+#endif
 }
 
 void NET_IP6BytesToNetadr( netadr_t *adr, const uint8_t *ip6 )
 {
+#if XASH_LITTLE_ENDIAN
 	memcpy( adr->ip6, ip6, sizeof( adr->ip6 ));
+#elif XASH_BIG_ENDIAN
+	memcpy( adr->ip6_0, ip6, sizeof( adr->ip6_0 ));
+	memcpy( adr->ip6_2, ip6 + sizeof( adr->ip6_0 ), sizeof( adr->ip6_2 ));
+#endif
 }
 
-static int NET_NetadrIP6Compare( const netadr_t *a, const netadr_t *b )
+_inline int NET_NetadrIP6Compare( const netadr_t *a, const netadr_t *b )
 {
+#if XASH_LITTLE_ENDIAN
 	return memcmp( a->ip6, b->ip6, sizeof( a->ip6 ));
+#elif XASH_BIG_ENDIAN
+	int ret = memcmp( a->ip6_0, b->ip6_0, sizeof( a->ip6_0 ));
+	if( !ret )
+		return memcmp( a->ip6_2, b->ip6_2, sizeof( a->ip6_2 ));
+	return ret;
+#endif
 }
 
 /*
@@ -317,7 +342,7 @@ static void NET_SockadrToNetadr( const struct sockaddr_storage *s, netadr_t *a )
 NET_GetHostByName
 ============
 */
-static qboolean NET_GetHostByName( const char *hostname, int family, struct sockaddr_storage *addr )
+qboolean NET_GetHostByName( const char *hostname, int family, struct sockaddr_storage *addr )
 {
 #if defined HAVE_GETADDRINFO
 	struct addrinfo *ai = NULL, *cur;
@@ -372,7 +397,7 @@ static void NET_ResolveThread( void );
 #define detach_thread( x ) pthread_detach(x)
 #define mutex_t  pthread_mutex_t
 #define thread_t pthread_t
-static void *NET_ThreadStart( void *unused )
+void *NET_ThreadStart( void *unused )
 {
 	NET_ResolveThread();
 	return NULL;
@@ -1018,7 +1043,7 @@ idnewt
 192.246.40.70
 =============
 */
-static qboolean NET_StringToAdrEx( const char *string, netadr_t *adr, int family )
+qboolean NET_StringToAdrEx( const char *string, netadr_t *adr, int family )
 {
 	struct sockaddr_storage s;
 
@@ -1339,28 +1364,40 @@ NET_GetLong
 receive long packet from network
 ==================
 */
-static qboolean NET_GetLong( byte *pData, int size, size_t *outSize, int splitsize )
+static qboolean NET_GetLong( byte *pData, int size, size_t *outSize, int splitsize, qboolean small_split )
 {
 	int		i, sequence_number, offset;
-	SPLITPACKET	*pHeader = (SPLITPACKET *)pData;
 	int		packet_number;
 	int		packet_count;
 	short		packet_id;
-	int body_size = splitsize - sizeof( SPLITPACKET );
+	size_t	header_size = small_split ? sizeof( SPLITPACKETGS ) : sizeof( SPLITPACKET );
+	SPLITPACKET	*pHeader = (SPLITPACKET *)pData;
+	SPLITPACKETGS	*pHeaderGS = (SPLITPACKETGS *)pData;
+	int body_size = splitsize - header_size;
 
 	if( body_size < 0 )
 		return false;
 
-	if( size < sizeof( SPLITPACKET ))
+	if( size < header_size )
 	{
 		Con_Printf( S_ERROR "invalid split packet length %i\n", size );
 		return false;
 	}
 
-	sequence_number = pHeader->sequence_number;
-	packet_id = pHeader->packet_id;
-	packet_count = ( packet_id & 0xFF );
-	packet_number = ( packet_id >> 8 );
+	if( small_split )
+	{
+		sequence_number = pHeaderGS->sequence_number;
+		packet_id = pHeaderGS->packet_id;
+		packet_count = ( packet_id & 0xF );
+		packet_number = ( packet_id >> 4 );
+	}
+	else
+	{
+		sequence_number = pHeader->sequence_number;
+		packet_id = pHeader->packet_id;
+		packet_count = ( packet_id & 0xFF );
+		packet_number = ( packet_id >> 8 );
+	}
 
 	if( packet_number >= NET_MAX_FRAGMENTS || packet_count > NET_MAX_FRAGMENTS )
 	{
@@ -1382,7 +1419,7 @@ static qboolean NET_GetLong( byte *pData, int size, size_t *outSize, int splitsi
 			Con_Printf( "<-- Split packet restart %i count %i seq\n", net.split.split_count, sequence_number );
 	}
 
-	size -= sizeof( SPLITPACKET );
+	size -= header_size;
 
 	if( net.split_flags[packet_number] != sequence_number )
 	{
@@ -1401,7 +1438,7 @@ static qboolean NET_GetLong( byte *pData, int size, size_t *outSize, int splitsi
 	}
 
 	offset = (packet_number * body_size);
-	memcpy( net.split.buffer + offset, pData + sizeof( SPLITPACKET ), size );
+	memcpy( net.split.buffer + offset, pData + header_size, size );
 
 	// have we received all of the pieces to the packet?
 	if( net.split.split_count <= 0 )
@@ -1470,7 +1507,7 @@ static qboolean NET_QueuePacket( netsrc_t sock, netadr_t *from, byte *data, size
 				// check for split message
 				if( sock == NS_CLIENT && *(int *)data == NET_HEADER_SPLITPACKET )
 				{
-					return NET_GetLong( data, ret, length, CL_GetSplitSize( ));
+					return NET_GetLong( data, ret, length, CL_GetSplitSize( ), CL_GoldSrcMode( ));
 				}
 #endif
 				// lag the packet, if needed
@@ -1534,7 +1571,7 @@ NET_SendLong
 Fragment long packets, send short directly
 ==================
 */
-static int NET_SendLong( netsrc_t sock, int net_socket, const char *buf, size_t len, int flags, const struct sockaddr_storage *to, size_t tolen, size_t splitsize )
+int NET_SendLong( netsrc_t sock, int net_socket, const char *buf, size_t len, int flags, const struct sockaddr_storage *to, size_t tolen, size_t splitsize )
 {
 #ifdef NET_USE_FRAGMENTS
 	// do we need to break this packet up?
@@ -1864,7 +1901,7 @@ NET_GetLocalAddress
 Returns the servers' ip address as a string.
 ================
 */
-static void NET_GetLocalAddress( void )
+void NET_GetLocalAddress( void )
 {
 	char		hostname[512];
 	char		buff[512];
@@ -2182,8 +2219,6 @@ HTTP downloader
 =================================================
 */
 
-#define MAX_HTTP_BUFFER_SIZE (BIT( 13 ))
-
 typedef struct httpserver_s
 {
 	char host[256];
@@ -2224,7 +2259,7 @@ typedef struct httpfile_s
 	qboolean process;
 
 	// query or response
-   char buf[MAX_HTTP_BUFFER_SIZE+1];
+   char buf[BUFSIZ+1];
    int header_size, query_length, bytes_sent;
 } httpfile_t;
 
@@ -2369,18 +2404,18 @@ process incoming data
 */
 static qboolean HTTP_ProcessStream( httpfile_t *curfile )
 {
-	char buf[sizeof( curfile->buf )];
+	char buf[BUFSIZ+1];
 	char *begin = 0;
 	int res;
 
-	if( curfile->header_size >= sizeof( buf ))
+	if( curfile->header_size >= BUFSIZ )
 	{
-		Con_Reportf( S_ERROR "Header too big, the size is %s\n", curfile->header_size );
+		Con_Reportf( S_ERROR "Header to big\n");
 		HTTP_FreeFile( curfile, true );
 		return false;
 	}
 
-	while( ( res = recv( curfile->socket, buf, sizeof( buf ) - curfile->header_size, 0 )) > 0) // if we got there, we are receiving data
+	while( ( res = recv( curfile->socket, buf, BUFSIZ - curfile->header_size, 0 )) > 0) // if we got there, we are receiving data
 	{
 		curfile->blocktime = 0;
 
@@ -2393,7 +2428,7 @@ static qboolean HTTP_ProcessStream( httpfile_t *curfile )
 			if( begin ) // Got full header
 			{
 				int cutheadersize = begin - curfile->buf + 4; // after that begin of data
-				char *content_length_line;
+				char *length;
 
 				Con_Reportf( "HTTP: Got response!\n" );
 
@@ -2412,13 +2447,10 @@ static qboolean HTTP_ProcessStream( httpfile_t *curfile )
 				}
 
 				// print size
-				content_length_line = Q_stristr( curfile->buf, "Content-Length: " );
-				if( content_length_line )
+				length = Q_stristr( curfile->buf, "Content-Length: " );
+				if( length )
 				{
-					int size;
-
-					content_length_line += sizeof( "Content-Length: " ) - 1;
-					size = Q_atoi( content_length_line );
+					int size = Q_atoi( length += 16 );
 
 					Con_Reportf( "HTTP: File size is %d\n", size );
 
@@ -2859,10 +2891,6 @@ static void HTTP_AddCustomServer_f( void )
 	if( Cmd_Argc() == 2 )
 	{
 		HTTP_AddCustomServer( Cmd_Argv( 1 ));
-	}
-	else
-	{
-		Con_Printf( S_USAGE "http_addcustomserver <url>\n" );
 	}
 }
 

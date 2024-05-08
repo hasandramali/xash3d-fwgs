@@ -32,9 +32,10 @@ struct jnimethods_s
 	JNIEnv *env;
 	jobject activity;
 	jclass actcls;
-	jmethodID loadAndroidID;
-	jmethodID getAndroidID;
-	jmethodID saveAndroidID;
+	jmethodID getID;
+	jmethodID saveID;
+	jmethodID loadID;
+	jmethodID getKeyboardHeight;
 } jni;
 
 void Android_Init( void )
@@ -42,9 +43,10 @@ void Android_Init( void )
 	jni.env = (JNIEnv *)SDL_AndroidGetJNIEnv();
 	jni.activity = (jobject)SDL_AndroidGetActivity();
 	jni.actcls = (*jni.env)->GetObjectClass( jni.env, jni.activity );
-	jni.loadAndroidID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "loadAndroidID", "()Ljava/lang/String;" );
-	jni.getAndroidID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "getAndroidID", "()Ljava/lang/String;" );
-	jni.saveAndroidID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "saveAndroidID", "(Ljava/lang/String;)V" );
+	jni.loadID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "loadAndroidID", "()Ljava/lang/String;" );
+	jni.getID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "getAndroidID", "()Ljava/lang/String;" );
+	jni.saveID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "saveAndroidID", "(Ljava/lang/String;)V" );
+	jni.getKeyboardHeight = (*jni.env)->GetMethodID( jni.env, jni.actcls, "getKeyboardHeight", "()I" );
 
 	SDL_SetHint( SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight" );
 	SDL_SetHint( SDL_HINT_JOYSTICK_HIDAPI_STEAM, "1" );
@@ -61,16 +63,23 @@ Android_GetNativeObject
 
 void *Android_GetNativeObject( const char *name )
 {
-	if( !strcasecmp( name, "JNIEnv" ) )
+	static const char *availObjects[] = { "JNIEnv", "ActivityClass", NULL };
+	void *object = NULL;
+
+	if( !name )
 	{
-		return (void *)jni.env;
+		object = (void *)availObjects;
+	}
+	else if( !strcasecmp( name, "JNIEnv" ) )
+	{
+		object = (void *)jni.env;
 	}
 	else if( !strcasecmp( name, "ActivityClass" ) )
 	{
-		return (void *)jni.actcls;
+		object = (void *)jni.actcls;
 	}
 
-	return NULL;
+	return object;
 }
 
 /*
@@ -86,7 +95,7 @@ const char *Android_GetAndroidID( void )
 
 	if( COM_CheckString( id ) ) return id;
 
-	resultJNIStr = (*jni.env)->CallObjectMethod( jni.env, jni.activity, jni.getAndroidID );
+	resultJNIStr = (*jni.env)->CallObjectMethod( jni.env, jni.activity, jni.getID );
 	resultCStr = (*jni.env)->GetStringUTFChars( jni.env, resultJNIStr, NULL );
 	Q_strncpy( id, resultCStr, sizeof( id ) );
 	(*jni.env)->ReleaseStringUTFChars( jni.env, resultJNIStr, resultCStr );
@@ -105,7 +114,7 @@ const char *Android_LoadID( void )
 	jstring resultJNIStr;
 	const char *resultCStr;
 
-	resultJNIStr = (*jni.env)->CallObjectMethod( jni.env, jni.activity, jni.loadAndroidID );
+	resultJNIStr = (*jni.env)->CallObjectMethod( jni.env, jni.activity, jni.loadID );
 	resultCStr = (*jni.env)->GetStringUTFChars( jni.env, resultJNIStr, NULL );
 	Q_strncpy( id, resultCStr, sizeof( id ) );
 	(*jni.env)->ReleaseStringUTFChars( jni.env, resultJNIStr, resultCStr );
@@ -120,7 +129,7 @@ Android_SaveID
 */
 void Android_SaveID( const char *id )
 {
-	(*jni.env)->CallVoidMethod( jni.env, jni.activity, jni.saveAndroidID, (*jni.env)->NewStringUTF( jni.env, id ) );
+	(*jni.env)->CallVoidMethod( jni.env, jni.activity, jni.saveID, (*jni.env)->NewStringUTF( jni.env, id ) );
 }
 
 /*
@@ -133,6 +142,16 @@ void Platform_ShellExecute( const char *path, const char *parms )
 #if SDL_VERSION_ATLEAST( 2, 0, 14 )
 	SDL_OpenURL( path );
 #endif
+}
+
+/*
+========================
+Android_GetKeyboardHeight
+========================
+*/
+int Android_GetKeyboardHeight( void )
+{
+	return (*jni.env)->CallIntMethod( jni.env, jni.activity, jni.getKeyboardHeight );
 }
 
 #endif // XASH_DEDICATED

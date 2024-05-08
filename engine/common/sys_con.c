@@ -135,10 +135,6 @@ void Sys_InitLog( void )
 		mode = "a";
 	else mode = "w";
 
-	if( Host_IsDedicated( ))
-		Q_strncpy( s_ld.title, XASH_DEDICATED_SERVER_NAME " " XASH_VERSION, sizeof( s_ld.title ));
-	else Q_strncpy( s_ld.title, XASH_ENGINE_NAME " " XASH_VERSION, sizeof( s_ld.title ));
-
 	// create log if needed
 	if( s_ld.log_active )
 	{
@@ -146,18 +142,15 @@ void Sys_InitLog( void )
 
 		if ( !s_ld.logfile )
 		{
-			Con_Reportf( S_ERROR  "Sys_InitLog: can't create log file %s: %s\n", s_ld.log_path, strerror( errno ));
+			Con_Reportf( S_ERROR  "Sys_InitLog: can't create log file %s: %s\n", s_ld.log_path, strerror( errno ) );
 			return;
 		}
 
 		s_ld.logfileno = fileno( s_ld.logfile );
 
-		// fit to 80 columns for easier read on standard terminal
-		fputs( "================================================================================\n", s_ld.logfile );
-		fprintf( s_ld.logfile, "%s (%i, %s, %s, %s-%s)\n", s_ld.title, Q_buildnum(), Q_buildcommit(), Q_buildbranch(), Q_buildos(), Q_buildarch());
-		fprintf( s_ld.logfile, "Game started at %s\n", Q_timestamp( TIME_FULL ));
-		fputs( "================================================================================\n", s_ld.logfile );
-		fflush( s_ld.logfile );
+		fprintf( s_ld.logfile, "=================================================================================\n" );
+		fprintf( s_ld.logfile, "\t%s (build %i commit %s (%s-%s)) started at %s\n", s_ld.title, Q_buildnum(), Q_buildcommit(), Q_buildos(), Q_buildarch(), Q_timestamp( TIME_FULL ) );
+		fprintf( s_ld.logfile, "=================================================================================\n" );
 	}
 }
 
@@ -184,11 +177,12 @@ void Sys_CloseLog( void )
 
 	if( s_ld.logfile )
 	{
-		fputc( '\n', s_ld.logfile );
-		fputs( "================================================================================\n", s_ld.logfile );
-		fprintf( s_ld.logfile, "%s (%i, %s, %s, %s-%s)\n", s_ld.title, Q_buildnum(), Q_buildcommit(), Q_buildbranch(), Q_buildos(), Q_buildarch());
-		fprintf( s_ld.logfile, "Stopped with reason \"%s\" at %s\n", event_name, Q_timestamp( TIME_FULL ));
-		fputs( "================================================================================\n", s_ld.logfile );
+		fprintf( s_ld.logfile, "\n");
+		fprintf( s_ld.logfile, "=================================================================================");
+		if( host.change_game ) fprintf( s_ld.logfile, "\n\t%s (build %i) %s\n", s_ld.title, Q_buildnum(), event_name );
+		else fprintf( s_ld.logfile, "\n\t%s (build %i) %s at %s\n", s_ld.title, Q_buildnum(), event_name, Q_timestamp( TIME_FULL ));
+		fprintf( s_ld.logfile, "=================================================================================\n");
+
 		fclose( s_ld.logfile );
 		s_ld.logfile = NULL;
 	}
@@ -341,18 +335,15 @@ void GAME_EXPORT Con_Printf( const char *szFmt, ... )
 {
 	static char	buffer[MAX_PRINT_MSG];
 	va_list		args;
-	qboolean add_newline;
 
 	if( !host.allow_console )
 		return;
 
 	va_start( args, szFmt );
-	add_newline = Q_vsnprintf( buffer, sizeof( buffer ), szFmt, args ) < 0;
+	Q_vsnprintf( buffer, sizeof( buffer ), szFmt, args );
 	va_end( args );
 
 	Sys_Print( buffer );
-	if( add_newline )
-		Sys_Print( "\n" );
 }
 
 /*
@@ -365,21 +356,18 @@ void GAME_EXPORT Con_DPrintf( const char *szFmt, ... )
 {
 	static char	buffer[MAX_PRINT_MSG];
 	va_list		args;
-	qboolean add_newline;
 
 	if( host_developer.value < DEV_NORMAL )
 		return;
 
 	va_start( args, szFmt );
-	add_newline = Q_vsnprintf( buffer, sizeof( buffer ), szFmt, args ) < 0;
+	Q_vsnprintf( buffer, sizeof( buffer ), szFmt, args );
 	va_end( args );
 
 	if( buffer[0] == '0' && buffer[1] == '\n' && buffer[2] == '\0' )
 		return; // hlrally spam
 
 	Sys_Print( buffer );
-	if( add_newline )
-		Sys_Print( "\n" );
 }
 
 /*
@@ -392,18 +380,15 @@ void Con_Reportf( const char *szFmt, ... )
 {
 	static char	buffer[MAX_PRINT_MSG];
 	va_list		args;
-	qboolean add_newline;
 
 	if( host_developer.value < DEV_EXTENDED )
 		return;
 
 	va_start( args, szFmt );
-	add_newline = Q_vsnprintf( buffer, sizeof( buffer ), szFmt, args ) < 0;
+	Q_vsnprintf( buffer, sizeof( buffer ), szFmt, args );
 	va_end( args );
 
 	Sys_Print( buffer );
-	if( add_newline )
-		Sys_Print( "\n" );
 }
 
 

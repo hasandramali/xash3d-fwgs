@@ -18,18 +18,19 @@ GNU General Public License for more details.
 
 #include "ref_api.h"
 
-#define RP_LOCALCLIENT( e ) ((e) != NULL && (e)->index == ( cl.playernum + 1 ) && e->player )
+#define RP_LOCALCLIENT( e )	((e) != NULL && (e)->index == ( cl.playernum + 1 ) && e->player )
 
 struct ref_state_s
 {
-	HINSTANCE       hInstance;
-	qboolean        initialized;
-	int             numRenderers;
+	qboolean initialized;
+
+	HINSTANCE hInstance;
 	ref_interface_t dllFuncs;
 
 	// depends on build configuration
-	const char    **shortNames;
-	const char    **readableNames;
+	int numRenderers;
+	const char **shortNames;
+	const char **readableNames;
 };
 
 extern struct ref_state_s ref;
@@ -45,12 +46,13 @@ void R_GetTextureParms( int *w, int *h, int texnum );
 void GL_RenderFrame( const struct ref_viewpass_s *rvp );
 
 // common engine and renderer cvars
-extern convar_t r_decals;
-extern convar_t r_adjust_fov;
+extern convar_t	r_decals;
+extern convar_t	r_adjust_fov;
 extern convar_t gl_clear;
 
 qboolean R_Init( void );
 void R_Shutdown( void );
+void R_UpdateRefState( void );
 
 extern triangleapi_t gTriApi;
 

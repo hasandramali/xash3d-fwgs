@@ -57,8 +57,6 @@ void COM_NewGame( char const *pMapName )
 	GameState->landmarkName[0] = 0;
 	GameState->loadGame = false;
 	GameState->newGame = true;
-
-	SV_ShutdownGame(); // exit from current game
 }
 
 void COM_LoadLevel( char const *pMapName, qboolean background )
@@ -76,8 +74,6 @@ void COM_LoadLevel( char const *pMapName, qboolean background )
 	GameState->landmarkName[0] = 0;
 	GameState->loadGame = false;
 	GameState->newGame = false;
-
-	SV_ShutdownGame(); // exit from current game
 }
 
 void COM_LoadGame( char const *pMapName )
@@ -121,7 +117,7 @@ void COM_ChangeLevel( char const *pNewLevel, char const *pLandmarkName, qboolean
 	GameState->newGame = false;
 }
 
-static void Host_ShutdownGame( void )
+void Host_ShutdownGame( void )
 {
 	SV_ShutdownGame();
 
@@ -137,7 +133,7 @@ static void Host_ShutdownGame( void )
 	}
 }
 
-static void Host_RunFrame( float time )
+void Host_RunFrame( float time )
 {
 	// at this time, we don't need to get events from OS on dedicated
 #if !XASH_DEDICATED
