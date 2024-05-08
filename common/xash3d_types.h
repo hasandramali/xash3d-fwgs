@@ -13,7 +13,7 @@
 #endif // _WIN32
 
 #include <sys/types.h> // off_t
-#include <stdint_h>
+#include_next <stdint_h>
 #include <assert.h>
 
 typedef unsigned char byte;
