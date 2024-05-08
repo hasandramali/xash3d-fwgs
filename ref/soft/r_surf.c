@@ -72,7 +72,7 @@ static void R_BuildLightMap( void );
 R_AddDynamicLights
 ===============
 */
-void R_AddDynamicLights( msurface_t *surf )
+static void R_AddDynamicLights( msurface_t *surf )
 {
 	float		dist, rad, minlight;
 	int		lnum, s, t, sd, td, smax, tmax;
@@ -86,7 +86,7 @@ void R_AddDynamicLights( msurface_t *surf )
 	uint		*bl;
 
 	// no dlighted surfaces here
-	//if( !R_CountSurfaceDlights( surf )) return;
+	if( !surf->dlightbits ) return;
 
 	sample_size = gEngfuncs.Mod_SampleSizeForFace( surf );
 	smax = (info->lightextents[0] / sample_size) + 1;
@@ -211,13 +211,9 @@ static void R_BuildLightMap( void )
 
 		for( i = 0, bl = blocklights; i < size; i++, bl += 1, lm++ )
 		{
-			bl[0] += gEngfuncs.LightToTexGamma( lm->r ) * scale;
-			bl[0] += gEngfuncs.LightToTexGamma( lm->g ) * scale;
-			bl[0] += gEngfuncs.LightToTexGamma( lm->b ) * scale;
-
-			//printf("test\n");
-			//bl[1] += gEngfuncs.LightToTexGamma( lm->g ) * scale;
-			//bl[2] += gEngfuncs.LightToTexGamma( lm->b ) * scale;
+			bl[0] += lm->r * scale;
+			bl[1] += lm->g * scale;
+			bl[2] += lm->b * scale;
 		}
 	}
 
@@ -245,7 +241,10 @@ static void R_BuildLightMap( void )
 	// bound, invert, and shift
 		for (i=0 ; i<size ; i++)
 		{
-			t = (int)blocklights[i];
+			if( blocklights[i] < 65280 )
+				t = gEngfuncs.LightToTexGammaEx( blocklights[i] >> 6 ) << 6;
+			else t = (int)blocklights[i];
+
 			if (t < 0)
 				t = 0;
 			if( t > 65535 * 3 )
@@ -375,7 +374,7 @@ R_TextureAnim
 Returns the proper texture for a given time and base texture, do not process random tiling
 ===============
 */
-texture_t *R_TextureAnim( texture_t *b )
+static texture_t *R_TextureAnim( texture_t *b )
 {
 	texture_t *base = b;
 	int	count, reletive;
@@ -401,7 +400,7 @@ texture_t *R_TextureAnim( texture_t *b )
 			speed = 10;
 		else speed = 20;
 
-		reletive = (int)(gpGlobals->time * speed) % base->anim_total;
+		reletive = (int)(gp_cl->time * speed) % base->anim_total;
 	}
 
 
@@ -425,7 +424,7 @@ R_TextureAnimation
 Returns the proper texture for a given time and surface
 ===============
 */
-texture_t *R_TextureAnimation( msurface_t *s )
+static texture_t *R_TextureAnimation( msurface_t *s )
 {
 	texture_t	*base = s->texinfo->texture;
 	int	count, reletive;
@@ -455,7 +454,7 @@ texture_t *R_TextureAnimation( msurface_t *s )
 			speed = 10;
 		else speed = 20;
 
-		reletive = (int)(gpGlobals->time * speed) % base->anim_total;
+		reletive = (int)(gp_cl->time * speed) % base->anim_total;
 	}
 
 	count = 0;
@@ -1025,7 +1024,7 @@ void D_FlushCaches( void )
 D_SCAlloc
 =================
 */
-surfcache_t     *D_SCAlloc (int width, int size)
+static surfcache_t     *D_SCAlloc (int width, int size)
 {
 	surfcache_t             *new;
 	qboolean                wrapped_this_time;
@@ -1106,8 +1105,7 @@ surfcache_t     *D_SCAlloc (int width, int size)
 }
 
 //=============================================================================
-void R_DecalComputeBasis( msurface_t *surf, int flags, vec3_t textureSpaceBasis[3] );
-void R_DrawSurfaceDecals( void )
+static void R_DrawSurfaceDecals( void )
 {
 	msurface_t *fa = r_drawsurf.surf;
 	decal_t *p;

@@ -49,7 +49,7 @@ R_Speeds_Printf
 helper to print into r_speeds message
 ==============
 */
-void R_Speeds_Printf( const char *msg, ... )
+static void R_Speeds_Printf( const char *msg, ... )
 {
 	va_list	argptr;
 	char	text[2048];
@@ -559,8 +559,6 @@ qboolean VID_CubemapShot( const char *base, uint size, const float *vieworg, qbo
 
 	// use client vieworg
 	if( !vieworg ) vieworg = RI.vieworg;
-
-	R_CheckGamma();
 
 	for( i = 0; i < 6; i++ )
 	{
