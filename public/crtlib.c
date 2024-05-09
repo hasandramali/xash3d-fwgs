@@ -18,7 +18,6 @@ GNU General Public License for more details.
 #include "const.h"
 #include <math.h>
 #include <stdarg.h>
-#include <ctype.h>
 #include <time.h>
 #include "stdio.h"
 #include "crtlib.h"
@@ -36,26 +35,6 @@ void Q_strnlwr( const char *in, char *out, size_t size_out )
 		size_out--;
 	}
 	*out = '\0';
-}
-
-qboolean Q_isdigit( const char *str )
-{
-	if( str && *str )
-	{
-		while( isdigit( *str )) str++;
-		if( !*str ) return true;
-	}
-	return false;
-}
-
-qboolean Q_isspace( const char *str )
-{
-	if( str && *str )
-	{
-		while( isspace( *str ) ) str++;
-		if( !*str ) return true;
-	}
-	return false;
 }
 
 size_t Q_colorstr( const char *string )
@@ -79,59 +58,6 @@ size_t Q_colorstr( const char *string )
 	}
 
 	return len;
-}
-
-char Q_toupper( const char in )
-{
-	char	out;
-
-	if( in >= 'a' && in <= 'z' )
-		out = in + 'A' - 'a';
-	else out = in;
-
-	return out;
-}
-
-char Q_tolower( const char in )
-{
-	char	out;
-
-	if( in >= 'A' && in <= 'Z' )
-		out = in + 'a' - 'A';
-	else out = in;
-
-	return out;
-}
-
-size_t Q_strncat( char *dst, const char *src, size_t size )
-{
-	register char	*d = dst;
-	register const char	*s = src;
-	register size_t	n = size;
-	size_t		dlen;
-
-	if( !dst || !src || !size )
-		return 0;
-
-	// find the end of dst and adjust bytes left but don't go past end
-	while( n-- != 0 && *d != '\0' ) d++;
-	dlen = d - dst;
-	n = size - dlen;
-
-	if( n == 0 ) return( dlen + Q_strlen( s ));
-
-	while( *s != '\0' )
-	{
-		if( n != 1 )
-		{
-			*d++ = *s;
-			n--;
-		}
-		s++;
-	}
-
-	*d = '\0';
-	return( dlen + ( s - src )); // count does not include NULL
 }
 
 int Q_atoi( const char *str )
@@ -253,13 +179,11 @@ float Q_atof( const char *str )
 
 void Q_atov( float *vec, const char *str, size_t siz )
 {
-	string	buffer;
-	char	*pstr, *pfront;
+	const char *pstr, *pfront;
 	int	j;
 
-	Q_strncpy( buffer, str, sizeof( buffer ));
 	memset( vec, 0, sizeof( vec_t ) * siz );
-	pstr = pfront = buffer;
+	pstr = pfront = str;
 
 	for( j = 0; j < siz; j++ )
 	{
@@ -394,7 +318,7 @@ const char* Q_timestamp( int format )
 	return timestamp;
 }
 
-#if !defined( HAVE_STRCASESTR )
+#if !HAVE_STRCASESTR
 char *Q_stristr( const char *string, const char *string2 )
 {
 	int	c;

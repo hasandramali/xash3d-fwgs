@@ -286,31 +286,8 @@ typedef struct ipfilter_s
 
 static ipfilter_t *ipfilter = NULL;
 
-static void SV_CleanExpiredIPFilters( void )
-{
-	ipfilter_t *f, **back;
-
-	back = &ipfilter;
-	while( 1 )
-	{
-		f = *back;
-		if( !f ) return;
-
-		if( f->endTime && host.realtime > f->endTime )
-		{
-			*back = f->next;
-			back = &f->next;
-
-			Mem_Free( f );
-		}
-		else back = &f->next;
-	}
-}
-
 static int SV_FilterToString( char *dest, size_t size, qboolean config, ipfilter_t *f )
 {
-	const char *strformat;
-
 	if( config )
 	{
 		return Q_snprintf( dest, size, "addip 0 %s/%d\n", NET_AdrToString( f->adr ), f->prefixlen );
@@ -379,6 +356,9 @@ qboolean SV_CheckIP( netadr_t *adr )
 
 	for( ; entry; entry = entry->next )
 	{
+		if( entry->endTime && host.realtime > entry->endTime )
+			continue; // expired
+
 		switch( entry->adr.type6 )
 		{
 		case NA_IP:
@@ -600,7 +580,7 @@ void SV_ShutdownFilter( void )
 
 #include "tests.h"
 
-void Test_StringToFilterAdr( void )
+static void Test_StringToFilterAdr( void )
 {
 	ipfilter_t f1;
 	int i;
@@ -669,7 +649,7 @@ void Test_StringToFilterAdr( void )
 	}
 }
 
-void Test_IPFilterIncludesIPFilter( void )
+static void Test_IPFilterIncludesIPFilter( void )
 {
 	qboolean ret;
 	const char *adrs[] =

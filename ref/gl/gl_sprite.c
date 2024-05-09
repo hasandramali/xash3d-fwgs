@@ -46,7 +46,7 @@ R_SpriteLoadFrame
 upload a single frame
 ====================
 */
-static const dframetype_t *R_SpriteLoadFrame( model_t *mod, const void *pin, mspriteframe_t **ppframe, int num )
+static const byte *R_SpriteLoadFrame( model_t *mod, const void *pin, mspriteframe_t **ppframe, int num )
 {
 	dspriteframe_t	pinframe;
 	mspriteframe_t	*pspriteframe;
@@ -82,7 +82,7 @@ static const dframetype_t *R_SpriteLoadFrame( model_t *mod, const void *pin, msp
 	pspriteframe->gl_texturenum = gl_texturenum;
 	*ppframe = pspriteframe;
 
-	return ( const dframetype_t* )(( const byte* )pin + sizeof( dspriteframe_t ) + pinframe.width * pinframe.height * bytes );
+	return (( const byte* )pin + sizeof( dspriteframe_t ) + pinframe.width * pinframe.height * bytes );
 }
 
 /*
@@ -92,7 +92,7 @@ R_SpriteLoadGroup
 upload a group frames
 ====================
 */
-static const dframetype_t *R_SpriteLoadGroup( model_t *mod, const void *pin, mspriteframe_t **ppframe, int framenum )
+static const byte *R_SpriteLoadGroup( model_t *mod, const void *pin, mspriteframe_t **ppframe, int framenum )
 {
 	const dspritegroup_t	*pingroup;
 	mspritegroup_t	*pspritegroup;
@@ -128,8 +128,9 @@ static const dframetype_t *R_SpriteLoadGroup( model_t *mod, const void *pin, msp
 		ptemp = R_SpriteLoadFrame( mod, ptemp, &pspritegroup->frames[i], framenum * 10 + i );
 	}
 
-	return (const dframetype_t *)ptemp;
+	return ptemp;
 }
+
 
 /*
 ====================
@@ -142,7 +143,7 @@ void Mod_LoadSpriteModel( model_t *mod, const void *buffer, qboolean *loaded, ui
 {
 	const dsprite_t		*pin;
 	const short		*numi = NULL;
-	const dframetype_t	*pframetype;
+	const byte	*pframetype;
 	msprite_t		*psprite;
 	int		i;
 
@@ -152,7 +153,7 @@ void Mod_LoadSpriteModel( model_t *mod, const void *buffer, qboolean *loaded, ui
 	if( pin->version == SPRITE_VERSION_Q1 || pin->version == SPRITE_VERSION_32 )
 		numi = NULL;
 	else if( pin->version == SPRITE_VERSION_HL )
-		numi = (const short *)(void *)((const byte*)buffer + sizeof( dsprite_hl_t ));
+		numi = (const short *)((const byte*)buffer + sizeof( dsprite_hl_t ));
 
 	r_texFlags = texFlags;
 	sprite_version = pin->version;
@@ -164,7 +165,7 @@ void Mod_LoadSpriteModel( model_t *mod, const void *buffer, qboolean *loaded, ui
 		rgbdata_t	*pal;
 
 		pal = gEngfuncs.FS_LoadImage( "#id.pal", (byte *)&i, 768 );
-		pframetype = (const dframetype_t *)(void *)((const byte*)buffer + sizeof( dsprite_q1_t )); // pinq1 + 1
+		pframetype = ((const byte*)buffer + sizeof( dsprite_q1_t )); // pinq1 + 1
 		gEngfuncs.FS_FreeImage( pal ); // palette installed, no reason to keep this data
 	}
 	else if( *numi == 256 )
@@ -186,7 +187,7 @@ void Mod_LoadSpriteModel( model_t *mod, const void *buffer, qboolean *loaded, ui
 			break;
 		}
 
-		pframetype = (const dframetype_t *)(void *)(src + 768);
+		pframetype = (const byte *)(src + 768);
 		gEngfuncs.FS_FreeImage( pal ); // palette installed, no reason to keep this data
 	}
 	else
@@ -200,22 +201,26 @@ void Mod_LoadSpriteModel( model_t *mod, const void *buffer, qboolean *loaded, ui
 
 	for( i = 0; i < mod->numframes; i++ )
 	{
-		frametype_t frametype = pframetype->type;
+		frametype_t frametype;
+		dframetype_t dframetype;
+
+		memcpy( &dframetype, pframetype, sizeof( dframetype ));
+		frametype = dframetype.type;
 		psprite->frames[i].type = (spriteframetype_t)frametype;
 
 		switch( frametype )
 		{
 		case FRAME_SINGLE:
 			Q_strncpy( group_suffix, "frame", sizeof( group_suffix ));
-			pframetype = R_SpriteLoadFrame( mod, pframetype + 1, &psprite->frames[i].frameptr, i );
+			pframetype = R_SpriteLoadFrame( mod, pframetype + sizeof( dframetype_t ), &psprite->frames[i].frameptr, i );
 			break;
 		case FRAME_GROUP:
 			Q_strncpy( group_suffix, "group", sizeof( group_suffix ));
-			pframetype = R_SpriteLoadGroup( mod, pframetype + 1, &psprite->frames[i].frameptr, i );
+			pframetype = R_SpriteLoadGroup( mod, pframetype + sizeof( dframetype_t ), &psprite->frames[i].frameptr, i );
 			break;
 		case FRAME_ANGLED:
 			Q_strncpy( group_suffix, "angle", sizeof( group_suffix ));
-			pframetype = R_SpriteLoadGroup( mod, pframetype + 1, &psprite->frames[i].frameptr, i );
+			pframetype = R_SpriteLoadGroup( mod, pframetype + sizeof( dframetype_t ), &psprite->frames[i].frameptr, i );
 			break;
 		}
 		if( pframetype == NULL ) break; // technically an error
@@ -430,7 +435,7 @@ mspriteframe_t *R_GetSpriteFrame( const model_t *pModel, int frame, float yaw )
 
 		// when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
 		// are positive, so we don't have to worry about division by zero
-		targettime = gpGlobals->time - ((int)( gpGlobals->time / fullinterval )) * fullinterval;
+		targettime = gp_cl->time - ((int)( gp_cl->time / fullinterval )) * fullinterval;
 
 		for( i = 0; i < (numframes - 1); i++ )
 		{
@@ -459,7 +464,7 @@ NOTE: we using prevblending[0] and [1] for holds interval
 between frames where are we lerping
 ================
 */
-float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, mspriteframe_t **curframe )
+static float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, mspriteframe_t **curframe )
 {
 	msprite_t		*psprite;
 	mspritegroup_t	*pspritegroup;
@@ -494,25 +499,25 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 				// this can be happens when rendering switched between single and angled frames
 				// or change model on replace delta-entity
 				ent->latched.prevblending[0] = ent->latched.prevblending[1] = frame;
-				ent->latched.sequencetime = gpGlobals->time;
+				ent->latched.sequencetime = gp_cl->time;
 				lerpFrac = 1.0f;
 			}
 
-			if( ent->latched.sequencetime < gpGlobals->time )
+			if( ent->latched.sequencetime < gp_cl->time )
 			{
 				if( frame != ent->latched.prevblending[1] )
 				{
 					ent->latched.prevblending[0] = ent->latched.prevblending[1];
 					ent->latched.prevblending[1] = frame;
-					ent->latched.sequencetime = gpGlobals->time;
+					ent->latched.sequencetime = gp_cl->time;
 					lerpFrac = 0.0f;
 				}
-				else lerpFrac = (gpGlobals->time - ent->latched.sequencetime) * 11.0f;
+				else lerpFrac = (gp_cl->time - ent->latched.sequencetime) * 11.0f;
 			}
 			else
 			{
 				ent->latched.prevblending[0] = ent->latched.prevblending[1] = frame;
-				ent->latched.sequencetime = gpGlobals->time;
+				ent->latched.sequencetime = gp_cl->time;
 				lerpFrac = 0.0f;
 			}
 		}
@@ -526,7 +531,7 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 		{
 			// reset interpolation on change model
 			ent->latched.prevblending[0] = ent->latched.prevblending[1] = frame;
-			ent->latched.sequencetime = gpGlobals->time;
+			ent->latched.sequencetime = gp_cl->time;
 			lerpFrac = 0.0f;
 		}
 
@@ -541,7 +546,7 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 		numframes = pspritegroup->numframes;
 		fullinterval = pintervals[numframes-1];
 		jinterval = pintervals[1] - pintervals[0];
-		time = gpGlobals->time;
+		time = gp_cl->time;
 		jtime = 0.0f;
 
 		// when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
@@ -580,25 +585,25 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 				// this can be happens when rendering switched between single and angled frames
 				// or change model on replace delta-entity
 				ent->latched.prevblending[0] = ent->latched.prevblending[1] = frame;
-				ent->latched.sequencetime = gpGlobals->time;
+				ent->latched.sequencetime = gp_cl->time;
 				lerpFrac = 1.0f;
 			}
 
-			if( ent->latched.sequencetime < gpGlobals->time )
+			if( ent->latched.sequencetime < gp_cl->time )
 			{
 				if( frame != ent->latched.prevblending[1] )
 				{
 					ent->latched.prevblending[0] = ent->latched.prevblending[1];
 					ent->latched.prevblending[1] = frame;
-					ent->latched.sequencetime = gpGlobals->time;
+					ent->latched.sequencetime = gp_cl->time;
 					lerpFrac = 0.0f;
 				}
-				else lerpFrac = (gpGlobals->time - ent->latched.sequencetime) * ent->curstate.framerate;
+				else lerpFrac = (gp_cl->time - ent->latched.sequencetime) * ent->curstate.framerate;
 			}
 			else
 			{
 				ent->latched.prevblending[0] = ent->latched.prevblending[1] = frame;
-				ent->latched.sequencetime = gpGlobals->time;
+				ent->latched.sequencetime = gp_cl->time;
 				lerpFrac = 0.0f;
 			}
 		}
@@ -625,7 +630,7 @@ R_CullSpriteModel
 Cull sprite model by bbox
 ================
 */
-qboolean R_CullSpriteModel( cl_entity_t *e, vec3_t origin )
+static qboolean R_CullSpriteModel( cl_entity_t *e, vec3_t origin )
 {
 	vec3_t	sprite_mins, sprite_maxs;
 	float	scale = 1.0f;
@@ -689,7 +694,7 @@ R_SpriteOccluded
 Do occlusion test for glow-sprites
 ================
 */
-qboolean R_SpriteOccluded( cl_entity_t *e, vec3_t origin, float *pscale )
+static qboolean R_SpriteOccluded( cl_entity_t *e, vec3_t origin, float *pscale )
 {
 	if( e->curstate.rendermode == kRenderGlow )
 	{
@@ -826,7 +831,7 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	{
 		cl_entity_t	*parent;
 
-		parent = gEngfuncs.GetEntityByIndex( e->curstate.aiment );
+		parent = CL_GetEntityByIndex( e->curstate.aiment );
 
 		if( parent && parent->model )
 		{

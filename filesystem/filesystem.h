@@ -31,7 +31,7 @@ extern "C"
 {
 #endif // __cplusplus
 
-#define FS_API_VERSION 2 // not stable yet!
+#define FS_API_VERSION 3 // not stable yet!
 #define FS_API_CREATEINTERFACE_TAG   "XashFileSystem002" // follow FS_API_VERSION!!!
 #define FILESYSTEM_INTERFACE_VERSION "VFileSystem009" // never change this!
 
@@ -106,6 +106,10 @@ typedef struct gameinfo_s
 
 	int		quicksave_aged_count; // min is 1, max is 99
 	int		autosave_aged_count; // min is 1, max is 99
+
+	// HL25 compatibility keys
+	qboolean hd_background;
+	qboolean animated_title;
 } gameinfo_t;
 
 typedef enum
@@ -117,8 +121,8 @@ typedef enum
 
 typedef struct fs_dllinfo_t
 {
-	string fullPath;
-	string shortPath;
+	char fullPath[2048]; // absolute disk path
+	string shortPath; // vfs path
 	qboolean encrypted;
 	qboolean custom_loader;
 } fs_dllinfo_t;
@@ -192,6 +196,9 @@ typedef struct fs_api_t
 	void *(*MountArchive_Fullpath)( const char *path, int flags );
 
 	qboolean (*GetFullDiskPath)( char *buffer, size_t size, const char *name, qboolean gamedironly );
+
+	// like LoadFile but returns pointer that can be free'd using standard library function
+	byte *(*LoadFileMalloc)( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly );
 } fs_api_t;
 
 typedef struct fs_interface_t
@@ -206,8 +213,8 @@ typedef struct fs_interface_t
 	// memory
 	poolhandle_t (*_Mem_AllocPool)( const char *name, const char *filename, int fileline );
 	void  (*_Mem_FreePool)( poolhandle_t *poolptr, const char *filename, int fileline );
-	void *(*_Mem_Alloc)( poolhandle_t poolptr, size_t size, qboolean clear, const char *filename, int fileline );
-	void *(*_Mem_Realloc)( poolhandle_t poolptr, void *memptr, size_t size, qboolean clear, const char *filename, int fileline );
+	void *(*_Mem_Alloc)( poolhandle_t poolptr, size_t size, qboolean clear, const char *filename, int fileline ) ALLOC_CHECK( 2 );
+	void *(*_Mem_Realloc)( poolhandle_t poolptr, void *memptr, size_t size, qboolean clear, const char *filename, int fileline ) ALLOC_CHECK( 3 );
 	void  (*_Mem_Free)( void *data, const char *filename, int fileline );
 
 	// platform

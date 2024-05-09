@@ -36,26 +36,26 @@ void CL_RunLightStyles( void )
 {
 	int		i, k, flight, clight;
 	float		l, lerpfrac, backlerp;
-	float		frametime = (gpGlobals->time -   gpGlobals->oldtime);
-	float		scale;
+	float		frametime = (gp_cl->time - gp_cl->oldtime);
 	lightstyle_t	*ls;
 
-	if( !WORLDMODEL ) return;
+	if( !WORLDMODEL )
+		return;
 
-	scale = r_lighting_modulate->value;
+	if( !WORLDMODEL->lightdata )
+	{
+		for( i = 0; i < MAX_LIGHTSTYLES; i++ )
+			tr.lightstylevalue[i] = 256 * 256;
+		return;
+	}
 
 	// light animations
 	// 'm' is normal light, 'a' is no light, 'z' is double bright
 	for( i = 0; i < MAX_LIGHTSTYLES; i++ )
 	{
 		ls = gEngfuncs.GetLightStyle( i );
-		if( !WORLDMODEL->lightdata )
-		{
-			tr.lightstylevalue[i] = 256 * 256;
-			continue;
-		}
 
-		if( !ENGINE_GET_PARM( PARAM_GAMEPAUSED ) && frametime <= 0.1f )
+		if( !gp_cl->paused && frametime <= 0.1f )
 			ls->time += frametime; // evaluate local time
 
 		flight = (int)Q_floor( ls->time * 10 );
@@ -65,18 +65,18 @@ void CL_RunLightStyles( void )
 
 		if( !ls->length )
 		{
-			tr.lightstylevalue[i] = 256 * scale;
+			tr.lightstylevalue[i] = 256;
 			continue;
 		}
 		else if( ls->length == 1 )
 		{
 			// single length style so don't bother interpolating
-			tr.lightstylevalue[i] = ls->map[0] * 22 * scale;
+			tr.lightstylevalue[i] = ( ls->pattern[0] - 'a' ) * 22;
 			continue;
 		}
 		else if( !ls->interp || !cl_lightstyle_lerping->flags )
 		{
-			tr.lightstylevalue[i] = ls->map[flight%ls->length] * 22 * scale;
+			tr.lightstylevalue[i] = ( ls->pattern[flight%ls->length] - 'a' ) * 22;
 			continue;
 		}
 
@@ -89,7 +89,7 @@ void CL_RunLightStyles( void )
 		k = ls->map[clight % ls->length];
 		l += (float)( k * 22.0f ) * lerpfrac;
 
-		tr.lightstylevalue[i] = (int)l * scale;
+		tr.lightstylevalue[i] = (int)l;
 	}
 }
 
@@ -152,43 +152,26 @@ void R_PushDlights( void )
 
 	tr.dlightframecount = tr.framecount;
 
-	RI.currententity = gEngfuncs.GetEntityByIndex( 0 );
-	if( RI.currententity )
-		RI.currentmodel = RI.currententity->model;
+	RI.currententity = CL_GetEntityByIndex( 0 );
+
+	// no world -- no dlights
+	if( !RI.currententity )
+		return;
+
+	RI.currentmodel = RI.currententity->model;
 
 	for( i = 0; i < MAX_DLIGHTS; i++, l++ )
 	{
 		l = gEngfuncs.GetDynamicLight( i );
 
-		if( l->die < gpGlobals->time || !l->radius )
+		if( l->die < gp_cl->time || !l->radius )
 			continue;
 
 		if( GL_FrustumCullSphere( &RI.frustum, l->origin, l->radius, 15 ))
 			continue;
 
-		if( RI.currententity )
-			R_MarkLights( l, 1<<i, RI.currentmodel->nodes );
+		R_MarkLights( l, 1<<i, RI.currentmodel->nodes );
 	}
-}
-
-/*
-=============
-R_CountSurfaceDlights
-=============
-*/
-int R_CountSurfaceDlights( msurface_t *surf )
-{
-	int	i, numDlights = 0;
-
-	for( i = 0; i < MAX_DLIGHTS; i++ )
-	{
-		if(!( surf->dlightbits & BIT( i )))
-			continue;	// not lit by this light
-
-		numDlights++;
-	}
-
-	return numDlights;
 }
 
 /*
@@ -320,18 +303,10 @@ static qboolean R_RecursiveLightPoint( model_t *model, mnode_t *node, float p1f,
 		{
 			uint	scale = tr.lightstylevalue[surf->styles[map]];
 
-			if( tr.ignore_lightgamma )
-			{
-				cv->r += lm->r * scale;
-				cv->g += lm->g * scale;
-				cv->b += lm->b * scale;
-			}
-			else
-			{
-				cv->r += gEngfuncs.LightToTexGamma( lm->r ) * scale;
-				cv->g += gEngfuncs.LightToTexGamma( lm->g ) * scale;
-				cv->b += gEngfuncs.LightToTexGamma( lm->b ) * scale;
-			}
+			cv->r += lm->r * scale;
+			cv->g += lm->g * scale;
+			cv->b += lm->b * scale;
+
 			lm += size; // skip to next lightmap
 
 			if( dm != NULL )
@@ -361,7 +336,7 @@ R_LightVec
 check bspmodels to get light from
 =================
 */
-colorVec R_LightVecInternal( const vec3_t start, const vec3_t end, vec3_t lspot, vec3_t lvec )
+static colorVec R_LightVecInternal( const vec3_t start, const vec3_t end, vec3_t lspot, vec3_t lvec )
 {
 	float	last_fraction;
 	int	i, maxEnts = 1;
@@ -418,9 +393,10 @@ colorVec R_LightVecInternal( const vec3_t start, const vec3_t end, vec3_t lspot,
 			{
 				if( lspot ) VectorCopy( g_trace_lightspot, lspot );
 				if( lvec ) VectorNormalize2( g_trace_lightvec, lvec );
-				light.r = Q_min(( cv.r >> 7 ), 255 );
-				light.g = Q_min(( cv.g >> 7 ), 255 );
-				light.b = Q_min(( cv.b >> 7 ), 255 );
+
+				light.r = Q_min(( cv.r >> 8 ), 255 );
+				light.g = Q_min(( cv.g >> 8 ), 255 );
+				light.b = Q_min(( cv.b >> 8 ), 255 );
 				last_fraction = g_trace_fraction;
 
 				if(( light.r + light.g + light.b ) != 0 )

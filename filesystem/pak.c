@@ -334,7 +334,7 @@ searchpath_t *FS_AddPak_Fullpath( const char *pakfile, int flags )
 {
 	searchpath_t *search;
 	pack_t *pak;
-	int i, errorcode = PAK_LOAD_COULDNT_OPEN;
+	int errorcode = PAK_LOAD_COULDNT_OPEN;
 
 	pak = FS_LoadPackPAK( pakfile, &errorcode );
 
@@ -358,7 +358,7 @@ searchpath_t *FS_AddPak_Fullpath( const char *pakfile, int flags )
 	search->pfnFindFile = FS_FindFile_PAK;
 	search->pfnSearch = FS_Search_PAK;
 
-	Con_Reportf( "Adding pakfile: %s (%i files)\n", pakfile, pak->numfiles );
+	Con_Reportf( "Adding PAK: %s (%i files)\n", pakfile, pak->numfiles );
 
 	return search;
 }

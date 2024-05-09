@@ -23,6 +23,7 @@ CVAR_DEFINE_AUTO( sv_lan, "0", 0, "server is a lan server ( no heartbeat, no aut
 CVAR_DEFINE_AUTO( sv_lan_rate, "20000.0", 0, "rate for lan server" );
 CVAR_DEFINE_AUTO( sv_nat, "0", 0, "enable NAT bypass for this server" );
 CVAR_DEFINE_AUTO( sv_aim, "1", FCVAR_ARCHIVE|FCVAR_SERVER, "auto aiming option" );
+CVAR_DEFINE_AUTO( sv_allow_autoaim, "0", FCVAR_ARCHIVE|FCVAR_SERVER, "auto aiming option (for HL25 compatibility)" );
 CVAR_DEFINE_AUTO( sv_unlag, "1", 0, "allow lag compensation on server-side" );
 CVAR_DEFINE_AUTO( sv_maxunlag, "0.5", 0, "max latency value which can be interpolated (by default ping should not exceed 500 units)" );
 CVAR_DEFINE_AUTO( sv_unlagpush, "0.0", 0, "interpolation bias for unlag time" );
@@ -74,6 +75,8 @@ CVAR_DEFINE_AUTO( skill, "1", 0, "skill level in singleplayer game" );
 CVAR_DEFINE_AUTO( temp1, "0", 0, "temporary cvar that used by some mods" );
 CVAR_DEFINE_AUTO( listipcfgfile, "listip.cfg", 0, "name of listip.cfg file" );
 CVAR_DEFINE_AUTO( mapchangecfgfile, "", 0, "name of map change configuration file" );
+CVAR_DEFINE_AUTO( disconcfgfile, "", 0, "name of disconnect configuration file" );
+CVAR_DEFINE_AUTO( _sv_override_scientist_mdl, "", 0, "override default scientist model name (specially for HL25 Uplink maps)" );
 
 // physic-related variables
 CVAR_DEFINE_AUTO( sv_gravity, "800", FCVAR_MOVEVARS, "world gravity value" );
@@ -128,7 +131,6 @@ CVAR_DEFINE( public_server, "public", "0", 0, "change server type from private t
 CVAR_DEFINE_AUTO( sv_novis, "0", 0, "force to ignore server visibility" );			// disable server culling entities by vis
 CVAR_DEFINE( sv_pausable, "pausable", "1", FCVAR_SERVER, "allow players to pause or not" );
 static CVAR_DEFINE_AUTO( timeout, "125", FCVAR_SERVER, "connection timeout" );				// seconds without any message
-CVAR_DEFINE( sv_lighting_modulate, "r_lighting_modulate", "0.6", FCVAR_ARCHIVE, "lightstyles modulate scale" );
 CVAR_DEFINE( sv_maxclients, "maxplayers", "1", FCVAR_LATCH, "server max capacity" );
 CVAR_DEFINE_AUTO( sv_check_errors, "0", FCVAR_ARCHIVE, "check edicts for errors" );
 CVAR_DEFINE_AUTO( sv_reconnect_limit, "3", FCVAR_ARCHIVE, "max reconnect attempts" );		// minimum seconds between connect messages
@@ -156,7 +158,7 @@ SV_HasActivePlayers
 returns true if server have spawned players
 ================
 */
-qboolean SV_HasActivePlayers( void )
+static qboolean SV_HasActivePlayers( void )
 {
 	int	i;
 
@@ -244,7 +246,7 @@ void SV_UpdateMovevars( qboolean initialize )
 SV_CheckCmdTimes
 =================
 */
-void SV_CheckCmdTimes( void )
+static void SV_CheckCmdTimes( void )
 {
 	sv_client_t	*cl;
 	static double	lastreset = 0;
@@ -299,7 +301,7 @@ SV_ProcessFile
 process incoming file (customization)
 =================
 */
-void SV_ProcessFile( sv_client_t *cl, const char *filename )
+static void SV_ProcessFile( sv_client_t *cl, const char *filename )
 {
 	customization_t	*pList;
 	resource_t	*resource;
@@ -370,7 +372,7 @@ void SV_ProcessFile( sv_client_t *cl, const char *filename )
 SV_ReadPackets
 =================
 */
-void SV_ReadPackets( void )
+static void SV_ReadPackets( void )
 {
 	sv_client_t	*cl;
 	int		i, qport;
@@ -488,7 +490,7 @@ for a few seconds to make sure any final reliable message gets resent
 if necessary
 ==================
 */
-void SV_CheckTimeouts( void )
+static void SV_CheckTimeouts( void )
 {
 	sv_client_t	*cl;
 	double		droppoint;
@@ -541,7 +543,7 @@ This has to be done before the world logic, because
 player processing happens outside RunWorldFrame
 ================
 */
-void SV_PrepWorldFrame( void )
+static void SV_PrepWorldFrame( void )
 {
 	edict_t	*ent;
 	int	i;
@@ -563,7 +565,7 @@ void SV_PrepWorldFrame( void )
 SV_IsSimulating
 =================
 */
-qboolean SV_IsSimulating( void )
+static qboolean SV_IsSimulating( void )
 {
 	if( sv.background && SV_Active() && CL_Active())
 	{
@@ -593,7 +595,7 @@ qboolean SV_IsSimulating( void )
 SV_RunGameFrame
 =================
 */
-qboolean SV_RunGameFrame( void )
+static qboolean SV_RunGameFrame( void )
 {
 	sv.simulating = SV_IsSimulating();
 
@@ -710,17 +712,6 @@ void Host_ServerFrame( void )
 
 	// send a heartbeat to the master if needed
 	NET_MasterHeartbeat ();
-}
-
-/*
-==================
-Host_SetServerState
-==================
-*/
-void Host_SetServerState( int state )
-{
-	Cvar_FullSet( "host_serverstate", va( "%i", state ), FCVAR_READ_ONLY );
-	sv.state = state;
 }
 
 //============================================================================
@@ -885,6 +876,7 @@ void SV_Init( void )
 	Cvar_RegisterVariable( &sv_fps );
 	Cvar_RegisterVariable( &showtriggers );
 	Cvar_RegisterVariable( &sv_aim );
+	Cvar_RegisterVariable( &sv_allow_autoaim );
 	Cvar_RegisterVariable( &deathmatch );
 	Cvar_RegisterVariable( &coop );
 	Cvar_RegisterVariable( &teamplay );
@@ -917,7 +909,6 @@ void SV_Init( void )
 	Cvar_RegisterVariable( &sv_maxclients );
 	Cvar_RegisterVariable( &sv_check_errors );
 	Cvar_RegisterVariable( &public_server );
-	Cvar_RegisterVariable( &sv_lighting_modulate );
 	Cvar_RegisterVariable( &sv_reconnect_limit );
 	Cvar_RegisterVariable( &sv_failuretime );
 	Cvar_RegisterVariable( &sv_unlag );
@@ -959,6 +950,8 @@ void SV_Init( void )
 	Cvar_RegisterVariable( &bannedcfgfile );
 	Cvar_RegisterVariable( &listipcfgfile );
 	Cvar_RegisterVariable( &mapchangecfgfile );
+	Cvar_RegisterVariable( &disconcfgfile );
+	Cvar_RegisterVariable( &_sv_override_scientist_mdl );
 
 	Cvar_RegisterVariable( &sv_voiceenable );
 	Cvar_RegisterVariable( &sv_voicequality );
@@ -1053,7 +1046,7 @@ SV_FreeClients
 release server clients
 ================
 */
-void SV_FreeClients( void )
+static void SV_FreeClients( void )
 {
 	if( svs.maxclients != 0 )
 	{
@@ -1101,7 +1094,7 @@ void SV_Shutdown( const char *finalmsg )
 		Con_Printf( "%s", finalmsg );
 
 	// rcon will be disconnected
-	SV_EndRedirect();
+	SV_EndRedirect( &host.rd );
 
 	if( svs.clients )
 		SV_FinalMessage( finalmsg, false );

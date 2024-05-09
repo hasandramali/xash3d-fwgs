@@ -17,6 +17,8 @@ GNU General Public License for more details.
 
 ref_api_t      gEngfuncs;
 ref_globals_t *gpGlobals;
+ref_client_t  *gp_cl;
+ref_host_t    *gp_host;
 gl_globals_t tr;
 ref_speeds_t r_stats;
 poolhandle_t r_temppool;
@@ -63,7 +65,7 @@ static void GAME_EXPORT CL_FillRGBABlend( float _x, float _y, float _w, float _h
 }
 void Mod_UnloadTextures( model_t *mod );
 
-qboolean GAME_EXPORT Mod_ProcessRenderData( model_t *mod, qboolean create, const byte *buf )
+static qboolean GAME_EXPORT Mod_ProcessRenderData( model_t *mod, qboolean create, const byte *buf )
 {
 	qboolean loaded = true;
 
@@ -98,7 +100,6 @@ qboolean GAME_EXPORT Mod_ProcessRenderData( model_t *mod, qboolean create, const
 
 	return loaded;
 }
-
 
 static int GL_RefGetParm( int parm, int arg )
 {
@@ -169,7 +170,9 @@ static int GL_RefGetParm( int parm, int arg )
 	case PARM_STENCIL_ACTIVE:
 		return 0; //glState.stencilEnabled;
 	case PARM_SKY_SPHERE:
-		return ENGINE_GET_PARM_( parm, arg ) && !tr.fCustomSkybox;
+		return 0; // ref_soft doesn't support sky sphere
+	case PARM_TEX_FILTERING:
+		return 0; // ref_soft doesn't do filtering in general
 	default:
 		return ENGINE_GET_PARM_( parm, arg );
 	}
@@ -221,7 +224,7 @@ static const char * GAME_EXPORT GL_TextureName( unsigned int texnum )
 	return R_GetTexture( texnum )->name;
 }
 
-const byte * GAME_EXPORT GL_TextureData( unsigned int texnum )
+static const byte * GAME_EXPORT GL_TextureData( unsigned int texnum )
 {
 	rgbdata_t *pic = R_GetTexture( texnum )->original;
 
@@ -230,7 +233,7 @@ const byte * GAME_EXPORT GL_TextureData( unsigned int texnum )
 	return NULL;
 }
 
-void Mod_BrushUnloadTextures( model_t *mod )
+static void Mod_BrushUnloadTextures( model_t *mod )
 {
 	int i;
 
@@ -273,24 +276,30 @@ void Mod_UnloadTextures( model_t *mod )
 	}
 }
 
-void GAME_EXPORT R_ProcessEntData( qboolean allocate )
+static void GAME_EXPORT R_ProcessEntData( qboolean allocate, cl_entity_t *entities, unsigned int max_entities )
 {
+	tr.entities = entities;
+	tr.max_entities = max_entities;
+}
 
+static void GAME_EXPORT R_Flush( unsigned int flags )
+{
+	// stub
 }
 
 // stubs
 
-void GAME_EXPORT GL_SetTexCoordArrayMode( uint mode )
+static void GAME_EXPORT GL_SetTexCoordArrayMode( uint mode )
 {
 
 }
 
-void GAME_EXPORT GL_BackendStartFrame( void )
+static void GAME_EXPORT GL_BackendStartFrame( void )
 {
 
 }
 
-void GAME_EXPORT GL_BackendEndFrame( void )
+static void GAME_EXPORT GL_BackendEndFrame( void )
 {
 
 }
@@ -303,14 +312,9 @@ void GAME_EXPORT GL_SetRenderMode(int mode)
 	/// maybe, setup block drawing function pointers here
 }
 
-void GAME_EXPORT R_ShowTextures( void )
+static void GAME_EXPORT R_ShowTextures( void )
 {
 	// textures undone too
-}
-
-void GAME_EXPORT R_ShowTree( void )
-{
-	// do we really need this here???
 }
 
 void GAME_EXPORT R_SetupSky(const char *skyboxname)
@@ -329,49 +333,44 @@ void R_InitSkyClouds(mip_t *mt, texture_t *tx, qboolean custom_palette)
 
 }
 
-void GAME_EXPORT GL_SubdivideSurface( model_t *mod, msurface_t *fa )
+static void GAME_EXPORT GL_SubdivideSurface( model_t *mod, msurface_t *fa )
 {
 
 }
 
-void GAME_EXPORT DrawSingleDecal(decal_t *pDecal, msurface_t *fa)
+static void GAME_EXPORT DrawSingleDecal(decal_t *pDecal, msurface_t *fa)
 {
 
 }
 
-void GAME_EXPORT GL_SelectTexture(int texture)
+static void GAME_EXPORT GL_SelectTexture(int texture)
 {
 
 }
 
-void GAME_EXPORT GL_LoadTexMatrixExt(const float *glmatrix)
+static void GAME_EXPORT GL_LoadTexMatrixExt(const float *glmatrix)
 {
 
 }
 
-void GAME_EXPORT GL_LoadIdentityTexMatrix( void )
+static void GAME_EXPORT GL_LoadIdentityTexMatrix( void )
 {
 
 }
 
-void GAME_EXPORT GL_CleanUpTextureUnits(int last)
+static void GAME_EXPORT GL_CleanUpTextureUnits(int last)
 {
 
 }
 
-void GAME_EXPORT GL_TexGen(unsigned int coord, unsigned int mode)
+static void GAME_EXPORT GL_TexGen(unsigned int coord, unsigned int mode)
 {
 
 }
 
-void GAME_EXPORT GL_TextureTarget(uint target)
+static void GAME_EXPORT GL_TextureTarget(uint target)
 {
 
-}
-
-void GAME_EXPORT GL_BuildLightmaps( void )
-{
-	CL_RunLightStyles();
 }
 
 void GAME_EXPORT Mod_SetOrthoBounds(const float *mins, const float *maxs)
@@ -389,7 +388,7 @@ byte *GAME_EXPORT Mod_GetCurrentVis( void )
 	return NULL;
 }
 
-const char *R_GetConfigName( void )
+static const char *R_GetConfigName( void )
 {
 	return "ref_soft"; // software specific cvars will go to ref_soft.cfg
 }
@@ -410,6 +409,7 @@ ref_interface_t gReffuncs =
 	GL_InitExtensions,
 	GL_ClearExtensions,
 
+	R_GammaChanged,
 	R_BeginFrame,
 	R_RenderScene,
 	R_EndFrame,
@@ -425,6 +425,7 @@ ref_interface_t gReffuncs =
 	R_AddEntity,
 	CL_AddCustomBeam,
 	R_ProcessEntData,
+	R_Flush,
 
 	R_ShowTextures,
 
@@ -547,7 +548,8 @@ ref_interface_t gReffuncs =
 	VGUI_GenerateTexture,
 };
 
-int EXPORT GAME_EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t *engfuncs, ref_globals_t *globals )
+int EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t *engfuncs, ref_globals_t *globals );
+int EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t *engfuncs, ref_globals_t *globals )
 {
 	if( version != REF_API_VERSION )
 		return 0;
@@ -556,6 +558,9 @@ int EXPORT GAME_EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t
 	memcpy( funcs, &gReffuncs, sizeof( ref_interface_t ));
 	memcpy( &gEngfuncs, engfuncs, sizeof( ref_api_t ));
 	gpGlobals = globals;
+
+	gp_cl = (ref_client_t *)ENGINE_GET_PARM( PARM_GET_CLIENT_PTR );
+	gp_host = (ref_host_t *)ENGINE_GET_PARM( PARM_GET_HOST_PTR );
 
 	return REF_API_VERSION;
 }

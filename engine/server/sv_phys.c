@@ -1384,7 +1384,9 @@ static void SV_CheckWaterTransition( edict_t *ent )
 		if( ent->v.watertype == CONTENTS_EMPTY )
 		{
 			// just crossed into water
-			SV_StartSound( ent, CHAN_AUTO, "player/pl_wade1.wav", 1.0f, ATTN_NORM, 0, 100 );
+			const char *snd = SoundList_GetRandom( PlayerWaterEnter );
+			if( snd )
+				SV_StartSound( ent, CHAN_AUTO, snd, 1.0f, ATTN_NORM, 0, 100 );
 			ent->v.velocity[2] *= 0.5f;
 		}
 
@@ -1418,7 +1420,9 @@ static void SV_CheckWaterTransition( edict_t *ent )
 		if( ent->v.watertype != CONTENTS_EMPTY )
 		{
 			// just crossed into water
-			SV_StartSound( ent, CHAN_AUTO, "player/pl_wade2.wav", 1.0f, ATTN_NORM, 0, 100 );
+			const char *snd = SoundList_GetRandom( PlayerWaterExit );
+			if( snd )
+				SV_StartSound( ent, CHAN_AUTO, snd, 1.0f, ATTN_NORM, 0, 100 );
 		}
 		ent->v.watertype = CONTENTS_EMPTY;
 		ent->v.waterlevel = 0;
@@ -1784,7 +1788,7 @@ static void SV_RunLightStyles( void )
 	lightstyle_t	*ls;
 	float		scale;
 
-	scale = sv_lighting_modulate.value;
+	scale = 1.0f;
 
 	// run lightstyles animation
 	for( i = 0, ls = sv.lightstyles; i < MAX_LIGHTSTYLES; i++, ls++ )
@@ -1842,8 +1846,10 @@ void SV_Physics( void )
 	// increase framecount
 	sv.framecount++;
 
+#if 0 // figure out why this causes memory corruption
 	// decrement svgame.numEntities if the highest number entities died
-	for( ; EDICT_NUM( svgame.numEntities - 1 )->free; svgame.numEntities-- );
+	for( ; ( ent = EDICT_NUM( svgame.numEntities - 1 )) && ent->free; svgame.numEntities-- );
+#endif
 }
 
 /*
@@ -1956,7 +1962,7 @@ SV_GetLightStyle
 needs to get correct working SV_LightPoint
 ==================
 */
-const char *GAME_EXPORT SV_GetLightStyle( int style )
+static const char *GAME_EXPORT SV_GetLightStyle( int style )
 {
 	if( style < 0 ) style = 0;
 	if( style >= MAX_LIGHTSTYLES )
@@ -2116,6 +2122,7 @@ static server_physics_api_t gPhysicsAPI =
 	COM_SaveFile,
 	pfnLoadImagePixels,
 	pfnGetModelName,
+	Sys_GetNativeObject
 };
 
 /*
@@ -2139,18 +2146,18 @@ qboolean SV_InitPhysicsAPI( void )
 			if( svgame.physFuncs.SV_CheckFeatures != NULL )
 			{
 				// grab common engine features (it will be shared across the network)
-				host.features = svgame.physFuncs.SV_CheckFeatures();
-				Host_PrintEngineFeatures ();
+				Host_ValidateEngineFeatures( svgame.physFuncs.SV_CheckFeatures( ));
 			}
 			return true;
 		}
 
 		// make sure what physic functions is cleared
 		memset( &svgame.physFuncs, 0, sizeof( svgame.physFuncs ));
-
+		Host_ValidateEngineFeatures( 0 );
 		return false; // just tell user about problems
 	}
 
 	// physic interface is missed
+	Host_ValidateEngineFeatures( 0 );
 	return true;
 }

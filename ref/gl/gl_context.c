@@ -24,6 +24,8 @@ GNU General Public License for more details.
 
 ref_api_t      gEngfuncs;
 ref_globals_t *gpGlobals;
+ref_client_t  *gp_cl;
+ref_host_t    *gp_host;
 
 static void R_ClearScreen( void )
 {
@@ -93,7 +95,7 @@ static void GAME_EXPORT CL_FillRGBABlend( float _x, float _y, float _w, float _h
 	pglDisable( GL_BLEND );
 }
 
-void Mod_BrushUnloadTextures( model_t *mod )
+static void Mod_BrushUnloadTextures( model_t *mod )
 {
 	int i;
 
@@ -108,7 +110,7 @@ void Mod_BrushUnloadTextures( model_t *mod )
 	}
 }
 
-void Mod_UnloadTextures( model_t *mod )
+static void Mod_UnloadTextures( model_t *mod )
 {
 	Assert( mod != NULL );
 
@@ -132,7 +134,7 @@ void Mod_UnloadTextures( model_t *mod )
 	}
 }
 
-qboolean Mod_ProcessRenderData( model_t *mod, qboolean create, const byte *buf )
+static qboolean Mod_ProcessRenderData( model_t *mod, qboolean create, const byte *buf )
 {
 	qboolean loaded = true;
 
@@ -234,7 +236,12 @@ static int GL_RefGetParm( int parm, int arg )
 	case PARM_STENCIL_ACTIVE:
 		return glState.stencilEnabled;
 	case PARM_SKY_SPHERE:
-		return ENGINE_GET_PARM_( parm, arg ) && !tr.fCustomSkybox;
+		return FBitSet( tr.world->flags, FWORLD_SKYSPHERE ) && !FBitSet( tr.world->flags, FWORLD_CUSTOM_SKYBOX );
+	case PARM_TEX_FILTERING:
+		if( arg < 0 )
+			return gl_texture_nearest.value == 0.0f;
+
+		return GL_TextureFilteringEnabled( R_GetTexture( arg ));
 	default:
 		return ENGINE_GET_PARM_( parm, arg );
 	}
@@ -286,7 +293,7 @@ static const char *GL_TextureName( unsigned int texnum )
 	return R_GetTexture( texnum )->name;
 }
 
-const byte *GL_TextureData( unsigned int texnum )
+static const byte *GL_TextureData( unsigned int texnum )
 {
 	rgbdata_t *pic = R_GetTexture( texnum )->original;
 
@@ -295,20 +302,33 @@ const byte *GL_TextureData( unsigned int texnum )
 	return NULL;
 }
 
-void R_ProcessEntData( qboolean allocate )
+static void R_ProcessEntData( qboolean allocate, cl_entity_t *entities, unsigned int max_entities )
 {
 	if( !allocate )
 	{
 		tr.draw_list->num_solid_entities = 0;
 		tr.draw_list->num_trans_entities = 0;
 		tr.draw_list->num_beam_entities = 0;
+
+		tr.max_entities = 0;
+		tr.entities = NULL;
+	}
+	else
+	{
+		tr.max_entities = max_entities;
+		tr.entities = entities;
 	}
 
 	if( gEngfuncs.drawFuncs->R_ProcessEntData )
 		gEngfuncs.drawFuncs->R_ProcessEntData( allocate );
 }
 
-qboolean R_SetDisplayTransform( ref_screen_rotation_t rotate, int offset_x, int offset_y, float scale_x, float scale_y )
+static void GAME_EXPORT R_Flush( unsigned int flags )
+{
+	// stub
+}
+
+static qboolean R_SetDisplayTransform( ref_screen_rotation_t rotate, int offset_x, int offset_y, float scale_x, float scale_y )
 {
 	qboolean ret = true;
 	if( rotate > 0 )
@@ -357,6 +377,7 @@ ref_interface_t gReffuncs =
 	GL_InitExtensions,
 	GL_ClearExtensions,
 
+	R_GammaChanged,
 	R_BeginFrame,
 	R_RenderScene,
 	R_EndFrame,
@@ -372,6 +393,7 @@ ref_interface_t gReffuncs =
 	R_AddEntity,
 	CL_AddCustomBeam,
 	R_ProcessEntData,
+	R_Flush,
 
 	R_ShowTextures,
 
@@ -494,6 +516,7 @@ ref_interface_t gReffuncs =
 	VGUI_GenerateTexture,
 };
 
+int EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t *engfuncs, ref_globals_t *globals );
 int EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t *engfuncs, ref_globals_t *globals )
 {
 	if( version != REF_API_VERSION )
@@ -503,6 +526,9 @@ int EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t *engfuncs, 
 	memcpy( funcs, &gReffuncs, sizeof( ref_interface_t ));
 	memcpy( &gEngfuncs, engfuncs, sizeof( ref_api_t ));
 	gpGlobals = globals;
+
+	gp_cl = (ref_client_t *)ENGINE_GET_PARM( PARM_GET_CLIENT_PTR );
+	gp_host = (ref_host_t *)ENGINE_GET_PARM( PARM_GET_HOST_PTR );
 
 	return REF_API_VERSION;
 }

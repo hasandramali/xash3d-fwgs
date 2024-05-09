@@ -34,6 +34,7 @@ GNU General Public License for more details.
 #include "common/cvar.h"
 #include "gl_export.h"
 #include "wadfile.h"
+#include "common/mod_local.h"
 
 #if XASH_PSVITA
 int VGL_ShimInit( void );
@@ -57,10 +58,6 @@ void VGL_ShimEndFrame( void );
 
 #include <stdio.h>
 
-#define WORLD (gEngfuncs.GetWorld())
-#define WORLDMODEL (gEngfuncs.pfnGetModelByIndex( 1 ))
-#define MOVEVARS (gEngfuncs.pfnGetMoveVars())
-
 // make mod_ref.h?
 #define LM_SAMPLE_SIZE             16
 
@@ -79,7 +76,7 @@ extern poolhandle_t r_temppool;
 #define MAX_DRAW_STACK	2		// normal view and menu view
 
 #define SHADEDOT_QUANT 	16		// precalculated dot products for quantized angles
-#define SHADE_LAMBERT	1.495f
+#define SHADE_LAMBERT	1.4953241
 #define DEFAULT_ALPHATEST	0.0f
 
 // refparams
@@ -91,10 +88,10 @@ extern poolhandle_t r_temppool;
 #define RP_NONVIEWERREF	(RP_ENVVIEW)
 #define R_ModelOpaque( rm )	( rm == kRenderNormal )
 #define R_StaticEntity( ent )	( VectorIsNull( ent->origin ) && VectorIsNull( ent->angles ))
-#define RP_LOCALCLIENT( e )	((e) != NULL && (e)->index == ENGINE_GET_PARM( PARM_PLAYER_INDEX ) && e->player )
+#define RP_LOCALCLIENT( e )	((e) != NULL && (e)->index == ( gp_cl->playernum + 1 ) && e->player )
 #define RP_NORMALPASS()	( FBitSet( RI.params, RP_NONVIEWERREF ) == 0 )
 
-#define CL_IsViewEntityLocalPlayer() ( ENGINE_GET_PARM( PARM_VIEWENT_INDEX ) == ENGINE_GET_PARM( PARM_PLAYER_INDEX ) )
+#define CL_IsViewEntityLocalPlayer() ( gp_cl->viewentity == ( gp_cl->playernum + 1 ))
 
 #define CULL_VISIBLE	0		// not culled
 #define CULL_BACKSIDE	1		// backside of transparent wall
@@ -241,7 +238,6 @@ typedef struct
 	int		realframecount;	// not including viewpasses
 	int		framecount;
 
-	qboolean		ignore_lightgamma;
 	qboolean		fCustomRendering;
 	qboolean		fResetVis;
 	qboolean		fFlipViewModel;
@@ -256,7 +252,14 @@ typedef struct
 	// cull info
 	vec3_t		modelorg;		// relative to viewpoint
 
-	qboolean fCustomSkybox;
+	// get from engine
+	world_static_t *world;
+	cl_entity_t *entities;
+	movevars_t *movevars;
+	color24 *palette;
+	cl_entity_t *viewent;
+
+	uint max_entities;
 } gl_globals_t;
 
 typedef struct
@@ -361,6 +364,7 @@ int GL_CreateTexture( const char *name, int width, int height, const void *buffe
 int GL_CreateTextureArray( const char *name, int width, int height, int depth, const void *buffer, texFlags_t flags );
 void GL_ProcessTexture( int texnum, float gamma, int topColor, int bottomColor );
 void GL_UpdateTexSize( int texnum, int width, int height, int depth );
+qboolean GL_TextureFilteringEnabled( const gl_texture_t *tex );
 void GL_ApplyTextureParams( gl_texture_t *tex );
 int GL_FindTexture( const char *name );
 void GL_FreeTexture( GLenum texnum );
@@ -380,7 +384,6 @@ void R_AnimateLight( void );
 void R_GetLightSpot( vec3_t lightspot );
 void R_MarkLights( dlight_t *light, int bit, mnode_t *node );
 colorVec R_LightVec( const vec3_t start, const vec3_t end, vec3_t lightspot, vec3_t lightvec );
-int R_CountSurfaceDlights( msurface_t *surf );
 colorVec R_LightPoint( const vec3_t p0 );
 
 //
@@ -395,9 +398,9 @@ void R_TranslateForEntity( cl_entity_t *e );
 void R_RotateForEntity( cl_entity_t *e );
 void R_SetupGL( qboolean set_gl_state );
 void R_AllowFog( qboolean allowed );
+qboolean R_OpaqueEntity( cl_entity_t *ent );
 void R_SetupFrustum( void );
 void R_FindViewLeaf( void );
-void R_CheckGamma( void );
 void R_PushScene( void );
 void R_PopScene( void );
 void R_DrawFog( void );
@@ -439,6 +442,7 @@ void GL_ResetFogColor( void );
 void R_GenerateVBO( void );
 void R_ClearVBO( void );
 void R_AddDecalVBO( decal_t *pdecal, msurface_t *surf );
+void R_LightmapCoord( const vec3_t v, const msurface_t *surf, const float sample_size, vec2_t coords );
 
 //
 // gl_rpart.c
@@ -492,7 +496,6 @@ void EmitWaterPolys( msurface_t *warp, qboolean reverse );
 void R_InitRipples( void );
 void R_ResetRipples( void );
 void R_AnimateRipples( void );
-void R_UpdateRippleTexParams( void );
 void R_UploadRipples( texture_t *image );
 
 //
@@ -523,11 +526,11 @@ void GL_SetupAttributes( int safegl );
 void GL_OnContextCreated( void );
 void GL_InitExtensions( void );
 void GL_ClearExtensions( void );
-void VID_CheckChanges( void );
 int GL_LoadTexture( const char *name, const byte *buf, size_t size, int flags );
 void GL_FreeImage( const char *name );
 qboolean VID_ScreenShot( const char *filename, int shot_type );
 qboolean VID_CubemapShot( const char *base, uint size, const float *vieworg, qboolean skyshot );
+void R_GammaChanged( qboolean do_reset_gamma );
 void R_BeginFrame( qboolean clearScene );
 void R_RenderFrame( const struct ref_viewpass_s *vp );
 void R_EndFrame( void );
@@ -706,7 +709,6 @@ typedef struct
 	qboolean		in2DMode;
 } glstate_t;
 
-
 typedef struct
 {
 	qboolean		initialized;	// OpenGL subsystem started
@@ -719,9 +721,32 @@ extern glstate_t		glState;
 extern glwstate_t		glw_state;
 extern ref_api_t      gEngfuncs;
 extern ref_globals_t *gpGlobals;
+extern ref_client_t  *gp_cl;
+extern ref_host_t    *gp_host;
 
 #define ENGINE_GET_PARM_ (*gEngfuncs.EngineGetParm)
 #define ENGINE_GET_PARM( parm ) ENGINE_GET_PARM_( ( parm ), 0 )
+
+//
+// helper funcs
+//
+static inline cl_entity_t *CL_GetEntityByIndex( int index )
+{
+	if( unlikely( index < 0 || index >= tr.max_entities || !tr.entities ))
+		return NULL;
+
+	return &tr.entities[index];
+}
+
+static inline model_t *CL_ModelHandle( int index )
+{
+	if( unlikely( index < 0 || index >= gp_cl->nummodels ))
+		return NULL;
+
+	return gp_cl->models[index];
+}
+
+#define WORLDMODEL (gp_cl->models[1])
 
 //
 // renderer cvars
@@ -741,6 +766,7 @@ extern convar_t	gl_nosort;
 extern convar_t	gl_test;		// cvar to testify new effects
 extern convar_t	gl_msaa;
 extern convar_t	gl_stencilbits;
+extern convar_t	gl_overbright;
 
 extern convar_t	r_lighting_extended;
 extern convar_t	r_lighting_ambient;
@@ -753,6 +779,8 @@ extern convar_t	r_lockfrustum;
 extern convar_t	r_traceglow;
 extern convar_t	r_vbo;
 extern convar_t	r_vbo_dlightmode;
+extern convar_t	r_vbo_detail;
+extern convar_t	r_vbo_overbrightmode;
 extern convar_t r_studio_sort_textures;
 extern convar_t r_studio_drawelements;
 extern convar_t r_ripple;
