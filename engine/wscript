@@ -37,8 +37,6 @@ def options(opt):
 def configure(conf):
 	# check for dedicated server build
 	if conf.options.DEDICATED:
-		if conf.env.DEST_OS == 'linux':
-			conf.check_cc(lib='rt')
 		conf.define('XASH_DEDICATED', 1)
 	elif conf.env.DEST_OS == 'dos':
 		conf.options.STATIC = True
@@ -49,14 +47,14 @@ def configure(conf):
 		# re-enable undefined reference errors
 		conf.env.CXXFLAGS += ['-Wl,--no-undefined']
 		conf.env.CFLAGS += ['-Wl,--no-undefined']
-		# allow the SDL2 sanity check to complete properly by linking in libstdc++ and lm normally
-		conf.env.LDFLAGS += ['-lstdc++', '-lm']
+		# allow the SDL2 sanity check to complete properly by linking in lm normally
+		conf.env.LDFLAGS += ['-lm']
 		conf.load('sdl2')
 		if not conf.env.HAVE_SDL2:
 			conf.fatal('SDL2 not availiable! Install switch-sdl2!')
 		conf.define('XASH_SDL', 2)
 		# then remove them to avoid them getting linked to shared objects
-		conf.env.LDFLAGS.remove('-lstdc++')
+		conf.env.LIB_SDL2.remove('stdc++') # remove libstdc++ linking from SDL2, we link it later
 		conf.env.LDFLAGS.remove('-lm')
 	elif conf.env.DEST_OS == 'psvita':
 		# allow the SDL2 sanity check to complete properly by linking in some deps missing from the pkg-config file
@@ -73,12 +71,9 @@ def configure(conf):
 		# unused, XASH_LINUX without XASH_SDL gives fbdev & alsa support
 		# conf.define('XASH_FBDEV', 1)
 		conf.check_cc( lib = 'asound' )
-		conf.check_cc( lib = 'rt' )
 	elif conf.options.SDL12:
 		conf.define('XASH_SDL', 12)
 		conf.check_cfg(package='sdl', args='--cflags --libs', uselib_store='SDL2' )
-		if conf.env.DEST_OS == 'linux':
-			conf.check_cc( lib='rt' )
 		conf.env.HAVE_SDL2 = True
 	else:
 		conf.load('sdl2')
@@ -95,7 +90,10 @@ def configure(conf):
 		conf.define('XASH_NO_LIBDL',1)
 
 	if not conf.env.DEST_OS in ['win32', 'android'] and not conf.options.NO_ASYNC_RESOLVE:
-		conf.check_pthreads()
+		conf.check_pthreads(mode='c')
+
+	if conf.env.DEST_OS == 'linux':
+		conf.check_cc(lib='rt')
 
 	if hasattr(conf.options, 'DLLEMU'):
 		conf.define_cond('XASH_DLL_LOADER', conf.options.DLLEMU)
@@ -112,7 +110,7 @@ def configure(conf):
 	conf.define_cond('XASH_ENGINE_TESTS', conf.env.ENGINE_TESTS)
 	conf.define_cond('XASH_STATIC_LIBS', conf.env.STATIC_LINKING)
 	conf.define_cond('XASH_CUSTOM_SWAP', conf.options.CUSTOM_SWAP)
-	conf.define_cond('SINGLE_BINARY', conf.env.SINGLE_BINARY)
+	conf.define_cond('XASH_ENABLE_MAIN', conf.env.DISABLE_LAUNCHER)
 	conf.define_cond('XASH_NO_ASYNC_NS_RESOLVE', conf.options.NO_ASYNC_RESOLVE)
 	conf.define_cond('SUPPORT_BSP2_FORMAT', conf.options.SUPPORT_BSP2_FORMAT)
 	conf.define_cond('XASH_64BIT', conf.env.DEST_SIZEOF_VOID_P != 4)
@@ -127,7 +125,7 @@ def build(bld):
 	bld(name = 'engine_includes', export_includes = '. common common/imagelib', use = 'filesystem_includes')
 
 	is_cxx_link = False
-	libs = [ 'engine_includes', 'public', 'dllemu' ]
+	libs = [ 'engine_includes', 'public', 'dllemu', 'werror' ]
 
 	# basic build: dedicated only
 	source = bld.path.ant_glob([
@@ -189,7 +187,7 @@ def build(bld):
 		# HACK: link in the entirety of libstdc++ so that dynamic libs could use all of it without manual exporting
 		# we can't do this right away because std::filesystem will complain about not having pathconf(),
 		# which we have defined in sys_nswitch.c
-		bld.env.LDFLAGS += ['-Wl,--whole-archive', '-lstdc++', '-Wl,--no-whole-archive', '-lm']
+		bld.env.LDFLAGS += ['-v', '-Wl,--whole-archive', '-lstdc++', '-Wl,--no-whole-archive', '-lm']
 
 	if bld.env.DEST_OS == 'psvita':
 		libs += [ 'VRTLD' ]
@@ -219,7 +217,7 @@ def build(bld):
 			'client/*.c',
 			'client/vgui/*.c',
 			'client/avi/*.c'])
-		libs += ['opus', 'bzip2']
+		libs += ['opus']
 
 	includes = ['server', 'client', 'client/vgui' ]
 
@@ -239,7 +237,8 @@ def build(bld):
 			app_name = 'xash3d-fwgs'
 		)
 	else:
-		if bld.env.SINGLE_BINARY:
+		# always build as shared library on Android
+		if bld.env.DISABLE_LAUNCHER and bld.env.DEST_OS != "android":
 			install_path = bld.env.BINDIR
 			program = 'cxxprogram' if is_cxx_link else 'cprogram'
 			if bld.env.STATIC:

@@ -32,7 +32,7 @@ def configure(conf):
 		conf.check_cc(lib='log')
 
 def build(bld):
-	libs = [ 'engine_includes' ]
+	libs = [ 'engine_includes', 'werror' ]
 	# on PSVita do not link any libraries that are already in the main executable, but add the includes target
 	if bld.env.DEST_OS == 'psvita':
 		libs += [ 'sdk_includes', 'vgl_shim' ]
@@ -65,7 +65,7 @@ def build(bld):
 		},
 		'ref_gles3compat': {
 			'enable':  bld.env.GLES3COMPAT,
-			'libs':    ['DL', 'gl4es', 'LOG'],
+			'libs':    [],
 			'defines': ['XASH_GLES3COMPAT'],
 		},
 	}
