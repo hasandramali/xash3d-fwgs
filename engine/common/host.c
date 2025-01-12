@@ -78,7 +78,7 @@ static CVAR_DEFINE_AUTO( host_clientloaded, "0", FCVAR_READ_ONLY, "inidcates a l
 CVAR_DEFINE_AUTO( host_limitlocal, "0", 0, "apply cl_cmdrate and rate to loopback connection" );
 CVAR_DEFINE( host_maxfps, "fps_max", "72", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "host fps upper limit" );
 CVAR_DEFINE_AUTO( fps_override, "1", FCVAR_FILTERABLE, "unlock higher framerate values, not supported" );
-static CVAR_DEFINE_AUTO( host_framerate, "0", FCVAR_FILTERABLE, "locks frame timing to this value in seconds" );
+static CVAR_DEFINE_AUTO( host_framerate, "0", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "locks frame timing to this value in seconds" );
 static CVAR_DEFINE( host_sleeptime, "sleeptime", "1", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "milliseconds to sleep for each frame. higher values reduce fps accuracy" );
 static CVAR_DEFINE_AUTO( host_sleeptime_debug, "0", 0, "print sleeps between frames" );
 CVAR_DEFINE_AUTO( host_allow_materials, "0", FCVAR_LATCH|FCVAR_ARCHIVE, "allow texture replacements from materials/ folder" );
@@ -773,7 +773,7 @@ static qboolean Host_FilterTime( double time )
 	oldtime = host.realtime;
 
 	// NOTE: allow only in singleplayer while demos are not active
-	if( host_framerate.value > 0.0f && Host_IsLocalGame() && !CL_IsPlaybackDemo() && !CL_IsRecordDemo( ))
+	if( host_framerate.value > 0.0f && !CL_IsPlaybackDemo() && !CL_IsRecordDemo( ))
 		host.frametime = bound( MIN_FRAMETIME, host_framerate.value * scale, MAX_FRAMETIME );
 	else host.frametime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
 
