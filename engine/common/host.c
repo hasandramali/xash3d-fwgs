@@ -773,7 +773,7 @@ static qboolean Host_FilterTime( double time )
 	oldtime = host.realtime;
 
 	// NOTE: allow only in singleplayer while demos are not active
-	if( host_framerate.value > 0.0f && !CL_IsPlaybackDemo() && !CL_IsRecordDemo( ))
+	if( host_framerate.value > 0.0f )
 		host.frametime = bound( MIN_FRAMETIME, host_framerate.value * scale, MAX_FRAMETIME );
 	else host.frametime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
 
