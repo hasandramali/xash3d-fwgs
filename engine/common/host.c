@@ -640,7 +640,7 @@ static double Host_CalcFPS( void )
 	{
 		fps = sys_ticrate.value;
 	}
-#if !XASH_DEDICATED
+/*#if !XASH_DEDICATED
 	else if( CL_IsPlaybackDemo() || CL_IsRecordDemo( )) // NOTE: we should play demos with same fps as it was recorded
 	{
 		fps = CL_GetDemoFramerate();
@@ -665,7 +665,7 @@ static double Host_CalcFPS( void )
 			fps = bound( MIN_FPS, fps, max_fps );
 		}
 	}
-#endif
+#endif*/
 
 	return fps;
 }
@@ -681,7 +681,7 @@ static qboolean Host_Autosleep( double dt, double scale )
 		return true;
 
 	// limit fps to withing tolerable range
-	fps = bound( MIN_FPS, fps, MAX_FPS_HARD );
+	fps = bound( MIN_FPS, fps, MAX_FPS );
 
 	if( Host_IsDedicated( ))
 		targetframetime = ( 1.0 / ( fps + 1.0 ));
