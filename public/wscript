@@ -67,8 +67,6 @@ def options(opt):
 def configure(conf):
 	# private to libpublic
 	conf.load('gitversion')
-	conf.define('XASH_BUILD_COMMIT', conf.env.GIT_VERSION if conf.env.GIT_VERSION else 'unknown-commit')
-	conf.define('XASH_BUILD_BRANCH', conf.env.GIT_BRANCH  if conf.env.GIT_BRANCH  else 'unknown-branch')
 	conf.env.VALIDATE_TARGET = conf.options.VALIDATE_TARGET
 
 	# need to expose it for everyone using libpublic headers
@@ -120,9 +118,14 @@ def build(bld):
 		export_includes = '. ../common ../pm_shared ../engine',
 		export_defines = bld.env.EXPORT_DEFINES_LIST)
 
-	bld.stlib(source   = bld.path.ant_glob('*.c'),
-		target   = 'public',
-		use      = 'sdk_includes werror')
+	# build it separately to slightly improve rebuild times
+	bld.stlib(source = 'build_vcs.c',
+		target = 'build_vcs',
+		defines = ['XASH_BUILD_COMMIT=\"%s\"' % bld.env.GIT_VERSION, 'XASH_BUILD_BRANCH=\"%s\"' % bld.env.GIT_BRANCH])
+
+	bld.stlib(source = bld.path.ant_glob('*.c', excl='build_vcs.c'),
+		target = 'public',
+		use = 'sdk_includes werror build_vcs')
 
 	if bld.env.TESTS:
 		if bld.env.VALIDATE_TARGET:
