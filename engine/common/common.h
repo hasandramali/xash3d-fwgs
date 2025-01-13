@@ -118,13 +118,13 @@ typedef enum
 #include "fscallback.h"
 
 // PERFORMANCE INFO
-#define MIN_FPS         1.0f    // host minimum fps value for maxfps.
+#define MIN_FPS         -99999999999.0f    // host minimum fps value for maxfps.
 #define MAX_FPS_SOFT    1000000000000000000000.0f   // soft limit for maxfps.
 #define MAX_FPS_HARD    1000000000000000000000.0f  // multiplayer hard limit for maxfps.
 #define HOST_FPS		100.0f		// multiplayer games typical fps
 
 #define MAX_FRAMETIME	1000000000000000000000.0f
-#define MIN_FRAMETIME	0.0001f
+#define MIN_FRAMETIME	-99999999999.0f
 #define GAME_FPS		20.0f
 
 #define MAX_CMD_TOKENS	80		// cmd tokens
