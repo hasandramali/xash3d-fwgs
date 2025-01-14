@@ -46,6 +46,7 @@ static CVAR_DEFINE_AUTO( cl_test_bandwidth, "1", FCVAR_ARCHIVE, "test network ba
 CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_ARCHIVE, "render particles" );
 CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_ARCHIVE, "render tracers" );
 CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_ARCHIVE, "render beams" );
+CVAR_DEFINE( cl_noscreenfade, "cl_noscreenfade", "0", FCVAR_ARCHIVE, "disable screenfade" );
 
 static CVAR_DEFINE_AUTO( rcon_address, "", FCVAR_PRIVILEGED, "remote control address" );
 CVAR_DEFINE_AUTO( cl_timeout, "60", 0, "connect timeout (in-seconds)" );
@@ -3370,6 +3371,7 @@ static void CL_InitLocal( void )
 	VGui_RegisterCvars();
 
 	// register our variables
+	Cvar_RegisterVariable( &cl_noscreenfade );
 	Cvar_RegisterVariable( &cl_crosshair );
 	Cvar_RegisterVariable( &cl_nodelta );
 	Cvar_RegisterVariable( &cl_idealpitchscale );
