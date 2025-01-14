@@ -49,52 +49,6 @@ const char *CL_MsgInfo( int cmd )
 	return sz;
 }
 
-int GAME_EXPORT CL_Active( void )
-{
-	return false;
-}
-
-qboolean CL_Initialized( void )
-{
-	return false;
-}
-
-qboolean CL_IsInGame( void )
-{
-	return true;	// always active for dedicated servers
-}
-
-qboolean CL_IsInConsole( void )
-{
-	return false;
-}
-
-qboolean CL_IsIntermission( void )
-{
-	return false;
-}
-
-qboolean CL_IsPlaybackDemo( void )
-{
-	return false;
-}
-
-qboolean CL_IsRecordDemo( void )
-{
-	return false;
-}
-
-
-qboolean CL_DisableVisibility( void )
-{
-	return false;
-}
-
-void CL_Init( void )
-{
-
-}
-
 void Key_Init( void )
 {
 
@@ -130,16 +84,6 @@ void CL_WriteMessageHistory( void )
 
 }
 
-void Host_ClientBegin( void )
-{
-	Cbuf_Execute();
-}
-
-void Host_ClientFrame( void )
-{
-
-}
-
 void Host_InputFrame( void )
 {
 }
@@ -159,22 +103,12 @@ void GAME_EXPORT S_StopSound(int entnum, int channel, const char *soundname)
 
 }
 
-int GAME_EXPORT CL_GetMaxClients( void )
-{
-	return 0;
-}
-
 void IN_TouchInitConfig( void )
 {
 
 }
 
 void CL_Disconnect( void )
-{
-
-}
-
-void CL_Shutdown( void )
 {
 
 }
@@ -189,11 +123,6 @@ void Host_Credits( void )
 
 }
 
-qboolean UI_CreditsActive( void )
-{
-	return false;
-}
-
 void S_StopBackgroundTrack( void )
 {
 
@@ -202,11 +131,6 @@ void S_StopBackgroundTrack( void )
 void SCR_BeginLoadingPlaque( qboolean is_background )
 {
 
-}
-
-int S_GetCurrentDynamicSounds( soundlist_t *pout, int size )
-{
-	return 0;
 }
 
 void S_StopAllSounds( qboolean ambient )

@@ -147,11 +147,6 @@ qboolean CL_IsRecordDemo( void )
 	return cls.demorecording;
 }
 
-qboolean CL_IsTimeDemo( void )
-{
-	return cls.timedemo;
-}
-
 qboolean CL_DisableVisibility( void )
 {
 	return cls.envshot_disable_vis;
@@ -598,7 +593,7 @@ CL_CreateCmd
 */
 static void CL_CreateCmd( void )
 {
-	usercmd_t nullcmd, *cmd;
+	usercmd_t nullcmd = { 0 }, *cmd;
 	runcmd_t  *pcmd;
 	qboolean  active;
 	double    accurate_ms;
@@ -650,7 +645,6 @@ static void CL_CreateCmd( void )
 	}
 	else
 	{
-		memset( &nullcmd, 0, sizeof( nullcmd ));
 		cmd = &nullcmd;
 	}
 
@@ -825,7 +819,7 @@ static void CL_WritePacket( void )
 			buf.pData[key] = CRC32_BlockSequence( &buf.pData[key + 1], size, cls.netchan.outgoing_sequence );
 			COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
 		}
-		else
+		else if( !Host_IsLocalClient( ))
 		{
 			int size = MSG_GetRealBytesWritten( &buf ) - key - 1;
 			buf.pData[key] = CRC32_BlockSequence( &buf.pData[key + 1], size, cls.netchan.outgoing_sequence );
