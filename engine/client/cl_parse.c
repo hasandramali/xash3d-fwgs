@@ -2142,6 +2142,8 @@ Set screen fade
 */
 static void CL_ParseScreenFade( sizebuf_t *msg )
 {
+	if ( Cvar_VariableInteger( "cl_noscreenfade" ) ) return 1;
+	
 	float		duration, holdTime;
 	screenfade_t	*sf = &clgame.fade;
 	float		flScale;
