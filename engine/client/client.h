@@ -703,6 +703,7 @@ extern convar_t	m_ignore;
 extern convar_t	r_showtree;
 extern convar_t	ui_renderworld;
 extern convar_t cl_fixmodelinterpolationartifacts;
+extern convar_t cl_noscreenfade;
 
 //=============================================================================
 
