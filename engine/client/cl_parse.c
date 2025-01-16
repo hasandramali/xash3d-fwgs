@@ -2140,15 +2140,8 @@ CL_ParseScreenFade
 Set screen fade
 ==============
 */
-#ifdef _WIN32
 static void CL_ParseScreenFade( sizebuf_t *msg )
-#else
-void CL_ParseScreenFade( sizebuf_t *msg )
-#endif
 {
-	if ( cl_noscreenfade.value > 0 )
-		return 1;
-	
 	float		duration, holdTime;
 	screenfade_t	*sf = &clgame.fade;
 	float		flScale;
