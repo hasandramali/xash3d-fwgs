@@ -634,40 +634,44 @@ compute actual FPS for various modes
 */
 static double Host_CalcFPS( void )
 {
-	double	fps = 0.0;
+    double fps = 0.0;
 
-	if( Host_IsDedicated( ))
-	{
-		fps = sys_ticrate.value;
-	}
-/*#if !XASH_DEDICATED
-	else if( CL_IsPlaybackDemo() || CL_IsRecordDemo( )) // NOTE: we should play demos with same fps as it was recorded
-	{
-		fps = CL_GetDemoFramerate();
-	}
-	else if( Host_IsLocalGame( ))
-	{
-		if( !gl_vsync.value )
-			fps = host_maxfps.value;
-	}
-	else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
-	{
-		return 31.0;
-	}
-	else
-	{
-		if( !gl_vsync.value )
-		{
-			double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
+    if( Host_IsDedicated( ))
+    {
+        fps = sys_ticrate.value;
+    }
+    else if( CL_IsPlaybackDemo() || CL_IsRecordDemo( )) 
+    {
+        fps = CL_GetDemoFramerate();
+    }
+    else if( Host_IsLocalGame( ))
+    {
+        if( true )
+        {
+            double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
 
-			fps = host_maxfps.value;
-			if( fps == 0.0 ) fps = max_fps;
-			fps = bound( MIN_FPS, fps, max_fps );
-		}
-	}
-#endif*/
+            fps = host_maxfps.value;
+            if( fps == 0.0 ) fps = max_fps;
+            fps = bound( MIN_FPS, fps, max_fps );
+        }
+    }
+    else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
+    {
+        return 31.0;
+    }
+    else
+    {
+        if( true )
+        {
+            double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
 
-	return fps;
+            fps = host_maxfps.value;
+            if( fps == 0.0 ) fps = max_fps;
+            fps = bound( MIN_FPS, fps, max_fps );
+        }
+    }
+
+    return fps;
 }
 
 static qboolean Host_Autosleep( double dt, double scale )
