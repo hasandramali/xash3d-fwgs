@@ -438,8 +438,6 @@ void R_DrawWaterSurfaces( void );
 void R_DrawBrushModel( cl_entity_t *e );
 void GL_SubdivideSurface( model_t *mod, msurface_t *fa );
 void GL_BuildPolygonFromSurface( model_t *mod, msurface_t *fa );
-void DrawGLPoly( glpoly2_t *p, float xScale, float yScale );
-texture_t *R_TextureAnimation( msurface_t *s );
 void GL_SetupFogColorForSurfaces( void );
 void R_DrawAlphaTextureChains( void );
 void GL_RebuildLightmaps( void );
@@ -503,10 +501,9 @@ void R_DrawSkyBox( void );
 void R_DrawClouds( void );
 void R_UnloadSkybox( void );
 void EmitWaterPolys( msurface_t *warp, qboolean reverse, qboolean ripples );
-void R_InitRipples( void );
 void R_ResetRipples( void );
 void R_AnimateRipples( void );
-qboolean R_UploadRipples( const texture_t *image );
+qboolean R_UploadRipples( texture_t *image );
 
 //#include "vid_common.h"
 
