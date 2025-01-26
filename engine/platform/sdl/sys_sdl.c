@@ -20,9 +20,9 @@ GNU General Public License for more details.
 #if XASH_TIMER == TIMER_SDL
 double Platform_DoubleTime( void )
 {
-	static longtime_t g_PerformanceFrequency;
-	static longtime_t g_ClockStart;
-	longtime_t CurrentTime;
+	static Uint64 g_PerformanceFrequency;
+	static Uint64 g_ClockStart;
+	Uint64 CurrentTime;
 
 	if( !g_PerformanceFrequency )
 	{
@@ -78,8 +78,19 @@ static void SDLCALL SDLash_LogOutputFunction( void *userdata, int category, SDL_
 	}
 }
 
-void SDLash_Init( void )
+void SDLash_Init( const char *basedir )
 {
+#if XASH_APPLE
+	char *path = SDL_GetBasePath();
+	if( path != NULL )
+	{
+		char buf[MAX_VA_STRING];
+
+		Q_snprintf( buf, sizeof( buf ), "%s%s/extras.pk3", basedir, path );
+		setenv( "XASH3D_EXTRAS_PAK1", buf, true );
+	}
+#endif
+
 	SDL_LogSetOutputFunction( SDLash_LogOutputFunction, NULL );
 
 	if( host_developer.value >= 2 )

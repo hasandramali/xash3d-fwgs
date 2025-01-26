@@ -688,6 +688,7 @@ extern convar_t	r_showtextures;
 extern convar_t	cl_bmodelinterp;
 extern convar_t	cl_lw;		// local weapons
 extern convar_t	cl_charset;
+extern convar_t	cl_trace_consistency;
 extern convar_t	cl_trace_stufftext;
 extern convar_t	cl_trace_messages;
 extern convar_t	cl_trace_events;
@@ -1120,7 +1121,7 @@ void Con_PageUp( int lines );
 //
 // s_main.c
 //
-void S_StreamAviSamples( void *Avi, int entnum, float fvol, float attn, float synctime );
+typedef int sound_t;
 void S_StartBackgroundTrack( const char *intro, const char *loop, int position, qboolean fullpath );
 void S_StopBackgroundTrack( void );
 void S_StreamSetPause( int pause );
@@ -1208,6 +1209,13 @@ void Key_SetKeyDest( int key_dest );
 void Key_EnableTextInput( qboolean enable, qboolean force );
 int Key_ToUpper( int key );
 void OSK_Draw( void );
+
+//
+// identification.c
+//
+void ID_Init( void );
+const char *ID_GetMD5( void );
+void GAME_EXPORT ID_SetCustomClientID( const char *id );
 
 extern rgba_t g_color_table[8];
 extern triangleapi_t gTriApi;

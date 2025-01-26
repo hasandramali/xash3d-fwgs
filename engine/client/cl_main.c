@@ -77,6 +77,7 @@ static CVAR_DEFINE_AUTO( cl_upmax, "1200", FCVAR_ARCHIVE, "max allowed incoming 
 
 CVAR_DEFINE_AUTO( cl_lw, "1", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapon predicting" );
 CVAR_DEFINE_AUTO( cl_charset, "utf-8", FCVAR_ARCHIVE, "1-byte charset to use (iconv style)" );
+CVAR_DEFINE_AUTO( cl_trace_consistency, "0", FCVAR_ARCHIVE, "enable consistency info tracing (good for developers)" );
 CVAR_DEFINE_AUTO( cl_trace_stufftext, "0", FCVAR_ARCHIVE, "enable stufftext (server-to-client console commands) tracing (good for developers)" );
 CVAR_DEFINE_AUTO( cl_trace_messages, "0", FCVAR_ARCHIVE, "enable message names tracing (good for developers)" );
 CVAR_DEFINE_AUTO( cl_trace_events, "0", FCVAR_ARCHIVE, "enable events tracing (good for developers)" );
@@ -1598,6 +1599,9 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 		}
 		break;
 	default:
+		if( !Host_IsLocalClient( ))
+			SetBits( flags, NETCHAN_USE_LZSS );
+
 		cls.extensions = Q_atoi( Info_ValueForKey( Cmd_Argv( 1 ), "ext" ));
 
 		if( FBitSet( cls.extensions, NET_EXT_SPLITSIZE ))
@@ -3392,6 +3396,7 @@ static void CL_InitLocal( void )
 
 	Cvar_RegisterVariable( &rcon_address );
 
+	Cvar_RegisterVariable( &cl_trace_consistency );
 	Cvar_RegisterVariable( &cl_trace_stufftext );
 	Cvar_RegisterVariable( &cl_trace_messages );
 	Cvar_RegisterVariable( &cl_trace_events );
@@ -3662,6 +3667,8 @@ void CL_Init( void )
 
 	if( !CL_LoadProgs( libpath ))
 		Host_Error( "can't initialize %s: %s\n", libpath, COM_GetLibraryError( ));
+
+	ID_Init();
 
 	cls.build_num = 0;
 	cls.initialized = true;

@@ -1135,7 +1135,7 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 #if XASH_DEDICATED
 	Platform_SetupSigtermHandling();
 #endif
-	Platform_Init( Host_IsDedicated( ) || developer >= DEV_EXTENDED );
+	Platform_Init( Host_IsDedicated( ) || developer >= DEV_EXTENDED, basedir );
 	FS_Init( basedir );
 
 	Sys_InitLog();
@@ -1260,7 +1260,6 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 	CL_Init();
 
 	HTTP_Init();
-	ID_Init();
 	SoundList_Init();
 
 	if( Host_IsDedicated( ))
@@ -1403,6 +1402,10 @@ void Host_ShutdownWithReason( const char *reason )
 	HTTP_Shutdown();
 	Host_FreeCommon();
 	Platform_Shutdown();
+
+	BaseCmd_Shutdown();
+	Cmd_Shutdown();
+	Cvar_Shutdown();
 
 	// must be last, console uses this
 	Mem_FreePool( &host.mempool );
