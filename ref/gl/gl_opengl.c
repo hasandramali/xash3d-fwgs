@@ -37,6 +37,7 @@ CVAR_DEFINE( r_vbo_overbrightmode, "gl_vbo_overbrightmode", "0", FCVAR_GLCONFIG,
 CVAR_DEFINE_AUTO( r_ripple, "0", FCVAR_GLCONFIG, "enable software-like water texture ripple simulation" );
 CVAR_DEFINE_AUTO( r_ripple_updatetime, "0.05", FCVAR_GLCONFIG, "how fast ripple simulation is" );
 CVAR_DEFINE_AUTO( r_ripple_spawntime, "0.1", FCVAR_GLCONFIG, "how fast new ripples spawn" );
+CVAR_DEFINE_AUTO( r_large_lightmaps, "0", FCVAR_GLCONFIG|FCVAR_LATCH, "enable larger lightmap atlas textures (might break custom renderer mods)" );
 
 DEFINE_ENGINE_SHARED_CVAR_LIST()
 
@@ -905,7 +906,13 @@ static void GL_InitExtensionsBigGL( void )
 		GL_CheckExtension( "GL_ARB_seamless_cube_map", NULL, 0, "gl_texture_cubemap_seamless", GL_ARB_SEAMLESS_CUBEMAP, 0 );
 	}
 
-	GL_CheckExtension( "GL_ARB_texture_non_power_of_two", NULL, 0, "gl_texture_npot", GL_ARB_TEXTURE_NPOT_EXT, 0 );
+	// NPOT textures support
+	if( !GL_CheckExtension( "GL_ARB_texture_non_power_of_two", NULL, 0, "gl_texture_npot", GL_ARB_TEXTURE_NPOT_EXT, 0 ))
+	{
+		// vitaGL exposes OES extension
+		GL_CheckExtension( "GL_OES_texture_npot", NULL, 0, "gl_texture_npot", GL_ARB_TEXTURE_NPOT_EXT, 0 );
+	}
+
 	GL_CheckExtension( "GL_ARB_texture_compression", texturecompressionfuncs, ARRAYSIZE( texturecompressionfuncs ), "gl_texture_dxt_compression", GL_TEXTURE_COMPRESSION_EXT, 0 );
 	if( !GL_CheckExtension( "GL_EXT_texture_edge_clamp", NULL, 0, "gl_clamp_to_edge", GL_CLAMPTOEDGE_EXT, 2.0 )) // present in ES2
 		GL_CheckExtension( "GL_SGIS_texture_edge_clamp", NULL, 0, "gl_clamp_to_edge", GL_CLAMPTOEDGE_EXT, 0 );
@@ -1147,6 +1154,7 @@ static void GL_InitCommands( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo_dlightmode );
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo_overbrightmode );
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo_detail );
+	gEngfuncs.Cvar_RegisterVariable( &r_large_lightmaps );
 
 	gEngfuncs.Cvar_RegisterVariable( &gl_extensions );
 	gEngfuncs.Cvar_RegisterVariable( &gl_texture_nearest );

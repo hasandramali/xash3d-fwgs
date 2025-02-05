@@ -201,7 +201,6 @@ static void Sys_PrintUsage( const char *exename )
 	O("-daemonize         ", "run engine as a daemon")
 #endif
 #if XASH_SDL == 2
-	O("-sdl_joy_old_api   ","use SDL legacy joystick API")
 	O("-sdl_renderer <n>  ","use alternative SDL_Renderer for software")
 #endif // XASH_SDL
 #if XASH_ANDROID && !XASH_SDL
@@ -1315,6 +1314,7 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 	Cmd_RemoveCommand( "setgl" );
 	Cbuf_ExecStuffCmds();	// execute stuffcmds (commandline)
 	SCR_CheckStartupVids();	// must be last
+	FS_CheckConfig();
 
 	if( Sys_GetParmFromCmdLine( "-timedemo", demoname ))
 		Cbuf_AddTextf( "timedemo %s\n", demoname );

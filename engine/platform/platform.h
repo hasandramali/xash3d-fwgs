@@ -178,7 +178,7 @@ static inline void Platform_Sleep( int msec )
 #endif
 }
 
-#if XASH_WIN32 || XASH_FREEBSD || XASH_NETBSD || XASH_OPENBSD || XASH_ANDROID || XASH_LINUX
+#if XASH_WIN32 || XASH_FREEBSD || XASH_NETBSD || XASH_OPENBSD || XASH_ANDROID || XASH_LINUX || XASH_APPLE
 void Sys_SetupCrashHandler( void );
 void Sys_RestoreCrashHandler( void );
 #else
@@ -199,7 +199,8 @@ static inline void Sys_RestoreCrashHandler( void )
 
 ==============================================================================
 */
-void Platform_Vibrate( float life, char flags );
+void Platform_Vibrate( float life, char flags ); // left for compatibility
+void Platform_Vibrate2( float time, int low_freq, int high_freq, uint flags );
 
 /*
 ==============================================================================
@@ -209,7 +210,27 @@ void Platform_Vibrate( float life, char flags );
 ==============================================================================
 */
 // Gamepad support
-int Platform_JoyInit( int numjoy ); // returns number of connected gamepads, negative if error
+#if XASH_SDL
+int Platform_JoyInit( void ); // returns number of connected gamepads, negative if error
+void Platform_JoyShutdown( void );
+void Platform_CalibrateGamepadGyro( void );
+#else
+static inline int Platform_JoyInit( void )
+{
+	return 0;
+}
+
+static inline void Platform_JoyShutdown( void )
+{
+
+}
+
+static inline void Platform_CalibrateGamepadGyro( void )
+{
+
+}
+#endif
+
 // Text input
 void Platform_EnableTextInput( qboolean enable );
 key_modifier_t Platform_GetKeyModifiers( void );

@@ -281,13 +281,8 @@ void GAME_EXPORT Platform_SetMousePos(int x, int y)
 
 }
 
-void Platform_Vibrate(float life, char flags)
+void Platform_Vibrate( float life, char flags )
 {
 
 }
-int Platform_JoyInit( int numjoy )
-{
-	return 0;
-}
-
 #endif

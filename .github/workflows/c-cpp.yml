@@ -52,7 +52,7 @@ jobs:
             targetos: apple
             targetarch: amd64
     env:
-      SDL_VERSION: 2.30.11
+      SDL_VERSION: 2.30.12
       GH_CPU_ARCH: ${{ matrix.targetarch }}
       GH_CROSSCOMPILING: ${{ matrix.cross }}
     steps:
@@ -85,7 +85,7 @@ jobs:
       with:
         submodules: recursive
     - name: Build flatpak (Compat.i386)
-      uses: FWGS/flatpak-github-actions/flatpak-builder@v6.3
+      uses: FWGS/flatpak-github-actions/flatpak-builder@v6.3-fix
       with:
         bundle: ${{ matrix.app }}.flatpak
         manifest-path: scripts/flatpak/${{ matrix.app }}.yml

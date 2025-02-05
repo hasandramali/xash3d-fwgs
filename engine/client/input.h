@@ -104,18 +104,21 @@ typedef enum engineAxis_e
 	JOY_AXIS_NULL
 } engineAxis_t;
 
+typedef enum joy_calibration_state_s
+{
+	JOY_NOT_CALIBRATED = 0,
+	JOY_CALIBRATING,
+	JOY_FAILED_TO_CALIBRATE,
+	JOY_CALIBRATED
+} joy_calibration_state_t;
+
 qboolean Joy_IsActive( void );
-void Joy_HatMotionEvent( byte hat, byte value );
-void Joy_AxisMotionEvent( byte axis, short value );
-void Joy_KnownAxisMotionEvent( engineAxis_t engineAxis, short value );
-void Joy_BallMotionEvent( byte ball, short xrel, short yrel );
-void Joy_ButtonEvent( byte button, byte down );
-void Joy_AddEvent( void );
-void Joy_RemoveEvent( void );
+void Joy_SetCapabilities( qboolean have_gyro );
+void Joy_SetCalibrationState( joy_calibration_state_t state );
+void Joy_AxisMotionEvent( engineAxis_t engineAxis, short value );
+void Joy_GyroEvent( vec3_t data );
 void Joy_FinalizeMove( float *fw, float *side, float *dpitch, float *dyaw );
 void Joy_Init( void );
 void Joy_Shutdown( void );
-void Joy_EnableTextInput(qboolean enable, qboolean force);
-
 
 #endif//INPUT_H

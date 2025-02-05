@@ -3140,6 +3140,9 @@ static qboolean CL_ShouldRescanFilesystem( void )
 		}
 	}
 
+	if( FBitSet( fs_mount_lv.flags|fs_mount_hd.flags|fs_mount_addon.flags|fs_mount_l10n.flags|ui_language.flags, FCVAR_CHANGED ))
+		retval = true;
+
 	return retval;
 }
 
@@ -3149,7 +3152,7 @@ qboolean CL_PrecacheResources( void )
 
 	// if we downloaded new WAD files or any other archives they must be added to searchpath
 	if( CL_ShouldRescanFilesystem( ))
-		g_fsapi.Rescan();
+		FS_Rescan_f();
 
 	// NOTE: world need to be loaded as first model
 	for( pRes = cl.resourcesonhand.pNext; pRes && pRes != &cl.resourcesonhand; pRes = pRes->pNext )
@@ -3490,6 +3493,8 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("linefile", CL_ReadLineFile_f, "show leaks on a map (if present of course)" );
 	Cmd_AddCommand ("fullserverinfo", CL_FullServerinfo_f, "sent by server when serverinfo changes" );
 	Cmd_AddCommand ("upload", CL_BeginUpload_f, "uploading file to the server" );
+
+	Cmd_AddRestrictedCommand( "replaybufferdat", CL_ReplayBufferDat_f, "development and debugging tool" );
 
 	Cmd_AddRestrictedCommand ("quit", CL_Quit_f, "quit from game" );
 	Cmd_AddRestrictedCommand ("exit", CL_Quit_f, "quit from game" );
