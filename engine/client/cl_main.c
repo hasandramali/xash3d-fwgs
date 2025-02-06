@@ -1044,6 +1044,12 @@ static void CL_WriteSteamTicket( sizebuf_t *send )
 		i = GenerateSetti( buf );
 	else if( !Q_stricmp( cl_ticket_generator.string, "avsmp" ))
 		i = GenerateAVSMP( buf, crc, true );
+	else if( !Q_stricmp( cl_ticket_generator.string, "custom" ))
+    		{
+        		const char *custom_steamid = "STEAM_1:0:1696951691";
+        		Q_snprintf( buf, sizeof(buf), "%s", custom_steamid );
+      	  		i = Q_strlen(buf);
+    		}
 	else
 		Con_Printf( "%s: unknown generator %s, supported are: null, revemu2003, sc2009, oldrevemu, steamemu, revemu, setti, avsmp\n", __func__, cl_ticket_generator.string );
 
