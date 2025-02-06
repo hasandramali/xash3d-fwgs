@@ -1010,6 +1010,7 @@ static void CL_WriteSteamTicket(sizebuf_t *send)
     uint32_t steamID;
     char buf[768] = {0};
     size_t i = sizeof(buf);
+    int *steamIDPtr;
 
     if (COM_CheckStringEmpty(cl_ticket_generator.string))
     {
@@ -1020,7 +1021,7 @@ static void CL_WriteSteamTicket(sizebuf_t *send)
         steamID = 1696951691;
     }
 
-    int *steamIDPtr = (int *)&buf[84];
+    steamIDPtr = (int *)&buf[84];
     *steamIDPtr = steamID;
 
     Con_Printf("your steamid: %d\n", steamID);
