@@ -1014,18 +1014,20 @@ static void CL_WriteSteamTicket( sizebuf_t *send )
 
     if( !Q_strcmp( cl_ticket_generator.string, "null" ))
     {
-        MSG_WriteBytes( send, buf, 512 );
+        MSG_WriteBytes( send, buf, 512 ); // specifically 512 bytes of zeros
         return;
     }
 
     if( !Q_stricmp( cl_ticket_generator.string, "custom" ))
     {
-        const char *custom_steamid = "STEAM_1:0:1696951691";
-        
-        crc = 0xAABBCCDD;
+        int account_id = 3131313131;
+        int universe = 1;
+        int parity = 0;
 
-        Q_snprintf( buf, sizeof(buf), "%s", custom_steamid );
+        Q_snprintf(buf, sizeof(buf), "STEAM_%d:%d:%d", universe, parity, account_id);
         i = Q_strlen(buf);
+
+        crc = 0xAABBCCDD;
     }
     else
     {
