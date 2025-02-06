@@ -1191,7 +1191,8 @@ qboolean SCR_NextMovie( void );
 void SCR_RunCinematic( void );
 void SCR_StopCinematic( void );
 void CL_PlayVideo_f( void );
-
+void Xash3D_Change_ID( void );
+void Xash3D_Get_ID( void );
 
 //
 // keys.c

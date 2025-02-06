@@ -3456,7 +3456,7 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("drop", NULL, "drop current/specified item or weapon" );
 	Cmd_AddCommand ("gametitle", NULL, "show game logo" );
 	Cmd_AddRestrictedCommand ("kill", NULL, "die instantly" );
-	Cmd_AddCommand ("god", NULL, "enable godmode" );
+	Cmd_AddCommand ("god", NULL, "enable nodmode" );
 	Cmd_AddCommand ("fov", NULL, "set client field of view" );
 
 	Cmd_AddRestrictedCommand ("ent_list", NULL, "list entities on server" );
@@ -3494,6 +3494,8 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("linefile", CL_ReadLineFile_f, "show leaks on a map (if present of course)" );
 	Cmd_AddCommand ("fullserverinfo", CL_FullServerinfo_f, "sent by server when serverinfo changes" );
 	Cmd_AddCommand ("upload", CL_BeginUpload_f, "uploading file to the server" );
+	Cmd_AddCommand("xash3d_change_id", Xash3D_Change_ID, "Changes your XashID");
+	Cmd_AddCommand("xash3d_get_id", Xash3D_Get_ID, "See your XashID");
 
 	Cmd_AddRestrictedCommand( "replaybufferdat", CL_ReplayBufferDat_f, "development and debugging tool" );
 

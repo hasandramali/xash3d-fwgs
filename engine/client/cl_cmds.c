@@ -18,6 +18,34 @@ GNU General Public License for more details.
 
 /*
 ====================
+Xash3D_Change_ID
+====================
+*/
+void Xash3D_Change_ID( void )
+{
+        char    *newid;
+        if( Cmd_Argc() != 2 )
+        {
+                Msg( "xash3d_change_id <newid>\n");
+                return;
+        }
+        newid = Cmd_Argv( 1 );
+	ID_SetCustomClientID( newid );
+        Msg( "ID CHANGED %s\n", ID_GetMD5() );
+}
+
+/*
+====================
+Xash3D_Get_ID
+====================
+*/
+void Xash3D_Get_ID( void )
+{
+        Msg( "Your ID: %s\n", ID_GetMD5() );
+}
+
+/*
+====================
 CL_PlayVideo_f
 
 movie <moviename>
