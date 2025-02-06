@@ -97,7 +97,7 @@ static CVAR_DEFINE_AUTO( topcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTE
 static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player bottom color" );
 CVAR_DEFINE_AUTO( rate, "3500", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 
-static CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE, "you wouldn't steal a car" );
+static CVAR_DEFINE_AUTO( cl_ticket_generator, "0", FCVAR_ARCHIVE, "you wouldn't steal a car" );
 
 
 client_t		cl;
@@ -1082,7 +1082,7 @@ static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 		byte send_buf[2048];
 
 		Info_SetValueForKey( protinfo, "prot", "3", sizeof( protinfo )); // steam auth type
-		Info_SetValueForKeyf( protinfo, "unique", sizeof( protinfo ), "%i", 0xffffffff );
+		Info_SetValueForKey( protinfo, "unique", steamID, sizeof( protinfo ));
 		Info_SetValueForKey( protinfo, "raw", "steam", sizeof( protinfo ));
 		CL_GetCDKey( protinfo, sizeof( protinfo ));
 
