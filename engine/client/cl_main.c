@@ -1007,53 +1007,52 @@ static void CL_GetCDKey( char *protinfo, size_t protinfosize )
 
 static void CL_WriteSteamTicket( sizebuf_t *send )
 {
-	const char *s;
-	uint32_t crc;
-	char buf[768] = { 0 }; // setti and steamemu return 768
-	size_t i = sizeof( buf );
+    const char *s;
+    uint32_t crc;
+    char buf[768] = { 0 }; // setti and steamemu return 768
+    size_t i = sizeof( buf );
 
-	if( !Q_strcmp( cl_ticket_generator.string, "null" ))
-	{
-		MSG_WriteBytes( send, buf, 512 ); // specifically 512 bytes of zeros
-		return;
-	}
+    if( !Q_strcmp( cl_ticket_generator.string, "null" ))
+    {
+        MSG_WriteBytes( send, buf, 512 );
+        return;
+    }
 
-	//if( !Q_strcmp( cl_ticket_generator.string, "steam" )
-	//{
-	//	i = SteamBroker_InitiateGameConnection( buf, sizeof( buf ));
-	//	MSG_WriteBytes( send, buf, i );
-	//	return;
-	//}
+    if( !Q_stricmp( cl_ticket_generator.string, "custom" ))
+    {
+        const char *custom_steamid = "STEAM_1:0:1696951691";
+        
+        crc = 0xAABBCCDD;
 
-	s = ID_GetMD5();
-	CRC32_Init( &crc );
-	CRC32_ProcessBuffer( &crc, s, Q_strlen( s ));
-	crc = CRC32_Final( crc );
+        Q_snprintf( buf, sizeof(buf), "%s", custom_steamid );
+        i = Q_strlen(buf);
+    }
+    else
+    {
+        s = ID_GetMD5();
+        CRC32_Init( &crc );
+        CRC32_ProcessBuffer( &crc, s, Q_strlen( s ));
+        crc = CRC32_Final( crc );
 
-	if( !Q_stricmp( cl_ticket_generator.string, "revemu2013" ))
-		i = GenerateRevEmu2013( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "sc2009" ))
-		i = GenerateSC2009( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "oldrevemu" ))
-		i = GenerateOldRevEmu( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "steamemu" ))
-		i = GenerateSteamEmu( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "revemu" ))
-		i = GenerateRevEmu( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "setti" ))
-		i = GenerateSetti( buf );
-	else if( !Q_stricmp( cl_ticket_generator.string, "avsmp" ))
-		i = GenerateAVSMP( buf, crc, true );
-	else if( !Q_stricmp( cl_ticket_generator.string, "custom" ))
-    		{
-        		const char *custom_steamid = "STEAM_1:0:1696951691";
-        		Q_snprintf( buf, sizeof(buf), "%s", custom_steamid );
-      	  		i = Q_strlen(buf);
-    		}
-	else
-		Con_Printf( "%s: unknown generator %s, supported are: null, revemu2003, sc2009, oldrevemu, steamemu, revemu, setti, avsmp\n", __func__, cl_ticket_generator.string );
+        if( !Q_stricmp( cl_ticket_generator.string, "revemu2013" ))
+            i = GenerateRevEmu2013( buf, crc );
+        else if( !Q_stricmp( cl_ticket_generator.string, "sc2009" ))
+            i = GenerateSC2009( buf, crc );
+        else if( !Q_stricmp( cl_ticket_generator.string, "oldrevemu" ))
+            i = GenerateOldRevEmu( buf, crc );
+        else if( !Q_stricmp( cl_ticket_generator.string, "steamemu" ))
+            i = GenerateSteamEmu( buf, crc );
+        else if( !Q_stricmp( cl_ticket_generator.string, "revemu" ))
+            i = GenerateRevEmu( buf, crc );
+        else if( !Q_stricmp( cl_ticket_generator.string, "setti" ))
+            i = GenerateSetti( buf );
+        else if( !Q_stricmp( cl_ticket_generator.string, "avsmp" ))
+            i = GenerateAVSMP( buf, crc, true );
+        else
+            Con_Printf( "%s: unknown generator %s, supported are: null, revemu2003, sc2009, oldrevemu, steamemu, revemu, setti, avsmp, custom\n", __func__, cl_ticket_generator.string );
+    }
 
-	MSG_WriteBytes( send, buf, i );
+    MSG_WriteBytes( send, buf, i );
 }
 
 /*
