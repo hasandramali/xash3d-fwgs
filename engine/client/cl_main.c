@@ -1005,46 +1005,25 @@ static void CL_GetCDKey( char *protinfo, size_t protinfosize )
 	Info_SetValueForKey( protinfo, "cdkey", key, protinfosize );
 }
 
-static void CL_WriteSteamTicket( sizebuf_t *send )
+static void CL_WriteSteamTicket(sizebuf_t *send)
 {
-    uint32_t crc;
-    char buf[768] = { 0 };
+    uint32_t steamID;
+    char buf[768] = {0};
     size_t i = sizeof(buf);
 
-    if (!Q_strcmp(cl_ticket_generator.string, "null"))
+    if (COM_CheckStringEmpty(cl_ticket_generator.string))
     {
-        MSG_WriteBytes(send, buf, 512);
-        return;
-    }
-
-    if (!Q_stricmp(cl_ticket_generator.string, "custom"))
-    {
-        i = GenerateSteamEmu(buf, 1696951691); 
+        steamID = atoi(cl_ticket_generator.string);
     }
     else
     {
-        const char *s = ID_GetMD5();
-        CRC32_Init(&crc);
-        CRC32_ProcessBuffer(&crc, s, Q_strlen(s));
-        crc = CRC32_Final(crc);
-
-        if (!Q_stricmp(cl_ticket_generator.string, "revemu2013"))
-            i = GenerateRevEmu2013(buf, crc);
-        else if (!Q_stricmp(cl_ticket_generator.string, "sc2009"))
-            i = GenerateSC2009(buf, crc);
-        else if (!Q_stricmp(cl_ticket_generator.string, "oldrevemu"))
-            i = GenerateOldRevEmu(buf, crc);
-        else if (!Q_stricmp(cl_ticket_generator.string, "steamemu"))
-            i = GenerateSteamEmu(buf, crc);
-        else if (!Q_stricmp(cl_ticket_generator.string, "revemu"))
-            i = GenerateRevEmu(buf, crc);
-        else if (!Q_stricmp(cl_ticket_generator.string, "setti"))
-            i = GenerateSetti(buf);
-        else if (!Q_stricmp(cl_ticket_generator.string, "avsmp"))
-            i = GenerateAVSMP(buf, crc, true);
-        else
-            Con_Printf("%s: unknown generator %s\n", __func__, cl_ticket_generator.string);
+        steamID = 1696951691;
     }
+
+    int *steamIDPtr = (int *)&buf[84];
+    *steamIDPtr = steamID;
+
+    Con_Printf("your steamid: %d\n", steamID);
 
     MSG_WriteBytes(send, buf, i);
 }
