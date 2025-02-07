@@ -97,7 +97,7 @@ static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FI
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 
 static CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE, "you wouldn't steal a car" );
-static CVAR_DEFINE_AUTO( cl_ticket_custom, "", FCVAR_ARCHIVE, "you wouldn't steal a cax" );
+CVAR_DEFINE_AUTO( cl_ticket_custom, "", FCVAR_ARCHIVE, "you wouldn't steal a cax" );
 
 
 client_t		cl;
