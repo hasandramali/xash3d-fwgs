@@ -1040,7 +1040,7 @@ connect.
 static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 {
 	char protinfo[MAX_INFO_STRING];
-	const char *key = ID_GetMD5();
+	const char *key = 0;
 	netadr_t adr = { 0 };
 	int input_devices;
 	netadrtype_t adrtype;
@@ -1094,7 +1094,7 @@ static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 
 		Info_SetValueForKey( protinfo, "prot", "3", sizeof( protinfo )); // steam auth type
 		Info_SetValueForKey( protinfo, "unique", steamID, sizeof( protinfo ));
-		Info_SetValueForKey( protinfo, "raw", "steam", sizeof( protinfo ));
+		Info_SetValueForKey( protinfo, "raw", steamID, sizeof( protinfo ));
 		CL_GetCDKey( protinfo, sizeof( protinfo ));
 
 		// remove keys set for legacy protocol
