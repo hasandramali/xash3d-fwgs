@@ -1075,11 +1075,22 @@ static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 		Info_SetValueForKey( protinfo, "a", Q_buildarch(), sizeof( protinfo ) );
 	}
 
-	if( proto == PROTO_GOLDSRC )
+	if (proto == PROTO_GOLDSRC)
 	{
-		const char *name;
-		sizebuf_t send;
-		byte send_buf[2048];
+   		 const char *name;
+    		 sizebuf_t send;
+   		 byte send_buf[2048];
+
+   		 const char *steamID;
+
+    		 if (!Q_strcmp(cl_ticket_generator.string, "custom"))
+    		 {
+			 steamID = "STEAM_1:0:3131313100"; 
+   		 }
+   		 else
+  		 {
+        	  	 steamID = "STEAM_1:0:3131313131";
+    	 	 }
 
 		Info_SetValueForKey( protinfo, "prot", "3", sizeof( protinfo )); // steam auth type
 		Info_SetValueForKey( protinfo, "unique", steamID, sizeof( protinfo ));
