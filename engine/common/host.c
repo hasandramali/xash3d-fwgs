@@ -634,7 +634,6 @@ compute actual FPS for various modes
 static double Host_CalcFPS( void )
 {
     double fps = 0.0;
-
     if( Host_IsDedicated( ))
     {
         fps = sys_ticrate.value;
@@ -648,7 +647,6 @@ static double Host_CalcFPS( void )
         if( true )
         {
             double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
-
             fps = host_maxfps.value;
             if( fps == 0.0 ) fps = max_fps;
             fps = bound( MIN_FPS, fps, max_fps );
@@ -663,13 +661,11 @@ static double Host_CalcFPS( void )
         if( true )
         {
             double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
-
             fps = host_maxfps.value;
             if( fps == 0.0 ) fps = max_fps;
             fps = bound( MIN_FPS, fps, max_fps );
         }
     }
-
     return fps;
 }
 
@@ -1047,7 +1043,7 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 	}
 
 	if( !Sys_CheckParm( "-noch" ))
-		Sys_SetupCrashHandler();
+		Sys_SetupCrashHandler( argv[0] );
 
 #if XASH_DLL_LOADER
 	host.enabledll = !Sys_CheckParm( "-nodll" );
