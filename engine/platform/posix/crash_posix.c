@@ -28,6 +28,8 @@ GNU General Public License for more details.
 #include "library.h"
 
 void Sys_Crash( int signal, siginfo_t *si, void *context );
+void Sys_CrashLibbacktrace( int signal, siginfo_t *si, void *context );
+qboolean Sys_SetupLibbacktrace( const char *argv0 );
 static struct sigaction oldFilter;
 
 #if !HAVE_EXECINFO
@@ -45,16 +47,16 @@ static int Sys_PrintFrame( char *buf, int len, int i, void *addr )
 	if( len <= 0 )
 		return 0; // overflow
 
-		if( dladdr( addr, &dlinfo ))
-		{
-			if( dlinfo.dli_sname )
-				return Q_snprintf( buf, len, "%2d: %p <%s+%lu> (%s)\n", i, addr, dlinfo.dli_sname,
-								   (unsigned long)addr - (unsigned long)dlinfo.dli_saddr, dlinfo.dli_fname ); // print symbol, module and address
+	if( dladdr( addr, &dlinfo ))
+	{
+		if( dlinfo.dli_sname )
+			return Q_snprintf( buf, len, "%2d: %p <%s+%lu> (%s)\n", i, addr, dlinfo.dli_sname,
+				(unsigned long)addr - (unsigned long)dlinfo.dli_saddr, dlinfo.dli_fname ); // print symbol, module and address
 
-				return Q_snprintf( buf, len, "%2d: %p (%s)\n", i, addr, dlinfo.dli_fname ); // print module and address
-		}
+		return Q_snprintf( buf, len, "%2d: %p (%s)\n", i, addr, dlinfo.dli_fname ); // print module and address
+	}
 
-		return Q_snprintf( buf, len, "%2d: %p\n", i, addr ); // print only address
+	return Q_snprintf( buf, len, "%2d: %p\n", i, addr ); // print only address
 }
 
 void Sys_Crash( int signal, siginfo_t *si, void *context )
@@ -68,6 +70,10 @@ void Sys_Crash( int signal, siginfo_t *si, void *context )
 #else
 	ucontext_t *ucontext = (ucontext_t*)context;
 #endif
+
+	// flush buffers before writing directly to descriptors
+	fflush( stdout );
+	fflush( stderr );
 
 #if XASH_AMD64
 #if XASH_FREEBSD
@@ -116,8 +122,8 @@ void Sys_Crash( int signal, siginfo_t *si, void *context )
 #endif
 
 	// safe actions first, stack and memory may be corrupted
-	len = Q_snprintf( message, sizeof( message ), "Ver: " XASH_ENGINE_NAME " " XASH_VERSION " (build %i-%s, %s-%s)\n",
-					  Q_buildnum(), g_buildcommit, Q_buildos(), Q_buildarch() );
+	len = Q_snprintf( message, sizeof( message ), "Ver: " XASH_ENGINE_NAME " " XASH_VERSION " (build %i-%s-%s, %s-%s)\n",
+					  Q_buildnum(), g_buildcommit, g_buildbranch, Q_buildos(), Q_buildarch() );
 
 #if !XASH_FREEBSD && !XASH_NETBSD && !XASH_OPENBSD && !XASH_APPLE
 	len += Q_snprintf( message + len, sizeof( message ) - len, "Crash: signal %d errno %d with code %d at %p %p\n", signal, si->si_errno, si->si_code, si->si_addr, si->si_ptr );
@@ -126,10 +132,6 @@ void Sys_Crash( int signal, siginfo_t *si, void *context )
 #endif
 
 	write( STDERR_FILENO, message, len );
-
-	// flush buffers before writing directly to descriptors
-	fflush( stdout );
-	fflush( stderr );
 
 	// now get log fd and write trace directly to log
 	logfd = Sys_LogFileNo();
@@ -206,15 +208,25 @@ void Sys_Crash( int signal, siginfo_t *si, void *context )
 
 #endif // !HAVE_EXECINFO
 
-void Sys_SetupCrashHandler( void )
+void Sys_SetupCrashHandler( const char *argv0 )
 {
 	struct sigaction act = { 0 };
-	act.sa_sigaction = Sys_Crash;
+#if HAVE_LIBBACKTRACE
+	if( Sys_SetupLibbacktrace( argv0 ))
+	{
+		act.sa_sigaction = Sys_CrashLibbacktrace;
+	}
+	else
+#endif
+	{
+		act.sa_sigaction = Sys_Crash;
+	}
 	act.sa_flags = SA_SIGINFO | SA_ONSTACK;
 	sigaction( SIGSEGV, &act, &oldFilter );
 	sigaction( SIGABRT, &act, &oldFilter );
 	sigaction( SIGBUS,  &act, &oldFilter );
 	sigaction( SIGILL,  &act, &oldFilter );
+
 }
 
 void Sys_RestoreCrashHandler( void )

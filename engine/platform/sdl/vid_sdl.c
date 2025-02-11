@@ -257,7 +257,8 @@ static void R_InitVideoModes( void )
 {
 	char buf[MAX_VA_STRING];
 #if SDL_VERSION_ATLEAST( 2, 0, 0 )
-	int displayIndex = 0; // TODO: handle multiple displays somehow
+	SDL_Point point = { window_xpos.value, window_ypos.value };
+	int displayIndex = SDL_GetPointDisplayIndex( &point );
 	int i, modes;
 
 	num_vidmodes = 0;
@@ -735,6 +736,24 @@ static qboolean VID_CreateWindowWithSafeGL( const char *wndname, int xpos, int y
 	return true;
 }
 
+static qboolean RectFitsInDisplay( const SDL_Rect *rect, const SDL_Rect *display )
+{
+	return rect->x >= display->x
+		&& rect->y >= display->y
+		&& rect->x + rect->w <= display->x + display->w
+		&& rect->y + rect->h <= display->y + display->h;
+}	
+// Function to check if the rectangle fits in any display
+static qboolean RectFitsInAnyDisplay( const SDL_Rect *rect, const SDL_Rect *display_rects, int num_displays )
+{
+	for( int i = 0; i < num_displays; i++ )
+	{
+		if( RectFitsInDisplay( rect, &display_rects[i] ))
+			return true; // Rectangle fits in this display
+	}
+	return false; // Rectangle does not fit in any display
+}
+
 /*
 =================
 VID_CreateWindow
@@ -747,6 +766,8 @@ qboolean VID_CreateWindow( int width, int height, window_mode_t window_mode )
 	qboolean maximized = vid_maximized.value != 0.0f;
 	Uint32 wndFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_MOUSE_FOCUS;
 	int xpos, ypos;
+	int num_displays = SDL_GetNumVideoDisplays();
+	SDL_Rect rect = { window_xpos.value, window_ypos.value, width, height };
 
 	Q_strncpy( wndname, GI->title, sizeof( wndname ));
 
@@ -757,35 +778,43 @@ qboolean VID_CreateWindow( int width, int height, window_mode_t window_mode )
 
 	if( window_mode == WINDOW_MODE_WINDOWED )
 	{
-		SDL_Rect r;
-
+		SDL_Rect *display_rects = ( SDL_Rect * )malloc( num_displays * sizeof( SDL_Rect ));
+	
 		SetBits( wndFlags, SDL_WINDOW_RESIZABLE );
 		if( maximized )
 			SetBits( wndFlags, SDL_WINDOW_MAXIMIZED );
 
-#if SDL_VERSION_ATLEAST( 2, 0, 5 )
-		if( SDL_GetDisplayUsableBounds( 0, &r ) < 0 &&
-			SDL_GetDisplayBounds( 0, &r ) < 0 )
-#else
-		if( SDL_GetDisplayBounds( 0, &r ) < 0 )
-#endif
+		if( !display_rects )
 		{
-			Con_Reportf( S_ERROR "%s: SDL_GetDisplayBounds failed: %s\n", __func__, SDL_GetError( ));
-			xpos = SDL_WINDOWPOS_CENTERED;
-			ypos = SDL_WINDOWPOS_CENTERED;
+			Con_Printf( S_ERROR "Failed to allocate memory for display rects!\n" );
+			xpos = SDL_WINDOWPOS_UNDEFINED;
+			ypos = SDL_WINDOWPOS_UNDEFINED;
 		}
 		else
 		{
-			xpos = window_xpos.value;
-			ypos = window_ypos.value;
-
-			// don't create window outside of usable display space
-			if( xpos < r.x || xpos + width > r.x + r.w )
+			for( int i = 0; i < num_displays; i++ )
+			{
+				if( SDL_GetDisplayBounds( i, &display_rects[i] ) != 0 )
+				{
+					Con_Printf( S_ERROR "Failed to get bounds for display %d! SDL_Error: %s\n", i, SDL_GetError());
+					display_rects[i] = ( SDL_Rect ){ 0, 0, 0, 0 };
+				}
+			}
+			// Check if the rectangle fits in any display
+			if( !RectFitsInAnyDisplay( &rect, display_rects, num_displays ))
+			{
+				// Rectangle doesn't fit in any display, center it
 				xpos = SDL_WINDOWPOS_CENTERED;
-
-			if( ypos < r.y || ypos + height > r.y + r.h )
 				ypos = SDL_WINDOWPOS_CENTERED;
+				Con_Printf( S_ERROR "Rectangle does not fit in any display. Centering window.\n" );
+			}
+			else
+			{
+				xpos = rect.x;
+				ypos = rect.y;
+			}
 		}
+		free( display_rects );
 	}
 	else
 	{
@@ -795,7 +824,16 @@ qboolean VID_CreateWindow( int width, int height, window_mode_t window_mode )
 		else
 			SetBits( wndFlags, SDL_WINDOW_FULLSCREEN_DESKTOP );
 		SetBits( wndFlags, SDL_WINDOW_BORDERLESS );
-		xpos = ypos = 0;
+		if ( window_xpos.value < 0 || window_ypos.value < 0 )
+		{
+			xpos = SDL_WINDOWPOS_UNDEFINED;
+			ypos = SDL_WINDOWPOS_UNDEFINED;
+		}
+		else
+		{
+			xpos = window_xpos.value;
+			ypos = window_ypos.value;
+		}
 	}
 
 	if( !VID_CreateWindowWithSafeGL( wndname, xpos, ypos, width, height, wndFlags ))
@@ -1018,7 +1056,8 @@ qboolean R_Init_Video( const int type )
 
 #if SDL_VERSION_ATLEAST( 2, 0, 0 )
 	SDL_DisplayMode displayMode;
-	SDL_GetCurrentDisplayMode( 0, &displayMode );
+	SDL_Point point = { window_xpos.value, window_ypos.value };
+	SDL_GetCurrentDisplayMode( SDL_GetPointDisplayIndex( &point ), &displayMode );
 	refState.desktopBitsPixel = SDL_BITSPERPIXEL( displayMode.format );
 #else
 	refState.desktopBitsPixel = 16;

@@ -84,6 +84,7 @@ SUBDIRS = [
 	Subproject('filesystem'),
 	Subproject('stub/server'),
 	Subproject('dllemu'),
+	Subproject('3rdparty/libbacktrace', lambda x: not x.env.HAVE_SYSTEM_LIBBACKTRACE),
 
 	# disable only by engine feature, makes no sense to even parse subprojects in dedicated mode
 	Subproject('3rdparty/extras',       lambda x: x.env.CLIENT and x.env.DEST_OS != 'android'),
@@ -273,9 +274,13 @@ def configure(conf):
 	else:
 		force_32bit = conf.options.FORCE32
 
+	# FIXME: move this whole logic to force_32bit.py, and ensure
+	# DEST_SIZEOF_VOID_P is always set
 	if force_32bit:
 		Logs.info('WARNING: will build engine for 32-bit target')
 		conf.force_32bit(True)
+	else:
+		conf.env.DEST_SIZEOF_VOID_P = 4 if conf.check_32bit() else 8
 
 	cflags, linkflags = conf.get_optimization_flags()
 	cxxflags = list(cflags) # optimization flags are common between C and C++ but we need a copy
@@ -479,28 +484,41 @@ def configure(conf):
 	else:
 		conf.env.SHAREDIR = conf.env.LIBDIR = conf.env.BINDIR = conf.env.PREFIX
 
-	# dedicated server don't have external dependencies
-	if not conf.options.BUILD_BUNDLED_DEPS and not conf.options.DEDICATED:
-		for i in ('ogg','opusfile','vorbis','vorbisfile'):
-			if conf.check_cfg(package=i, uselib_store=i, args='--cflags --libs', mandatory=False):
-				conf.env['HAVE_SYSTEM_%s' % i.upper()] = True
+	if not conf.options.BUILD_BUNDLED_DEPS:
+		frag='''#include <backtrace.h>
+#include <backtrace-supported.h>
+#if !BACKTRACE_SUPPORTS_THREADS
+#error
+#endif
+int main(int argc, char **argv) { return backtrace_create_state(argv[0], 1, 0, 0) != 0; }'''
 
-		# search for opus 1.4 only, it has fixes for custom modes
-		# 1.5 breaks custom modes: https://github.com/xiph/opus/issues/374
-		if conf.check_cfg(package='opus', uselib_store='opus', args='opus = 1.4 --cflags --libs', mandatory=False):
-			# now try to link with export that only exists with CUSTOM_MODES defined
-			frag='''#include <opus_custom.h>
+		conf.env.HAVE_SYSTEM_LIBBACKTRACE = conf.check_cc(lib='backtrace', fragment=frag, uselib_store='backtrace', mandatory=False)
+
+		if conf.env.CLIENT:
+			for i in ('ogg','opusfile','vorbis','vorbisfile'):
+				if conf.check_cfg(package=i, uselib_store=i, args='--cflags --libs', mandatory=False):
+					conf.env['HAVE_SYSTEM_%s' % i.upper()] = True
+
+				if conf.env.HAVE_SYSTEM_OPUSFILE:
+					frag='''#include <opusfile.h>
+int main(int argc, char **argv) { return opus_tagcompare(argv[0], argv[1]); }'''
+
+					conf.env.HAVE_SYSTEM_OPUSFILE = conf.check_cc(msg='Checking for libopusfile sanity', use='opusfile werror', fragment=frag, mandatory=False)
+
+			# search for opus 1.4 only, it has fixes for custom modes
+			# 1.5 breaks custom modes: https://github.com/xiph/opus/issues/374
+			if conf.check_cfg(package='opus', uselib_store='opus', args='opus = 1.4 --cflags --libs', mandatory=False):
+				# now try to link with export that only exists with CUSTOM_MODES defined
+				frag='''#include <opus_custom.h>
 int main(void) { return !opus_custom_encoder_init((OpusCustomEncoder *)1, (const OpusCustomMode *)1, 1); }'''
 
-			if conf.check_cc(msg='Checking if opus supports custom modes', defines='CUSTOM_MODES=1', use='opus werror', fragment=frag, mandatory=False):
-				conf.env.HAVE_SYSTEM_OPUS = True
+				conf.env.HAVE_SYSTEM_OPUS = conf.check_cc(msg='Checking if opus supports custom modes', defines='CUSTOM_MODES=1', use='opus werror', fragment=frag, mandatory=False)
 
-		# search for bzip2
-		BZIP2_CHECK='''#include <bzlib.h>
+			# search for bzip2
+			BZIP2_CHECK='''#include <bzlib.h>
 int main(void) { return (int)BZ2_bzlibVersion(); }'''
 
-		if conf.check_cc(lib='bz2', fragment=BZIP2_CHECK, uselib_store='bzip2', mandatory=False):
-			conf.env.HAVE_SYSTEM_BZ2 = True
+			conf.env.HAVE_SYSTEM_BZ2 = conf.check_cc(lib='bz2', fragment=BZIP2_CHECK, uselib_store='bzip2', mandatory=False)
 
 	conf.define('XASH_LOW_MEMORY', conf.options.LOW_MEMORY)
 
@@ -517,7 +535,7 @@ def build(bld):
 
 	# don't clean QtCreator files and reconfigure saved options
 	bld.clean_files = bld.bldnode.ant_glob('**',
-		excl='*.user configuration.py .lock* *conf_check_*/** config.log %s/*' % Build.CACHE_DIR,
+		excl='*.user configuration.py .lock* *conf_check_*/** config.log 3rdparty/libbacktrace/*.h %s/*' % Build.CACHE_DIR,
 		quiet=True, generator=True)
 
 	bld.load('xshlib')
