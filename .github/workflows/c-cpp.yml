@@ -1,11 +1,7 @@
 name: Build & Deploy Engine
 on: [push, pull_request]
+
 jobs:
-#  cleanup:
-#    runs-on: self-hosted
-#    steps:
-#    - name: Cleanup
-#      run: rm -rf .* || true
   build:
     runs-on: ${{ matrix.os }}
     continue-on-error: true
@@ -13,8 +9,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux build specifically want oldest Ubuntu as possible
-          # to be crossdistribution compatible, otherwise use ubuntu-latest
           - os: ubuntu-20.04
             targetos: linux
             targetarch: amd64
@@ -37,16 +31,9 @@ jobs:
             targetos: linux
             targetarch: ppc64el
             cross: true
-#          - os: ubuntu-aarch64-20.04
-#            targetos: linux
-#            targetarch: aarch64
           - os: ubuntu-20.04
             targetos: android
             targetarch: multiarch
-#          - os: ubuntu-20.04
-#            targetos: motomagx
-#            targetarch: armv6
-
           - os: ubuntu-latest
             targetos: nswitch
             targetarch: arm64
@@ -56,13 +43,13 @@ jobs:
           - os: windows-latest
             targetos: win32
             targetarch: amd64
-          - os: windows-2019 # always use the oldest possible for 32-bit because of older compilers, and better support of certain legacy OSes
+          - os: windows-2019
             targetos: win32
             targetarch: i386
-          - os: macos-14 # arm64 as per github documentation
+          - os: macos-14
             targetos: apple
             targetarch: arm64
-          - os: macos-13 # x86 as per github documentation (will they fix it before they deprecate this version?..)
+          - os: macos-13
             targetos: apple
             targetarch: amd64
     env:
@@ -77,14 +64,13 @@ jobs:
     - name: Install dependencies
       run: bash scripts/gha/deps_${{ matrix.targetos }}.sh
     - name: Build engine
-      env:
-        FWGS_PFX_PASSWORD: ${{ secrets.FWGS_PFX_PASSWORD }}
       run: bash scripts/gha/build_${{ matrix.targetos }}.sh
     - name: Upload engine (artifacts)
       uses: actions/upload-artifact@v4
       with:
         name: artifact-${{ matrix.targetos }}-${{ matrix.targetarch }}
         path: artifacts/*
+
   flatpak:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -105,37 +91,34 @@ jobs:
       with:
         bundle: ${{ matrix.app }}.flatpak
         manifest-path: scripts/flatpak/${{ matrix.app }}.yml
+
   release:
     name: "Upload releases"
     runs-on: ubuntu-latest
     needs: [build, flatpak]
     if: ${{ github.event_name == 'push' }}
     steps:
-    - name: Remove old release, fetch artifacts, repackage binaries and upload new release
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        RELEASE_TAG: ${{ github.ref_name == 'master' && 'continuous' || format('continuous-{0}', github.ref_name) }}
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Fetch artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+    - name: List artifacts
       run: |
-        gh release delete "$RELEASE_TAG" \
-          --yes \
-          --cleanup-tag \
-          --repo "$GITHUB_REPOSITORY" || true
-        gh run download "$GITHUB_RUN_ID" \
-          --dir artifacts/ \
-          --repo "$GITHUB_REPOSITORY"
-        pushd artifacts/
-        echo "Found artifacts:"
-        ls
-        for i in $(find -mindepth 1 -maxdepth 1 -type d); do
-          mv "$i"/* .
-          rm -rf "$i"
+        echo "Downloaded artifacts:"
+        ls -R artifacts/
+    - name: Zip artifacts
+      run: |
+        cd artifacts/
+        for dir in */; do
+          zip -r "${dir%/}.zip" "$dir"
+          rm -rf "$dir"
         done
-        echo "Repackaged artifacts:"
-        ls -R
-        popd
-        sleep 20s
-        gh release create "$RELEASE_TAG" artifacts/* \
-          --title "Xash3D FWGS Continuous ${{ github.ref_name }} Build" \
-          --target $GITHUB_SHA \
-          --repo "$GITHUB_REPOSITORY" \
-          --prerelease
+        cd ..
+    - name: Upload release artifacts
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/*.zip
+        tag_name: continuous
+        prerelease: true
