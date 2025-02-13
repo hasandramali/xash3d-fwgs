@@ -121,18 +121,15 @@ static void Sys_MakeVersionString( char *out, size_t len )
 static void Sys_PrintUsage( const char *exename )
 {
 #ifdef XASH_MOBILE_PLATFORM
-	if (argc > 1)
+	for (int i = 1; i < argc; i++)
 	{
-		for (int i = 1; i < argc; i++)
+		if (strcmp(argv[i], "-width") == 0 && i + 1 < argc)
 		{
-			if (strcmp(argv[i], "-width") == 0 && i + 1 < argc)
-			{
-				cl_width = atoi(argv[i + 1]);
-			}
-			if (strcmp(argv[i], "-height") == 0 && i + 1 < argc)
-			{
-				cl_height = atoi(argv[i + 1]);
-			}
+			sw.width = atoi(argv[i + 1]);
+		}
+		if (strcmp(argv[i], "-height") == 0 && i + 1 < argc)
+		{
+			sw.height = atoi(argv[i + 1]);
 		}
 	}
 #endif
