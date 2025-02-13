@@ -120,20 +120,6 @@ static void Sys_MakeVersionString( char *out, size_t len )
 
 static void Sys_PrintUsage( const char *exename )
 {
-#ifdef XASH_MOBILE_PLATFORM
-	for (int i = 1; i < argc; i++)
-	{
-		if (strcmp(argv[i], "-width") == 0 && i + 1 < argc)
-		{
-			sw.width = atoi(argv[i + 1]);
-		}
-		if (strcmp(argv[i], "-height") == 0 && i + 1 < argc)
-		{
-			sw.height = atoi(argv[i + 1]);
-		}
-	}
-#endif
-
 	string version_str;
 	const char *usage_str;
 
@@ -1214,6 +1200,20 @@ Host_Main
 */
 int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGame, pfnChangeGame func )
 {
+#ifdef XASH_MOBILE_PLATFORM
+	for (int i = 1; i < argc; i++)
+	{
+		if (strcmp(argv[i], "-width") == 0 && i + 1 < argc)
+		{
+			sw.width = atoi(argv[i + 1]);
+		}
+		if (strcmp(argv[i], "-height") == 0 && i + 1 < argc)
+		{
+			sw.height = atoi(argv[i + 1]);
+		}
+	}
+#endif
+
 	static double	oldtime, newtime;
 	string demoname, exename;
 
