@@ -70,6 +70,9 @@ void Android_Shutdown( void );
 #endif
 
 #if XASH_WIN32
+void Win32_Init( qboolean con_showalways );
+void Win32_Shutdown( void );
+qboolean Win32_NanoSleep( int nsec );
 void Wcon_CreateConsole( qboolean con_showalways );
 void Wcon_DestroyConsole( void );
 void Wcon_InitConsoleCommands( void );
@@ -124,7 +127,7 @@ static inline void Platform_Init( qboolean con_showalways, const char *basedir )
 #elif XASH_DOS
 	DOS_Init( );
 #elif XASH_WIN32
-	Wcon_CreateConsole( con_showalways );
+	Win32_Init( con_showalways );
 #elif XASH_LINUX
 	Linux_Init( );
 #endif
@@ -139,7 +142,7 @@ static inline void Platform_Shutdown( void )
 #elif XASH_DOS
 	DOS_Shutdown( );
 #elif XASH_WIN32
-	Wcon_DestroyConsole( );
+	Win32_Shutdown( );
 #elif XASH_LINUX
 	Linux_Shutdown( );
 #endif
@@ -175,6 +178,23 @@ static inline void Platform_Sleep( int msec )
 	Sleep( msec );
 #else
 	// stub
+#endif
+}
+
+static inline qboolean Platform_NanoSleep( int nsec )
+{
+	// SDL2 doesn't have nanosleep, so use low-level functions here
+	// When this code will be ported to SDL3, use SDL_DelayNS
+#if XASH_POSIX
+	struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = nsec, // just don't put large numbers here
+	};
+	return nanosleep( &ts, NULL ) == 0;
+#elif XASH_WIN32
+	return Win32_NanoSleep( nsec );
+#else
+	return false;
 #endif
 }
 

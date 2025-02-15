@@ -86,38 +86,54 @@ flood the server with invalid connection IPs.  With a
 challenge, they must give a valid IP address.
 =================
 */
-static void SV_GetChallenge( netadr_t from )
+static int SV_GetChallenge( netadr_t from, qboolean *error )
 {
-	int	i, oldest = 0;
-	double	oldestTime;
+	const netadrtype_t type = NET_NetadrType( &from );
+	MD5Context_t ctx;
+	byte digest[16];
 
-	oldestTime = 0x7fffffff;
+	*error = false;
 
-	// see if we already have a challenge for this ip
-	for( i = 0; i < MAX_CHALLENGES; i++ )
+	MD5Init( &ctx );
+
+	switch( type )
 	{
-		if( !svs.challenges[i].connected && NET_CompareAdr( from, svs.challenges[i].adr ))
-			break;
-
-		if( svs.challenges[i].time < oldestTime )
-		{
-			oldestTime = svs.challenges[i].time;
-			oldest = i;
-		}
+	case NA_IP:
+		MD5Update( &ctx, from.ip, sizeof( from.ip ));
+		break;
+	case NA_IPX:
+		MD5Update( &ctx, from.ipx, sizeof( from.ipx ));
+		break;
+	case NA_IP6:
+	{
+		byte ip6[16];
+		NET_NetadrToIP6Bytes( ip6, &from );
+		MD5Update( &ctx, ip6, sizeof( ip6 ));
+		break;
+	}
+	case NA_LOOPBACK:
+		return 0;
+	default:
+		*error = true;
+		return 0;
 	}
 
-	if( i == MAX_CHALLENGES )
-	{
-		// this is the first time this client has asked for a challenge
-		svs.challenges[oldest].challenge = (COM_RandomLong( 0, 0x7FFF ) << 16) | COM_RandomLong( 0, 0xFFFF );
-		svs.challenges[oldest].adr = from;
-		svs.challenges[oldest].time = host.realtime;
-		svs.challenges[oldest].connected = false;
-		i = oldest;
-	}
+	MD5Update( &ctx, (byte *)svs.challenge_salt, sizeof( svs.challenge_salt ));
+	MD5Final( digest, &ctx );
+
+	return digest[0] | digest[1] << 8 | digest[2] << 16 | digest[3] << 24;
+}
+
+static void SV_SendChallenge( netadr_t from )
+{
+	qboolean error = false;
+	int challenge = SV_GetChallenge( from, &error );
+
+	if( error )
+		return;
 
 	// send it back
-	Netchan_OutOfBandPrint( NS_SERVER, svs.challenges[i].adr, S2C_CHALLENGE" %i", svs.challenges[i].challenge );
+	Netchan_OutOfBandPrint( NS_SERVER, from, S2C_CHALLENGE" %i", challenge );
 }
 
 static int SV_GetFragmentSize( void *pcl, fragsize_t mode )
@@ -211,35 +227,16 @@ Make sure connecting client is not spoofing
 */
 static int SV_CheckChallenge( netadr_t from, int challenge )
 {
-	int	i;
+	qboolean error = false;
+	int challenge2 = SV_GetChallenge( from, &error );
 
-	// see if the challenge is valid
-	// don't care if it is a local address.
-	if( NET_IsLocalAddress( from ))
-		return 1;
-
-	for( i = 0; i < MAX_CHALLENGES; i++ )
-	{
-		if( NET_CompareAdr( from, svs.challenges[i].adr ))
-		{
-			if( challenge == svs.challenges[i].challenge )
-				break; // valid challenge
-#if 0
-			// g-cont. this breaks multiple connections from single machine
-			SV_RejectConnection( from, "bad challenge %i\n", challenge );
-			return 0;
-#endif
-		}
-	}
-
-	if( i == MAX_CHALLENGES )
+	if( error || challenge2 != challenge )
 	{
 		SV_RejectConnection( from, "no challenge for your address\n" );
-		return 0;
+		return false;
 	}
-	svs.challenges[i].connected = true;
 
-	return 1;
+	return true;
 }
 
 /*
@@ -253,7 +250,7 @@ static int SV_CheckIPRestrictions( netadr_t from )
 {
 	if( sv_lan.value )
 	{
-		if( !NET_CompareClassBAdr( from, net_local ) && !NET_IsReservedAdr( from ))
+		if( !NET_IsReservedAdr( from ))
 			return 0;
 	}
 	return 1;
@@ -267,23 +264,17 @@ Get slot # and set client_t pointer for player, if possible
 We don't do this search on a "reconnect, we just reuse the slot
 ================
 */
-static int SV_FindEmptySlot( netadr_t from, int *pslot, sv_client_t **ppClient )
+static sv_client_t *SV_FindEmptySlot( void )
 {
-	sv_client_t	*cl;
-	int		i;
+	int i;
 
-	for( i = 0, cl = svs.clients; i < svs.maxclients; i++, cl++ )
+	for( i = 0; i < svs.maxclients; i++ )
 	{
-		if( cl->state == cs_free )
-		{
-			*ppClient = cl;
-			*pslot = i;
-			return 1;
-		}
+		if( svs.clients[i].state == cs_free )
+			return &svs.clients[i];
 	}
 
-	SV_RejectConnection( from, "server is full\n" );
-	return 0;
+	return NULL;
 }
 
 /*
@@ -295,15 +286,13 @@ A connection request that did not come from the master
 */
 static void SV_ConnectClient( netadr_t from )
 {
-	char		userinfo[MAX_INFO_STRING];
-	char		protinfo[MAX_INFO_STRING];
-	sv_client_t	*cl, *newcl = NULL;
-	qboolean		reconnect = false;
-	int		nClientSlot = 0;
-	int		qport, version;
-	int		i, count = 0;
-	int		challenge;
-	const char		*s;
+	char userinfo[MAX_INFO_STRING];
+	char protinfo[MAX_INFO_STRING];
+	sv_client_t *newcl = NULL;
+	int qport, version;
+	int i, count = 0;
+	int challenge;
+	const char *s;
 	int extensions;
 	uint netchan_flags = 0;
 
@@ -321,39 +310,6 @@ static void SV_ConnectClient( netadr_t from )
 		return;
 	}
 
-	challenge = Q_atoi( Cmd_Argv( 2 )); // get challenge
-
-	// see if the challenge is valid (local clients don't need to challenge)
-	if( !SV_CheckChallenge( from, challenge ))
-		return;
-
-	s = Cmd_Argv( 3 );	// protocol info
-
-	if( !Info_IsValid( s ))
-	{
-		SV_RejectConnection( from, "invalid protinfo in connect command\n" );
-		return;
-	}
-
-	Q_strncpy( protinfo, s, sizeof( protinfo ));
-
-	if( !SV_ProcessUserAgent( from, protinfo ) )
-	{
-		return;
-	}
-
-	// extract qport from protocol info
-	qport = Q_atoi( Info_ValueForKey( protinfo, "qport" ));
-
-	s = Info_ValueForKey( protinfo, "uuid" );
-	if( Q_strlen( s ) != 32 )
-	{
-		SV_RejectConnection( from, "invalid authentication certificate length\n" );
-		return;
-	}
-
-	extensions = Q_atoi( Info_ValueForKey( protinfo, "ext" ) );
-
 	// LAN servers restrict to class b IP addresses
 	if( !SV_CheckIPRestrictions( from ))
 	{
@@ -361,9 +317,37 @@ static void SV_ConnectClient( netadr_t from )
 		return;
 	}
 
+	challenge = Q_atoi( Cmd_Argv( 2 )); // get challenge
+
+	// see if the challenge is valid (local clients don't need to challenge)
+	if( !SV_CheckChallenge( from, challenge ))
+		return;
+
+	s = Cmd_Argv( 3 );
+	if( Q_strlen( s ) > sizeof( protinfo ) || !Info_IsValid( s ))
+	{
+		SV_RejectConnection( from, "invalid protinfo in connect command\n" );
+		return;
+	}
+
+	Q_strncpy( protinfo, s, sizeof( protinfo )); // protocol info
+
+	if( !SV_ProcessUserAgent( from, protinfo ))
+		return;
+
+	if( Q_strlen( Info_ValueForKey( protinfo, "uuid" )) != 32 )
+	{
+		SV_RejectConnection( from, "invalid authentication certificate length\n" );
+		return;
+	}
+
+	// extract qport from protocol info
+	qport = Q_atoi( Info_ValueForKey( protinfo, "qport" ));
+	extensions = Q_atoi( Info_ValueForKey( protinfo, "ext" ));
+
 	s = Cmd_Argv( 4 );	// user info
 
-	if( Q_strlen( s ) > MAX_INFO_STRING || !Info_IsValid( s ))
+	if( Q_strlen( s ) > sizeof( userinfo ) || !Info_IsValid( s ))
 	{
 		SV_RejectConnection( from, "invalid userinfo in connect command\n" );
 		return;
@@ -382,43 +366,43 @@ static void SV_ConnectClient( netadr_t from )
 	}
 
 	// if there is already a slot for this ip, reuse it
-	for( i = 0, cl = svs.clients; i < svs.maxclients; i++, cl++ )
+	for( i = 0; i < svs.maxclients; i++ )
 	{
+		sv_client_t *cl = &svs.clients[i];
+
 		if( cl->state == cs_free || cl->state == cs_zombie )
 			continue;
 
 		if( NET_CompareBaseAdr( from, cl->netchan.remote_address ) && ( cl->netchan.qport == qport || from.port == cl->netchan.remote_address.port ))
 		{
-			reconnect = true;
 			newcl = cl;
+			Con_Reportf( S_NOTE "%s:reconnect\n", NET_AdrToString( from ));
 			break;
 		}
 	}
 
 	// A reconnecting client will re-use the slot found above when checking for reconnection.
 	// the slot will be wiped clean.
-	if( !reconnect )
+	if( !newcl )
 	{
 		// connect the client if there are empty slots.
-		if( !SV_FindEmptySlot( from, &nClientSlot, &newcl ))
-			return;
-	}
-	else
-	{
-		Con_Reportf( S_NOTE "%s:reconnect\n", NET_AdrToString( from ));
-	}
+		newcl = SV_FindEmptySlot();
 
-	// find a client slot
-	ASSERT( newcl != NULL );
+		if( !newcl )
+		{
+			SV_RejectConnection( from, "server is full\n" );
+			return;
+		}
+	}
 
 	// build a new connection
 	// accept the new client
 
 	sv.current_client = newcl;
-	newcl->edict = EDICT_NUM( (newcl - svs.clients) + 1 );
+	newcl->edict = EDICT_NUM(( newcl - svs.clients ) + 1 );
 	newcl->challenge = challenge; // save challenge for checksumming
-	if( newcl->frames ) Mem_Free( newcl->frames );
-	newcl->frames = (client_frame_t *)Z_Calloc( sizeof( client_frame_t ) * SV_UPDATE_BACKUP );
+	newcl->frames = (client_frame_t *)Mem_Realloc( host.mempool, newcl->frames, sizeof( client_frame_t ) * SV_UPDATE_BACKUP );
+	memset( newcl->frames, 0, sizeof( client_frame_t ) * SV_UPDATE_BACKUP );
 	newcl->userid = g_userid++;	// create unique userid
 	newcl->state = cs_connected;
 	newcl->extensions = extensions & (NET_EXT_SPLITSIZE);
@@ -482,8 +466,11 @@ static void SV_ConnectClient( netadr_t from )
 
 	// if this was the first client on the server, or the last client
 	// the server can hold, send a heartbeat to the master.
-	for( i = 0, cl = svs.clients; i < svs.maxclients; i++, cl++ )
-		if( cl->state >= cs_connected ) count++;
+	for( i = 0; i < svs.maxclients; i++ )
+	{
+		if( svs.clients[i].state >= cs_connected )
+			count++;
+	}
 
 	Log_Printf( "\"%s<%i><%i><>\" connected, address \"%s\"\n", newcl->name, newcl->userid, i, NET_AdrToString( newcl->netchan.remote_address ));
 
@@ -854,7 +841,7 @@ static void SV_TestBandWidth( netadr_t from )
 		( packetsize > FRAGMENT_MAX_SIZE ))
 	{
 		// skip the test and just get challenge
-		SV_GetChallenge( from );
+		SV_SendChallenge( from );
 		return;
 	}
 
@@ -862,7 +849,7 @@ static void SV_TestBandWidth( netadr_t from )
 	ofs = packetsize - svs.testpacket_filepos - 1;
 	if(( ofs < 0 ) || ( ofs > svs.testpacket_filelen ))
 	{
-		SV_GetChallenge( from );
+		SV_SendChallenge( from );
 		return;
 	}
 
@@ -1785,7 +1772,7 @@ static qboolean SV_ShouldUpdateUserinfo( sv_client_t *cl )
 	if( host.realtime < cl->userinfo_next_changetime + cl->userinfo_penalty * sv_userinfo_penalty_multiplier.value )
 	{
 		// player changes userinfo too quick! ignore!
-		if( host.realtime < cl->userinfo_next_changetime )
+		if( host.realtime < cl->userinfo_next_changetime && cl->userinfo_change_attempts > 0 )
 		{
 			Con_Reportf( "%s: ignore userinfo update for %s: penalty %f, attempts %i\n",
 				__func__, cl->name, cl->userinfo_penalty, cl->userinfo_change_attempts );
@@ -1796,15 +1783,15 @@ static qboolean SV_ShouldUpdateUserinfo( sv_client_t *cl )
 	}
 
 	// they spammed too fast, increase penalty
-	if( cl->userinfo_change_attempts > sv_userinfo_penalty_attempts.value )
+	if( cl->userinfo_change_attempts >= (int)sv_userinfo_penalty_attempts.value )
 	{
-		Con_Reportf( "%s: penalty set %f for %s\n", __func__,
-			cl->userinfo_penalty, cl->name );
 		cl->userinfo_penalty *= sv_userinfo_penalty_multiplier.value;
 		cl->userinfo_change_attempts = 0;
+
+		Con_Reportf( "%s: penalty set %f for %s\n", __func__, cl->userinfo_penalty, cl->name );
 	}
 
-	cl->userinfo_next_changetime = host.realtime + cl->userinfo_penalty;
+	cl->userinfo_next_changetime = host.realtime + cl->userinfo_penalty * sv_userinfo_penalty_multiplier.value;
 
 	return allow;
 }
@@ -1908,13 +1895,10 @@ static void SV_UserinfoChanged( sv_client_t *cl )
 
 	val = Info_ValueForKey( cl->userinfo, "cl_updaterate" );
 
-	if( COM_CheckString( val ) )
+	if( COM_CheckString( val ))
 	{
-		if( Q_atoi( val ) != 0 )
-		{
-			cl->cl_updaterate = 1.0 / bound( sv_minupdaterate.value, Q_atoi( val ), sv_maxupdaterate.value );
-		}
-		else cl->cl_updaterate = 0.0;
+		float rate = Q_atoi( val );
+		cl->cl_updaterate = 1.0 / bound( sv_minupdaterate.value, rate, sv_maxupdaterate.value );
 	}
 
 	// call prog code to allow overrides
@@ -3179,7 +3163,7 @@ void SV_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	}
 	else if( !Q_strcmp( pcmd, C2S_GETCHALLENGE ))
 	{
-		SV_GetChallenge( from );
+		SV_SendChallenge( from );
 	}
 	else if( !Q_strcmp( pcmd, C2S_CONNECT ))
 	{
