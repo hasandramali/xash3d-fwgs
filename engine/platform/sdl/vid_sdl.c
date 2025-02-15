@@ -599,8 +599,18 @@ static qboolean VID_SetScreenResolution( int width, int height, window_mode_t wi
 	}
 	else if( window_mode == WINDOW_MODE_FULLSCREEN )
 	{
-		got.w = width;
-		got.h = height;
+		SDL_DisplayMode want = { 0 };
+		want.w = width;
+		want.h = height;
+
+		if( SDL_GetClosestDisplayMode( 0, &want, &got ) == NULL )
+		{
+			Con_Printf( S_ERROR "%s: SDL_GetClosestDisplayMode: %s", __func__, SDL_GetError( ));
+			return false;
+		}
+
+		if( got.w != want.w || got.h != want.h )
+			Con_Reportf( S_NOTE "Got closest display mode: %ix%i@%i\n", got.w, got.h, got.refresh_rate );
 
 		if( SDL_SetWindowDisplayMode( host.hWnd, &got ) < 0 )
 		{
