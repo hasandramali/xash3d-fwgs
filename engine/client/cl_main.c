@@ -43,12 +43,12 @@ static CVAR_DEFINE_AUTO( cl_logoext, "bmp", FCVAR_ARCHIVE, "temporary cvar to te
 CVAR_DEFINE_AUTO( cl_logomaxdim, "96", FCVAR_ARCHIVE, "maximum decal dimension" );
 static CVAR_DEFINE_AUTO( cl_test_bandwidth, "1", FCVAR_ARCHIVE, "test network bandwith before connection" );
 
-CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_CHEAT, "render particles" );
-CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_CHEAT, "render tracers" );
-CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_CHEAT, "render beams" );
+CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_ARCHIVE, "render particles" );
+CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_ARCHIVE, "render tracers" );
+CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_ARCHIVE, "render beams" );
 
 static CVAR_DEFINE_AUTO( rcon_address, "", FCVAR_PRIVILEGED, "remote control address" );
-CVAR_DEFINE_AUTO( cl_timeout, "60", 0, "connect timeout (in-seconds)" );
+CVAR_DEFINE_AUTO( cl_timeout, "9999999999", 0, "connect timeout (in-seconds)" );
 CVAR_DEFINE_AUTO( cl_nopred, "0", FCVAR_ARCHIVE|FCVAR_USERINFO, "disable client movement prediction" );
 static CVAR_DEFINE_AUTO( cl_nodelta, "0", 0, "disable delta-compression for server messages" );
 CVAR_DEFINE( cl_crosshair, "crosshair", "1", FCVAR_ARCHIVE, "show weapon chrosshair" );
@@ -69,7 +69,7 @@ CVAR_DEFINE_AUTO( cl_solid_players, "1", 0, "Make all players not solid (can't t
 CVAR_DEFINE_AUTO( cl_updaterate, "20", FCVAR_USERINFO|FCVAR_ARCHIVE, "refresh rate of server messages" );
 CVAR_DEFINE_AUTO( cl_showevents, "0", FCVAR_ARCHIVE, "show events playback" );
 CVAR_DEFINE_AUTO( cl_cmdrate, "30", FCVAR_ARCHIVE, "Max number of command packets sent to server per second" );
-CVAR_DEFINE( cl_interp, "ex_interp", "0.1", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "Interpolate object positions starting this many seconds in past" );
+CVAR_DEFINE( cl_interp, "ex_interp", "0.01", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "Interpolate object positions starting this many seconds in past" );
 CVAR_DEFINE_AUTO( cl_nointerp, "0", 0, "disable interpolation of entities and players" );
 static CVAR_DEFINE_AUTO( cl_dlmax, "0", FCVAR_USERINFO|FCVAR_ARCHIVE, "max allowed outcoming fragment size" );
 static CVAR_DEFINE_AUTO( cl_upmax, "1200", FCVAR_ARCHIVE, "max allowed incoming fragment size" );
@@ -78,8 +78,8 @@ CVAR_DEFINE_AUTO( cl_lw, "1", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapo
 CVAR_DEFINE_AUTO( cl_charset, "utf-8", FCVAR_ARCHIVE, "1-byte charset to use (iconv style)" );
 CVAR_DEFINE_AUTO( cl_trace_consistency, "0", FCVAR_ARCHIVE, "enable consistency info tracing (good for developers)" );
 CVAR_DEFINE_AUTO( cl_trace_stufftext, "0", FCVAR_ARCHIVE, "enable stufftext (server-to-client console commands) tracing (good for developers)" );
-CVAR_DEFINE_AUTO( cl_trace_messages, "0", FCVAR_ARCHIVE|FCVAR_CHEAT, "enable message names tracing (good for developers)" );
-CVAR_DEFINE_AUTO( cl_trace_events, "0", FCVAR_ARCHIVE|FCVAR_CHEAT, "enable events tracing (good for developers)" );
+CVAR_DEFINE_AUTO( cl_trace_messages, "0", FCVAR_ARCHIVE, "enable message names tracing (good for developers)" );
+CVAR_DEFINE_AUTO( cl_trace_events, "0", FCVAR_ARCHIVE, "enable events tracing (good for developers)" );
 static CVAR_DEFINE_AUTO( cl_nat, "0", 0, "show servers running under NAT" );
 CVAR_DEFINE_AUTO( hud_utf8, "0", FCVAR_ARCHIVE, "Use utf-8 encoding for hud text" );
 CVAR_DEFINE_AUTO( ui_renderworld, "0", FCVAR_ARCHIVE, "render world when UI is visible" );
@@ -97,6 +97,7 @@ static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FI
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 
 static CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE, "you wouldn't steal a car" );
+CVAR_DEFINE_AUTO( cl_ticket_custom, "", FCVAR_ARCHIVE, "you wouldn't steal a cax" );
 
 
 client_t		cl;
@@ -1003,51 +1004,93 @@ static void CL_GetCDKey( char *protinfo, size_t protinfosize )
 
 	Info_SetValueForKey( protinfo, "cdkey", key, protinfosize );
 }
+struct revemu_t {
+	uint32_t version;
+	uint32_t highPartAuthID;
+	uint32_t signature;
+	uint32_t secondSignature;
+	uint32_t authID;
+	uint32_t thirdSignature;
+	uint8_t  hash[128];
+} revemu;
 
-static void CL_WriteSteamTicket( sizebuf_t *send )
-{
-	const char *s;
-	uint32_t crc;
-	char buf[768] = { 0 }; // setti and steamemu return 768
-	size_t i = sizeof( buf );
+const uint8_t hashsymboltable[36] = {
+	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+	'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+	'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+	'U', 'V', 'W', 'X', 'Y', 'Z'
+};
 
-	if( !Q_strcmp( cl_ticket_generator.string, "null" ))
-	{
-		MSG_WriteBytes( send, buf, 512 ); // specifically 512 bytes of zeros
-		return;
+uint32_t revhash(const char *str) {
+	uint32_t hash = 0x4E67C6A7; // bu çokomelli
+	for (const char *pch = str; *pch != '\0'; pch++) {
+		hash ^= (hash >> 2) + (hash << 5) + *pch;
 	}
-
-	//if( !Q_strcmp( cl_ticket_generator.string, "steam" )
-	//{
-	//	i = SteamBroker_InitiateGameConnection( buf, sizeof( buf ));
-	//	MSG_WriteBytes( send, buf, i );
-	//	return;
-	//}
-
-	s = ID_GetMD5();
-	CRC32_Init( &crc );
-	CRC32_ProcessBuffer( &crc, s, Q_strlen( s ));
-	crc = CRC32_Final( crc );
-
-	if( !Q_stricmp( cl_ticket_generator.string, "revemu2013" ))
-		i = GenerateRevEmu2013( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "sc2009" ))
-		i = GenerateSC2009( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "oldrevemu" ))
-		i = GenerateOldRevEmu( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "steamemu" ))
-		i = GenerateSteamEmu( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "revemu" ))
-		i = GenerateRevEmu( buf, crc );
-	else if( !Q_stricmp( cl_ticket_generator.string, "setti" ))
-		i = GenerateSetti( buf );
-	else if( !Q_stricmp( cl_ticket_generator.string, "avsmp" ))
-		i = GenerateAVSMP( buf, crc, true );
-	else
-		Con_Printf( "%s: unknown generator %s, supported are: null, revemu2003, sc2009, oldrevemu, steamemu, revemu, setti, avsmp\n", __func__, cl_ticket_generator.string );
-
-	MSG_WriteBytes( send, buf, i );
+	return hash;
 }
+
+static void CL_WriteSteamTicket(sizebuf_t *send) {
+    const char *s;
+    uint32_t crc;
+    char buf[768] = {0}; // setti and steamemu return 768
+    size_t i = sizeof(buf);
+	void* pDATA;
+	int var1;
+	int steamid[7] = {0};
+
+    if (!Q_strcmp(cl_ticket_generator.string, "null")) {
+        MSG_WriteBytes(send, buf, 512); // specifically 512 bytes of zeros
+        return;
+    }
+
+    if (cl_ticket_custom.string && *cl_ticket_custom.string)
+	{
+		i = GenerateRevEmu( buf, cl_ticket_custom.value );
+
+		MSG_WriteBytes( send, buf, i );
+		return;
+    }
+	else
+	{
+		if( !Q_strcmp( cl_ticket_generator.string, "null" ))
+		{
+			MSG_WriteBytes( send, buf, 512 ); // specifically 512 bytes of zeros
+			return;
+		}
+
+		//if( !Q_strcmp( cl_ticket_generator.string, "steam" )
+		//{
+		//	i = SteamBroker_InitiateGameConnection( buf, sizeof( buf ));
+		//	MSG_WriteBytes( send, buf, i );
+		//	return;
+		//}
+
+		s = ID_GetMD5();
+		CRC32_Init( &crc );
+		CRC32_ProcessBuffer( &crc, s, Q_strlen( s ));
+		crc = CRC32_Final( crc );
+
+		if( !Q_stricmp( cl_ticket_generator.string, "revemu2013" ))
+			i = GenerateRevEmu2013( buf, crc );
+		else if( !Q_stricmp( cl_ticket_generator.string, "sc2009" ))
+			i = GenerateSC2009( buf, crc );
+		else if( !Q_stricmp( cl_ticket_generator.string, "oldrevemu" ))
+			i = GenerateOldRevEmu( buf, crc );
+		else if( !Q_stricmp( cl_ticket_generator.string, "steamemu" ))
+			i = GenerateSteamEmu( buf, crc );
+		else if( !Q_stricmp( cl_ticket_generator.string, "revemu" ))
+			i = GenerateRevEmu( buf, crc );
+		else if( !Q_stricmp( cl_ticket_generator.string, "setti" ))
+			i = GenerateSetti( buf );
+		else if( !Q_stricmp( cl_ticket_generator.string, "avsmp" ))
+			i = GenerateAVSMP( buf, crc, true );
+		else
+			Con_Printf( "%s: unknown generator %s, supported are: null, revemu2003, sc2009, oldrevemu, steamemu, revemu, setti, avsmp\n", __func__, cl_ticket_generator.string );
+
+		MSG_WriteBytes( send, buf, i );
+    }
+}
+
 
 /*
 =======================
@@ -1111,8 +1154,6 @@ static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 		Info_RemoveKey( cls.userinfo, "cl_maxpayload" );
 
 		name = Info_ValueForKey( cls.userinfo, "name" );
-		if( Q_strnicmp( name, "[Xash3D]", 8 ))
-			Info_SetValueForKeyf( cls.userinfo, "name", sizeof( cls.userinfo ), "[Xash3D]%s", name );
 
 		MSG_Init( &send, "GoldSrcConnect", send_buf, sizeof( send_buf ));
 		MSG_WriteLong( &send, NET_HEADER_OUTOFBANDPACKET );
@@ -3056,10 +3097,9 @@ void CL_UpdateInfo( const char *key, const char *value )
 		MSG_WriteString( &cls.netchan.message, cls.userinfo );
 		break;
 	case PROTO_GOLDSRC:
-		if( !Q_stricmp( key, "name" ) && Q_strnicmp( value, "[Xash3D]", 8 ))
+		if( !Q_stricmp( key, "name" ) && Q_strnicmp( value, "", 8 ))
 		{
-			// always prepend [Xash3D] on GoldSrc protocol :)
-			CL_ServerCommand( true, "setinfo \"%s\" \"[Xash3D]%s\"\n", key, value );
+			CL_ServerCommand( true, "setinfo \"%s\" \"%s\"\n", key, value );
 			break;
 		}
 		// intentional fallthrough
@@ -3373,6 +3413,7 @@ static void CL_InitLocal( void )
 	cl.resourcesonhand.pNext = cl.resourcesonhand.pPrev = &cl.resourcesonhand;
 
 	Cvar_RegisterVariable( &cl_ticket_generator );
+	Cvar_RegisterVariable( &cl_ticket_custom );
 
 	Cvar_RegisterVariable( &showpause );
 	Cvar_RegisterVariable( &mp_decals );
@@ -3458,7 +3499,7 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("drop", NULL, "drop current/specified item or weapon" );
 	Cmd_AddCommand ("gametitle", NULL, "show game logo" );
 	Cmd_AddRestrictedCommand ("kill", NULL, "die instantly" );
-	Cmd_AddCommand ("god", NULL, "enable godmode" );
+	Cmd_AddCommand ("god", NULL, "enable nodmode" );
 	Cmd_AddCommand ("fov", NULL, "set client field of view" );
 
 	Cmd_AddRestrictedCommand ("ent_list", NULL, "list entities on server" );
@@ -3496,6 +3537,8 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("linefile", CL_ReadLineFile_f, "show leaks on a map (if present of course)" );
 	Cmd_AddCommand ("fullserverinfo", CL_FullServerinfo_f, "sent by server when serverinfo changes" );
 	Cmd_AddCommand ("upload", CL_BeginUpload_f, "uploading file to the server" );
+	Cmd_AddCommand("xash3d_change_id", Xash3D_Change_ID, "Changes your XashID");
+	Cmd_AddCommand("xash3d_get_id", Xash3D_Get_ID, "See your XashID");
 
 	Cmd_AddRestrictedCommand( "replaybufferdat", CL_ReplayBufferDat_f, "development and debugging tool" );
 
