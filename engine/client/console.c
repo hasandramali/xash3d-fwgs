@@ -759,7 +759,7 @@ Con_DrawString
 client version of routine
 ====================
 */
-int Con_DrawString( int x, int y, const char *string, rgba_t setColor )
+int Con_DrawString( int x, int y, const char *string, const rgba_t setColor )
 {
 	return CL_DrawString( x, y, string, setColor, con.curFont, FONT_DRAW_UTF8 );
 }
@@ -843,11 +843,14 @@ If no console is visible, the notify window will pop up.
 */
 void Con_Print( const char *txt )
 {
-	static int	cr_pending = 0;
-	static char	buf[MAX_PRINT_MSG];
-	qboolean		norefresh = false;
-	static int	lastlength = 0;
-	static int	bufpos = 0;
+	static qboolean cr_pending = false;
+	static qboolean colorstring = false;
+	static char buf[MAX_PRINT_MSG];
+	static int  lastlength = 0;
+	static int  bufpos = 0;
+	static int  charpos = 0;
+
+	qboolean norefresh = false;
 	int		c, mask = 0;
 
 	// client not running
@@ -873,7 +876,7 @@ void Con_Print( const char *txt )
 		if( cr_pending )
 		{
 			Con_DeleteLastLine();
-			cr_pending = 0;
+			cr_pending = false;
 		}
 		c = *txt;
 
@@ -886,23 +889,42 @@ void Con_Print( const char *txt )
 			{
 				Con_AddLine( buf, bufpos, true );
 				lastlength = CON_LINES_LAST().length;
-				cr_pending = 1;
+				cr_pending = true;
 				bufpos = 0;
+				charpos = 0;
 			}
 			break;
 		case '\n':
 			Con_AddLine( buf, bufpos, true );
 			lastlength = CON_LINES_LAST().length;
 			bufpos = 0;
+			charpos = 0;
 			break;
 		default:
-
 			buf[bufpos++] = c | mask;
-			if(( bufpos >= sizeof( buf ) - 1 ) || bufpos >= ( con.linewidth - 1 ))
+
+			if( IsColorString( txt ))
+			{
+				// first color string character
+				colorstring = true;
+			}
+			else if( colorstring )
+			{
+				// second color string character
+				colorstring = false;
+			}
+			else
+			{
+				// not a color string, move char counter
+				charpos++;
+			}
+
+			if(( bufpos >= sizeof( buf ) - 1 ) || charpos >= ( con.linewidth - 1 ))
 			{
 				Con_AddLine( buf, bufpos, true );
 				lastlength = CON_LINES_LAST().length;
 				bufpos = 0;
+				charpos = 0;
 			}
 			break;
 		}
@@ -918,6 +940,7 @@ void Con_Print( const char *txt )
 			Con_AddLine( buf, bufpos, lastlength != 0 );
 			lastlength = 0;
 			bufpos = 0;
+			charpos = 0;
 		}
 
 		// pump messages to avoid window hanging
@@ -1467,6 +1490,16 @@ Handles history and console scrollback
 */
 void Key_Console( int key )
 {
+	// exit the console by pressing MINUS on NSwitch
+	// or both Back(Select)/Start buttons for everyone else
+	if( key == K_BACK_BUTTON || key == K_START_BUTTON || key == K_ESCAPE )
+	{
+		if( cls.state == ca_active && !cl.background )
+			Key_SetKeyDest( key_game );
+		else UI_SetActiveMenu( true );
+		return;
+	}
+
 	// ctrl-L clears screen
 	if( key == 'l' && Key_IsDown( K_CTRL ))
 	{
@@ -1572,16 +1605,6 @@ void Key_Console( int key )
 	if( key == K_Y_BUTTON )
 	{
 		Key_EnableTextInput( true, true );
-		return;
-	}
-
-	// exit the console by pressing MINUS on NSwitch
-	// or both Back(Select)/Start buttons for everyone else
-	if( key == K_BACK_BUTTON || key == K_START_BUTTON )
-	{
-		if( cls.state == ca_active && !cl.background )
-			Key_SetKeyDest( key_game );
-		else UI_SetActiveMenu( true );
 		return;
 	}
 
@@ -2008,7 +2031,7 @@ void Con_DrawVersion( void )
 	int	start, height = refState.height;
 	string	curbuild;
 
-	if( !scr_drawversion.value || CL_IsDevOverviewMode() == 2 || net_graph.value )
+	if( !scr_drawversion.value )
 		return;
 
 	if( cls.key_dest == key_menu )
@@ -2019,6 +2042,9 @@ void Con_DrawVersion( void )
 	else
 	{
 		qboolean draw_version;
+
+		if( CL_IsDevOverviewMode() == 2 || net_graph.value )
+			return;
 
 		draw_version = cls.scrshot_action == scrshot_normal
 			|| cls.scrshot_action == scrshot_snapshot
