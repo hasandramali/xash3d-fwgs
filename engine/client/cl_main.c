@@ -3537,8 +3537,6 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("linefile", CL_ReadLineFile_f, "show leaks on a map (if present of course)" );
 	Cmd_AddCommand ("fullserverinfo", CL_FullServerinfo_f, "sent by server when serverinfo changes" );
 	Cmd_AddCommand ("upload", CL_BeginUpload_f, "uploading file to the server" );
-	Cmd_AddCommand("xash3d_change_id", Xash3D_Change_ID, "Changes your XashID");
-	Cmd_AddCommand("xash3d_get_id", Xash3D_Get_ID, "See your XashID");
 
 	Cmd_AddRestrictedCommand( "replaybufferdat", CL_ReplayBufferDat_f, "development and debugging tool" );
 
