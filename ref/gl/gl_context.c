@@ -364,26 +364,30 @@ static void GAME_EXPORT R_SetupSky( int *skyboxTextures )
 
 static qboolean R_SetDisplayTransform( ref_screen_rotation_t rotate, int offset_x, int offset_y, float scale_x, float scale_y )
 {
-	qboolean ret = true;
-	if( rotate > 0 )
-	{
-		gEngfuncs.Con_Printf("rotation transform not supported\n");
-		ret = false;
-	}
+    qboolean ret = true;
+    float scale;
 
-	if( offset_x || offset_y )
-	{
-		gEngfuncs.Con_Printf("offset transform not supported\n");
-		ret = false;
-	}
+    if( rotate > 0 )
+    {
+        gEngfuncs.Con_Printf("rotation transform not supported\n");
+        ret = false;
+    }
 
-	if( scale_x != 1.0f || scale_y != 1.0f )
-	{
-		gEngfuncs.Con_Printf("scale transform not supported\n");
-		ret = false;
-	}
+    if( offset_x || offset_y )
+    {
+        gEngfuncs.Con_Printf("offset transform not supported\n");
+        ret = false;
+    }
 
-	return ret;
+    scale = gEngfuncs.pfnGetCvarFloat( "vid_scale" );
+    if( scale <= 0.0f ) scale = 1.0f;
+
+    if( scale != 1.0f )
+    {
+        gEngfuncs.Con_Printf("R_SetDisplayTransform: vid_scale=%.2f (display transform will use projection scaling)\n", scale );
+    }
+
+    return ret;
 }
 
 static void GAME_EXPORT VGUI_UploadTextureBlock( int drawX, int drawY, const byte *rgba, int blockWidth, int blockHeight )
