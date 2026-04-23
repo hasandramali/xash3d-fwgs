@@ -2071,48 +2071,51 @@ Set screen fade
 */
 static void CL_ParseScreenFade( sizebuf_t *msg )
 {
-	float		duration, holdTime;
-	screenfade_t	*sf = &clgame.fade;
-	float		flScale;
+	float           duration, holdTime;
+    screenfade_t    *sf = &clgame.fade;
+    float           flScale;
 
-	duration = (float)MSG_ReadWord( msg );
-	holdTime = (float)MSG_ReadWord( msg );
-	sf->fadeFlags = MSG_ReadShort( msg );
-	flScale = FBitSet( sf->fadeFlags, FFADE_LONGFADE ) ? (1.0f / 256.0f) : (1.0f / 4096.0f);
+    duration = (float)MSG_ReadWord( msg );
+    holdTime = (float)MSG_ReadWord( msg );
+    sf->fadeFlags = MSG_ReadShort( msg );
+    flScale = FBitSet( sf->fadeFlags, FFADE_LONGFADE ) ? (1.0f / 256.0f) : (1.0f / 4096.0f);
 
-	sf->fader = MSG_ReadByte( msg );
-	sf->fadeg = MSG_ReadByte( msg );
-	sf->fadeb = MSG_ReadByte( msg );
-	sf->fadealpha = MSG_ReadByte( msg );
-	sf->fadeSpeed = 0.0f;
-	sf->fadeEnd = duration * flScale;
-	sf->fadeReset = holdTime * flScale;
+    sf->fader = MSG_ReadByte( msg );
+    sf->fadeg = MSG_ReadByte( msg );
+    sf->fadeb = MSG_ReadByte( msg );
+    sf->fadealpha = MSG_ReadByte( msg );
+    sf->fadeSpeed = 0.0f;
+    sf->fadeEnd = duration * flScale;
+    sf->fadeReset = holdTime * flScale;
 
-	// calc fade speed
-	if( duration > 0 )
-	{
-		if( FBitSet( sf->fadeFlags, FFADE_OUT ))
-		{
-			if( sf->fadeEnd )
-			{
-				sf->fadeSpeed = -(float)sf->fadealpha / sf->fadeEnd;
-			}
+    if ( !cl_screenfade.value )
+    {
+        sf->fadealpha = 0;
+    }
+    if( duration > 0 )
+    {
+        if( FBitSet( sf->fadeFlags, FFADE_OUT ))
+        {
+            if( sf->fadeEnd )
+            {
+                sf->fadeSpeed = -(float)sf->fadealpha / sf->fadeEnd;
+            }
 
-			sf->fadeEnd += cl.time;
-			sf->fadeTotalEnd = sf->fadeEnd;
-			sf->fadeReset += sf->fadeEnd;
-		}
-		else
-		{
-			if( sf->fadeEnd )
-			{
-				sf->fadeSpeed = (float)sf->fadealpha / sf->fadeEnd;
-			}
+            sf->fadeEnd += cl.time;
+            sf->fadeTotalEnd = sf->fadeEnd;
+            sf->fadeReset += sf->fadeEnd;
+        }
+        else
+        {
+            if( sf->fadeEnd )
+            {
+                sf->fadeSpeed = (float)sf->fadealpha / sf->fadeEnd;
+            }
 
-			sf->fadeReset += cl.time;
-			sf->fadeEnd += sf->fadeReset;
-		}
-	}
+            sf->fadeReset += cl.time;
+            sf->fadeEnd += sf->fadeReset;
+        }
+    }
 }
 
 /*

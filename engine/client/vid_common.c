@@ -155,8 +155,8 @@ void VID_SetDisplayTransform( int *render_w, int *render_h )
 			*render_h = swap;
 		}
 
-		*render_h /= vid_scale.value;
-		*render_w /= vid_scale.value;
+		//*render_h /= vid_scale.value;
+		//*render_w /= vid_scale.value;
 
 		ref.rotation = rotate;
 	}

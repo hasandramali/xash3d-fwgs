@@ -21,6 +21,7 @@ GNU General Public License for more details.
 #define MAX_CMD_BUFFER	32768
 #define MAX_CMD_LINE	2048
 #define MAX_ALIAS_NAME	32
+#define MAX_FILTERED_CMDS 256
 
 typedef struct
 {
@@ -28,6 +29,9 @@ typedef struct
 	int  cursize;
 } cmdbuf_t;
 
+static char *filtered_commands[MAX_FILTERED_CMDS];
+static int num_filtered_commands = 0;
+static qboolean cmd_filter_initialized = false;
 static int cmd_wait;
 static cmdbuf_t cmd_text;
 static cmdbuf_t filteredcmd_text;
@@ -36,7 +40,10 @@ static uint cmd_condition;
 static int  cmd_condlevel;
 static qboolean cmd_currentCommandIsPrivileged;
 static poolhandle_t cmd_pool;
-
+static void Cmd_LoadFilterConfig( void );
+static qboolean Cmd_IsFiltered( const char *cmd );
+static void Cmd_FilterCommands( cmdbuf_t *buf );
+static void Cmd_ReloadFilter_f( void );
 static void Cmd_ExecuteStringWithPrivilegeCheck( const char *text, qboolean isPrivileged );
 
 /*
@@ -173,6 +180,11 @@ static void Cbuf_ExecuteCommandsFromBuffer( cmdbuf_t *buf, qboolean isPrivileged
 	int	i, quotes;
 	char	*comment;
 
+	if( !isPrivileged && buf == &filteredcmd_text )
+	{
+		Cmd_FilterCommands( buf );
+	}
+
 	while( buf->cursize )
 	{
 		if( cmd_wait > 0 )
@@ -180,7 +192,7 @@ static void Cbuf_ExecuteCommandsFromBuffer( cmdbuf_t *buf, qboolean isPrivileged
 			cmd_wait--;
 			break;
 		}
-
+		
 		// limit amount of commands that can be issued
 		if( cmdsToExecute >= 0 )
 		{
@@ -505,6 +517,283 @@ static void Cmd_UnAlias_f ( void )
 		if( !a ) Con_Printf( "%s not found\n", s );
 	}
 }
+	
+/*
+============
+Cmd_LoadFilterConfig
+
+Load commands to filter from cmdfilter.ini
+============
+*/
+static void Cmd_LoadFilterConfig( void )
+{
+	char filename[256];
+	file_t *f;
+	char *data, *p;
+	char line[MAX_CMD_LINE];
+	int len;
+	char *line_start;
+	int line_len;
+	
+	if( cmd_filter_initialized )
+		return;
+	
+	num_filtered_commands = 0;
+
+	Q_snprintf( filename, sizeof( filename ), "cmdfilter.ini" );
+	f = FS_Open( filename, "r", false );
+	
+	if( !f )
+	{
+		static qboolean file_not_found_printed = false;
+		if( !file_not_found_printed )
+		{
+			Con_DPrintf( "Cmd_LoadFilterConfig: cmdfilter.ini not found\n" );
+			file_not_found_printed = true;
+		}
+		cmd_filter_initialized = true;
+		return;
+	}
+	
+	len = FS_FileLength( f );
+	data = Mem_Malloc( cmd_pool, len + 1 );
+	FS_Read( f, data, len );
+	data[len] = 0;
+	FS_Close( f );
+	
+	p = data;
+	while( p && *p )
+	{
+		while( *p && (byte)*p <= ' ' )
+			p++;
+			
+		if( !*p ) break;
+
+		if( *p == '/' && *(p+1) == '/' )
+		{
+			while( *p && *p != '\n' )
+				p++;
+			continue;
+		}
+		
+		if( *p == ';' )
+		{
+			while( *p && *p != '\n' )
+				p++;
+			continue;
+		}
+
+		line_start = p;
+		while( *p && *p != '\n' && *p != '\r' )
+			p++;
+			
+		line_len = p - line_start;
+		if( line_len >= sizeof( line ) )
+			line_len = sizeof( line ) - 1;
+			
+		memcpy( line, line_start, line_len );
+		line[line_len] = 0;
+	
+		while( line_len > 0 && (byte)line[line_len-1] <= ' ' )
+			line[--line_len] = 0;
+		
+		if( line_len > 0 && num_filtered_commands < MAX_FILTERED_CMDS )
+		{
+			filtered_commands[num_filtered_commands] = copystringpool( cmd_pool, line );
+			num_filtered_commands++;
+			Con_DPrintf( "Cmd_LoadFilterConfig: added filter for '%s'\n", line );
+		}
+		else if( num_filtered_commands >= MAX_FILTERED_CMDS )
+		{
+			Con_Printf( S_ERROR "Cmd_LoadFilterConfig: too many filtered commands, max is %d\n", MAX_FILTERED_CMDS );
+			break;
+		}
+		while( *p && ( *p == '\n' || *p == '\r' ) )
+			p++;
+	}
+	
+	Mem_Free( data );
+	cmd_filter_initialized = true;
+	
+	if( num_filtered_commands > 0 )
+	{
+		Con_Printf( "Cmd_LoadFilterConfig: loaded %d filtered commands\n", num_filtered_commands );
+	}
+}
+
+/*
+============
+Cmd_IsFiltered
+
+Check if a command should be filtered
+============
+*/
+static qboolean Cmd_IsFiltered( const char *cmd )
+{
+	int i;
+	
+	if( !cmd_filter_initialized )
+		Cmd_LoadFilterConfig();
+
+	if( num_filtered_commands == 0 )
+		return false;
+	
+	for( i = 0; i < num_filtered_commands; i++ )
+	{
+		if( !Q_stricmp( cmd, filtered_commands[i] ) )
+			return true;
+	}
+	
+	return false;
+}
+
+/*
+============
+Cmd_FilterCommands
+
+Filter commands from text buffer
+============
+*/
+static void Cmd_FilterCommands( cmdbuf_t *buf )
+{
+	char *text, *filtered_text;
+	char line[MAX_CMD_LINE];
+	int i, j, quotes, new_size;
+	qboolean skip_line, comment;
+	char *comment_pos;
+	char *cmd_start;
+	char command[64];
+	int k;
+	int line_end;
+	int copy_len;
+
+	if( !cmd_filter_initialized )
+		Cmd_LoadFilterConfig();
+	if( num_filtered_commands == 0 || buf->cursize == 0 )
+		return;
+
+	filtered_text = Mem_Malloc( cmd_pool, sizeof( buf->data ) );
+	new_size = 0;
+	text = (char *)buf->data;
+
+	for( i = 0; i < buf->cursize; )
+	{
+		quotes = false;
+		comment = false;
+		comment_pos = NULL;
+		skip_line = false;
+
+		for( j = 0; i + j < buf->cursize; j++ )
+		{
+			if( !comment )
+			{
+				if( text[i + j] == '"' )
+					quotes = !quotes;
+
+				if( quotes )
+				{
+					if( i + j < buf->cursize - 1 && 
+						text[i + j] == '\\' && 
+						(text[i + j + 1] == '"' || text[i + j + 1] == '\\') )
+						j++;
+				}
+				else
+				{
+					if( i + j < buf->cursize - 1 &&
+						text[i + j] == '/' && text[i + j + 1] == '/' &&
+						( j == 0 || (byte)text[i + j - 1] <= ' ' ) )
+					{
+						comment = true;
+						comment_pos = &text[i + j];
+					}
+					if( text[i + j] == ';' )
+						break;
+				}
+			}
+			if( text[i + j] == '\n' || text[i + j] == '\r' )
+				break;
+		}
+		
+		line_end = (i + j < buf->cursize) ? j : buf->cursize - i;
+
+		if( line_end >= sizeof(line) )
+			line_end = sizeof(line) - 1;
+			
+		memcpy( line, &text[i], comment_pos ? (comment_pos - &text[i]) : line_end );
+		line[comment_pos ? (comment_pos - &text[i]) : line_end] = 0;
+
+		if( !comment_pos )
+		{
+			cmd_start = line;
+
+			while( *cmd_start && (byte)*cmd_start <= ' ' )
+				cmd_start++;
+
+			if( *cmd_start == '+' || *cmd_start == '-' || 
+				(*cmd_start >= 'a' && *cmd_start <= 'z') ||
+				(*cmd_start >= 'A' && *cmd_start <= 'Z') ||
+				*cmd_start == '_' )
+			{
+				k = 0;
+				while( *cmd_start && 
+					   (*cmd_start == '+' || *cmd_start == '-' ||
+					   (*cmd_start >= 'a' && *cmd_start <= 'z') ||
+					   (*cmd_start >= 'A' && *cmd_start <= 'Z') ||
+					   (*cmd_start >= '0' && *cmd_start <= '9') ||
+					   *cmd_start == '_') &&
+					   k < sizeof(command) - 1 )
+				{
+					command[k++] = *cmd_start++;
+				}
+				command[k] = 0;
+				
+				if( command[0] && Cmd_IsFiltered( command ) )
+				{
+					skip_line = true;
+					Con_DPrintf( "Cmd_FilterCommands: filtered '%s'\n", command );
+				}
+			}
+		}
+		
+		if( !skip_line )
+		{
+			copy_len = (i + j < buf->cursize) ? j + 1 : buf->cursize - i;
+			memcpy( &filtered_text[new_size], &text[i], copy_len );
+			new_size += copy_len;
+		}
+		
+		if( i + j < buf->cursize )
+			i += j + 1;
+		else
+			break;
+	}
+
+	memcpy( buf->data, filtered_text, new_size );
+	buf->cursize = new_size;
+
+	Mem_Free( filtered_text );
+}
+
+/*
+============
+Cmd_ReloadFilter_f
+
+Reload command filter configuration
+============
+*/
+static void Cmd_ReloadFilter_f( void )
+{
+	int i;
+	for( i = 0; i < num_filtered_commands; i++ )
+	{
+		if( filtered_commands[i] )
+			Mem_Free( filtered_commands[i] );
+	}
+	num_filtered_commands = 0;
+
+	Cmd_LoadFilterConfig();
+	Con_Printf( "Command filter configuration reloaded\n" );
+}
 
 /*
 =============================================================================
@@ -615,11 +904,8 @@ void Cmd_TokenizeString( const char *text )
 		if( !*text )
 			return;
 
-		switch( cmd_argc )
-		{
-		case 0: cmd_args = "";   break;
-		case 1: cmd_args = text; break;
-		}
+		if( cmd_argc == 1 )
+			 cmd_args = text;
 
 		text = COM_ParseFileSafe( (char*)text, cmd_token, sizeof( cmd_token ), PFILE_IGNOREBRACKET, NULL, NULL );
 
@@ -991,7 +1277,7 @@ void Cmd_ExecuteString( const char *text )
 Cmd_ForwardToServer
 
 adds the current command line as a clc_stringcmd to the client message.
-things like godmode, noclip, etc, are commands directed to the server,
+things like nodmode, noclip, etc, are commands directed to the server,
 so when they are typed in at the console, they will need to be forwarded.
 ===================
 */
@@ -1245,7 +1531,7 @@ static void Cmd_MakePrivileged_f( void )
 Cmd_ExecScript
 ===============
 */
-static void Cmd_ExecScript( const char *filename )
+static void Cmd_ExecScript( const char *filename, qboolean privileged )
 {
 	byte *f;
 	fs_offset_t len;
@@ -1277,25 +1563,53 @@ static void Cmd_ExecScript( const char *filename )
 
 /*
 ===============
-Cmd_UnprivilegedExec_f
+Cmd_Exec_f
 ===============
 */
-static void Cmd_UnprivilegedExec_f( void )
+static void Cmd_Exec_f( void )
 {
 	string cfgpath;
-	qboolean allow = false;
+	search_t *search = NULL;
+	int i;
 
 	if( Cmd_Argc() != 2 )
+	{
+		Con_Printf( S_USAGE "exec <PATTERN>\n"
+		"PATTERN single file or wildcard pattern to match\n"
+		"Wildcards: * matches any characters, ? matches single character\n"
+		"Example: file.cfg    - single file.cfg\n"
+		"\tdirectory/*        - all .cfg files in directory\n"
+		"\tdirectory/???.cfg  - all .cfg files in directory with 3 character names\n" );
 		return;
+	}
 
 	Q_strncpy( cfgpath, Cmd_Argv( 1 ), sizeof( cfgpath ));
 	COM_DefaultExtension( cfgpath, ".cfg", sizeof( cfgpath ));
 
-	if( SV_GetMaxClients() == 1 )
-		allow = true;
+	if( Q_strpbrk( cfgpath, "*?" ))
+	{
+		search = FS_Search( cfgpath, true, false );
+		if( !search || !search->numfilenames )
+		{
+			Con_Printf( "couldn't exec %s\n", Cmd_Argv( 1 ));
+			if( search ) Mem_Free( search );
+			return;
+		}
 
-#if !XASH_DEDICATED
-	if( !allow && !Q_stricmp( GI->gamefolder, "tfc" ))
+		Con_Printf( "execing %d file(s) - " S_GREEN "%s" S_DEFAULT "\n",
+			search->numfilenames, Cmd_Argv( 1 ));
+
+		for( i = 0; i < search->numfilenames; i++ )
+		{
+			Cmd_ExecScript( search->filenames[i], false );
+		}
+
+		Mem_Free( search );
+		return;
+	}
+
+#ifndef XASH_DEDICATED
+	if( !Cmd_CurrentCommandIsPrivileged() && !Q_stricmp( GI->gamefolder, "tfc" ))
 	{
 		const char *const unprivileged_whitelist[] =
 		{
@@ -1312,7 +1626,7 @@ static void Cmd_UnprivilegedExec_f( void )
 		{
 			allow = true;
 		}
-		else for( int i = 0; i < ARRAYSIZE( unprivileged_whitelist ); i++ )
+		else for( i = 0; i < ARRAYSIZE( unprivileged_whitelist ); i++ )
 		{
 			if( !Q_strcmp( cfgpath, unprivileged_whitelist[i] ))
 			{
@@ -1320,64 +1634,14 @@ static void Cmd_UnprivilegedExec_f( void )
 				break;
 			}
 		}
-	}
-#endif
 
-	if( allow )
-		Cmd_ExecScript( cfgpath );
-	else
-		Con_Printf( "exec %s: not privileged or in whitelist\n", cfgpath );
-}
-
-/*
-===============
-Cmd_Exec_f
-===============
-*/
-static void Cmd_Exec_f( void )
-{
-	string cfgpath;
-
-	// early exit for stuffcmd
-	if( !Cmd_CurrentCommandIsPrivileged())
-	{
-		Cmd_UnprivilegedExec_f();
-		return;
-	}
-
-	if( Cmd_Argc() != 2 )
-	{
-		Con_Printf( S_USAGE "exec <PATTERN>\n"
-			"PATTERN single file or wildcard pattern to match\n"
-			"Wildcards: * matches any characters, ? matches single character\n"
-			"Example: file.cfg   - single file.cfg\n"
-			"\tdirectory/*       - all .cfg files in directory\n"
-			"\tdirectory/???.cfg - all .cfg files in directory with 3 character names\n" );
-		return;
-	}
-
-	Q_strncpy( cfgpath, Cmd_Argv( 1 ), sizeof( cfgpath ));
-	COM_DefaultExtension( cfgpath, ".cfg", sizeof( cfgpath ));
-
-	if( Q_strpbrk( cfgpath, "*?" ))
-	{
-		search_t *search = FS_Search( cfgpath, true, false );
-		if( !search || !search->numfilenames )
+		if( !allow )
 		{
-			Con_Printf( "couldn't exec %s\n", Cmd_Argv( 1 ));
-			if( search ) Mem_Free( search );
+			Con_Printf( "exec %s: not privileged or in whitelist\n", cfgpath );
 			return;
 		}
-
-		Con_Printf( "execing %d file%s from " S_GREEN "%s" S_DEFAULT "\n",
-			search->numfilenames, search->numfilenames > 1 ? "s" : "", Cmd_Argv( 1 ));
-
-		for( int i = 0; i < search->numfilenames; i++ )
-			Cmd_ExecScript( search->filenames[i] );
-
-		Mem_Free( search );
-		return;
 	}
+#endif // XASH_DEDICATED
 
 	// don't execute game.cfg in singleplayer
 	if( SV_GetMaxClients() == 1 && !Q_stricmp( "game.cfg", cfgpath ))
@@ -1388,7 +1652,7 @@ static void Cmd_Exec_f( void )
 
 	Con_Printf( "execing " S_GREEN "%s" S_DEFAULT "\n", Cmd_Argv( 1 ));
 
-	Cmd_ExecScript( cfgpath );
+	Cmd_ExecScript( cfgpath, true );
 }
 
 /*
@@ -1475,7 +1739,7 @@ void Cmd_Init( void )
 	Cmd_AddRestrictedCommand( "unalias", Cmd_UnAlias_f, "remove a script function" );
 	Cmd_AddRestrictedCommand( "if", Cmd_If_f, "compare and set condition bits" );
 	Cmd_AddRestrictedCommand( "else", Cmd_Else_f, "invert condition bit" );
-
+	Cmd_AddCommand( "reload_filter", Cmd_ReloadFilter_f, "reload cmdfilter config from cmdfilter.ini" );
 	Cmd_AddRestrictedCommand( "make_privileged", Cmd_MakePrivileged_f, "makes command or variable privileged (protected from access attempts from server)" );
 
 	Cmd_AddRestrictedCommand( "basecmd_stats", BaseCmd_Stats_f, "print info about basecmd usage" );
@@ -1486,6 +1750,14 @@ void Cmd_Init( void )
 
 void Cmd_Shutdown( void )
 {
+	int i;
+	for( i = 0; i < num_filtered_commands; i++ )
+	{
+		if( filtered_commands[i] )
+			Mem_Free( filtered_commands[i] );
+	}
+	num_filtered_commands = 0;
+
 	Mem_FreePool( &cmd_pool );
 }
 

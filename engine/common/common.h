@@ -102,13 +102,13 @@ typedef enum instance_e
 #endif
 
 // PERFORMANCE INFO
-#define MIN_FPS         20.0f    // host minimum fps value for maxfps.
-#define MAX_FPS_SOFT    200.0f   // soft limit for maxfps.
-#define MAX_FPS_HARD    1000.0f  // multiplayer hard limit for maxfps.
+#define MIN_FPS         1.0f    // host minimum fps value for maxfps.
+#define MAX_FPS_SOFT    9999999999999999999999999999999999.9f   // soft limit for maxfps.
+#define MAX_FPS_HARD    9999999999999999999999999999999999.0f  // multiplayer hard limit for maxfps.
 #define HOST_FPS		100.0f		// multiplayer games typical fps
 
-#define MAX_FRAMETIME	0.25f
-#define MIN_FRAMETIME	0.0001f
+#define MAX_FRAMETIME	99999999999999999999999999999999999.9f
+#define MIN_FRAMETIME	-1.0f
 #define GAME_FPS		20.0f
 
 #define MAX_CMD_TOKENS	80		// cmd tokens

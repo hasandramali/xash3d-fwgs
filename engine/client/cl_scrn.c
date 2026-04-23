@@ -20,11 +20,12 @@ GNU General Public License for more details.
 #include "input.h"
 #include "library.h"
 
+CVAR_DEFINE_AUTO( scr_skip_frames, "0", FCVAR_PROTECTED, "skip frames to terakke fps" );
 CVAR_DEFINE_AUTO( scr_centertime, "2.5", 0, "centerprint hold time" );
 CVAR_DEFINE_AUTO( scr_loading, "0", 0, "loading bar progress" );
 CVAR_DEFINE_AUTO( scr_download, "-1", 0, "downloading bar progress" );
 CVAR_DEFINE( scr_viewsize, "viewsize", "120", FCVAR_ARCHIVE, "screen size (quake only)" );
-CVAR_DEFINE_AUTO( cl_testlights, "0", FCVAR_CHEAT, "test dynamic lights" );
+CVAR_DEFINE_AUTO( cl_testlights, "0", FCVAR_ARCHIVE, "test dynamic lights" );
 CVAR_DEFINE( cl_allow_levelshots, "allow_levelshots", "0", FCVAR_ARCHIVE, "allow engine to use indivdual levelshots instead of 'loading' image" );
 CVAR_DEFINE_AUTO( cl_levelshot_name, "*black", 0, "contains path to current levelshot" );
 static CVAR_DEFINE_AUTO( cl_envshot_size, "256", FCVAR_ARCHIVE, "envshot size of cube side" );
@@ -32,7 +33,7 @@ CVAR_DEFINE_AUTO( v_dark, "0", 0, "starts level from dark screen" );
 static CVAR_DEFINE_AUTO( net_speeds, "0", FCVAR_ARCHIVE, "show network packets" );
 static CVAR_DEFINE_AUTO( cl_showfps, "0", FCVAR_ARCHIVE, "show client fps" );
 static CVAR_DEFINE_AUTO( cl_showpos, "0", FCVAR_ARCHIVE, "show local player position and velocity" );
-static CVAR_DEFINE_AUTO( cl_showents, "0", FCVAR_ARCHIVE | FCVAR_CHEAT, "show entities information (largely undone)" );
+static CVAR_DEFINE_AUTO( cl_showents, "0", FCVAR_ARCHIVE, "show entities information (largely undone)" );
 static CVAR_DEFINE_AUTO( cl_showcmd, "0", 0, "visualize usercmd button presses" );
 
 typedef struct
@@ -97,12 +98,21 @@ void SCR_DrawFPS( int height )
 	{
 		int	curfps = (int)(calc + 0.5f);
 
-		if( curfps < minfps ) minfps = curfps;
-		if( curfps > maxfps ) maxfps = curfps;
-
-		if( cl_showfps.value == 2 )
-			Q_snprintf( fpsstring, sizeof( fpsstring ), "fps: ^1%4i min, ^3%4i cur, ^2%4i max", minfps, curfps, maxfps );
-		else Q_snprintf( fpsstring, sizeof( fpsstring ), "%4i fps", curfps );
+		if( scr_skip_frames.value > 0 )
+		{
+			if( cl_showfps.value == 2 )
+				Q_snprintf( fpsstring, sizeof( fpsstring ), "fps(skip %d): ^1%4i min, ^3%4i cur, ^2%4i max", 
+					(int)scr_skip_frames.value, minfps, curfps, maxfps );
+			else 
+				Q_snprintf( fpsstring, sizeof( fpsstring ), "%4i fps(skip %d)", curfps, (int)scr_skip_frames.value );
+		}
+		else
+		{
+			if( cl_showfps.value == 2 )
+				Q_snprintf( fpsstring, sizeof( fpsstring ), "fps: ^1%4i min, ^3%4i cur, ^2%4i max", minfps, curfps, maxfps );
+			else 
+				Q_snprintf( fpsstring, sizeof( fpsstring ), "%4i fps", curfps );
+		}
 		MakeRGBA( color, 255, 255, 255, 255 );
 	}
 
@@ -670,18 +680,34 @@ void SCR_TileClear( void )
 	}
 }
 
-/*
-==================
+/* ==================
 SCR_UpdateScreen
-
-This is called every frame, and can also be called explicitly to flush
-text to the screen.
-==================
-*/
+This is called every frame, and can also be called explicitly to flush text to the screen.
+================== */
 void SCR_UpdateScreen( void )
 {
+	static int frame_count = 0;
+	int skip_frames;
 	qboolean screen_redraw = true; // assume screen has been redrawn
 
+	skip_frames = (int)scr_skip_frames.value;
+	if( skip_frames > 0 && cls.state == ca_active )
+	{
+		frame_count++;
+
+		if( frame_count <= skip_frames )
+		{
+			return;
+		}
+		else
+		{
+			frame_count = 0;
+		}
+	}
+	else
+	{
+		frame_count = 0;
+	}
 	if( !V_PreRender( )) return;
 
 	switch( cls.state )
@@ -931,6 +957,7 @@ void SCR_Init( void )
 	Cvar_RegisterVariable( &cl_envshot_size );
 	Cvar_RegisterVariable( &v_dark );
 	Cvar_RegisterVariable( &scr_viewsize );
+	Cvar_RegisterVariable( &scr_skip_frames );
 	Cvar_RegisterVariable( &net_speeds );
 	Cvar_RegisterVariable( &cl_showfps );
 	Cvar_RegisterVariable( &cl_showpos );

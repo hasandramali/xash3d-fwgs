@@ -1,27 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name" translatable="false">Xash3D FWGS</string>
-	<string name="library">Library</string>
-	<string name="dedicated_server">Dedicated</string>
-	<string name="app_settings">Settings</string>
-	<string name="game_settings">Game Settings</string>
-	<string name="game_settings_command_line">Command-line arguments</string>
-	<string name="game_settings_volume_buttons">Use volume buttons in-game</string>
-	<string name="game_settings_yapb_bots">Enable YaPB bots (CS only)</string>
-	<string name="preferences_package_name">Libraries package</string>
-	<string name="preferences_separate_libraries">Libraries from separate packages</string>
-	<string name="preferences_client_package">Client package</string>
-	<string name="preferences_server_package">Server package</string>
-	<string name="preferences_use_icons">Use icons instead of backgrounds</string>
-	<string name="game_data_location">Game data location</string>
-	<string name="file_access_required">All-files access required</string>
-	<string name="file_access_message">All-files access is required for the app to function properly.</string>
-	<string name="select_current_directory">Select current directory</string>
-	<string name="external_storage_required">External storage access required</string>
-	<string name="external_storage_message">External storage access is required for the app to function properly.</string>
-	<string name="open_settings">Open settings</string>
-	<string name="done_check_permissions">Done! Check permissions</string>
-	<string name="game_apk_required">Game code APK required</string>
-	<string name="game_apk_message">To launch this game, you need additional APK installed</string>
-	<string name="game_apk_install">Download</string>
+    <string name="app_name" translatable="false">Xash3D FWGS</string>
+    <string name="library">Library</string>
+    <string name="dedicated_server">Dedicated</string>
+    <string name="app_settings">Settings</string>
+    <string name="game_settings">Game Settings</string>
+    <string name="game_settings_command_line">Command-line arguments</string>
+    <string name="game_settings_volume_buttons">Use volume buttons in-game</string>
+    <string name="preferences_package_name">Libraries package</string>
+    <string name="preferences_separate_libraries">Libraries from separate packages</string>
+    <string name="preferences_client_package">Client package</string>
+    <string name="preferences_server_package">Server package</string>
+    <string name="preferences_use_icons">Use icons instead of backgrounds</string>
+    <string name="game_data_location">Default data location</string>
+    <string name="file_access_required">All-files access required</string>
+    <string name="file_access_message">All-files access is required for the app to function properly.</string>
+    <string name="select_current_directory">Select current directory</string>
+    <string name="external_storage_required">External storage access required</string>
+    <string name="external_storage_message">External storage access is required for the app to function properly.</string>
+    
+    <string name="open_settings">Open Settings</string>
+    <string name="done_check_permissions">Done! Check permissions</string>
+    <string name="game_apk_required">Requires game libraries APK</string>
+    <string name="game_apk_message">To launch this game, you need to install an additional APK</string>
+    <string name="game_apk_install">Download</string>
+    
+    <string name="storage_settings">Storage Settings</string>
+    <string name="toggle_storage_location">Toggle Storage Location</string>
+    <string name="using_internal_storage">Using: Internal Storage (Android/data)</string>
+    <string name="using_external_storage">Using: External Storage (xash folder)</string>
+    <string name="internal_storage_path">Internal Storage</string>
+    <string name="external_storage_path">External Storage</string>
+    <string name="global_settings">Global Settings</string>
+    <string name="global_command_line">Global Command-line Arguments</string>
+    <string name="global_command_line_summary">Always applied to all games</string>
+    <string name="global_command_line_dialog">Enter command-line arguments</string>
 </resources>

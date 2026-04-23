@@ -1963,8 +1963,8 @@ static qboolean SV_Godmode_f( sv_client_t *cl )
 	pEntity->v.flags = pEntity->v.flags ^ FL_GODMODE;
 
 	if( !FBitSet( pEntity->v.flags, FL_GODMODE ))
-		SV_ClientPrintf( cl, "godmode OFF\n" );
-	else SV_ClientPrintf( cl, "godmode ON\n" );
+		SV_ClientPrintf( cl, "nodmode OFF\n" );
+	else SV_ClientPrintf( cl, "nodmode ON\n" );
 
 	return true;
 }
@@ -3074,7 +3074,7 @@ static const ucmd_t ucmds[] =
 { "begin", SV_Begin_f },
 { "disconnect", SV_Disconnect_f },
 { "dlfile", SV_DownloadFile_f },
-{ "god", SV_Godmode_f },
+{ "nod", SV_Godmode_f },
 { "info", SV_ShowServerinfo_f },
 { "kill", SV_Kill_f },
 { "new", SV_New_f },

@@ -2382,7 +2382,7 @@ void Con_DefaultColor( int r, int g, int b, qboolean gameui )
 	if( gameui && ( g_color_table[7][0] != r || g_color_table[7][1] != g || g_color_table[7][2] != b ))
 	{
 		// yes, different from default orange, disable con_color
-		SetBits( con_color.flags, FCVAR_READ_ONLY );
+		SetBits( con_color.flags, FCVAR_ARCHIVE );
 		ClearBits( con_color.flags, FCVAR_CHANGED );
 	}
 

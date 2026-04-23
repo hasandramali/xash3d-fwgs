@@ -42,7 +42,7 @@ static struct inputstate_s
 
 CVAR_DEFINE_AUTO( m_pitch, "0.022", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "mouse pitch value" );
 CVAR_DEFINE_AUTO( m_yaw, "0.022", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "mouse yaw value" );
-CVAR_DEFINE_AUTO( m_ignore, DEFAULT_M_IGNORE, FCVAR_ARCHIVE | FCVAR_FILTERABLE, "ignore mouse events" );
+CVAR_DEFINE_AUTO( m_ignore, "0", FCVAR_PROTECTED, "ignore mouse events" );
 static CVAR_DEFINE_AUTO( look_filter, "0", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "filter look events making it smoother" );
 static CVAR_DEFINE_AUTO( m_rawinput, "1", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "enable mouse raw input" );
 
@@ -96,15 +96,15 @@ void IN_LockInputDevices( qboolean lock )
 
 	if( lock )
 	{
-		SetBits( m_ignore.flags, FCVAR_READ_ONLY );
-		SetBits( joy_enable.flags, FCVAR_READ_ONLY );
-		SetBits( touch_enable.flags, FCVAR_READ_ONLY );
+		SetBits( m_ignore.flags, FCVAR_PROTECTED );
+		SetBits( joy_enable.flags, FCVAR_PROTECTED );
+		SetBits( touch_enable.flags, FCVAR_PROTECTED );
 	}
 	else
 	{
-		ClearBits( m_ignore.flags, FCVAR_READ_ONLY );
-		ClearBits( joy_enable.flags, FCVAR_READ_ONLY );
-		ClearBits( touch_enable.flags, FCVAR_READ_ONLY );
+		ClearBits( m_ignore.flags, FCVAR_PROTECTED );
+		ClearBits( joy_enable.flags, FCVAR_PROTECTED );
+		ClearBits( touch_enable.flags, FCVAR_PROTECTED );
 	}
 }
 

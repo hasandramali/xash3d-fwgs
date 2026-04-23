@@ -102,10 +102,10 @@ extern int CL_UPDATE_BACKUP;
 #define SIGNONS		2		// signon messages to receive before connected
 #define INVALID_HANDLE	0xFFFF		// for XashXT cache system
 
-#define MIN_UPDATERATE	10.0f
-#define MAX_UPDATERATE	102.0f
+#define MIN_UPDATERATE	0.00001f
+#define MAX_UPDATERATE	9999999.0f
 
-#define MAX_EX_INTERP	0.1f
+#define MAX_EX_INTERP	1000000000.0f
 
 #define MAX_TEXTCHANNELS 8 // must be power of two (GoldSrc uses 4 channels)
 
@@ -735,7 +735,7 @@ extern convar_t	m_ignore;
 extern convar_t	r_showtree;
 extern convar_t	ui_renderworld;
 extern convar_t cl_fixmodelinterpolationartifacts;
-
+extern convar_t cl_screenfade;
 //=============================================================================
 
 extern client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS];
