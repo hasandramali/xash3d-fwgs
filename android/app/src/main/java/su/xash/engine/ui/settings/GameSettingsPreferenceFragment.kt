@@ -73,7 +73,7 @@ class GameSettingsPreferenceFragment(val game: Game) : PreferenceFragmentCompat(
 		val resolutionResult = findPreference<Preference>("resolution_result")!!
 
 		// Set default values if not set
-		val prefs = preferenceManager.sharedPreferences
+		val prefs = preferenceManager.sharedPreferences!!
 		if (!prefs.contains("resolution_width")) {
 			prefs.edit().putInt("resolution_width", mEngineWidth).apply()
 		}
@@ -122,7 +122,7 @@ class GameSettingsPreferenceFragment(val game: Game) : PreferenceFragmentCompat(
 			try {
 				val width = (newValue as String).toInt()
 				val height = ((mEngineHeight.toFloat() / mEngineWidth.toFloat()) * width).toInt()
-				prefs.edit().putInt("resolution_height", height).apply()
+				prefs!!.edit().putInt("resolution_height", height).apply()
 				resolutionHeight.text = height.toString()
 			} catch (e: NumberFormatException) {
 				Log.e("GameSettings", "Invalid width value: $newValue")
@@ -145,7 +145,7 @@ class GameSettingsPreferenceFragment(val game: Game) : PreferenceFragmentCompat(
 	private fun updateResolutionResult() {
 		val resolutionResult = findPreference<Preference>("resolution_result") ?: return
 		val resolutionCustom = findPreference<SwitchPreferenceCompat>("resolution_custom") ?: return
-		val prefs = preferenceManager.sharedPreferences
+		val prefs = preferenceManager.sharedPreferences!!
 
 		val width: Int
 		val height: Int
