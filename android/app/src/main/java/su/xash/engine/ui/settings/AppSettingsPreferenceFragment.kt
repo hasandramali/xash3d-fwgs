@@ -54,6 +54,9 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
             "global_arguments" -> {
                 updateGlobalArgsSummary()
             }
+            "resolution_fixed", "resolution_custom", "resolution_scale", "resolution_width", "resolution_height" -> {
+                updateResolutionResult()
+            }
         }
     }
 
@@ -89,9 +92,6 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
             prefs.edit().putInt("resolution_height", mEngineHeight).apply()
         }
 
-        // Initial update of result
-        updateResolutionResult()
-
         // Set up change listeners
         resolutionFixed.setOnPreferenceChangeListener { _, newValue ->
             val enabled = newValue as Boolean
@@ -126,8 +126,10 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
             try {
                 val width = (newValue as String).toInt()
                 val height = ((mEngineHeight.toFloat() / mEngineWidth.toFloat()) * width).toInt()
+                // Store calculated height for later use
                 prefs.edit().putInt("resolution_height", height).apply()
-                resolutionHeight.text = height.toString()
+                // Don't set resolutionHeight.text here - it can cause crashes
+                // The new value will be read from prefs when needed
             } catch (e: NumberFormatException) {
                 Log.e("AppSettings", "Invalid width value: $newValue")
             }
@@ -149,10 +151,12 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
     }
 
     private fun updateResolutionResult() {
+        if (!isAdded) return  // Fragment not attached to activity
+
         val resolutionResult = findPreference<Preference>("resolution_result") ?: return
         val resolutionCustom = findPreference<SwitchPreferenceCompat>("resolution_custom") ?: return
         val resolutionFixed = findPreference<SwitchPreferenceCompat>("resolution_fixed") ?: return
-        val prefs = preferenceManager.sharedPreferences!!
+        val prefs = preferenceManager.sharedPreferences ?: return
 
         if (!resolutionFixed.isChecked) {
             resolutionResult.summary = "Using device default resolution"
@@ -238,6 +242,7 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
         preferences.registerOnSharedPreferenceChangeListener(this)
         updateGamePathSummary()
         updateGlobalArgsSummary()
+        updateResolutionResult()
     }
 
     override fun onPause() {
