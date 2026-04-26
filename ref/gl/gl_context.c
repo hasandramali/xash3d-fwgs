@@ -161,7 +161,7 @@ static qboolean Mod_ProcessRenderData( model_t *mod, qboolean create, const byte
 	return loaded;
 }
 
-static int GL_RefGetParm( int parm, int arg )
+static intptr_t GL_RefGetParm( int parm, int arg )
 {
 	gl_texture_t *glt;
 
@@ -230,6 +230,8 @@ static int GL_RefGetParm( int parm, int arg )
 			return gl_texture_nearest.value == 0.0f;
 
 		return GL_TextureFilteringEnabled( R_GetTexture( arg ));
+	case PARM_GET_STUDIO_HDR:
+		return (intptr_t)R_StudioGetHeader();
 	default:
 		return ENGINE_GET_PARM_( parm, arg );
 	}
