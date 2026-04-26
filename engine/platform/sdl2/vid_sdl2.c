@@ -577,6 +577,14 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 		// SDL_SetWindowDisplayMode is broken in SDL2, it changes the display mode but doesn't change window size
 		SDL_SetWindowSize( host.hWnd, got.w, got.h );
 
+#if XASH_ANDROID
+		// On Android, force the window size to our desired resolution
+		// This allows lower rendering resolution than the display's native resolution
+		// The surface will be scaled up by the system to fill the screen
+		SDL_SetWindowSize( host.hWnd, width, height );
+		Con_Reportf( "%s: Android - forced window size to %dx%d (display mode: %dx%d)\n", __func__, width, height, got.w, got.h );
+#endif
+
 		break;
 	}
 	case WINDOW_MODE_WINDOWED:

@@ -214,21 +214,29 @@ public class XashActivity extends SDLActivity {
     }
 
     private String addResolutionSettings(String argv) {
-        boolean resolutionFixed = getIntent().getBooleanExtra("resolution_fixed", false);
+        // Read resolution settings from global preferences (app_preferences)
+        boolean resolutionFixed = mPreferences.getBoolean("resolution_fixed", false);
         if (!resolutionFixed) {
             Log.d(TAG, "Resolution settings: using default");
             return argv;
         }
 
-        boolean resolutionCustom = getIntent().getBooleanExtra("resolution_custom", false);
+        boolean resolutionCustom = mPreferences.getBoolean("resolution_custom", false);
         int width, height;
 
         if (resolutionCustom) {
-            width = getIntent().getIntExtra("resolution_width", 854);
-            height = getIntent().getIntExtra("resolution_height", 480);
+            width = mPreferences.getInt("resolution_width", 854);
+            height = mPreferences.getInt("resolution_height", 480);
             Log.d(TAG, "Resolution settings: custom mode " + width + "x" + height);
         } else {
-            float scale = getIntent().getFloatExtra("resolution_scale", 2.0f);
+            float scale = 2.0f;
+            try {
+                String scaleStr = mPreferences.getString("resolution_scale", "2.0");
+                scale = Float.parseFloat(scaleStr);
+            } catch (NumberFormatException e) {
+                Log.e(TAG, "Invalid scale value, using default 2.0");
+            }
+
             // Get display metrics for calculating resolution
             android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
             getWindowManager().getDefaultDisplay().getMetrics(metrics);

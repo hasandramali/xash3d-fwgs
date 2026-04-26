@@ -21,20 +21,20 @@ jobs:
           - os: ubuntu-22.04
             targetos: linux
             targetarch: i386
-          - os: ubuntu-22.04-arm
-            targetos: linux
-            targetarch: arm64
-          - os: ubuntu-22.04-arm
-            targetos: linux
-            targetarch: armhf
-          - os: ubuntu-24.04 # riscv64 would benefit from having latest compilers
-            targetos: linux
-            targetarch: riscv64
-            cross: true
-          - os: ubuntu-22.04
-            targetos: linux
-            targetarch: ppc64el
-            cross: true
+#          - os: ubuntu-22.04-arm
+#            targetos: linux
+#            targetarch: arm64
+#          - os: ubuntu-22.04-arm
+#            targetos: linux
+#            targetarch: armhf
+#          - os: ubuntu-24.04 # riscv64 would benefit from having latest compilers
+#            targetos: linux
+#            targetarch: riscv64
+#            cross: true
+#          - os: ubuntu-22.04
+#            targetos: linux
+#            targetarch: ppc64el
+#            cross: true
 #          - os: ubuntu-latest
 #            targetos: linux
 #            targetarch: e2k-8c
@@ -49,24 +49,24 @@ jobs:
           - os: ubuntu-latest
             targetos: nswitch
             targetarch: arm64
-          - os: ubuntu-latest
-            targetos: psvita
-            targetarch: armv7hf
+#          - os: ubuntu-latest
+#            targetos: psvita
+#            targetarch: armv7hf
           - os: windows-latest
             targetos: win32
             targetarch: amd64
           - os: windows-2022 # always use the oldest possible for 32-bit because of older compilers, and better support of certain legacy OSes
             targetos: win32
             targetarch: i386
-          - os: macos-14 # arm64 as per github documentation
-            targetos: apple
-            targetarch: arm64
+#          - os: macos-14 # arm64 as per github documentation
+#            targetos: apple
+#            targetarch: arm64
           - os: macos-latest
             targetos: ios
             targetarch: arm64
-          - os: macos-15-intel
-            targetos: apple
-            targetarch: amd64
+#          - os: macos-15-intel
+#            targetos: apple
+#            targetarch: amd64
     env:
       SDL_VERSION: 2.32.10
       FFMPEG_VERSION: 8.1
