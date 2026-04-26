@@ -215,47 +215,20 @@ public class XashActivity extends SDLActivity {
 
     private String addResolutionSettings(String argv) {
         // Read resolution settings from global preferences (app_preferences)
-        boolean resolutionFixed = mPreferences.getBoolean("resolution_fixed", false);
-        if (!resolutionFixed) {
+        boolean resolutionEnabled = mPreferences.getBoolean("resolution_enabled", false);
+        if (!resolutionEnabled) {
             Log.d(TAG, "Resolution settings: using default");
             return argv;
         }
 
-        boolean resolutionCustom = mPreferences.getBoolean("resolution_custom", false);
+        // Custom resolution is always used when enabled (no scale mode anymore)
+        boolean resolutionCustom = true;
         int width, height;
 
-        if (resolutionCustom) {
-            width = mPreferences.getInt("resolution_width", 854);
-            height = mPreferences.getInt("resolution_height", 480);
-            Log.d(TAG, "Resolution settings: custom mode " + width + "x" + height);
-        } else {
-            float scale = 2.0f;
-            try {
-                String scaleStr = mPreferences.getString("resolution_scale", "2.0");
-                scale = Float.parseFloat(scaleStr);
-            } catch (NumberFormatException e) {
-                Log.e(TAG, "Invalid scale value, using default 2.0");
-            }
-
-            // Get display metrics for calculating resolution
-            android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
-            getWindowManager().getDefaultDisplay().getMetrics(metrics);
-
-            int displayWidth = metrics.widthPixels;
-            int displayHeight = metrics.heightPixels;
-
-            // Swap for landscape mode
-            if (displayWidth < displayHeight) {
-                int temp = displayWidth;
-                displayWidth = displayHeight;
-                displayHeight = temp;
-            }
-
-            float safeScale = scale < 0.5f ? 0.5f : scale;
-            width = (int) (displayWidth / safeScale);
-            height = (int) (displayHeight / safeScale);
-            Log.d(TAG, "Resolution settings: scale mode scale=" + scale + " result=" + width + "x" + height);
-        }
+        // Read custom width/height from preferences
+        width = mPreferences.getInt("resolution_width", 854);
+        height = mPreferences.getInt("resolution_height", 480);
+        Log.d(TAG, "Resolution settings: " + width + "x" + height);
 
         // Enforce minimum resolution
         if (width < 320) width = 320;

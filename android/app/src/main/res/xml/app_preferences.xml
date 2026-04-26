@@ -25,40 +25,21 @@
 
     <PreferenceCategory app:title="@string/resolution_settings">
         <SwitchPreferenceCompat
-            app:key="resolution_fixed"
+            app:key="resolution_enabled"
             app:title="@string/resolution_fixed_title"
             app:summary="@string/resolution_fixed_summary"
             app:defaultValue="false" />
 
-        <SwitchPreferenceCompat
-            app:key="resolution_custom"
+        <Preference
+            app:key="resolution_settings"
             app:title="@string/resolution_custom_title"
-            app:summary="@string/resolution_custom_summary"
-            app:defaultValue="false"
-            app:dependency="resolution_fixed" />
-
-        <EditTextPreference
-            app:key="resolution_scale"
-            app:title="@string/resolution_scale_title"
-            app:defaultValue="2.0"
-            app:dependency="resolution_fixed" />
-
-        <EditTextPreference
-            app:key="resolution_width"
-            app:title="@string/resolution_width_title"
-            app:defaultValue="854"
-            app:dependency="resolution_custom" />
-
-        <EditTextPreference
-            app:key="resolution_height"
-            app:title="@string/resolution_height_title"
-            app:defaultValue="480"
-            app:dependency="resolution_custom" />
+            app:summary="Tap to configure resolution"
+            app:dependency="resolution_enabled" />
 
         <Preference
-            app:key="resolution_result"
-            app:title="@string/resolution_result_title"
-            app:summary="Resolution will be calculated"
+            app:key="resolution_current"
+            app:title="Current Resolution"
+            app:summary="Not set"
             app:enabled="false" />
     </PreferenceCategory>
 
