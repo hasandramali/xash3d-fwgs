@@ -160,11 +160,11 @@ public class XashActivity extends SDLActivity {
     protected String[] getArguments() {
         String gamedir = getIntent().getStringExtra("gamedir");
         if (gamedir == null) gamedir = "valve";
-        
+
         String basedir = findBestBasedir(gamedir);
         nativeSetenv("XASH3D_BASEDIR", basedir);
         nativeSetenv("XASH3D_GAME", gamedir);
-        
+
         Log.d(TAG, "Using basedir: " + basedir + " for game: " + gamedir);
 
         String gamelibdir = getIntent().getStringExtra("gamelibdir");
@@ -206,7 +206,62 @@ public class XashActivity extends SDLActivity {
                 argv += " -dll @hl";
         }
 
+        // Handle resolution settings
+        argv = addResolutionSettings(argv);
+
         Log.d(TAG, "Final argv: " + argv);
         return argv.split(" ");
+    }
+
+    private String addResolutionSettings(String argv) {
+        boolean resolutionFixed = getIntent().getBooleanExtra("resolution_fixed", false);
+        if (!resolutionFixed) {
+            Log.d(TAG, "Resolution settings: using default");
+            return argv;
+        }
+
+        boolean resolutionCustom = getIntent().getBooleanExtra("resolution_custom", false);
+        int width, height;
+
+        if (resolutionCustom) {
+            width = getIntent().getIntExtra("resolution_width", 854);
+            height = getIntent().getIntExtra("resolution_height", 480);
+            Log.d(TAG, "Resolution settings: custom mode " + width + "x" + height);
+        } else {
+            float scale = getIntent().getFloatExtra("resolution_scale", 2.0f);
+            // Get display metrics for calculating resolution
+            android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getMetrics(metrics);
+
+            int displayWidth = metrics.widthPixels;
+            int displayHeight = metrics.heightPixels;
+
+            // Swap for landscape mode
+            if (displayWidth < displayHeight) {
+                int temp = displayWidth;
+                displayWidth = displayHeight;
+                displayHeight = temp;
+            }
+
+            float safeScale = scale < 0.5f ? 0.5f : scale;
+            width = (int) (displayWidth / safeScale);
+            height = (int) (displayHeight / safeScale);
+            Log.d(TAG, "Resolution settings: scale mode scale=" + scale + " result=" + width + "x" + height);
+        }
+
+        // Enforce minimum resolution
+        if (width < 320) width = 320;
+        if (height < 240) height = 240;
+
+        // Add resolution to command line arguments
+        if (!argv.contains("-width ")) {
+            argv += " -width " + width;
+        }
+        if (!argv.contains("-height ")) {
+            argv += " -height " + height;
+        }
+
+        Log.d(TAG, "Final resolution: " + width + "x" + height);
+        return argv;
     }
 }

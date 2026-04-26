@@ -35,4 +35,16 @@
     <string name="global_command_line">Global Command-line Arguments</string>
     <string name="global_command_line_summary">Always applied to all games</string>
     <string name="global_command_line_dialog">Enter command-line arguments</string>
+
+    <!-- Resolution Settings -->
+    <string name="resolution_settings">Resolution Settings</string>
+    <string name="resolution_fixed_title">Fixed screen resolution (experimental)</string>
+    <string name="resolution_fixed_summary">Enable to set a custom rendering resolution</string>
+    <string name="resolution_custom_title">Custom resolution</string>
+    <string name="resolution_custom_summary">Specify exact width and height instead of scale</string>
+    <string name="resolution_scale_title">Resolution scale</string>
+    <string name="resolution_width_title">Width</string>
+    <string name="resolution_height_title">Height</string>
+    <string name="resolution_result_title">Calculated Resolution</string>
+    <string name="resolution_mod_warn">Use with caution! Some games do not support too low resolution. In case of bugs increase resolution to 640x480 or higher. Resolution lower than 320x240 is ignored.</string>
 </resources>

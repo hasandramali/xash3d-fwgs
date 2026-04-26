@@ -48,6 +48,25 @@ class Game(val ctx: Context, val basedir: File) {
 			putExtra("argv", pref.getString("arguments", "-console -log"))
 			putExtra("usevolume", pref.getBoolean("use_volume_buttons", false))
 			putExtra("basedir", basedir.parent)
+
+			// Resolution settings
+			val resolutionFixed = pref.getBoolean("resolution_fixed", false)
+			putExtra("resolution_fixed", resolutionFixed)
+
+			if (resolutionFixed) {
+				val resolutionCustom = pref.getBoolean("resolution_custom", false)
+				putExtra("resolution_custom", resolutionCustom)
+
+				if (resolutionCustom) {
+					putExtra("resolution_width", pref.getInt("resolution_width", 854))
+					putExtra("resolution_height", pref.getInt("resolution_height", 480))
+				} else {
+					val scaleStr = pref.getString("resolution_scale", "2.0") ?: "2.0"
+					val scale = scaleStr.toFloatOrNull() ?: 2.0f
+					putExtra("resolution_scale", scale)
+				}
+			}
+
 			//.putExtra("gamelibdir", getGameLibDir(context))
 			//.putExtra("package", getPackageName()) }
 		})
