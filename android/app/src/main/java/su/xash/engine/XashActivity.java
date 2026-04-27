@@ -11,6 +11,10 @@ import android.content.SharedPreferences;
 import android.provider.Settings.Secure;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
@@ -29,9 +33,9 @@ public class XashActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
         mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+
+        super.onCreate(savedInstanceState);
 
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -39,6 +43,9 @@ public class XashActivity extends SDLActivity {
         }
 
         AndroidBug5497Workaround.assistActivity(this);
+
+        // Apply surface size after SDL creates the view but before it initializes the surface
+        applyResolutionIfNeeded();
     }
 
     @Override
@@ -244,5 +251,67 @@ public class XashActivity extends SDLActivity {
 
         Log.d(TAG, "Final resolution: " + width + "x" + height);
         return argv;
+    }
+
+    // Apply custom resolution by setting surface holder size
+    // This must be called BEFORE SDL initializes the surface
+    private void applyResolutionIfNeeded() {
+        boolean resolutionEnabled = mPreferences.getBoolean("resolution_enabled", false);
+        if (!resolutionEnabled) {
+            Log.d(TAG, "Resolution: using device default");
+            return;
+        }
+
+        int width = mPreferences.getInt("resolution_width", 854);
+        int height = mPreferences.getInt("resolution_height", 480);
+
+        if (width < 320) width = 320;
+        if (height < 240) height = 240;
+
+        Log.d(TAG, "Resolution: setting surface size to " + width + "x" + height);
+
+        try {
+            // Find SDL's SurfaceView using reflection
+            ViewGroup layout = (ViewGroup) getWindow().getDecorView().findViewById(android.R.id.content);
+            if (layout != null && layout.getChildCount() > 0) {
+                View child = layout.getChildAt(0);
+                if (child instanceof SurfaceView) {
+                    SurfaceView surfaceView = (SurfaceView) child;
+                    SurfaceHolder holder = surfaceView.getHolder();
+                    holder.setFixedSize(width, height);
+                    Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + width + ", " + height + ") applied");
+                } else {
+                    Log.w(TAG, "Resolution: Could not find SurfaceView, found: " + child.getClass().getName());
+                }
+            } else {
+                // Try to find SurfaceView in the entire view hierarchy
+                SurfaceView surfaceView = findSurfaceView(layout);
+                if (surfaceView != null) {
+                    SurfaceHolder holder = surfaceView.getHolder();
+                    holder.setFixedSize(width, height);
+                    Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + width + ", " + height + ") applied (found in hierarchy)");
+                } else {
+                    Log.w(TAG, "Resolution: Could not find any SurfaceView in view hierarchy");
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Resolution: Error applying surface size", e);
+        }
+    }
+
+    private SurfaceView findSurfaceView(ViewGroup parent) {
+        if (parent == null) return null;
+
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (child instanceof SurfaceView) {
+                return (SurfaceView) child;
+            }
+            if (child instanceof ViewGroup) {
+                SurfaceView result = findSurfaceView((ViewGroup) child);
+                if (result != null) return result;
+            }
+        }
+        return null;
     }
 }

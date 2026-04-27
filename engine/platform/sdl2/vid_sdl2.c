@@ -22,11 +22,6 @@ GNU General Public License for more details.
 // include it after because it breaks definitions in net_api.h wtf
 #include <SDL_syswm.h>
 
-#if XASH_ANDROID
-#include <jni.h>
-#include <android/native_window.h>
-#include <android/native_window_jni.h>
-#endif
 
 #if XASH_PSVITA
 #include <vrtld.h>
@@ -554,33 +549,6 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 			// no video mode change to begin with
 			return rserr_invalid_fullscreen;
 		}
-
-#if XASH_ANDROID
-		// On Android borderless fullscreen, force the window size
-		// This creates a smaller rendering surface that gets scaled up
-		SDL_SetWindowSize( host.hWnd, width, height );
-
-		// Additionally, try to set the native window buffer size
-		// This ensures the surface is actually created at our desired size
-		SDL_SysWMinfo wmInfo;
-		SDL_VERSION( &wmInfo.version );
-		if( SDL_GetWindowWMInfo( host.hWnd, &wmInfo ) )
-		{
-			if( wmInfo.subsystem == SDL_SYSWM_ANDROID )
-			{
-				ANativeWindow *nativeWindow = wmInfo.info.android.window;
-				if( nativeWindow )
-				{
-					int32_t result = ANativeWindow_setBuffersGeometry( nativeWindow, width, height, 0 );
-					Con_Reportf( "%s: Android - ANativeWindow_setBuffersGeometry(%d, %d) returned %d\n",
-						__func__, width, height, result );
-				}
-			}
-		}
-
-		Con_Reportf( "%s: Android borderless - forced resolution to %dx%d\n", __func__, width, height );
-#endif
-
 		break;
 	}
 	case WINDOW_MODE_FULLSCREEN:
@@ -609,15 +577,6 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 
 		// SDL_SetWindowDisplayMode is broken in SDL2, it changes the display mode but doesn't change window size
 		SDL_SetWindowSize( host.hWnd, got.w, got.h );
-
-#if XASH_ANDROID
-		// On Android, force the window size to our desired resolution
-		// This allows lower rendering resolution than the display's native resolution
-		// The surface will be scaled up by the system to fill the screen
-		SDL_SetWindowSize( host.hWnd, width, height );
-		Con_Reportf( "%s: Android - forced window size to %dx%d (display mode: %dx%d)\n", __func__, width, height, got.w, got.h );
-#endif
-
 		break;
 	}
 	case WINDOW_MODE_WINDOWED:
