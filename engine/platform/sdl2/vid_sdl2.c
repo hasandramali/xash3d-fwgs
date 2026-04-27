@@ -27,16 +27,16 @@ GNU General Public License for more details.
 #endif // XASH_PSVITA
 
 #if XASH_ANDROID
-#include <android/native_window.h>
-#include <android/native_window_jni.h>
+#include <jni.h>
 
 // Android-specific resolution handling
-// On Android, we use ANativeWindow_setBuffersGeometry to set the surface size
-// This creates a lower-resolution render buffer that is automatically scaled up
+// On Android, we use JNI to call back to Java and use SurfaceHolder.setFixedSize
+// This creates a lower-resolution surface that Android automatically scales up
 
 // Store the user's requested resolution (from command line or console)
 static int s_android_requested_width = 0;
 static int s_android_requested_height = 0;
+static qboolean s_android_resizing = false;
 
 void Android_SetRequestedResolution( int width, int height )
 {
@@ -45,38 +45,71 @@ void Android_SetRequestedResolution( int width, int height )
 	Con_Reportf( "%s: Stored requested resolution %dx%d\n", __func__, width, height );
 }
 
+// JNI function to call Java's setSurfaceSize via SDL's JNI helper
+static void Android_SetSurfaceSize( int width, int height )
+{
+	JNIEnv *env;
+	jobject activity;
+	jclass clazz;
+	jmethodID method;
+
+	// Prevent infinite resize loops
+	if( s_android_resizing )
+	{
+		Con_Reportf( "%s: Already resizing, skipping\n", __func__ );
+		return;
+	}
+
+	env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	if( !env )
+	{
+		Con_Reportf( S_WARN "%s: Could not get JNI environment\n", __func__ );
+		return;
+	}
+
+	activity = (jobject)SDL_AndroidGetActivity();
+	if( !activity )
+	{
+		Con_Reportf( S_WARN "%s: Could not get activity\n", __func__ );
+		return;
+	}
+
+	clazz = (*env)->GetObjectClass( env, activity );
+	if( !clazz )
+	{
+		Con_Reportf( S_WARN "%s: Could not get activity class\n", __func__ );
+		(*env)->DeleteLocalRef( env, activity );
+		return;
+	}
+
+	method = (*env)->GetMethodID( env, clazz, "setSurfaceSize", "(II)V" );
+	if( !method )
+	{
+		Con_Reportf( S_WARN "%s: setSurfaceSize method not found\n", __func__ );
+		(*env)->DeleteLocalRef( env, clazz );
+		(*env)->DeleteLocalRef( env, activity );
+		return;
+	}
+
+	s_android_resizing = true;
+	(*env)->CallVoidMethod( env, activity, method, width, height );
+	s_android_resizing = false;
+
+	Con_Reportf( "%s: Called Java setSurfaceSize(%d, %d)\n", __func__, width, height );
+
+	(*env)->DeleteLocalRef( env, clazz );
+	(*env)->DeleteLocalRef( env, activity );
+}
+
 static void Android_SetSurfaceGeometry( int width, int height )
 {
-	SDL_SysWMinfo wmInfo;
-	SDL_VERSION( &wmInfo.version );
-	if( !SDL_GetWindowWMInfo( host.hWnd, &wmInfo ) )
-	{
-		Con_Reportf( S_WARN "%s: SDL_GetWindowWMInfo failed: %s\n", __func__, SDL_GetError() );
-		return;
-	}
-
-	if( wmInfo.subsystem != SDL_SYSWM_ANDROID )
-	{
-		Con_Reportf( S_WARN "%s: Not an Android window\n", __func__ );
-		return;
-	}
-
-	ANativeWindow *nativeWindow = wmInfo.info.android.window;
-	if( !nativeWindow )
-	{
-		Con_Reportf( S_WARN "%s: No native window\n", __func__ );
-		return;
-	}
-
-	// Use the user's requested resolution if available and reasonable
-	// This handles the case where vid_setmode passes display resolution instead of user resolution
 	int use_width = width;
 	int use_height = height;
 
+	// Use the user's requested resolution if available and reasonable
 	if( s_android_requested_width > 0 && s_android_requested_height > 0 )
 	{
-		// If the passed width/height is the same as the window size but different from what user requested,
-		// use the user's requested resolution
+		// If the passed width/height is different from what user requested, use user's
 		if( width != s_android_requested_width || height != s_android_requested_height )
 		{
 			Con_Reportf( "%s: Overriding %dx%d with user requested %dx%d\n",
@@ -90,15 +123,10 @@ static void Android_SetSurfaceGeometry( int width, int height )
 	if( use_width < 320 ) use_width = 320;
 	if( use_height < 240 ) use_height = 240;
 
-	int32_t result = ANativeWindow_setBuffersGeometry( nativeWindow, use_width, use_height, 0 );
-	if( result < 0 )
-	{
-		Con_Reportf( S_WARN "%s: ANativeWindow_setBuffersGeometry failed: %d\n", __func__, result );
-	}
-	else
-	{
-		Con_Reportf( "%s: Set surface geometry to %dx%d (result: %d)\n", __func__, use_width, use_height, result );
-	}
+	// Call Java to set the surface size via SurfaceHolder.setFixedSize
+	Android_SetSurfaceSize( use_width, use_height );
+
+	Con_Reportf( "%s: Requested surface size %dx%d\n", __func__, use_width, use_height );
 }
 #endif // XASH_ANDROID
 
@@ -631,7 +659,8 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 		}
 
 #if XASH_ANDROID
-		// On Android, set the surface geometry for lower resolution rendering
+		// On Android, call Java to set the surface size via SurfaceHolder.setFixedSize
+		// This makes Android automatically scale the surface to fill the screen
 		Android_SetSurfaceGeometry( width, height );
 #endif
 
