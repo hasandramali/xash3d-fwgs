@@ -234,6 +234,10 @@ typedef struct
 	uint max_entities;
 
 	ref_screen_rotation_t rotation;
+
+	// display scaling for resolution changes (Android)
+	float scale_x;
+	float scale_y;
 } gl_globals_t;
 
 typedef struct
