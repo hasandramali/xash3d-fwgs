@@ -22,10 +22,46 @@ GNU General Public License for more details.
 // include it after because it breaks definitions in net_api.h wtf
 #include <SDL_syswm.h>
 
-
 #if XASH_PSVITA
 #include <vrtld.h>
 #endif // XASH_PSVITA
+
+#if XASH_ANDROID
+// Android-specific resolution handling
+// These are used to prevent infinite resize loops and to call Java setSurfaceSize via JNI
+static qboolean s_android_resizing = false;
+static int s_android_target_width = 0;
+static int s_android_target_height = 0;
+
+// JNI function to call Java's setSurfaceSize
+static void Android_SetSurfaceSize( int width, int height )
+{
+	JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	if( !env ) return;
+
+	jobject activity = (jobject)SDL_AndroidGetActivity();
+	if( !activity ) return;
+
+	jclass clazz = (*env)->GetObjectClass( env, activity );
+	if( !clazz ) return;
+
+	jmethodID method = (*env)->GetMethodID( env, clazz, "setSurfaceSize", "(II)V" );
+	if( !method )
+	{
+		Con_Reportf( S_WARN "Android_SetSurfaceSize: setSurfaceSize method not found\n" );
+		(*env)->DeleteLocalRef( env, clazz );
+		(*env)->DeleteLocalRef( env, activity );
+		return;
+	}
+
+	(*env)->CallVoidMethod( env, activity, method, width, height );
+
+	(*env)->DeleteLocalRef( env, clazz );
+	(*env)->DeleteLocalRef( env, activity );
+
+	Con_Reportf( "%s: Called Java setSurfaceSize(%d, %d)\n", __func__, width, height );
+}
+#endif // XASH_ANDROID
 
 static vidmode_t *vidmodes = NULL;
 static int num_vidmodes = 0;
@@ -630,6 +666,33 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 	Con_Reportf( "%s: Setting video mode to %dx%d %s\n", __func__, out_width, out_height,
 		window_mode == WINDOW_MODE_BORDERLESS ? "borderless" :
 		window_mode == WINDOW_MODE_FULLSCREEN ? "fullscreen" : "windowed" );
+
+#if XASH_ANDROID
+	// On Android, we need to call back to Java to set the SurfaceHolder size
+	// This is the key to making resolution scaling work on Android
+	// Only do this if we're not already in a resize (to prevent infinite loops)
+	if( !s_android_resizing && (width != out_width || height != out_height) )
+	{
+		s_android_resizing = true;
+		s_android_target_width = width;
+		s_android_target_height = height;
+
+		// Call Java to set the surface size
+		Android_SetSurfaceSize( width, height );
+
+		Con_Reportf( "%s: Android - requested surface size %dx%d (actual window: %dx%d)\n",
+			__func__, width, height, out_width, out_height );
+
+		// Update out_width/out_height to reflect what we requested
+		// The actual resize will happen asynchronously via surfaceChanged callback
+		out_width = width;
+		out_height = height;
+	}
+	else
+	{
+		s_android_resizing = false;
+	}
+#endif // XASH_ANDROID
 
 	VID_SaveWindowSize( out_width, out_height );
 
