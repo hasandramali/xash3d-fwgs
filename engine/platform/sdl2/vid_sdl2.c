@@ -22,6 +22,12 @@ GNU General Public License for more details.
 // include it after because it breaks definitions in net_api.h wtf
 #include <SDL_syswm.h>
 
+#if XASH_ANDROID
+#include <jni.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
+#endif
+
 #if XASH_PSVITA
 #include <vrtld.h>
 #endif // XASH_PSVITA
@@ -548,6 +554,33 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 			// no video mode change to begin with
 			return rserr_invalid_fullscreen;
 		}
+
+#if XASH_ANDROID
+		// On Android borderless fullscreen, force the window size
+		// This creates a smaller rendering surface that gets scaled up
+		SDL_SetWindowSize( host.hWnd, width, height );
+
+		// Additionally, try to set the native window buffer size
+		// This ensures the surface is actually created at our desired size
+		SDL_SysWMinfo wmInfo;
+		SDL_VERSION( &wmInfo.version );
+		if( SDL_GetWindowWMInfo( host.hWnd, &wmInfo ) )
+		{
+			if( wmInfo.subsystem == SDL_SYSWM_ANDROID )
+			{
+				ANativeWindow *nativeWindow = wmInfo.info.android.window;
+				if( nativeWindow )
+				{
+					int32_t result = ANativeWindow_setBuffersGeometry( nativeWindow, width, height, 0 );
+					Con_Reportf( "%s: Android - ANativeWindow_setBuffersGeometry(%d, %d) returned %d\n",
+						__func__, width, height, result );
+				}
+			}
+		}
+
+		Con_Reportf( "%s: Android borderless - forced resolution to %dx%d\n", __func__, width, height );
+#endif
+
 		break;
 	}
 	case WINDOW_MODE_FULLSCREEN:
