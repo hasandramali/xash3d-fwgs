@@ -27,6 +27,8 @@ GNU General Public License for more details.
 #endif // XASH_PSVITA
 
 #if XASH_ANDROID
+#include <jni.h>
+
 // Android-specific resolution handling
 // These are used to prevent infinite resize loops and to call Java setSurfaceSize via JNI
 static qboolean s_android_resizing = false;
