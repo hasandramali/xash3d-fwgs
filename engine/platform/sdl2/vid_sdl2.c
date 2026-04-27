@@ -33,6 +33,18 @@ GNU General Public License for more details.
 // Android-specific resolution handling
 // On Android, we use ANativeWindow_setBuffersGeometry to set the surface size
 // This creates a lower-resolution render buffer that is automatically scaled up
+
+// Store the user's requested resolution (from command line or console)
+static int s_android_requested_width = 0;
+static int s_android_requested_height = 0;
+
+void Android_SetRequestedResolution( int width, int height )
+{
+	s_android_requested_width = width;
+	s_android_requested_height = height;
+	Con_Reportf( "%s: Stored requested resolution %dx%d\n", __func__, width, height );
+}
+
 static void Android_SetSurfaceGeometry( int width, int height )
 {
 	SDL_SysWMinfo wmInfo;
@@ -56,14 +68,36 @@ static void Android_SetSurfaceGeometry( int width, int height )
 		return;
 	}
 
-	int32_t result = ANativeWindow_setBuffersGeometry( nativeWindow, width, height, 0 );
+	// Use the user's requested resolution if available and reasonable
+	// This handles the case where vid_setmode passes display resolution instead of user resolution
+	int use_width = width;
+	int use_height = height;
+
+	if( s_android_requested_width > 0 && s_android_requested_height > 0 )
+	{
+		// If the passed width/height is the same as the window size but different from what user requested,
+		// use the user's requested resolution
+		if( width != s_android_requested_width || height != s_android_requested_height )
+		{
+			Con_Reportf( "%s: Overriding %dx%d with user requested %dx%d\n",
+				__func__, width, height, s_android_requested_width, s_android_requested_height );
+			use_width = s_android_requested_width;
+			use_height = s_android_requested_height;
+		}
+	}
+
+	// Enforce minimum resolution
+	if( use_width < 320 ) use_width = 320;
+	if( use_height < 240 ) use_height = 240;
+
+	int32_t result = ANativeWindow_setBuffersGeometry( nativeWindow, use_width, use_height, 0 );
 	if( result < 0 )
 	{
 		Con_Reportf( S_WARN "%s: ANativeWindow_setBuffersGeometry failed: %d\n", __func__, result );
 	}
 	else
 	{
-		Con_Reportf( "%s: Set surface geometry to %dx%d (result: %d)\n", __func__, width, height, result );
+		Con_Reportf( "%s: Set surface geometry to %dx%d (result: %d)\n", __func__, use_width, use_height, result );
 	}
 }
 #endif // XASH_ANDROID
@@ -578,6 +612,11 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 	const int display_index = VID_GetDisplayIndex( __func__, host.hWnd );
 	int out_width, out_height;
 
+#if XASH_ANDROID
+	// Store the user's requested resolution for Android surface geometry
+	Android_SetRequestedResolution( width, height );
+#endif
+
 	switch( window_mode )
 	{
 	case WINDOW_MODE_BORDERLESS:
@@ -623,7 +662,10 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 		}
 
 		// SDL_SetWindowDisplayMode is broken in SDL2, it changes the display mode but doesn't change window size
+		// On Android, don't resize the window - instead set the surface geometry separately
+#if !XASH_ANDROID
 		SDL_SetWindowSize( host.hWnd, got.w, got.h );
+#endif
 		break;
 	}
 	case WINDOW_MODE_WINDOWED:
@@ -645,7 +687,9 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 
 			if( SDL_GetDesktopDisplayMode( display_index, &dm ) >= 0 && width >= dm.w && height >= dm.h )
 			{
+#if !XASH_ANDROID
 				SDL_SetWindowSize( host.hWnd, dm.w, dm.h );
+#endif
 				// Con_Printf( "%s: activating fake fullscreen mode\n", __func__ );
 				center_window = true;
 			}
@@ -654,7 +698,9 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 				SDL_Rect r;
 				int x, y;
 
+#if !XASH_ANDROID
 				SDL_SetWindowSize( host.hWnd, width, height );
+#endif
 
 				if( VID_GetDisplayBounds( display_index, host.hWnd, &r ) >= 0 )
 				{
