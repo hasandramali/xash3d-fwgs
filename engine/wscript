@@ -239,6 +239,8 @@ def build(bld):
 		libs += ['M', 'RT', 'PTHREAD', 'ASOUND', 'HAIKU', 'MAGX', 'LOG', 'SOCKET']
 		if not bld.env.STATIC:
 			libs += ['DL']
+		if bld.env.DEST_OS == 'android':
+			libs += ['ANDROID']
 
 	if bld.env.SERVER:
 		# TODO: avoid possible name collision when client is built without launcher
