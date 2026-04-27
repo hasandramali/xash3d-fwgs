@@ -463,6 +463,7 @@ def configure(conf):
 
 		conf.check_cc(lib='dl')
 		conf.check_cc(lib='log')
+		conf.check_cc(lib='android')
 		if not conf.options.ANDROID_OPTS:
 			# if we're compiling on device itself
 			conf.check_cc(lib='m')
