@@ -365,11 +365,10 @@ static qboolean R_SetDisplayTransform( ref_screen_rotation_t rotate, int offset_
 		ret = false;
 	}
 
-	// Store scale values for rendering
-	if( scale_x > 0.0f && scale_y > 0.0f )
+	if( scale_x != 1.0f || scale_y != 1.0f )
 	{
-		tr.scale_x = scale_x;
-		tr.scale_y = scale_y;
+		gEngfuncs.Con_Printf("scale transform not supported\n");
+		ret = false;
 	}
 
 	return ret;

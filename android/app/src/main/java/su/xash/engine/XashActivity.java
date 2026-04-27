@@ -11,16 +11,7 @@ import android.content.SharedPreferences;
 import android.provider.Settings.Secure;
 import android.util.Log;
 import android.view.KeyEvent;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
-import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
-import android.view.ViewTreeObserver;
-import android.os.Handler;
-import android.os.Looper;
 
 import org.libsdl.app.SDLActivity;
 
@@ -36,18 +27,11 @@ public class XashActivity extends SDLActivity {
     private static final String TAG = "XashActivity";
     private SharedPreferences mPreferences;
 
-    // Resolution settings
-    private int mForceWidth = 0;
-    private int mForceHeight = 0;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-
-        // Read resolution settings early
-        readResolutionSettings();
-
         super.onCreate(savedInstanceState);
+
+        mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -55,87 +39,6 @@ public class XashActivity extends SDLActivity {
         }
 
         AndroidBug5497Workaround.assistActivity(this);
-
-        // Setup layout listener to detect when SurfaceView is added
-        setupSurfaceDetection();
-    }
-
-    private void readResolutionSettings() {
-        boolean resolutionEnabled = mPreferences.getBoolean("resolution_enabled", false);
-        if (!resolutionEnabled) {
-            Log.d(TAG, "Resolution: using device default");
-            return;
-        }
-
-        int width = mPreferences.getInt("resolution_width", 854);
-        int height = mPreferences.getInt("resolution_height", 480);
-
-        if (width < 320) width = 320;
-        if (height < 240) height = 240;
-
-        mForceWidth = width;
-        mForceHeight = height;
-        Log.d(TAG, "Resolution: configured " + width + "x" + height);
-    }
-
-    private void setupSurfaceDetection() {
-        if (mForceWidth == 0 || mForceHeight == 0) return;
-
-        final ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
-        decorView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
-            @Override
-            public void onGlobalLayout() {
-                SurfaceView surfaceView = findSurfaceViewRecursive(decorView);
-                if (surfaceView != null) {
-                    try {
-                        SurfaceHolder holder = surfaceView.getHolder();
-                        holder.setFixedSize(mForceWidth, mForceHeight);
-                        Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + mForceWidth + ", " + mForceHeight + ") applied via layout listener");
-
-                        // Remove listener after applying
-                        decorView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                    } catch (Exception e) {
-                        Log.e(TAG, "Resolution: Error in layout listener", e);
-                    }
-                }
-            }
-        });
-    }
-
-    // Called from native code when surface is ready
-    public void onNativeSurfaceReady() {
-        if (mForceWidth == 0 || mForceHeight == 0) return;
-
-        runOnUiThread(() -> {
-            try {
-                ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
-                SurfaceView surfaceView = findSurfaceViewRecursive(decorView);
-
-                if (surfaceView != null) {
-                    SurfaceHolder holder = surfaceView.getHolder();
-                    holder.setFixedSize(mForceWidth, mForceHeight);
-                    Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + mForceWidth + ", " + mForceHeight + ") applied via native callback");
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Resolution: Error in native callback", e);
-            }
-        });
-    }
-
-    private SurfaceView findSurfaceViewRecursive(ViewGroup parent) {
-        if (parent == null) return null;
-
-        for (int i = 0; i < parent.getChildCount(); i++) {
-            View child = parent.getChildAt(i);
-            if (child instanceof SurfaceView) {
-                return (SurfaceView) child;
-            }
-            if (child instanceof ViewGroup) {
-                SurfaceView result = findSurfaceViewRecursive((ViewGroup) child);
-                if (result != null) return result;
-            }
-        }
-        return null;
     }
 
     @Override
@@ -257,11 +160,11 @@ public class XashActivity extends SDLActivity {
     protected String[] getArguments() {
         String gamedir = getIntent().getStringExtra("gamedir");
         if (gamedir == null) gamedir = "valve";
-
+        
         String basedir = findBestBasedir(gamedir);
         nativeSetenv("XASH3D_BASEDIR", basedir);
         nativeSetenv("XASH3D_GAME", gamedir);
-
+        
         Log.d(TAG, "Using basedir: " + basedir + " for game: " + gamedir);
 
         String gamelibdir = getIntent().getStringExtra("gamelibdir");
@@ -303,44 +206,7 @@ public class XashActivity extends SDLActivity {
                 argv += " -dll @hl";
         }
 
-        // Handle resolution settings
-        argv = addResolutionSettings(argv);
-
         Log.d(TAG, "Final argv: " + argv);
         return argv.split(" ");
     }
-
-    private String addResolutionSettings(String argv) {
-        // Read resolution settings from global preferences (app_preferences)
-        boolean resolutionEnabled = mPreferences.getBoolean("resolution_enabled", false);
-        if (!resolutionEnabled) {
-            Log.d(TAG, "Resolution settings: using default");
-            return argv;
-        }
-
-        // Custom resolution is always used when enabled (no scale mode anymore)
-        boolean resolutionCustom = true;
-        int width, height;
-
-        // Read custom width/height from preferences
-        width = mPreferences.getInt("resolution_width", 854);
-        height = mPreferences.getInt("resolution_height", 480);
-        Log.d(TAG, "Resolution settings: " + width + "x" + height);
-
-        // Enforce minimum resolution
-        if (width < 320) width = 320;
-        if (height < 240) height = 240;
-
-        // Add resolution to command line arguments
-        if (!argv.contains("-width ")) {
-            argv += " -width " + width;
-        }
-        if (!argv.contains("-height ")) {
-            argv += " -height " + height;
-        }
-
-        Log.d(TAG, "Final resolution: " + width + "x" + height);
-        return argv;
-    }
-
 }

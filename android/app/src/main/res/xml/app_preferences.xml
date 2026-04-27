@@ -23,24 +23,4 @@
             app:summary="set any arguments" />
     </PreferenceCategory>
 
-    <PreferenceCategory app:title="@string/resolution_settings">
-        <SwitchPreferenceCompat
-            app:key="resolution_enabled"
-            app:title="@string/resolution_fixed_title"
-            app:summary="@string/resolution_fixed_summary"
-            app:defaultValue="false" />
-
-        <Preference
-            app:key="resolution_settings"
-            app:title="@string/resolution_custom_title"
-            app:summary="Tap to configure resolution"
-            app:dependency="resolution_enabled" />
-
-        <Preference
-            app:key="resolution_current"
-            app:title="Current Resolution"
-            app:summary="Not set"
-            app:enabled="false" />
-    </PreferenceCategory>
-
 </PreferenceScreen>

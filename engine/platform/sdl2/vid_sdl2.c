@@ -26,69 +26,6 @@ GNU General Public License for more details.
 #include <vrtld.h>
 #endif // XASH_PSVITA
 
-#if XASH_ANDROID
-#include <jni.h>
-
-// Android-specific resolution handling
-// Simple approach: store requested resolution and apply via JNI when ready
-
-static int s_android_res_width = 0;
-static int s_android_res_height = 0;
-static qboolean s_android_surface_called = false;
-
-void Android_SetRequestedResolution( int width, int height )
-{
-	s_android_res_width = width;
-	s_android_res_height = height;
-}
-
-// JNI callback to notify Java that surface is ready
-static void Android_NotifySurfaceReady( void )
-{
-	JNIEnv *env;
-	jobject activity;
-	jclass clazz;
-	jmethodID method;
-
-	env = (JNIEnv *)SDL_AndroidGetJNIEnv();
-	if( !env )
-	{
-		Con_Reportf( S_WARN "%s: Could not get JNI environment\n", __func__ );
-		return;
-	}
-
-	activity = (jobject)SDL_AndroidGetActivity();
-	if( !activity )
-	{
-		Con_Reportf( S_WARN "%s: Could not get activity\n", __func__ );
-		return;
-	}
-
-	clazz = (*env)->GetObjectClass( env, activity );
-	if( !clazz )
-	{
-		Con_Reportf( S_WARN "%s: Could not get activity class\n", __func__ );
-		(*env)->DeleteLocalRef( env, activity );
-		return;
-	}
-
-	method = (*env)->GetMethodID( env, clazz, "onNativeSurfaceReady", "()V" );
-	if( !method )
-	{
-		Con_Reportf( S_WARN "%s: onNativeSurfaceReady method not found\n", __func__ );
-		(*env)->DeleteLocalRef( env, clazz );
-		(*env)->DeleteLocalRef( env, activity );
-		return;
-	}
-
-	(*env)->CallVoidMethod( env, activity, method );
-	Con_Reportf( "%s: Called Java onNativeSurfaceReady()\n", __func__ );
-
-	(*env)->DeleteLocalRef( env, clazz );
-	(*env)->DeleteLocalRef( env, activity );
-}
-#endif // XASH_ANDROID
-
 static vidmode_t *vidmodes = NULL;
 static int num_vidmodes = 0;
 static void GL_SetupAttributes( void );
@@ -599,14 +536,6 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 	const int display_index = VID_GetDisplayIndex( __func__, host.hWnd );
 	int out_width, out_height;
 
-#if XASH_ANDROID
-		// Store the user's requested resolution for later JNI callback
-		// We can't call JNI here as it may cause deadlock during startup
-		s_android_res_width = width;
-		s_android_res_height = height;
-		Con_Reportf( "%s: Stored Android resolution %dx%d\n", __func__, width, height );
-#endif
-
 	switch( window_mode )
 	{
 	case WINDOW_MODE_BORDERLESS:
@@ -619,21 +548,6 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 			// no video mode change to begin with
 			return rserr_invalid_fullscreen;
 		}
-
-#if XASH_ANDROID
-		// On Android, we handle resolution scaling through the Java activity
-		// The Java side reads resolution from preferences and applies it via SurfaceHolder.setFixedSize
-		// This avoids JNI complexity and potential deadlocks
-		Con_Reportf( "%s: Android borderless mode - resolution %dx%d will be applied by Java\n", __func__, width, height );
-
-		// Notify Java that surface is ready (only once)
-		if( !s_android_surface_called )
-		{
-			Android_NotifySurfaceReady();
-			s_android_surface_called = true;
-		}
-#endif
-
 		break;
 	}
 	case WINDOW_MODE_FULLSCREEN:
@@ -661,10 +575,8 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 		}
 
 		// SDL_SetWindowDisplayMode is broken in SDL2, it changes the display mode but doesn't change window size
-		// On Android, don't resize the window - instead set the surface geometry separately
-#if !XASH_ANDROID
 		SDL_SetWindowSize( host.hWnd, got.w, got.h );
-#endif
+
 		break;
 	}
 	case WINDOW_MODE_WINDOWED:
@@ -686,9 +598,7 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 
 			if( SDL_GetDesktopDisplayMode( display_index, &dm ) >= 0 && width >= dm.w && height >= dm.h )
 			{
-#if !XASH_ANDROID
 				SDL_SetWindowSize( host.hWnd, dm.w, dm.h );
-#endif
 				// Con_Printf( "%s: activating fake fullscreen mode\n", __func__ );
 				center_window = true;
 			}
@@ -697,9 +607,7 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 				SDL_Rect r;
 				int x, y;
 
-#if !XASH_ANDROID
 				SDL_SetWindowSize( host.hWnd, width, height );
-#endif
 
 				if( VID_GetDisplayBounds( display_index, host.hWnd, &r ) >= 0 )
 				{
