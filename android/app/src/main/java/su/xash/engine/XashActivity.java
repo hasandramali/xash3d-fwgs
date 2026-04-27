@@ -18,6 +18,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.ViewTreeObserver;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -35,12 +36,16 @@ public class XashActivity extends SDLActivity {
     private static final String TAG = "XashActivity";
     private SharedPreferences mPreferences;
 
+    // Resolution settings
+    private int mForceWidth = 0;
+    private int mForceHeight = 0;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 
-        // Apply resolution to surface BEFORE SDL creates it
-        applyResolutionIfNeeded();
+        // Read resolution settings early
+        readResolutionSettings();
 
         super.onCreate(savedInstanceState);
 
@@ -50,11 +55,12 @@ public class XashActivity extends SDLActivity {
         }
 
         AndroidBug5497Workaround.assistActivity(this);
+
+        // Setup layout listener to detect when SurfaceView is added
+        setupSurfaceDetection();
     }
 
-    // Apply custom resolution by setting surface holder size
-    // This must be called BEFORE SDL initializes the surface
-    private void applyResolutionIfNeeded() {
+    private void readResolutionSettings() {
         boolean resolutionEnabled = mPreferences.getBoolean("resolution_enabled", false);
         if (!resolutionEnabled) {
             Log.d(TAG, "Resolution: using device default");
@@ -67,42 +73,53 @@ public class XashActivity extends SDLActivity {
         if (width < 320) width = 320;
         if (height < 240) height = 240;
 
-        Log.d(TAG, "Resolution: will set surface size to " + width + "x" + height);
-
-        // Store for later application via surface callback
         mForceWidth = width;
         mForceHeight = height;
+        Log.d(TAG, "Resolution: configured " + width + "x" + height);
     }
 
-    // These are used to force surface size
-    private int mForceWidth = 0;
-    private int mForceHeight = 0;
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Apply resolution to surface after SDL creates it
-        applyResolutionToSurface();
-    }
-
-    private void applyResolutionToSurface() {
+    private void setupSurfaceDetection() {
         if (mForceWidth == 0 || mForceHeight == 0) return;
 
-        try {
-            // Find SDL's SurfaceView and apply resolution
-            ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
-            SurfaceView surfaceView = findSurfaceViewRecursive(decorView);
+        final ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
+        decorView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                SurfaceView surfaceView = findSurfaceViewRecursive(decorView);
+                if (surfaceView != null) {
+                    try {
+                        SurfaceHolder holder = surfaceView.getHolder();
+                        holder.setFixedSize(mForceWidth, mForceHeight);
+                        Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + mForceWidth + ", " + mForceHeight + ") applied via layout listener");
 
-            if (surfaceView != null) {
-                SurfaceHolder holder = surfaceView.getHolder();
-                holder.setFixedSize(mForceWidth, mForceHeight);
-                Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + mForceWidth + ", " + mForceHeight + ") applied");
-            } else {
-                Log.w(TAG, "Resolution: Could not find SDL SurfaceView in onResume");
+                        // Remove listener after applying
+                        decorView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Resolution: Error in layout listener", e);
+                    }
+                }
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Resolution: Error applying surface size", e);
-        }
+        });
+    }
+
+    // Called from native code when surface is ready
+    public void onNativeSurfaceReady() {
+        if (mForceWidth == 0 || mForceHeight == 0) return;
+
+        runOnUiThread(() -> {
+            try {
+                ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
+                SurfaceView surfaceView = findSurfaceViewRecursive(decorView);
+
+                if (surfaceView != null) {
+                    SurfaceHolder holder = surfaceView.getHolder();
+                    holder.setFixedSize(mForceWidth, mForceHeight);
+                    Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + mForceWidth + ", " + mForceHeight + ") applied via native callback");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Resolution: Error in native callback", e);
+            }
+        });
     }
 
     private SurfaceView findSurfaceViewRecursive(ViewGroup parent) {

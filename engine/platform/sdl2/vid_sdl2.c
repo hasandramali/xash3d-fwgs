@@ -34,11 +34,58 @@ GNU General Public License for more details.
 
 static int s_android_res_width = 0;
 static int s_android_res_height = 0;
+static qboolean s_android_surface_called = false;
 
 void Android_SetRequestedResolution( int width, int height )
 {
 	s_android_res_width = width;
 	s_android_res_height = height;
+}
+
+// JNI callback to notify Java that surface is ready
+static void Android_NotifySurfaceReady( void )
+{
+	JNIEnv *env;
+	jobject activity;
+	jclass clazz;
+	jmethodID method;
+
+	env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	if( !env )
+	{
+		Con_Reportf( S_WARN "%s: Could not get JNI environment\n", __func__ );
+		return;
+	}
+
+	activity = (jobject)SDL_AndroidGetActivity();
+	if( !activity )
+	{
+		Con_Reportf( S_WARN "%s: Could not get activity\n", __func__ );
+		return;
+	}
+
+	clazz = (*env)->GetObjectClass( env, activity );
+	if( !clazz )
+	{
+		Con_Reportf( S_WARN "%s: Could not get activity class\n", __func__ );
+		(*env)->DeleteLocalRef( env, activity );
+		return;
+	}
+
+	method = (*env)->GetMethodID( env, clazz, "onNativeSurfaceReady", "()V" );
+	if( !method )
+	{
+		Con_Reportf( S_WARN "%s: onNativeSurfaceReady method not found\n", __func__ );
+		(*env)->DeleteLocalRef( env, clazz );
+		(*env)->DeleteLocalRef( env, activity );
+		return;
+	}
+
+	(*env)->CallVoidMethod( env, activity, method );
+	Con_Reportf( "%s: Called Java onNativeSurfaceReady()\n", __func__ );
+
+	(*env)->DeleteLocalRef( env, clazz );
+	(*env)->DeleteLocalRef( env, activity );
 }
 #endif // XASH_ANDROID
 
@@ -578,6 +625,13 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 		// The Java side reads resolution from preferences and applies it via SurfaceHolder.setFixedSize
 		// This avoids JNI complexity and potential deadlocks
 		Con_Reportf( "%s: Android borderless mode - resolution %dx%d will be applied by Java\n", __func__, width, height );
+
+		// Notify Java that surface is ready (only once)
+		if( !s_android_surface_called )
+		{
+			Android_NotifySurfaceReady();
+			s_android_surface_called = true;
+		}
 #endif
 
 		break;
