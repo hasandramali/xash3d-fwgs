@@ -30,103 +30,15 @@ GNU General Public License for more details.
 #include <jni.h>
 
 // Android-specific resolution handling
-// On Android, we use JNI to call back to Java and use SurfaceHolder.setFixedSize
-// This creates a lower-resolution surface that Android automatically scales up
+// Simple approach: store requested resolution and apply via JNI when ready
 
-// Store the user's requested resolution (from command line or console)
-static int s_android_requested_width = 0;
-static int s_android_requested_height = 0;
-static qboolean s_android_resizing = false;
+static int s_android_res_width = 0;
+static int s_android_res_height = 0;
 
 void Android_SetRequestedResolution( int width, int height )
 {
-	s_android_requested_width = width;
-	s_android_requested_height = height;
-	Con_Reportf( "%s: Stored requested resolution %dx%d\n", __func__, width, height );
-}
-
-// JNI function to call Java's setSurfaceSize via SDL's JNI helper
-static void Android_SetSurfaceSize( int width, int height )
-{
-	JNIEnv *env;
-	jobject activity;
-	jclass clazz;
-	jmethodID method;
-
-	// Prevent infinite resize loops
-	if( s_android_resizing )
-	{
-		Con_Reportf( "%s: Already resizing, skipping\n", __func__ );
-		return;
-	}
-
-	env = (JNIEnv *)SDL_AndroidGetJNIEnv();
-	if( !env )
-	{
-		Con_Reportf( S_WARN "%s: Could not get JNI environment\n", __func__ );
-		return;
-	}
-
-	activity = (jobject)SDL_AndroidGetActivity();
-	if( !activity )
-	{
-		Con_Reportf( S_WARN "%s: Could not get activity\n", __func__ );
-		return;
-	}
-
-	clazz = (*env)->GetObjectClass( env, activity );
-	if( !clazz )
-	{
-		Con_Reportf( S_WARN "%s: Could not get activity class\n", __func__ );
-		(*env)->DeleteLocalRef( env, activity );
-		return;
-	}
-
-	method = (*env)->GetMethodID( env, clazz, "setSurfaceSize", "(II)V" );
-	if( !method )
-	{
-		Con_Reportf( S_WARN "%s: setSurfaceSize method not found\n", __func__ );
-		(*env)->DeleteLocalRef( env, clazz );
-		(*env)->DeleteLocalRef( env, activity );
-		return;
-	}
-
-	s_android_resizing = true;
-	(*env)->CallVoidMethod( env, activity, method, width, height );
-	s_android_resizing = false;
-
-	Con_Reportf( "%s: Called Java setSurfaceSize(%d, %d)\n", __func__, width, height );
-
-	(*env)->DeleteLocalRef( env, clazz );
-	(*env)->DeleteLocalRef( env, activity );
-}
-
-static void Android_SetSurfaceGeometry( int width, int height )
-{
-	int use_width = width;
-	int use_height = height;
-
-	// Use the user's requested resolution if available and reasonable
-	if( s_android_requested_width > 0 && s_android_requested_height > 0 )
-	{
-		// If the passed width/height is different from what user requested, use user's
-		if( width != s_android_requested_width || height != s_android_requested_height )
-		{
-			Con_Reportf( "%s: Overriding %dx%d with user requested %dx%d\n",
-				__func__, width, height, s_android_requested_width, s_android_requested_height );
-			use_width = s_android_requested_width;
-			use_height = s_android_requested_height;
-		}
-	}
-
-	// Enforce minimum resolution
-	if( use_width < 320 ) use_width = 320;
-	if( use_height < 240 ) use_height = 240;
-
-	// Call Java to set the surface size via SurfaceHolder.setFixedSize
-	Android_SetSurfaceSize( use_width, use_height );
-
-	Con_Reportf( "%s: Requested surface size %dx%d\n", __func__, use_width, use_height );
+	s_android_res_width = width;
+	s_android_res_height = height;
 }
 #endif // XASH_ANDROID
 
@@ -641,8 +553,11 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 	int out_width, out_height;
 
 #if XASH_ANDROID
-	// Store the user's requested resolution for Android surface geometry
-	Android_SetRequestedResolution( width, height );
+		// Store the user's requested resolution for later JNI callback
+		// We can't call JNI here as it may cause deadlock during startup
+		s_android_res_width = width;
+		s_android_res_height = height;
+		Con_Reportf( "%s: Stored Android resolution %dx%d\n", __func__, width, height );
 #endif
 
 	switch( window_mode )
@@ -659,9 +574,10 @@ static rserr_t VID_SetScreenResolution( int width, int height, window_mode_t win
 		}
 
 #if XASH_ANDROID
-		// On Android, call Java to set the surface size via SurfaceHolder.setFixedSize
-		// This makes Android automatically scale the surface to fill the screen
-		Android_SetSurfaceGeometry( width, height );
+		// On Android, we handle resolution scaling through the Java activity
+		// The Java side reads resolution from preferences and applies it via SurfaceHolder.setFixedSize
+		// This avoids JNI complexity and potential deadlocks
+		Con_Reportf( "%s: Android borderless mode - resolution %dx%d will be applied by Java\n", __func__, width, height );
 #endif
 
 		break;

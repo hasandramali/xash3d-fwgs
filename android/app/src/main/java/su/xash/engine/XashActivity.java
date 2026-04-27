@@ -16,6 +16,10 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+import android.os.Handler;
+import android.os.Looper;
 
 import org.libsdl.app.SDLActivity;
 
@@ -35,6 +39,9 @@ public class XashActivity extends SDLActivity {
     protected void onCreate(Bundle savedInstanceState) {
         mPreferences = PreferenceManager.getDefaultSharedPreferences(this);
 
+        // Apply resolution to surface BEFORE SDL creates it
+        applyResolutionIfNeeded();
+
         super.onCreate(savedInstanceState);
 
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
@@ -45,28 +52,57 @@ public class XashActivity extends SDLActivity {
         AndroidBug5497Workaround.assistActivity(this);
     }
 
-    // Called from native code via JNI to set the surface size
-    // This must be called after SDL creates the surface but before rendering starts
-    public void setSurfaceSize(int width, int height) {
-        runOnUiThread(() -> {
-            try {
-                Log.d(TAG, "setSurfaceSize(" + width + ", " + height + ") called from native");
+    // Apply custom resolution by setting surface holder size
+    // This must be called BEFORE SDL initializes the surface
+    private void applyResolutionIfNeeded() {
+        boolean resolutionEnabled = mPreferences.getBoolean("resolution_enabled", false);
+        if (!resolutionEnabled) {
+            Log.d(TAG, "Resolution: using device default");
+            return;
+        }
 
-                // Find SDL's SurfaceView
-                ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
-                SurfaceView surfaceView = findSurfaceViewRecursive(decorView);
+        int width = mPreferences.getInt("resolution_width", 854);
+        int height = mPreferences.getInt("resolution_height", 480);
 
-                if (surfaceView != null) {
-                    SurfaceHolder holder = surfaceView.getHolder();
-                    holder.setFixedSize(width, height);
-                    Log.d(TAG, "setSurfaceSize: SurfaceHolder.setFixedSize(" + width + ", " + height + ") applied");
-                } else {
-                    Log.e(TAG, "setSurfaceSize: Could not find SDL SurfaceView");
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "setSurfaceSize: Error", e);
+        if (width < 320) width = 320;
+        if (height < 240) height = 240;
+
+        Log.d(TAG, "Resolution: will set surface size to " + width + "x" + height);
+
+        // Store for later application via surface callback
+        mForceWidth = width;
+        mForceHeight = height;
+    }
+
+    // These are used to force surface size
+    private int mForceWidth = 0;
+    private int mForceHeight = 0;
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Apply resolution to surface after SDL creates it
+        applyResolutionToSurface();
+    }
+
+    private void applyResolutionToSurface() {
+        if (mForceWidth == 0 || mForceHeight == 0) return;
+
+        try {
+            // Find SDL's SurfaceView and apply resolution
+            ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
+            SurfaceView surfaceView = findSurfaceViewRecursive(decorView);
+
+            if (surfaceView != null) {
+                SurfaceHolder holder = surfaceView.getHolder();
+                holder.setFixedSize(mForceWidth, mForceHeight);
+                Log.d(TAG, "Resolution: SurfaceHolder.setFixedSize(" + mForceWidth + ", " + mForceHeight + ") applied");
+            } else {
+                Log.w(TAG, "Resolution: Could not find SDL SurfaceView in onResume");
             }
-        });
+        } catch (Exception e) {
+            Log.e(TAG, "Resolution: Error applying surface size", e);
+        }
     }
 
     private SurfaceView findSurfaceViewRecursive(ViewGroup parent) {
