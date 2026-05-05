@@ -203,28 +203,30 @@ static const byte *Mod_SpriteLoadFrame( model_t *mod, const void *pin, mspritefr
 
 static const byte *Mod_SpriteLoadGroup( model_t *mod, const void *pin, mspriteframe_t **ppframe, int framenum )
 {
-	const dspritegroup_t    *pingroup;
+	dspritegroup_t          pingroup;
 	mspritegroup_t          *pspritegroup;
 	const dspriteinterval_t *pin_intervals;
 	float      *poutintervals;
 	int         i, groupsize, numframes;
 	const void *ptemp;
 
-	pingroup = (const dspritegroup_t *)pin;
-	numframes = pingroup->numframes;
+	memcpy( &pingroup, pin, sizeof( pingroup ));
+	numframes = pingroup.numframes;
 
 	groupsize = sizeof( mspritegroup_t ) + ( numframes - 1 ) * sizeof( pspritegroup->frames[0] );
 	pspritegroup = Mem_Calloc( mod->mempool, groupsize );
 	pspritegroup->numframes = numframes;
 
 	*ppframe = (mspriteframe_t *)pspritegroup;
-	pin_intervals = (const dspriteinterval_t *)( pingroup + 1 );
+	pin_intervals = (const dspriteinterval_t *)((const dspritegroup_t *)pin + 1 );
 	poutintervals = Mem_Calloc( mod->mempool, numframes * sizeof( float ));
 	pspritegroup->intervals = poutintervals;
 
 	for( i = 0; i < numframes; i++ )
 	{
-		*poutintervals = pin_intervals->interval;
+		dspriteinterval_t interval;
+		memcpy( &interval, pin_intervals, sizeof( interval ));
+		*poutintervals = interval.interval;
 		if( *poutintervals <= 0.0f )
 			*poutintervals = 1.0f; // set error value
 		poutintervals++;
@@ -237,7 +239,7 @@ static const byte *Mod_SpriteLoadGroup( model_t *mod, const void *pin, mspritefr
 		ptemp = Mod_SpriteLoadFrame( mod, ptemp, &pspritegroup->frames[i], framenum * 10 + i );
 	}
 
-	return ptemp;
+	return (const byte *)ptemp;
 }
 
 void Mod_SpriteLoadTextures( model_t *mod, const void *buffer )

@@ -27,55 +27,62 @@ static const trivertex_t *g_poseverts[MAXALIASFRAMES];
 
 static const void *Mod_LoadAliasFrame( const daliasframe_t *pdaliasframe, maliasframedesc_t *frame, const aliashdr_t *aliashdr )
 {
-	const trivertex_t *pinframe;
+	daliasframe_t pinframe;
+	const trivertex_t *pverts;
 	int i;
 
-	Q_strncpy( frame->name, pdaliasframe->name, sizeof( frame->name ));
+	memcpy( &pinframe, pdaliasframe, sizeof( pinframe ));
+
+	Q_strncpy( frame->name, pinframe.name, sizeof( frame->name ));
 	frame->firstpose = g_posenum;
 	frame->numposes = 1;
 
 	for( i = 0; i < 3; i++ )
 	{
-		frame->bboxmin.v[i] = pdaliasframe->bboxmin.v[i];
-		frame->bboxmax.v[i] = pdaliasframe->bboxmax.v[i];
+		frame->bboxmin.v[i] = pinframe.bboxmin.v[i];
+		frame->bboxmax.v[i] = pinframe.bboxmax.v[i];
 	}
 
-	pinframe = (const trivertex_t *)(pdaliasframe + 1);
+	pverts = (const trivertex_t *)(pdaliasframe + 1);
 
-	g_poseverts[g_posenum] = pinframe;
+	g_poseverts[g_posenum] = pverts;
 	g_posenum++;
 
-	pinframe += aliashdr->numverts;
+	pverts += aliashdr->numverts;
 
-	return (void *)pinframe;
+	return (void *)pverts;
 }
 
 static const void *Mod_LoadAliasGroup( const daliasgroup_t *pingroup, maliasframedesc_t *frame, const aliashdr_t *aliashdr )
 {
+	daliasgroup_t group;
 	const daliasinterval_t *pin_intervals;
 	const void *ptemp;
 	int i, numframes;
 
+	memcpy( &group, pingroup, sizeof( group ));
 	frame->firstpose = g_posenum;
-	frame->numposes = numframes = pingroup->numframes;
+	frame->numposes = numframes = group.numframes;
 
 	for( i = 0; i < 3; i++ )
 	{
-		frame->bboxmin.v[i] = pingroup->bboxmin.v[i];
-		frame->bboxmax.v[i] = pingroup->bboxmax.v[i];
+		frame->bboxmin.v[i] = group.bboxmin.v[i];
+		frame->bboxmax.v[i] = group.bboxmax.v[i];
 	}
 
 	pin_intervals = (const daliasinterval_t *)(pingroup + 1);
 
 	// all the intervals are always equal 0.1 so we don't care about them
-	frame->interval = pin_intervals->interval;
+	daliasinterval_t interval;
+	memcpy( &interval, pin_intervals, sizeof( interval ));
+	frame->interval = interval.interval;
 	pin_intervals += numframes;
 	ptemp = (void *)pin_intervals;
 
 	for( i = 0; i < numframes; i++ )
 	{
 		g_poseverts[g_posenum] = (const trivertex_t *)((const daliasframe_t *)ptemp + 1);
-		ptemp = g_poseverts[g_posenum] + aliashdr->numverts;
+		ptemp = (const trivertex_t *)g_poseverts[g_posenum] + aliashdr->numverts;
 		g_posenum++;
 	}
 
@@ -123,17 +130,23 @@ static const void *Mod_LoadAllSkins( model_t *mod, int numskins, const daliasski
 	// just skipping textures, renderer will take care of them later
 	for( i = 0; i < numskins; i++ )
 	{
-		if( pskintype->type == ALIAS_SKIN_SINGLE )
+		daliasskintype_t skintype;
+		memcpy( &skintype, pskintype, sizeof( skintype ));
+
+		if( skintype.type == ALIAS_SKIN_SINGLE )
 		{
-			const byte *ptexture = (const byte *)&pskintype[1];
+			const byte *ptexture = (const byte *)pskintype + sizeof( daliasskintype_t );
 
 			pskintype = (const daliasskintype_t *)( ptexture + size );
 		}
 		else
 		{
-			const daliasskingroup_t *pinskingroup = (const daliasskingroup_t *)&pskintype[1];
-			const daliasskininterval_t *pinskinintervals = (const daliasskininterval_t *)&pinskingroup[1];
-			const byte *ptexture = (const byte *)&pinskinintervals[pinskingroup->numskins];
+			daliasskingroup_t skingroup;
+			const daliasskingroup_t *pinskingroup = (const daliasskingroup_t *)((const byte *)pskintype + sizeof( daliasskintype_t ));
+			memcpy( &skingroup, pinskingroup, sizeof( skingroup ));
+
+			const daliasskininterval_t *pinskinintervals = (const daliasskininterval_t *)((const byte *)pinskingroup + sizeof( daliasskingroup_t ));
+			const byte *ptexture = (const byte *)pinskinintervals + skingroup.numskins * sizeof( daliasskininterval_t );
 
 			pskintype = (const daliasskintype_t *)( ptexture + size );
 		}
@@ -226,11 +239,12 @@ void Mod_LoadAliasModel( model_t *mod, const void *buffer, qboolean *loaded )
 
 	for( i = 0; i < m_pAliasHeader->numframes; i++ )
 	{
-		aliasframetype_t frametype = pframetype->type;
+		daliasframetype_t dframetype;
+		memcpy( &dframetype, pframetype, sizeof( dframetype ));
 
-		if( frametype == ALIAS_SINGLE )
-			pframetype = (const daliasframetype_t *)Mod_LoadAliasFrame((const daliasframe_t *)&pframetype[1], &m_pAliasHeader->frames[i], m_pAliasHeader );
-		else pframetype = (const daliasframetype_t *)Mod_LoadAliasGroup(( const daliasgroup_t *)&pframetype[1], &m_pAliasHeader->frames[i], m_pAliasHeader );
+		if( dframetype.type == ALIAS_SINGLE )
+			pframetype = (const daliasframetype_t *)Mod_LoadAliasFrame((const daliasframe_t *)((const byte *)pframetype + sizeof( daliasframetype_t )), &m_pAliasHeader->frames[i], m_pAliasHeader );
+		else pframetype = (const daliasframetype_t *)Mod_LoadAliasGroup(( const daliasgroup_t *)((const byte *)pframetype + sizeof( daliasframetype_t )), &m_pAliasHeader->frames[i], m_pAliasHeader );
 	}
 
 	m_pAliasHeader->numposes = g_posenum;
