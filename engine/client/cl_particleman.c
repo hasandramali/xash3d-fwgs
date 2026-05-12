@@ -204,6 +204,7 @@ static void CL_ParticleMan_ParseEntityBlock( const char *classname, const vec3_t
 static void CL_ParticleMan_LoadMapEntities( void )
 {
 	char *entityCursor;
+	char token[2048];
 
 	if( !cl.worldmodel || !cl.worldmodel->entities )
 		return;
@@ -216,7 +217,7 @@ static void CL_ParticleMan_LoadMapEntities( void )
 
 	entityCursor = cl.worldmodel->entities;
 
-	while(( entityCursor = COM_Parse( entityCursor )) != NULL )
+	while(( entityCursor = COM_ParseFile( entityCursor, token, sizeof( token ))) != NULL )
 	{
 		char classname[64] = "";
 		vec3_t origin = { 0, 0, 0 };
@@ -235,23 +236,23 @@ static void CL_ParticleMan_LoadMapEntities( void )
 		float fogEnd = 0.0f;
 		float fogDensity = 0.0f;
 
-		if( com_token[0] != '{' )
+		if( token[0] != '{' )
 			continue;
 
-		while(( entityCursor = COM_Parse( entityCursor )) != NULL )
+		while(( entityCursor = COM_ParseFile( entityCursor, token, sizeof( token ))) != NULL )
 		{
 			char key[256];
 			char value[1024];
 
-			if( com_token[0] == '}' )
+			if( token[0] == '}' )
 				break;
 
-			Q_strcpy( key, com_token );
-			entityCursor = COM_Parse( entityCursor );
-			if( !entityCursor || com_token[0] == '}' )
+			Q_strncpy( key, token, sizeof( key ));
+			entityCursor = COM_ParseFile( entityCursor, token, sizeof( token ));
+			if( !entityCursor || token[0] == '}' )
 				break;
 
-			Q_strcpy( value, com_token );
+			Q_strncpy( value, token, sizeof( value ));
 
 			if( !Q_stricmp( key, "classname" ))
 			{
@@ -658,4 +659,3 @@ void CL_ParticleMan_Draw( qboolean fTrans )
 	}
 	gTriApi.End();
 }
-
