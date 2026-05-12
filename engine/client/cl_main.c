@@ -17,6 +17,7 @@ GNU General Public License for more details.
 #include "client.h"
 #include "net_encode.h"
 #include "cl_tent.h"
+#include "cl_particleman.h"
 #include "input.h"
 #include "vgui_draw.h"
 #include "library.h"
@@ -1597,6 +1598,7 @@ void CL_ClearState( void )
 
 	S_StopAllSounds ( true );
 	CL_ClearEffects ();
+	CL_ParticleMan_Reset ();
 	CL_FreeEdicts ();
 
 	PM_ClearPhysEnts( clgame.pmove );
@@ -3709,6 +3711,7 @@ void CL_Init( void )
 		return; // nothing running on the client
 
 	CL_InitLocal();
+	CL_ParticleMan_Init();
 
 	VID_Init();	// init video
 

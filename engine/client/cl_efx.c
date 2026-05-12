@@ -5,6 +5,7 @@
 #include "customentity.h"
 #include "r_efx.h"
 #include "cl_tent.h"
+#include "cl_particleman.h"
 #include "pm_local.h"
 #define PART_SIZE	Q_max( 0.5f, cl_draw_particles.value )
 
@@ -2154,6 +2155,7 @@ static void CL_FreeDeadBeams( void )
 
 void CL_DrawEFX( float time, qboolean fTrans )
 {
+	CL_ParticleMan_Draw( fTrans );
 	CL_FreeDeadBeams();
 	if( cl_draw_beams.value )
 		ref.dllFuncs.CL_DrawBeams( fTrans, cl_active_beams );

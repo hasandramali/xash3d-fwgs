@@ -15,6 +15,7 @@ GNU General Public License for more details.
 
 #include "common.h"
 #include "client.h"
+#include "cl_particleman.h"
 #include "const.h"
 #include "entity_types.h"
 #include "vgui_draw.h"
@@ -396,6 +397,8 @@ void V_RenderView( void )
 	static ref_params_t	rp;
 	ref_viewpass_t	rvp;
 	int		viewnum = 0;
+
+	CL_ParticleMan_Frame( cl.time );
 
 	if( !cl.video_prepped || ( !ui_renderworld.value && UI_IsVisible() && !cl.background ))
 		return; // still loading
