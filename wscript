@@ -122,6 +122,7 @@ SUBDIRS = [
 REFDLLS = [
 	RefDll('soft', True),
 	RefDll('gl', True),
+	RefDll('vk', False),
 	RefDll('gles1', False, 'NANOGL'),
 	RefDll('gles2', False, 'GLWES'),
 	RefDll('gl4es', False),
