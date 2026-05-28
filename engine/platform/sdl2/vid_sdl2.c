@@ -757,7 +757,9 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 	SetBits( flags, SDL_WINDOW_ALLOW_HIGHDPI );
 #endif // !XASH_WIN32
 
-	if( !glw_state.software )
+	if( glw_state.context_type == REF_VULKAN )
+		SetBits( flags, SDL_WINDOW_VULKAN );
+	else if( !glw_state.software )
 		SetBits( flags, SDL_WINDOW_OPENGL );
 
 	if( vid_maximized.value )
@@ -1005,6 +1007,8 @@ qboolean R_Init_Video( ref_graphic_apis_t type )
 	SDL_SetHint( SDL_HINT_VIDEO_X11_XRANDR, "1" );
 	SDL_SetHint( SDL_HINT_VIDEO_X11_XVIDMODE, "1" );
 
+	glw_state.context_type = type;
+
 	switch( type )
 	{
 	case REF_SOFTWARE:
@@ -1024,7 +1028,11 @@ qboolean R_Init_Video( ref_graphic_apis_t type )
 		}
 		break;
 	case REF_VULKAN:
-		// Vulkan ref handles its own device initialization
+		if( SDL_Vulkan_LoadLibrary( NULL ) < 0 )
+		{
+			Con_Reportf( S_ERROR  "Couldn't initialize Vulkan: %s\n", SDL_GetError());
+			return false;
+		}
 		break;
 	default:
 		Host_Error( "Can't initialize unknown context type %d!\n", type );
