@@ -420,57 +420,88 @@ qboolean R_VkInit( void )
 }
 
 void R_VkShutdown( void ) {
-	XVK_CHECK(vkDeviceWaitIdle(vk_core.device));
-
-	VK_EntityDataClear();
-
-	R_SpriteShutdown();
-
-	if (vk_core.rtx)
+	if (vk_core.device)
 	{
-		VK_LightsShutdown();
-		VK_RayShutdown();
+		XVK_CHECK(vkDeviceWaitIdle(vk_core.device));
+
+		VK_EntityDataClear();
+
+		R_SpriteShutdown();
+
+		if (vk_core.rtx)
+		{
+			VK_LightsShutdown();
+			VK_RayShutdown();
+		}
+
+		R_BrushShutdown();
+		VK_StudioShutdown();
+		R_VkOverlay_Shutdown();
+
+		VK_RenderShutdown();
+		R_GeometryBuffer_Shutdown();
+
+		VK_FrameCtlShutdown();
+
+		R_VkMaterialsShutdown();
+
+		R_TexturesShutdown();
+
+		VK_PipelineShutdown();
+
+		VK_DescriptorShutdown();
+
+		R_VkStagingShutdown();
+
+		R_VkCombuf_Destroy();
+
+		VK_DevMemDestroy();
+
+		vDeviceShutdown();
 	}
-
-	R_BrushShutdown();
-	VK_StudioShutdown();
-	R_VkOverlay_Shutdown();
-
-	VK_RenderShutdown();
-	R_GeometryBuffer_Shutdown();
-
-	VK_FrameCtlShutdown();
-
-	R_VkMaterialsShutdown();
-
-	R_TexturesShutdown();
-
-	VK_PipelineShutdown();
-
-	VK_DescriptorShutdown();
-
-	R_VkStagingShutdown();
-
-	R_VkCombuf_Destroy();
-
-	VK_DevMemDestroy();
-
-	vDeviceShutdown();
 
 #if USE_AFTERMATH
-	VK_AftermathShutdown();
+	if (vk_core.device)
+	{
+		VK_AftermathShutdown();
+	}
 #endif
 
-	if (vk_core.debug_messenger)
+	if (vk_core.instance)
 	{
-		vkDestroyDebugUtilsMessengerEXT(vk_core.instance, vk_core.debug_messenger, NULL);
+		if (vk_core.debug_messenger)
+		{
+			vkDestroyDebugUtilsMessengerEXT(vk_core.instance, vk_core.debug_messenger, NULL);
+			vk_core.debug_messenger = NULL;
+		}
+
+		if (vk_core.surface.present_modes)
+		{
+			Mem_Free(vk_core.surface.present_modes);
+			vk_core.surface.present_modes = NULL;
+		}
+
+		if (vk_core.surface.surface_formats)
+		{
+			Mem_Free(vk_core.surface.surface_formats);
+			vk_core.surface.surface_formats = NULL;
+		}
+
+		if (vk_core.surface.surface)
+		{
+			vkDestroySurfaceKHR(vk_core.instance, vk_core.surface.surface, NULL);
+			vk_core.surface.surface = NULL;
+		}
+
+		vkDestroyInstance(vk_core.instance, NULL);
+		vk_core.instance = NULL;
 	}
 
-	Mem_Free(vk_core.surface.present_modes);
-	Mem_Free(vk_core.surface.surface_formats);
-	vkDestroySurfaceKHR(vk_core.instance, vk_core.surface.surface, NULL);
-	vkDestroyInstance(vk_core.instance, NULL);
-	Mem_FreePool(&vk_core.pool);
+	if (vk_core.pool)
+	{
+		Mem_FreePool(&vk_core.pool);
+		vk_core.pool = NULL;
+	}
 
 	gEngine.R_Free_Video();
 }

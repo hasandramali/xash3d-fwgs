@@ -810,7 +810,7 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 			Con_Printf( "SDL_Renderer %s initialized\n", info.name );
 		}
 	}
-	else
+	else if( glw_state.context_type == REF_GL )
 	{
 		glw_state.context = SDL_GL_CreateContext( host.hWnd );
 
