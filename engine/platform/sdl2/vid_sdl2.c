@@ -14,6 +14,7 @@ GNU General Public License for more details.
 */
 #include <SDL.h>
 #include <SDL_config.h>
+#include <SDL_vulkan.h>
 #include "common.h"
 #include "client.h"
 #include "vid_common.h"
