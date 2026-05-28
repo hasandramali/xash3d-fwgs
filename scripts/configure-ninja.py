@@ -100,6 +100,10 @@ def main():
 	env["ANDROID_NDK"] = args.ndk_root
 	env["BUILD_CMAKE_LIBRARY_OUTPUT_DIRECTORY"] = sdl_out_path
 
+	shader_tools = os.path.join(args.ndk_root, "shader-tools")
+	if os.path.isdir(shader_tools):
+		env["PATH"] = shader_tools + os.pathsep + env.get("PATH", "")
+
 	waf_exec = [sys.executable, waf_path, "configure", "-t", args.wscript_path, "-o", out_path,
 				"-T", waf_build_type, "--android={},,{}".format(abi, args.min_sdk_version), "-s",
 				sdl_path, "--skip-sdl2-sanity-check", "--enable-bundled-deps", "--disable-soft", "--enable-vk", "ninja"]

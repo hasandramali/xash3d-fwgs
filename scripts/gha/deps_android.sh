@@ -42,9 +42,6 @@ echo "Download all needed tools and Android NDK"
 yes | sdkmanager --licenses > /dev/null 2>/dev/null # who even reads licenses? :)
 sdkmanager --install build-tools\;${ANDROID_BUILD_TOOLS_VER} platform-tools platforms\;${ANDROID_PLATFORM_VER} ndk\;${ANDROID_NDK_VERSION}
 
-echo "Install Vulkan shader compiler (glslc)"
-sudo apt-get update -qq
-sudo apt-get install -y -qq glslang-tools
-
 echo "Set Vulkan shader compiler (glslc) from Android NDK"
+echo "$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/shader-tools" >> $GITHUB_PATH
 export PATH=$PATH:$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION/shader-tools
