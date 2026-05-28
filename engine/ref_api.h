@@ -31,6 +31,7 @@ GNU General Public License for more details.
 #include "cvardef.h"
 #include "q_client.h"
 #include "ref_vulkan.h"
+#include "common/ref_device.h"
 
 // RefAPI changelog:
 // 1. Initial release
