@@ -108,8 +108,15 @@ def main():
 				"-T", waf_build_type, "--android={},,{}".format(abi, args.min_sdk_version), "-s",
 				sdl_path, "--skip-sdl2-sanity-check", "--enable-bundled-deps", "--disable-soft", "--enable-vk", "ninja"]
 
-	process = subprocess.Popen(waf_exec, env=env)
-	process.communicate()
+	print("Running: {}".format(" ".join(waf_exec)), file=sys.stderr)
+	sys.stderr.flush()
+	process = subprocess.Popen(waf_exec, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+	out, _ = process.communicate()
+	sys.stderr.buffer.write(out)
+	sys.stderr.flush()
+
+	if process.returncode != 0:
+		sys.exit(process.returncode)
 
 	with io.open(os.path.join(args.configuration_dir, "build.ninja.txt"), "w", encoding="utf-8") as f:
 		f.write(os.path.join(out_path, "build.ninja"))
