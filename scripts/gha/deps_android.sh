@@ -38,6 +38,10 @@ export ANDROID_HOME=$GITHUB_WORKSPACE/sdk
 export PATH=$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/tools/bin
 popd || exit 1
 
+echo "Install Vulkan shader compiler (glslc)"
+sudo apt-get update -qq
+sudo apt-get install -y -qq shaderc
+
 echo "Download all needed tools and Android NDK"
 yes | sdkmanager --licenses > /dev/null 2>/dev/null # who even reads licenses? :)
 sdkmanager --install build-tools\;${ANDROID_BUILD_TOOLS_VER} platform-tools platforms\;${ANDROID_PLATFORM_VER} ndk\;${ANDROID_NDK_VERSION}

@@ -69,9 +69,9 @@ def main():
 	sdl_out_path = os.path.join(args.configuration_dir, "SDL")
 
 	run_cmake(sdl_path, sdl_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root, args.min_sdk_version,
-			  "-DSDL_RENDER=OFF", "-DSDL_POWER=OFF", "-DSDL_VULKAN=OFF", "-DSDL_DISKAUDIO=OFF",
+			  "-DSDL_RENDER=OFF", "-DSDL_POWER=OFF", "-DSDL_VULKAN=ON", "-DSDL_DISKAUDIO=OFF",
 			  "-DSDL_DUMMYAUDIO=OFF", "-DSDL_DUMMYVIDEO=OFF",
-			  "-DSDL_VULKAN=OFF", "-DSDL_OFFSCREEN=OFF", "-DSDL_STATIC=OFF")
+			  "-DSDL_VULKAN=ON", "-DSDL_OFFSCREEN=OFF", "-DSDL_STATIC=OFF")
 
 	# configure hlsdk-portable
 	hlsdk_path = os.path.join(args.wscript_path, "3rdparty", "hlsdk-portable")

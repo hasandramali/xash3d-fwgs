@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "client.h"
 #include "vid_common.h"
 #include "platform_sdl2.h"
+#include "ref_vulkan.h"
 
 // include it after because it breaks definitions in net_api.h wtf
 #include <SDL_syswm.h>
@@ -1315,6 +1316,62 @@ void VID_Info_f( void )
 		Con_Printf( "Window display mode: " S_GREEN "%dx%d@%d" S_DEFAULT "\n", dm.w, dm.h, dm.refresh_rate );
 	else
 		Con_Printf( "Window display mode: " S_RED "fail: " S_DEFAULT "%s\n", SDL_GetError( ));
+}
+
+/*
+=================
+XVK_GetInstanceExtensions
+
+Engine-provided Vulkan bridge: get required instance extensions
+=================
+*/
+int XVK_GetInstanceExtensions( unsigned int count, const char **pNames )
+{
+	if( host.hWnd )
+	{
+		if( !SDL_Vulkan_GetInstanceExtensions( host.hWnd, &count, pNames ))
+		{
+			Con_Reportf( S_ERROR "Couldn't get Vulkan extensions: %s\n", SDL_GetError());
+			return -1;
+		}
+		return (int)count;
+	}
+	return -1;
+}
+
+/*
+=================
+XVK_GetVkGetInstanceProcAddr
+
+Engine-provided Vulkan bridge: get vkGetInstanceProcAddr pointer
+=================
+*/
+void *XVK_GetVkGetInstanceProcAddr( void )
+{
+	return SDL_Vulkan_GetVkGetInstanceProcAddr();
+}
+
+/*
+=================
+XVK_CreateSurface
+
+Engine-provided Vulkan bridge: create a VkSurfaceKHR for the current window
+=================
+*/
+VkSurfaceKHR XVK_CreateSurface( VkInstance instance )
+{
+	VkSurfaceKHR surface;
+
+	if( !host.hWnd )
+		return 0;
+
+	if( !SDL_Vulkan_CreateSurface( host.hWnd, instance, &surface ))
+	{
+		Con_Reportf( S_ERROR "Couldn't create Vulkan surface: %s\n", SDL_GetError());
+		return 0;
+	}
+
+	return surface;
 }
 
 platform_orientation_t Platform_GetDisplayOrientation( void )
