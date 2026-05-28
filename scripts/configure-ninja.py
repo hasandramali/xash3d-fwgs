@@ -97,12 +97,19 @@ def main():
 
 	env = os.environ.copy()
 	env["WAFLOCK"] = ".lock-waf_android_{}_build".format(abi)
+	env["ANDROID_NDK_HOME"] = args.ndk_root
 	env["ANDROID_NDK"] = args.ndk_root
 	env["BUILD_CMAKE_LIBRARY_OUTPUT_DIRECTORY"] = sdl_out_path
 
 	shader_tools = os.path.join(args.ndk_root, "shader-tools")
 	if os.path.isdir(shader_tools):
 		env["PATH"] = shader_tools + os.pathsep + env.get("PATH", "")
+
+	vulkan_sdk = os.environ.get("VULKAN_SDK")
+	if vulkan_sdk:
+		vulkan_bin = os.path.join(vulkan_sdk, "bin")
+		if os.path.isdir(vulkan_bin):
+			env["PATH"] = vulkan_bin + os.pathsep + env.get("PATH", "")
 
 	waf_exec = [sys.executable, waf_path, "configure", "-t", args.wscript_path, "-o", out_path,
 				"-T", waf_build_type, "--android={},,{}".format(abi, args.min_sdk_version), "-s",
