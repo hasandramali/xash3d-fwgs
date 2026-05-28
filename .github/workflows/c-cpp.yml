@@ -70,7 +70,6 @@ jobs:
     env:
       SDL_VERSION: 2.32.10
       FFMPEG_VERSION: 8.1
-      VULKAN_SDK_VERSION: 1.4.321.1
       GH_CPU_ARCH: ${{ matrix.targetarch }}
       GH_CPU_OS: ${{ matrix.targetos }}
       GH_CROSSCOMPILING: ${{ matrix.cross }}
@@ -81,14 +80,6 @@ jobs:
         submodules: recursive
     - name: Install dependencies
       run: bash scripts/gha/deps_${{ matrix.targetos }}.sh
-    - name: Install Vulkan SDK
-      if: matrix.targetos == 'android'
-      uses: jakoch/install-vulkan-sdk-action@v1
-      with:
-        vulkan_version: ${{ env.VULKAN_SDK_VERSION }}
-        install_runtime: false
-        cache: true
-        stripdown: true
     - name: Build engine
       env:
         FWGS_PFX_PASSWORD: ${{ secrets.FWGS_PFX_PASSWORD }}
