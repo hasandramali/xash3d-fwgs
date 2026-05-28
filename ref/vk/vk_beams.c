@@ -551,7 +551,7 @@ static void R_DrawCylinder( vec3_t source, vec3_t delta, float width, float scal
 static void R_DrawBeamFollow( BEAM *pbeam, float frametime, const vec4_t color )
 {
 	particle_t	*pnew, *particles;
-	float		fraction, div, vStep;
+	float		fraction, div, vLast, vStep;
 	vec3_t		last1, last2, tmp, screen;
 	vec3_t		delta, screenLast, normal;
 

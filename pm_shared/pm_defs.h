@@ -17,6 +17,7 @@
 #define PM_DEFS_H
 
 #include "q_client.h"
+#include "pmove.h"
 
 #define MAX_PHYSENTS	600		// Must have room for all entities in the world.
 #define MAX_MOVEENTS	64

@@ -6,7 +6,6 @@
 #include "vk_light.h"
 
 #include "pm_defs.h"
-#include "pmtrace.h"
 
 static const char *renderModeName( int rendermode ) {
 	switch (rendermode) {
