@@ -553,6 +553,7 @@ static void R_DrawBeamFollow( BEAM *pbeam, float frametime, const vec4_t color )
 	particle_t	*pnew, *particles;
 	float		fraction, div, vLast, vStep;
 	vec3_t		last1, last2, tmp, screen;
+	(void)vLast;
 	vec3_t		delta, screenLast, normal;
 
 	gEngine.R_FreeDeadParticles( &pbeam->particles );

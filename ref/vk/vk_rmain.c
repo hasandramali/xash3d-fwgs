@@ -117,10 +117,11 @@ static void Mod_UnloadTextures( model_t *mod )
 	}
 }
 
-static qboolean Mod_ProcessRenderData( model_t *mod, qboolean create, const byte *buffer )
+static qboolean Mod_ProcessRenderData( model_t *mod, qboolean create, const byte *buffer, size_t buffersize )
 {
 	qboolean loaded = true;
 
+	(void)buffersize;
 	DEBUG("%s(%s, create=%d)", __FUNCTION__, mod->name, create);
 
 	// TODO does this ever happen?
@@ -220,13 +221,12 @@ static const char *getParmName(int parm)
 	case PARM_TEX_MEMORY: return "PARM_TEX_MEMORY";
 	case PARM_DELUXEDATA: return "PARM_DELUXEDATA";
 	case PARM_SHADOWDATA: return "PARM_SHADOWDATA";
-	case PARM_MODERNFLASHLIGHT: return "PARM_MODERNFLASHLIGHT";
 	case PARM_TEX_FILTERING: return "PARM_TEX_FILTERING";
 	default: return "UNKNOWN";
 	}
 }
 
-static int VK_RefGetParm( int parm, int arg )
+static intptr_t VK_RefGetParm( int parm, int arg )
 {
 	// TODO all PARM_TEX handle in r_texture internally
 	switch(parm){
@@ -249,15 +249,10 @@ static int VK_RefGetParm( int parm, int arg )
 	case PARM_TEX_MEMORY:
 	*/
 		return R_TexturesGetParm( parm, arg );
-	case PARM_MODERNFLASHLIGHT:
-		if (CVAR_TO_BOOL( rt_enable )) {
-			return true;
-		}
-		return false;
 	case PARM_WIDESCREEN:
 		return gpGlobals->wideScreen;
 	case PARM_FULLSCREEN:
-		return gpGlobals->fullScreen;
+		return gpGlobals->window_mode != WINDOW_MODE_WINDOWED;
 	case PARM_SCREEN_WIDTH:
 		return gpGlobals->width;
 	case PARM_SCREEN_HEIGHT:

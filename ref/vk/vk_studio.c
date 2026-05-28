@@ -2387,7 +2387,7 @@ static model_t *R_StudioSetupPlayerModel( int index )
 	state = &g_studio.player_models[index];
 
 	// g-cont: force for "dev-mode", non-local games and menu preview
-	if(( gpGlobals->developer || !ENGINE_GET_PARM( PARM_LOCAL_GAME ) || !RI.drawWorld ) && info->model[0] )
+	if(( gpGlobals->developer || !ENGINE_GET_PARM( PARM_SINGLEPLAYER_GAME ) || !RI.drawWorld ) && info->model[0] )
 	{
 		if( Q_strcmp( state->name, info->model ))
 		{
@@ -3500,7 +3500,7 @@ static void pfnMod_LoadCacheFile( const char *path, struct cache_user_s *cu )
 
 static cvar_t *pfnGetCvarPointer( const char *name )
 {
-	return (cvar_t*)gEngine.pfnGetCvarPointer( name, 0 );
+	return (cvar_t*)gEngine.pfnGetCvarPointer( name );
 }
 
 static void *pfnMod_Calloc( int number, size_t size )
@@ -3617,11 +3617,9 @@ void CL_InitStudioAPI( void )
 	pStudioDraw = &gStudioDraw;
 
 	// trying to grab them from client.dll
-	cl_righthand = gEngine.pfnGetCvarPointer( "cl_righthand", 0 );
+	cl_righthand = gEngine.pfnGetCvarPointer( "cl_righthand" );
 
 	// Xash will be used internal StudioModelRenderer
-	if( gEngine.pfnGetStudioModelInterface( STUDIO_INTERFACE_VERSION, &pStudioDraw, &gStudioAPI ))
-		return;
 
 	// NOTE: we always return true even if game interface was not correct
 	// because we need Draw our StudioModels
