@@ -3555,7 +3555,7 @@ static float ***pfnStudioGetRotationMatrix( void )
 	return PTR_CAST(float **, g_studio.rotationmatrix);
 }
 
-static engine_studio_api_t gStudioAPI =
+static __attribute__((unused)) engine_studio_api_t gStudioAPI =
 {
 	pfnMod_Calloc,
 	pfnMod_CacheCheck,

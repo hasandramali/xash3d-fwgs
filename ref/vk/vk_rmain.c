@@ -22,6 +22,9 @@
 
 #include <memory.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 #define LOG_MODULE rmain
 
 r_globals_t globals = {0};
@@ -577,3 +580,4 @@ int EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t *engfuncs, 
 
 	return REF_API_VERSION;
 }
+#pragma GCC diagnostic pop
