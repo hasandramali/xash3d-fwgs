@@ -360,6 +360,8 @@ uint32_t R_VkImageFormatTexelBlockSize( VkFormat format ) {
 		case VK_FORMAT_UNDEFINED:
 		case VK_FORMAT_MAX_ENUM:
 			return 4;
+		default:
+			return 4;
 	}
 
 	return 4;
@@ -460,6 +462,8 @@ static VkComponentMapping componentMappingForFormat( VkFormat format, qboolean i
 		case VK_FORMAT_BC5_SNORM_BLOCK:
 			map.b = VK_COMPONENT_SWIZZLE_R;
 			map.a = VK_COMPONENT_SWIZZLE_G;
+			break;
+		default:
 			break;
 	}
 

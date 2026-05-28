@@ -19,10 +19,8 @@
 #include "triangleapi.h"
 #include "studio.h"
 #include "pm_local.h"
-#include "pmtrace.h"
 #include "protocol.h"
 #include "enginefeatures.h"
-#include "pm_movevars.h"
 
 #include <memory.h>
 #include <stdlib.h>

@@ -3,7 +3,6 @@
 #include "vk_math.h"
 
 #include "ref_params.h"
-#include "pm_movevars.h"
 
 vk_global_camera_t g_camera;
 

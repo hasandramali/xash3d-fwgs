@@ -216,7 +216,7 @@ static void R_DecalComputeBasis( msurface_t *surf, int flags, vec3_t textureSpac
 	vec3_t	surfaceNormal = {};
 
 	// setup normal
-	if (surf->plane->normal) {
+	if (surf->plane) {
 		if( surf->flags & SURF_PLANEBACK )
 			VectorNegate( surf->plane->normal, surfaceNormal );
 		else VectorCopy( surf->plane->normal, surfaceNormal );
@@ -1148,7 +1148,7 @@ static qboolean R_DecalUnProject( decal_t *pdecal, decallist_t *entry )
 
 	// Grab surface plane equation
 	// TODO: calculate pdecal->psurface->plane->normal
-	if (pdecal->psurface->plane->normal) {
+	if (pdecal->psurface->plane) {
 		if( pdecal->psurface->flags & SURF_PLANEBACK )
 			VectorNegate( pdecal->psurface->plane->normal, entry->impactPlaneNormal );
 		else VectorCopy( pdecal->psurface->plane->normal, entry->impactPlaneNormal );

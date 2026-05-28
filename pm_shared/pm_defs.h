@@ -16,6 +16,8 @@
 #ifndef PM_DEFS_H
 #define PM_DEFS_H
 
+#include "q_client.h"
+
 #define MAX_PHYSENTS	600		// Must have room for all entities in the world.
 #define MAX_MOVEENTS	64
 #define MAX_CLIP_PLANES	5
