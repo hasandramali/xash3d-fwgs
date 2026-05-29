@@ -409,6 +409,46 @@ static void	TriCullFace( TRICULLSTYLE mode )
 	PRINT_NOT_IMPLEMENTED();
 }
 
+static void TriTexCoord2f( float s, float t )
+{
+	PRINT_NOT_IMPLEMENTED();
+}
+
+static void R_FillTriAPI( triangleapi_t *api )
+{
+	api->TexCoord2f    = TriTexCoord2f;
+	api->Fog           = TriFog;
+	api->ScreenToWorld = R_ScreenToWorld;
+	api->GetMatrix     = TriGetMatrix;
+	api->FogParams     = TriFogParams;
+}
+
+static void R_FillRenderAPI( render_api_t *api )
+{
+	(void)api;
+}
+
+static void GL_UpdateTexture( int texnum, int cols, int rows, int width, int height, const byte *buffer, pixformat_t fmt )
+{
+	(void)texnum; (void)cols; (void)rows; (void)width; (void)height; (void)buffer; (void)fmt;
+}
+
+static qboolean R_StudioFillAPI( struct engine_studio_api_s *api, struct r_studio_interface_s *pDefaultDraw )
+{
+	(void)api; (void)pDefaultDraw;
+	return false;
+}
+
+static void R_StudioSetDrawInterface( struct r_studio_interface_s *pDraw )
+{
+	(void)pDraw;
+}
+
+static void R_SetDetailScaleForTexture( int texture, float xScale, float yScale )
+{
+	(void)texture; (void)xScale; (void)yScale;
+}
+
 static const byte* R_TextureData_UNUSED( unsigned int texnum )
 {
 	PRINT_NOT_IMPLEMENTED_ARGS("texnum=%d", texnum);
@@ -531,8 +571,8 @@ static const ref_interface_t gReffuncs =
 	.R_ClearAllDecals = R_ClearAllDecals,
 	.R_StudioEstimateFrame = R_StudioEstimateFrame,
 	.R_StudioLerpMovement = R_StudioLerpMovement,
-	.R_StudioFillAPI = NULL,
-	.R_StudioSetDrawInterface = NULL,
+	.R_StudioFillAPI = R_StudioFillAPI,
+	.R_StudioSetDrawInterface = R_StudioSetDrawInterface,
 	.R_SetSkyCloudsTextures = R_SetSkyCloudsTextures,
 	.GL_SubdivideSurface = GL_SubdivideSurface,
 	.CL_RunLightStyles = VK_RunLightStyles,
@@ -543,7 +583,7 @@ static const ref_interface_t gReffuncs =
 	.CL_DrawBeams = CL_DrawBeams,
 	.RefGetParm = VK_RefGetParm,
 	.R_GetDetailScaleForTexture = GetDetailScaleForTexture,
-	.R_SetDetailScaleForTexture = NULL,
+	.R_SetDetailScaleForTexture = R_SetDetailScaleForTexture,
 	.GL_CreateTexture = R_CreateTexture,
 	.GL_FindTexture = R_TextureFindByName,
 	.GL_TextureName = R_TextureGetNameByIndex,
@@ -551,7 +591,7 @@ static const ref_interface_t gReffuncs =
 	.GL_LoadTexture = R_TextureUploadFromFile,
 	.GL_FreeTexture = R_TextureFree,
 	.R_OverrideTextureSourceSize = R_OverrideTextureSourceSize,
-	.GL_UpdateTexture = NULL,
+	.GL_UpdateTexture = GL_UpdateTexture,
 	.GL_Bind = GL_Bind,
 	.GL_RenderFrame = VK_RenderFrame,
 	.GL_OrthoBounds = GL_OrthoBounds,
@@ -567,8 +607,8 @@ static const ref_interface_t gReffuncs =
 	.Vertex3fv = TriVertex3fv,
 	.Vertex3f = TriVertex3f,
 	.CullFace = TriCullFace,
-	.R_FillRenderAPI = NULL,
-	.R_FillTriAPI = NULL,
+	.R_FillRenderAPI = R_FillRenderAPI,
+	.R_FillTriAPI = R_FillTriAPI,
 	.VGUI_SetupDrawing = VGUI_SetupDrawing,
 	.pfnGetVulkanRenderDevice = pfnGetRenderDevice,
 };
