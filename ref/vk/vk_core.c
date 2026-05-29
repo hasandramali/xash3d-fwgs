@@ -472,7 +472,7 @@ void R_VkShutdown( void ) {
 		if (vk_core.debug_messenger)
 		{
 			vkDestroyDebugUtilsMessengerEXT(vk_core.instance, vk_core.debug_messenger, NULL);
-			vk_core.debug_messenger = NULL;
+			vk_core.debug_messenger = VK_NULL_HANDLE;
 		}
 
 		if (vk_core.surface.present_modes)
@@ -490,11 +490,11 @@ void R_VkShutdown( void ) {
 		if (vk_core.surface.surface)
 		{
 			vkDestroySurfaceKHR(vk_core.instance, vk_core.surface.surface, NULL);
-			vk_core.surface.surface = NULL;
+			vk_core.surface.surface = VK_NULL_HANDLE;
 		}
 
 		vkDestroyInstance(vk_core.instance, NULL);
-		vk_core.instance = NULL;
+		vk_core.instance = VK_NULL_HANDLE;
 	}
 
 	if (vk_core.pool)
