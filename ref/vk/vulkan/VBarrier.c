@@ -321,15 +321,59 @@ void barrierCommit(Barrier *bar, struct vk_combuf_s * combuf) {
 	if (bar->buffers.count == 0 && bar->images.count == 0)
 		return;
 
-	vkCmdPipelineBarrier2(combuf->cmdbuf, &(VkDependencyInfo) {
-		.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-		.pNext = NULL,
-		.dependencyFlags = 0,
-		.bufferMemoryBarrierCount = bar->buffers.count,
-		.pBufferMemoryBarriers = bar->buffers.items,
-		.imageMemoryBarrierCount = bar->images.count,
-		.pImageMemoryBarriers = bar->images.items,
-	});
+	if (vkCmdPipelineBarrier2) {
+		vkCmdPipelineBarrier2(combuf->cmdbuf, &(VkDependencyInfo) {
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.pNext = NULL,
+			.dependencyFlags = 0,
+			.bufferMemoryBarrierCount = bar->buffers.count,
+			.pBufferMemoryBarriers = bar->buffers.items,
+			.imageMemoryBarrierCount = bar->images.count,
+			.pImageMemoryBarriers = bar->images.items,
+		});
+	} else {
+		VkPipelineStageFlags src_stage = 0;
+		for (int i = 0; i < bar->images.count; ++i)
+			src_stage |= (VkPipelineStageFlags)bar->images.items[i].srcStageMask;
+		for (int i = 0; i < bar->buffers.count; ++i)
+			src_stage |= (VkPipelineStageFlags)bar->buffers.items[i].srcStageMask;
+
+		VkBufferMemoryBarrier bufs[MAX_BUFFER_BARRIERS];
+		for (int i = 0; i < bar->buffers.count; ++i) {
+			bufs[i] = (VkBufferMemoryBarrier) {
+				.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+				.srcAccessMask = (VkAccessFlags)bar->buffers.items[i].srcAccessMask,
+				.dstAccessMask = (VkAccessFlags)bar->buffers.items[i].dstAccessMask,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.buffer = bar->buffers.items[i].buffer,
+				.offset = bar->buffers.items[i].offset,
+				.size = bar->buffers.items[i].size,
+			};
+		}
+
+		VkImageMemoryBarrier imgs[MAX_IMAGE_BARRIERS];
+		for (int i = 0; i < bar->images.count; ++i) {
+			imgs[i] = (VkImageMemoryBarrier) {
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				.srcAccessMask = (VkAccessFlags)bar->images.items[i].srcAccessMask,
+				.dstAccessMask = (VkAccessFlags)bar->images.items[i].dstAccessMask,
+				.oldLayout = bar->images.items[i].oldLayout,
+				.newLayout = bar->images.items[i].newLayout,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = bar->images.items[i].image,
+				.subresourceRange = bar->images.items[i].subresourceRange,
+			};
+		}
+
+		vkCmdPipelineBarrier(combuf->cmdbuf,
+			src_stage, (VkPipelineStageFlags)bar->stage,
+			VK_DEPENDENCY_BY_REGION_BIT,
+			0, NULL,
+			bar->buffers.count, bar->buffers.count > 0 ? bufs : NULL,
+			bar->images.count, bar->images.count > 0 ? imgs : NULL);
+	}
 
 	bar->stage = 0;
 }
