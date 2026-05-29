@@ -409,11 +409,6 @@ static void	TriCullFace( TRICULLSTYLE mode )
 	PRINT_NOT_IMPLEMENTED();
 }
 
-static void TriTexCoord2f( float s, float t )
-{
-	PRINT_NOT_IMPLEMENTED();
-}
-
 static void R_FillTriAPI( triangleapi_t *api )
 {
 	api->TexCoord2f    = TriTexCoord2f;
