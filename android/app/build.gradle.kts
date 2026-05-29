@@ -89,6 +89,7 @@ extensions.configure<ApplicationExtension> {
 	sourceSets {
 		getByName("main") {
 			assets.directories.add("../../3rdparty/extras/xash-extras")
+			assets.directories.add("../../ref/vk/shaders")
 			java.directories.add("../../3rdparty/SDL/android-project/app/src/main/java")
 		}
 	}

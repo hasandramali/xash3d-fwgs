@@ -14,6 +14,7 @@
 from __future__ import print_function
 
 import argparse
+import glob
 import os
 import subprocess
 import sys
@@ -110,6 +111,16 @@ def main():
 		vulkan_bin = os.path.join(vulkan_sdk, "bin")
 		if os.path.isdir(vulkan_bin):
 			env["PATH"] = vulkan_bin + os.pathsep + env.get("PATH", "")
+
+	# compile vulkan shaders into ref/vk/shaders/ so they become APK assets
+	shaders_dir = os.path.join(args.wscript_path, "ref", "vk", "shaders")
+	try:
+		subprocess.check_output(["glslc", "--version"], env=env, stderr=subprocess.STDOUT)
+		for src in glob.glob(os.path.join(shaders_dir, "*.vert")) + glob.glob(os.path.join(shaders_dir, "*.frag")):
+			dst = src + ".spv"
+			subprocess.check_call(["glslc", "-g", "-O", src, "-o", dst], env=env)
+	except (subprocess.CalledProcessError, FileNotFoundError):
+		pass
 
 	waf_exec = [sys.executable, waf_path, "configure", "-t", args.wscript_path, "-o", out_path,
 				"-T", waf_build_type, "--android={},,{}".format(abi, args.min_sdk_version), "-s",

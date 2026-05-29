@@ -417,10 +417,21 @@ static const byte* R_TextureData_UNUSED( unsigned int texnum )
 	return NULL;
 }
 
-static int R_CreateTexture_UNUSED( const char *name, int width, int height, const void *buffer, texFlags_t flags )
+static int R_CreateTexture( const char *name, int width, int height, const void *buffer, texFlags_t flags )
 {
-	PRINT_NOT_IMPLEMENTED_ARGS("name=%s width=%d height=%d buffer=%p flags=%08x", name, width, height, buffer, flags);
-	return 0;
+	rgbdata_t pic = {
+		.width = width,
+		.height = height,
+		.depth = 1,
+		.type = PF_RGBA_32,
+		.flags = 0,
+		.encode = 0,
+		.numMips = 1,
+		.palette = NULL,
+		.buffer = (byte *)buffer,
+		.size = width * height * 4,
+	};
+	return R_TextureUploadFromBuffer( name, &pic, flags, false );
 }
 
 static int R_LoadTextureArray_UNUSED( const char **names, int flags )
@@ -533,7 +544,7 @@ static const ref_interface_t gReffuncs =
 	.RefGetParm = VK_RefGetParm,
 	.R_GetDetailScaleForTexture = GetDetailScaleForTexture,
 	.R_SetDetailScaleForTexture = NULL,
-	.GL_CreateTexture = R_CreateTexture_UNUSED,
+	.GL_CreateTexture = R_CreateTexture,
 	.GL_FindTexture = R_TextureFindByName,
 	.GL_TextureName = R_TextureGetNameByIndex,
 	.GL_TextureData = R_TextureData_UNUSED,

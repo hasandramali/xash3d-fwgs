@@ -362,6 +362,8 @@ cmake-build-*
 3rdparty/hlsdk-portable
 !scripts/build-ninja.py
 
+xash-vulkan/
+
 # slop
 CLAUDE.md
 AGENTS.md
