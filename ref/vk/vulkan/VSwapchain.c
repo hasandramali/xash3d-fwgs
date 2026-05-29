@@ -70,17 +70,10 @@ static qboolean recreateSwapchainIfNeeded( qboolean force ) {
 	VkSurfaceCapabilitiesKHR surface_caps;
 	XVK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(v_device_info.physical_device, vk_core.surface.surface, &surface_caps));
 
-	new_width = surface_caps.currentExtent.width;
-	new_height = surface_caps.currentExtent.height;
-
-	if (new_width == 0xfffffffful || new_width == 0)
-		new_width = gpGlobals->width;
-
-	if (new_height == 0xfffffffful || new_height == 0)
-		new_height = gpGlobals->height;
-
-	new_width = clamp_u32(new_width, surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
-	new_height = clamp_u32(new_height, surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height);
+	// Use engine-requested (landscape) dimensions, ignoring currentExtent which
+	// may report portrait on mobile. Clamp to surface capabilities.
+	new_width = clamp_u32(gpGlobals->width, surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
+	new_height = clamp_u32(gpGlobals->height, surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height);
 
 	if (new_height == 0 || new_width == 0) {
 		return false;
@@ -98,13 +91,13 @@ static qboolean recreateSwapchainIfNeeded( qboolean force ) {
 			.pNext = NULL,
 			.surface = vk_core.surface.surface,
 			.imageFormat = g_swapchain.image_format,
-			.imageColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR, // TODO get from surface_formats
+			.imageColorSpace = vk_core.surface.swapchain_colorspace,
 			.imageExtent.width = g_swapchain.width,
 			.imageExtent.height = g_swapchain.height,
 			.imageArrayLayers = 1,
 			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | (vk_core.rtx ? /* TODO is it used really? why not? */ VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0),
 			.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-			.preTransform = surface_caps.currentTransform,
+			.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
 			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 			.presentMode = VK_PRESENT_MODE_FIFO_KHR, // TODO caps, MAILBOX is better
 			//.presentMode = VK_PRESENT_MODE_MAILBOX_KHR, // TODO caps, MAILBOX is better
