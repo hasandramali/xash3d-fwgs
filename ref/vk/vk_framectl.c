@@ -112,7 +112,7 @@ static VkRenderPass createRenderPass( VkFormat depth_format, qboolean ray_tracin
 	VkRenderPass render_pass;
 
 	const VkAttachmentDescription attachments[] = {{
-		.format = SWAPCHAIN_FORMAT,
+		.format = vk_core.surface.swapchain_format,
 		.samples = VK_SAMPLE_COUNT_1_BIT,
 		.loadOp = ray_tracing ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR /* TODO: prod renderer should not care VK_ATTACHMENT_LOAD_OP_DONT_CARE */,
 		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -573,7 +573,7 @@ void VK_FrameCtlShutdown( void ) {
 static qboolean canBlitFromSwapchainToFormat( VkFormat dest_format ) {
 	VkFormatProperties props;
 
-	vkGetPhysicalDeviceFormatProperties(v_device_info.physical_device, SWAPCHAIN_FORMAT, &props);
+	vkGetPhysicalDeviceFormatProperties(v_device_info.physical_device, vk_core.surface.swapchain_format, &props);
 	if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT)) {
 		gEngine.Con_Reportf(S_WARN "Swapchain source format doesn't support blit\n");
 		return false;
@@ -720,7 +720,7 @@ static rgbdata_t *R_VkReadPixels( void ) {
 			r_shot->buffer = Mem_Malloc( r_temppool, r_shot->size );
 
 			if (!blit) {
-				if (dest_format != VK_FORMAT_R8G8B8A8_UNORM || SWAPCHAIN_FORMAT != VK_FORMAT_B8G8R8A8_UNORM) {
+				if (dest_format != VK_FORMAT_R8G8B8A8_UNORM || vk_core.surface.swapchain_format != VK_FORMAT_B8G8R8A8_UNORM) {
 					gEngine.Con_Printf(S_WARN "Don't have a blit function for this format pair, will save as-is without conversion; expect image to look wrong\n");
 					blit = true;
 				} else {

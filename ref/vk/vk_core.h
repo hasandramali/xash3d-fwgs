@@ -38,6 +38,8 @@ typedef struct vulkan_core_s {
 		VkSurfaceKHR surface;
 		uint32_t num_surface_formats;
 		VkSurfaceFormatKHR *surface_formats;
+		VkFormat swapchain_format;
+		VkColorSpaceKHR swapchain_colorspace;
 
 		uint32_t num_present_modes;
 		VkPresentModeKHR *present_modes;

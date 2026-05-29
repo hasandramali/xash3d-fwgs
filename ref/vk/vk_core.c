@@ -249,6 +249,19 @@ static qboolean initSurface( void )
 			R_VkColorSpaceName(vk_core.surface.surface_formats[i].colorSpace), vk_core.surface.surface_formats[i].colorSpace);
 	}
 
+	// Pick first available surface format (Mali G68 doesn't support B8G8R8A8)
+	if (vk_core.surface.num_surface_formats > 0)
+	{
+		vk_core.surface.swapchain_format = vk_core.surface.surface_formats[0].format;
+		vk_core.surface.swapchain_colorspace = vk_core.surface.surface_formats[0].colorSpace;
+	}
+	else
+	{
+		gEngine.Con_Printf(S_ERROR "No surface formats available, using fallback\n");
+		vk_core.surface.swapchain_format = VK_FORMAT_B8G8R8A8_UNORM;
+		vk_core.surface.swapchain_colorspace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	}
+
 	return true;
 }
 

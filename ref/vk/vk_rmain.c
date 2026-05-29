@@ -42,7 +42,7 @@ static qboolean R_SetDisplayTransform( ref_screen_rotation_t rotate, int x, int 
 {
 	PRINT_NOT_IMPLEMENTED_ARGS("(%d, %d, %d, %f, %f)", rotate, x, y, scale_x, scale_y);
 
-	return true;
+	return false;
 }
 
 static void GL_SetupAttributes( int safegl )

@@ -199,7 +199,7 @@ qboolean R_VkSwapchainInit( VkRenderPass render_pass, VkFormat depth_format ) {
 */
 	//g_swapchain.image_format = VK_FORMAT_B8G8R8A8_SRGB;
 
-	g_swapchain.image_format = VK_FORMAT_B8G8R8A8_UNORM; // TODO get from surface_formats
+	g_swapchain.image_format = vk_core.surface.swapchain_format;
 	g_swapchain.render_pass = render_pass;
 	g_swapchain.depth_format = depth_format;
 
