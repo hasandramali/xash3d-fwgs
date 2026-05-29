@@ -500,7 +500,7 @@ void R_VkShutdown( void ) {
 	if (vk_core.pool)
 	{
 		Mem_FreePool(&vk_core.pool);
-		vk_core.pool = NULL;
+		vk_core.pool = 0;
 	}
 
 	gEngine.R_Free_Video();
