@@ -761,7 +761,13 @@ VkDescriptorSet R_VkTextureGetDescriptorUnorm( uint index ) {
 	const vk_texture_t *const tex = R_TextureGetByIndex(index);
 	if (tex->vk.descriptor_unorm == VK_NULL_HANDLE) {
 		WARN("Texture %d(\"%s\") has NULL descriptor_unorm, using default", index, TEX_NAME(tex));
-		return R_TextureGetByIndex(tglob.defaultTexture)->vk.descriptor_unorm;
+		if (tglob.defaultTexture > 0 && tglob.defaultTexture < MAX_TEXTURES) {
+			const vk_texture_t *const default_tex = R_TextureGetByIndex(tglob.defaultTexture);
+			if (default_tex->vk.descriptor_unorm != VK_NULL_HANDLE)
+				return default_tex->vk.descriptor_unorm;
+		}
+		WARN("defaultTexture also has NULL descriptor_unorm, returning VK_NULL_HANDLE");
+		return VK_NULL_HANDLE;
 	}
 	return tex->vk.descriptor_unorm;
 }

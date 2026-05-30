@@ -15,6 +15,7 @@ GNU General Public License for more details.
 
 #include "vk_rpart.h"
 #include "vk_triapi.h"
+#include "vk_logs.h"
 #include "camera.h"
 #include "r_textures.h" // tglob.particleTexture
 #include "vk_common.h"
@@ -243,7 +244,7 @@ void CL_DrawTracers( double frametime, particle_t *cl_active_tracers )
 
 			if( p->color > sizeof( gTracerColors ) / sizeof( color24 ) )
 			{
-				gEngine.Con_Printf( S_ERROR "UserTracer with color > %d\n", (int)(sizeof( gTracerColors ) / sizeof( color24 )));
+				ERROR_THROTTLED(10, "UserTracer with color > %d", (int)(sizeof( gTracerColors ) / sizeof( color24 )));
 				p->color = 0;
 			}
 

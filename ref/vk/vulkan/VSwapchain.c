@@ -63,12 +63,39 @@ static void destroySwapchainAndFramebuffers( VkSwapchainKHR swapchain ) {
 	vkDestroySwapchainKHR(vk_core.device, swapchain, NULL);
 }
 
+static qboolean recreateSurface( void ) {
+	gEngine.Con_Printf( "Recreating Vulkan surface\n" );
+	if (vk_core.surface.surface)
+		vkDestroySurfaceKHR( vk_core.instance, vk_core.surface.surface, NULL );
+	vk_core.surface.surface = gEngine.XVK_CreateSurface( vk_core.instance );
+	if (!vk_core.surface.surface)
+	{
+		gEngine.Con_Printf( S_ERROR "Cannot recreate Vulkan surface\n" );
+		return false;
+	}
+	return true;
+}
+
 static qboolean recreateSwapchainIfNeeded( qboolean force ) {
 	const uint32_t prev_num_images = g_swapchain.num_images;
 	uint32_t new_width, new_height;
 
 	VkSurfaceCapabilitiesKHR surface_caps;
-	XVK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(v_device_info.physical_device, vk_core.surface.surface, &surface_caps));
+	VkResult caps_result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(v_device_info.physical_device, vk_core.surface.surface, &surface_caps);
+
+	if (caps_result == VK_ERROR_SURFACE_LOST_KHR)
+	{
+		gEngine.Con_Printf( S_WARN "Surface lost, recreating...\n" );
+		if (!recreateSurface())
+			return false;
+		caps_result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(v_device_info.physical_device, vk_core.surface.surface, &surface_caps);
+	}
+
+	if (caps_result != VK_SUCCESS)
+	{
+		XVK_CHECK(caps_result);
+		return false;
+	}
 
 	new_width = surface_caps.currentExtent.width;
 	new_height = surface_caps.currentExtent.height;
