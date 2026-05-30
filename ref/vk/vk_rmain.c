@@ -423,9 +423,35 @@ static void R_FillTriAPI( triangleapi_t *api )
 	api->FogParams     = TriFogParams;
 }
 
+static void CL_DrawParticlesExternal( const ref_viewpass_t *rvp, qboolean trans_pass, float frametime )
+{
+	(void)rvp; (void)trans_pass; (void)frametime;
+}
+
 static void R_FillRenderAPI( render_api_t *api )
 {
-	(void)api;
+	api->GetExtraParmsForTexture  = GetExtraParmsForTexture;
+	api->GetFrameTime             = GetFrameTime;
+	api->R_SetCurrentEntity       = R_SetCurrentEntity;
+	api->R_SetCurrentModel        = R_SetCurrentModel;
+	api->GL_CreateTexture         = R_CreateTexture;
+	api->GL_LoadTextureArray      = R_LoadTextureArray_UNUSED;
+	api->GL_CreateTextureArray    = R_CreateTextureArray_UNUSED;
+	api->DrawSingleDecal          = R_DrawSingleDecal;
+	api->R_DecalSetupVerts        = R_DecalSetupVerts;
+	api->R_EntityRemoveDecals     = R_EntityRemoveDecals;
+	api->GL_SelectTexture         = GL_SelectTexture;
+	api->GL_LoadTextureMatrix     = GL_LoadTextureMatrix;
+	api->GL_TexMatrixIdentity     = GL_TexMatrixIdentity;
+	api->GL_CleanUpTextureUnits   = GL_CleanUpTextureUnits;
+	api->GL_TexGen                = GL_TexGen;
+	api->GL_TextureTarget         = GL_TextureTarget;
+	api->GL_TexCoordArrayMode     = GL_TexCoordArrayMode;
+	api->GL_UpdateTexSize         = GL_UpdateTexSize;
+	api->GL_DrawParticles         = CL_DrawParticlesExternal;
+	api->LightVec                 = R_LightVec;
+	api->StudioGetTexture         = R_StudioGetTexture;
+	api->GL_GetProcAddress        = R_GetProcAddress;
 }
 
 static void GL_UpdateTexture( int texnum, int cols, int rows, int width, int height, const byte *buffer, pixformat_t fmt )

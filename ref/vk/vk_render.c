@@ -807,7 +807,8 @@ void VK_RenderEnd( vk_combuf_t* combuf, qboolean draw, uint32_t width, uint32_t 
 		if (cur.lightmap != draw->draw.lightmap) {
 			cur.lightmap = draw->draw.lightmap;
 			const VkDescriptorSet lm_unorm = R_VkTextureGetDescriptorUnorm(cur.lightmap);
-			vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, g_render.pipeline_layout, 2, 1, &lm_unorm, 0, NULL);
+			if (lm_unorm != VK_NULL_HANDLE)
+				vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, g_render.pipeline_layout, 2, 1, &lm_unorm, 0, NULL);
 		}
 
 		if (cur.texture != draw->draw.texture)
@@ -815,7 +816,8 @@ void VK_RenderEnd( vk_combuf_t* combuf, qboolean draw, uint32_t width, uint32_t 
 			cur.texture = draw->draw.texture;
 			const VkDescriptorSet tex_unorm = R_VkTextureGetDescriptorUnorm(cur.texture);
 			// TODO names/enums for binding points
-			vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, g_render.pipeline_layout, 1, 1, &tex_unorm, 0, NULL);
+			if (tex_unorm != VK_NULL_HANDLE)
+				vkCmdBindDescriptorSets(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, g_render.pipeline_layout, 1, 1, &tex_unorm, 0, NULL);
 		}
 
 		// Only indexed mode is supported
