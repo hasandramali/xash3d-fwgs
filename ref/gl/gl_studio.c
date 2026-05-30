@@ -33,7 +33,6 @@ typedef struct
 
 // never gonna change, just shut up const warning
 CVAR_DEFINE_AUTO( r_shadows, "0", 0, "draw ugly shadows" );
-CVAR_DEFINE_AUTO( gl_shadows, "0", 0, "draw ugly shadows (CS 1.6 compat)" );
 CVAR_DEFINE_AUTO( r_shadow_height, "0", 0, "shadow height offset" );
 CVAR_DEFINE_AUTO( r_shadow_x, "0.75", 0, "shadow projection x factor" );
 CVAR_DEFINE_AUTO( r_shadow_y, "0", 0, "shadow projection y factor" );
@@ -2595,6 +2594,10 @@ static void R_StudioDrawPointsShadow( void )
 	if( FBitSet( RI.currententity->curstate.effects, EF_NOSHADOW ))
 		return;
 
+	// skip dead player corpses
+	if( RI.currententity->curstate.renderfx == kRenderFxDeadPlayer )
+		return;
+
 	if( glState.stencilEnabled )
 		pglEnable( GL_STENCIL_TEST );
 
@@ -2662,7 +2665,7 @@ static void R_StudioDrawPointsShadow( void )
 				idx1 = idx2;
 				triSwap = !triSwap;
 
-				// trace each vertex to the surface below
+				// trace each vertex along the shadow direction to find the surface
 				vec3_t shadowPos[3];
 				qboolean valid = true;
 
@@ -2671,10 +2674,11 @@ static void R_StudioDrawPointsShadow( void )
 					float sx = v[vv][0] - (vec_x * ( v[vv][2] - entityZ ));
 					float sy = v[vv][1] - (vec_y * ( v[vv][2] - entityZ ));
 
-					// trace straight down from above the projected position
+					// trace from vertex diagonally toward the projected position
+					// to catch walls/cliffs between the entity and the shadow
 					vec3_t start, end;
-					start[0] = sx; start[1] = sy;
-					start[2] = (v[vv][2] > entityZ ? v[vv][2] : entityZ) + 32.0f;
+					start[0] = v[vv][0]; start[1] = v[vv][1];
+					start[2] = (v[vv][2] > entityZ ? v[vv][2] : entityZ) + 8.0f;
 					end[0] = sx; end[1] = sy;
 					end[2] = entityZ - 1024.0f;
 
@@ -2686,8 +2690,8 @@ static void R_StudioDrawPointsShadow( void )
 						break;
 					}
 
-					shadowPos[vv][0] = sx;
-					shadowPos[vv][1] = sy;
+					shadowPos[vv][0] = tr.endpos[0];
+					shadowPos[vv][1] = tr.endpos[1];
 					shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
 				}
 
@@ -2754,7 +2758,7 @@ static void GL_StudioDrawShadow( void )
 {
 	pglDepthMask( GL_TRUE );
 
-	if(( r_shadows.value || gl_shadows.value ) && g_studio.rendermode != kRenderTransAdd && !FBitSet( RI.currentmodel->flags, STUDIO_AMBIENT_LIGHT ))
+	if( r_shadows.value && g_studio.rendermode != kRenderTransAdd && !FBitSet( RI.currentmodel->flags, STUDIO_AMBIENT_LIGHT ))
 	{
 		float	color = 1.0f - (tr.blend * 0.5f);
 

@@ -675,6 +675,10 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	if( FBitSet( RI.currententity->curstate.effects, EF_NOSHADOW ))
 		return;
 
+	// skip dead player corpses
+	if( RI.currententity->curstate.renderfx == kRenderFxDeadPlayer )
+		return;
+
 	if( glState.stencilEnabled )
 		pglEnable( GL_STENCIL_TEST );
 
@@ -761,7 +765,7 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 			}
 			triSwap = !triSwap;
 
-			// trace each vertex to the surface below
+			// trace each vertex along the shadow direction to find the surface
 			vec3_t shadowPos[3];
 			qboolean valid = true;
 
@@ -771,10 +775,11 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 				float sx = av[idx][0] - (vec_x * ( av[idx][2] - entityZ ));
 				float sy = av[idx][1] - (vec_y * ( av[idx][2] - entityZ ));
 
-				// trace straight down from above the projected position
+				// trace from vertex diagonally toward the projected position
+				// to catch walls/cliffs between the entity and the shadow
 				vec3_t start, end;
-				start[0] = sx; start[1] = sy;
-				start[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 32.0f;
+				start[0] = av[idx][0]; start[1] = av[idx][1];
+				start[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 8.0f;
 				end[0] = sx; end[1] = sy;
 				end[2] = entityZ - 1024.0f;
 
@@ -786,8 +791,8 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 					break;
 				}
 
-				shadowPos[vv][0] = sx;
-				shadowPos[vv][1] = sy;
+				shadowPos[vv][0] = tr.endpos[0];
+				shadowPos[vv][1] = tr.endpos[1];
 				shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
 			}
 
@@ -1136,7 +1141,7 @@ void R_DrawAliasModel( cl_entity_t *e )
 	pglAlphaFunc( GL_GREATER, DEFAULT_ALPHATEST );
 	pglDisable( GL_ALPHA_TEST );
 
-	if( r_shadows.value || gl_shadows.value )
+	if( r_shadows.value )
 	{
 		// need to compute transformation matrix
 		Matrix4x4_CreateFromEntity( RI.objectMatrix, e->angles, e->origin, 1.0f );
