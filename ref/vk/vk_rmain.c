@@ -423,6 +423,10 @@ static void R_FillTriAPI( triangleapi_t *api )
 	api->FogParams     = TriFogParams;
 }
 
+static int R_CreateTexture( const char *name, int width, int height, const void *buffer, texFlags_t flags );
+static int R_LoadTextureArray_UNUSED( const char **names, int flags );
+static int R_CreateTextureArray_UNUSED( const char *name, int width, int height, int depth, const void *buffer, texFlags_t flags );
+
 static void CL_DrawParticlesExternal( const ref_viewpass_t *rvp, qboolean trans_pass, float frametime )
 {
 	(void)rvp; (void)trans_pass; (void)frametime;
