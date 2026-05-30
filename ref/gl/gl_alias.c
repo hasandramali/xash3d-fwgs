@@ -678,18 +678,7 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	if( glState.stencilEnabled )
 		pglEnable( GL_STENCIL_TEST );
 
-	// trace downward to find ground Z
-	vec3_t end;
-	VectorCopy( RI.currententity->origin, end );
-	end[2] -= 8192.0f;
-
-	float shadowZ = g_alias.lightspot[2];
-
-	pmtrace_t trace = gEngfuncs.CL_TraceLine( RI.currententity->origin, end, PM_WORLD_ONLY );
-	if( trace.fraction < 1.0f && trace.endpos[2] < RI.currententity->origin[2] )
-		shadowZ = trace.endpos[2];
-
-	float height = shadowZ + r_shadow_height.value + 0.15f;
+	float entityZ = RI.currententity->origin[2];
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
@@ -699,7 +688,11 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	trivertex_t *verts1 = paliashdr->posedata;
 	verts0 += g_alias.oldpose * paliashdr->poseverts;
 	verts1 += g_alias.newpose * paliashdr->poseverts;
+
+	pglBegin( GL_TRIANGLES );
+
 	int *order = paliashdr->commands;
+	vec3_t av[3];
 
 	while( 1 )
 	{
@@ -707,41 +700,117 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 		int count = *order++;
 		if( !count ) break; // done
 
-		if( count < 0 )
+		qboolean isFan = ( count < 0 );
+		if( isFan ) count = -count;
+
+		if( count < 3 )
 		{
-			pglBegin( GL_TRIANGLE_FAN );
-			count = -count;
+			order += count * 2;
+			verts0 += count;
+			verts1 += count;
+			continue;
 		}
-		else
+
+		// read first two vertices
+		for( int side = 0; side < 2; side++ )
 		{
-			pglBegin( GL_TRIANGLE_STRIP );
+			order += 2; // skip texcoords
+			VectorLerp( verts0->v, g_alias.lerpfrac, verts1->v, av[side] );
+			av[side][0] = av[side][0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+			av[side][1] = av[side][1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+			av[side][2] = av[side][2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+			Matrix3x4_VectorTransform( RI.objectMatrix, av[side], av[side] );
+			verts0++; verts1++;
 		}
+		count -= 2;
 
-		do
+		qboolean triSwap = false;
+
+		while( count > 0 )
 		{
-			// texture coordinates come from the draw list
-			// (skipped for shadows) pglTexCoord2fv ((float *)order);
-			order += 2;
+			order += 2; // skip texcoords
+			VectorLerp( verts0->v, g_alias.lerpfrac, verts1->v, av[2] );
+			av[2][0] = av[2][0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+			av[2][1] = av[2][1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+			av[2][2] = av[2][2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+			Matrix3x4_VectorTransform( RI.objectMatrix, av[2], av[2] );
+			verts0++; verts1++;
+			count--;
 
-			// normals and vertexes come from the frame list
-			vec3_t av, point;
-			VectorLerp( verts0->v, g_alias.lerpfrac, verts1->v, av );
-			point[0] = av[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
-			point[1] = av[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
-			point[2] = av[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
-			Matrix3x4_VectorTransform( RI.objectMatrix, point, av );
+			// determine triangle order for strip/fan winding
+			int vOrder[3];
+			if( isFan )
+			{
+				vOrder[0] = 0;
+				vOrder[1] = 1;
+				vOrder[2] = 2;
+			}
+			else
+			{
+				if( triSwap )
+				{
+					vOrder[0] = 1;
+					vOrder[1] = 0;
+				}
+				else
+				{
+					vOrder[0] = 0;
+					vOrder[1] = 1;
+				}
+				vOrder[2] = 2;
+			}
+			triSwap = !triSwap;
 
-			point[0] = av[0] - (vec_x * ( av[2] - shadowZ ));
-			point[1] = av[1] - (vec_y * ( av[2] - shadowZ ));
-			point[2] = height;
+			// trace each vertex to the surface below
+			vec3_t shadowPos[3];
+			qboolean valid = true;
 
-			pglVertex3fv( point );
-			verts0++, verts1++;
+			for( int vv = 0; vv < 3; vv++ )
+			{
+				int idx = vOrder[vv];
+				float sx = av[idx][0] - (vec_x * ( av[idx][2] - entityZ ));
+				float sy = av[idx][1] - (vec_y * ( av[idx][2] - entityZ ));
 
-		} while( --count );
+				// trace straight down from above the projected position
+				vec3_t start, end;
+				start[0] = sx; start[1] = sy;
+				start[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 32.0f;
+				end[0] = sx; end[1] = sy;
+				end[2] = entityZ - 1024.0f;
 
-		pglEnd();
+				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
+
+				if( tr.fraction >= 1.0f || tr.allsolid || tr.startsolid )
+				{
+					valid = false;
+					break;
+				}
+
+				shadowPos[vv][0] = sx;
+				shadowPos[vv][1] = sy;
+				shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
+			}
+
+			if( valid )
+			{
+				for( int vv = 0; vv < 3; vv++ )
+					pglVertex3fv( shadowPos[vv] );
+			}
+
+			// shift for next triangle in strip/fan
+			if( isFan )
+			{
+				VectorCopy( av[2], av[1] );
+			}
+			else
+			{
+				VectorCopy( av[1], av[0] );
+				VectorCopy( av[2], av[1] );
+			}
+		}
 	}
+
+	pglEnd();
 
 	if( glState.stencilEnabled )
 		pglDisable( GL_STENCIL_TEST );
@@ -1067,7 +1136,7 @@ void R_DrawAliasModel( cl_entity_t *e )
 	pglAlphaFunc( GL_GREATER, DEFAULT_ALPHATEST );
 	pglDisable( GL_ALPHA_TEST );
 
-	if( r_shadows.value )
+	if( r_shadows.value || gl_shadows.value )
 	{
 		// need to compute transformation matrix
 		Matrix4x4_CreateFromEntity( RI.objectMatrix, e->angles, e->origin, 1.0f );

@@ -33,6 +33,7 @@ typedef struct
 
 // never gonna change, just shut up const warning
 CVAR_DEFINE_AUTO( r_shadows, "0", 0, "draw ugly shadows" );
+CVAR_DEFINE_AUTO( gl_shadows, "0", 0, "draw ugly shadows (CS 1.6 compat)" );
 CVAR_DEFINE_AUTO( r_shadow_height, "0", 0, "shadow height offset" );
 CVAR_DEFINE_AUTO( r_shadow_x, "0.75", 0, "shadow projection x factor" );
 CVAR_DEFINE_AUTO( r_shadow_y, "0", 0, "shadow projection y factor" );
@@ -2591,28 +2592,17 @@ R_StudioDrawPointsShadow
 */
 static void R_StudioDrawPointsShadow( void )
 {
-	vec3_t		point;
-
 	if( FBitSet( RI.currententity->curstate.effects, EF_NOSHADOW ))
 		return;
 
 	if( glState.stencilEnabled )
 		pglEnable( GL_STENCIL_TEST );
 
-	// trace downward to find ground Z
-	vec3_t end;
-	VectorCopy( RI.currententity->origin, end );
-	end[2] -= 8192.0f;
-
-	float shadowZ = g_studio.lightspot[2];
-
-	pmtrace_t trace = gEngfuncs.CL_TraceLine( RI.currententity->origin, end, PM_WORLD_ONLY );
-	if( trace.fraction < 1.0f && trace.endpos[2] < RI.currententity->origin[2] )
-		shadowZ = trace.endpos[2];
-
-	float height = shadowZ + r_shadow_height.value + 0.15f;
+	float entityZ = RI.currententity->origin[2];
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
+
+	pglBegin( GL_TRIANGLES );
 
 	for( int k = 0; k < m_pSubModel->nummesh; k++ )
 	{
@@ -2624,29 +2614,93 @@ static void R_StudioDrawPointsShadow( void )
 		int i;
 		while(( i = *( ptricmds++ )))
 		{
-			if( i < 0 )
-			{
-				pglBegin( GL_TRIANGLE_FAN );
-				i = -i;
-			}
-			else
-			{
-				pglBegin( GL_TRIANGLE_STRIP );
-			}
+			qboolean isFan = ( i < 0 );
+			if( isFan ) i = -i;
 
-			for( ; i > 0; i--, ptricmds += 4 )
+			if( i < 3 )
 			{
-				float *av = g_studio.verts[ptricmds[0]];
-				point[0] = av[0] - (vec_x * ( av[2] - shadowZ ));
-				point[1] = av[1] - (vec_y * ( av[2] - shadowZ ));
-				point[2] = height;
-
-				pglVertex3fv( point );
+				ptricmds += i * 4;
+				continue;
 			}
 
-			pglEnd();
+			// read first two vertex indices
+			short idx0 = ptricmds[0];
+			short idx1 = ptricmds[4];
+			ptricmds += 8;
+			i -= 2;
+
+			qboolean triSwap = false;
+
+			while( i > 0 )
+			{
+				short idx2 = ptricmds[0];
+				ptricmds += 4;
+				i--;
+
+				float *v[3];
+				if( isFan )
+				{
+					v[0] = g_studio.verts[idx0];
+					v[1] = g_studio.verts[idx1];
+					v[2] = g_studio.verts[idx2];
+				}
+				else
+				{
+					if( triSwap )
+					{
+						v[0] = g_studio.verts[idx1];
+						v[1] = g_studio.verts[idx0];
+					}
+					else
+					{
+						v[0] = g_studio.verts[idx0];
+						v[1] = g_studio.verts[idx1];
+					}
+					v[2] = g_studio.verts[idx2];
+					idx0 = idx1;
+				}
+				idx1 = idx2;
+				triSwap = !triSwap;
+
+				// trace each vertex to the surface below
+				vec3_t shadowPos[3];
+				qboolean valid = true;
+
+				for( int vv = 0; vv < 3; vv++ )
+				{
+					float sx = v[vv][0] - (vec_x * ( v[vv][2] - entityZ ));
+					float sy = v[vv][1] - (vec_y * ( v[vv][2] - entityZ ));
+
+					// trace straight down from above the projected position
+					vec3_t start, end;
+					start[0] = sx; start[1] = sy;
+					start[2] = (v[vv][2] > entityZ ? v[vv][2] : entityZ) + 32.0f;
+					end[0] = sx; end[1] = sy;
+					end[2] = entityZ - 1024.0f;
+
+					pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
+
+					if( tr.fraction >= 1.0f || tr.allsolid || tr.startsolid )
+					{
+						valid = false;
+						break;
+					}
+
+					shadowPos[vv][0] = sx;
+					shadowPos[vv][1] = sy;
+					shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
+				}
+
+				if( valid )
+				{
+					for( int vv = 0; vv < 3; vv++ )
+						pglVertex3fv( shadowPos[vv] );
+				}
+			}
 		}
 	}
+
+	pglEnd();
 
 	if( glState.stencilEnabled )
 		pglDisable( GL_STENCIL_TEST );
@@ -2700,7 +2754,7 @@ static void GL_StudioDrawShadow( void )
 {
 	pglDepthMask( GL_TRUE );
 
-	if( r_shadows.value && g_studio.rendermode != kRenderTransAdd && !FBitSet( RI.currentmodel->flags, STUDIO_AMBIENT_LIGHT ))
+	if(( r_shadows.value || gl_shadows.value ) && g_studio.rendermode != kRenderTransAdd && !FBitSet( RI.currentmodel->flags, STUDIO_AMBIENT_LIGHT ))
 	{
 		float	color = 1.0f - (tr.blend * 0.5f);
 
