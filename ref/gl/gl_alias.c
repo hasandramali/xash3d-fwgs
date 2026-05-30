@@ -686,6 +686,16 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
+	// find ground reference Z for consistent offset across all vertices
+	vec3_t refEnd;
+	VectorCopy( RI.currententity->origin, refEnd );
+	refEnd[2] -= 1024.0f;
+
+	float groundRefZ = entityZ;
+	pmtrace_t refTr = gEngfuncs.CL_TraceLine( RI.currententity->origin, refEnd, PM_WORLD_ONLY );
+	if( refTr.fraction < 1.0f && !refTr.allsolid && !refTr.startsolid )
+		groundRefZ = refTr.endpos[2];
+
 	r_stats.c_alias_polys += paliashdr->numtris;
 
 	trivertex_t *verts0 = paliashdr->posedata;
@@ -772,8 +782,8 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 			for( int vv = 0; vv < 3; vv++ )
 			{
 				int idx = vOrder[vv];
-				float sx = av[idx][0] - (vec_x * ( av[idx][2] - entityZ ));
-				float sy = av[idx][1] - (vec_y * ( av[idx][2] - entityZ ));
+				float sx = av[idx][0] - (vec_x * ( av[idx][2] - groundRefZ ));
+				float sy = av[idx][1] - (vec_y * ( av[idx][2] - groundRefZ ));
 
 				// trace from vertex diagonally toward the projected position
 				// to catch walls/cliffs between the entity and the shadow

@@ -2605,6 +2605,17 @@ static void R_StudioDrawPointsShadow( void )
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
+	// find ground reference Z for consistent offset across all vertices
+	// prevents "bag" distortion on flying entities
+	vec3_t refEnd;
+	VectorCopy( RI.currententity->origin, refEnd );
+	refEnd[2] -= 1024.0f;
+
+	float groundRefZ = entityZ;
+	pmtrace_t refTr = gEngfuncs.CL_TraceLine( RI.currententity->origin, refEnd, PM_WORLD_ONLY );
+	if( refTr.fraction < 1.0f && !refTr.allsolid && !refTr.startsolid )
+		groundRefZ = refTr.endpos[2];
+
 	pglBegin( GL_TRIANGLES );
 
 	for( int k = 0; k < m_pSubModel->nummesh; k++ )
@@ -2671,8 +2682,10 @@ static void R_StudioDrawPointsShadow( void )
 
 				for( int vv = 0; vv < 3; vv++ )
 				{
-					float sx = v[vv][0] - (vec_x * ( v[vv][2] - entityZ ));
-					float sy = v[vv][1] - (vec_y * ( v[vv][2] - entityZ ));
+					// use groundRefZ as consistent reference so all vertices
+					// offset in the same direction (no bag effect on flying entities)
+					float sx = v[vv][0] - (vec_x * ( v[vv][2] - groundRefZ ));
+					float sy = v[vv][1] - (vec_y * ( v[vv][2] - groundRefZ ));
 
 					// trace from vertex diagonally toward the projected position
 					// to catch walls/cliffs between the entity and the shadow
