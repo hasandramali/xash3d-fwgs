@@ -759,6 +759,9 @@ VkDescriptorSet R_VkTextureGetDescriptorUnorm( uint index ) {
 	ASSERT( index < MAX_TEXTURES );
 	// TODO make an array of unorm descriptors
 	const vk_texture_t *const tex = R_TextureGetByIndex(index);
-	ASSERT(tex->vk.descriptor_unorm != VK_NULL_HANDLE);
+	if (tex->vk.descriptor_unorm == VK_NULL_HANDLE) {
+		WARN("Texture %d(\"%s\") has NULL descriptor_unorm, using default", index, TEX_NAME(tex));
+		return R_TextureGetByIndex(tglob.defaultTexture)->vk.descriptor_unorm;
+	}
 	return tex->vk.descriptor_unorm;
 }

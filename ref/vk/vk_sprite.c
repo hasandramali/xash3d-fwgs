@@ -656,10 +656,10 @@ static vk_render_type_e spriteRenderModeToRenderType( int render_mode ) {
 		case kRenderGlow:         return kVkRenderType_A_1;
 		case kRenderTransAlpha:   return kVkRenderType_A_1mA_R;
 		case kRenderTransAdd:     return kVkRenderType_A_1_R;
-		default: ASSERT(!"Unxpected render_mode");
+		default:
+			WARN("Unxpected render_mode=%d, falling back to kVkRenderTypeSolid", render_mode);
+			return kVkRenderTypeSolid;
 	}
-
-	return kVkRenderTypeSolid;
 }
 
 static void R_DrawSpriteQuad( const char *debug_name, const mspriteframe_t *frame, const vec3_t org, const vec3_t v_right, const vec3_t v_up, float scale, int texture, int render_mode, const vec4_t color ) {

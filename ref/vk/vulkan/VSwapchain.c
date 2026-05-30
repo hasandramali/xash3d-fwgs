@@ -70,10 +70,17 @@ static qboolean recreateSwapchainIfNeeded( qboolean force ) {
 	VkSurfaceCapabilitiesKHR surface_caps;
 	XVK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(v_device_info.physical_device, vk_core.surface.surface, &surface_caps));
 
-	// Use engine-requested (landscape) dimensions, ignoring currentExtent which
-	// may report portrait on mobile. Clamp to surface capabilities.
-	new_width = clamp_u32(gpGlobals->width, surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
-	new_height = clamp_u32(gpGlobals->height, surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height);
+	new_width = surface_caps.currentExtent.width;
+	new_height = surface_caps.currentExtent.height;
+
+	if (new_width == 0xfffffffful || new_width == 0)
+		new_width = clamp_u32(gpGlobals->width, surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
+
+	if (new_height == 0xfffffffful || new_height == 0)
+		new_height = clamp_u32(gpGlobals->height, surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height);
+
+	new_width = clamp_u32(new_width, surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
+	new_height = clamp_u32(new_height, surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height);
 
 	if (new_height == 0 || new_width == 0) {
 		return false;
@@ -314,6 +321,7 @@ void R_VkSwapchainPresent(uint32_t index) {
 
 		case VK_SUBOPTIMAL_KHR:
 			gEngine.Con_Printf(S_WARN "vkQueuePresentKHR returned %s\n", R_VkResultName(present_result));
+			++g_swapchain.recreate_requested;
 			break;
 
 		default:
