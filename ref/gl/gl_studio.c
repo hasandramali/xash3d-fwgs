@@ -33,6 +33,9 @@ typedef struct
 
 // never gonna change, just shut up const warning
 CVAR_DEFINE_AUTO( r_shadows, "0", 0, "draw ugly shadows" );
+CVAR_DEFINE_AUTO( r_shadow_height, "0", 0, "shadow height offset" );
+CVAR_DEFINE_AUTO( r_shadow_x, "0.75", 0, "shadow projection x factor" );
+CVAR_DEFINE_AUTO( r_shadow_y, "0", 0, "shadow projection y factor" );
 
 static const vec3_t hullcolor[8] =
 {
@@ -2596,8 +2599,20 @@ static void R_StudioDrawPointsShadow( void )
 	if( glState.stencilEnabled )
 		pglEnable( GL_STENCIL_TEST );
 
-	float vec_x = -g_studio.lightvec[0] * 8.0f;
-	float vec_y = -g_studio.lightvec[1] * 8.0f;
+	// trace downward to find ground Z
+	vec3_t end;
+	VectorCopy( RI.currententity->origin, end );
+	end[2] -= 8192.0f;
+
+	float shadowZ = g_studio.lightspot[2];
+
+	pmtrace_t trace = gEngfuncs.CL_TraceLine( RI.currententity->origin, end, PM_WORLD_ONLY );
+	if( trace.fraction < 1.0f && trace.endpos[2] < RI.currententity->origin[2] )
+		shadowZ = trace.endpos[2];
+
+	float height = shadowZ + r_shadow_height.value + 0.15f;
+	float vec_x = r_shadow_x.value;
+	float vec_y = r_shadow_y.value;
 
 	for( int k = 0; k < m_pSubModel->nummesh; k++ )
 	{
@@ -2619,13 +2634,12 @@ static void R_StudioDrawPointsShadow( void )
 				pglBegin( GL_TRIANGLE_STRIP );
 			}
 
-
 			for( ; i > 0; i--, ptricmds += 4 )
 			{
 				float *av = g_studio.verts[ptricmds[0]];
-				point[0] = av[0] - (vec_x * ( av[2] - g_studio.lightspot[2] ));
-				point[1] = av[1] - (vec_y * ( av[2] - g_studio.lightspot[2] ));
-				point[2] = g_studio.lightspot[2] + 1.0f;
+				point[0] = av[0] - (vec_x * ( av[2] - shadowZ ));
+				point[1] = av[1] - (vec_y * ( av[2] - shadowZ ));
+				point[2] = height;
 
 				pglVertex3fv( point );
 			}

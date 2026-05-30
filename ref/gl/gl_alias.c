@@ -678,8 +678,20 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	if( glState.stencilEnabled )
 		pglEnable( GL_STENCIL_TEST );
 
-	float vec_x = -g_alias.lightvec[0] * 8.0f;
-	float vec_y = -g_alias.lightvec[1] * 8.0f;
+	// trace downward to find ground Z
+	vec3_t end;
+	VectorCopy( RI.currententity->origin, end );
+	end[2] -= 8192.0f;
+
+	float shadowZ = g_alias.lightspot[2];
+
+	pmtrace_t trace = gEngfuncs.CL_TraceLine( RI.currententity->origin, end, PM_WORLD_ONLY );
+	if( trace.fraction < 1.0f && trace.endpos[2] < RI.currententity->origin[2] )
+		shadowZ = trace.endpos[2];
+
+	float height = shadowZ + r_shadow_height.value + 0.15f;
+	float vec_x = r_shadow_x.value;
+	float vec_y = r_shadow_y.value;
 
 	r_stats.c_alias_polys += paliashdr->numtris;
 
@@ -719,9 +731,9 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 			point[2] = av[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
 			Matrix3x4_VectorTransform( RI.objectMatrix, point, av );
 
-			point[0] = av[0] - (vec_x * ( av[2] - g_alias.lightspot[2] ));
-			point[1] = av[1] - (vec_y * ( av[2] - g_alias.lightspot[2] ));
-			point[2] = g_alias.lightspot[2] + 1.0f;
+			point[0] = av[0] - (vec_x * ( av[2] - shadowZ ));
+			point[1] = av[1] - (vec_y * ( av[2] - shadowZ ));
+			point[2] = height;
 
 			pglVertex3fv( point );
 			verts0++, verts1++;

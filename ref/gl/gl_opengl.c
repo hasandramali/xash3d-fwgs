@@ -1153,6 +1153,9 @@ static void GL_InitCommands( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_ripple_updatetime );
 	gEngfuncs.Cvar_RegisterVariable( &r_ripple_spawntime );
 	gEngfuncs.Cvar_RegisterVariable( &r_shadows );
+	gEngfuncs.Cvar_RegisterVariable( &r_shadow_height );
+	gEngfuncs.Cvar_RegisterVariable( &r_shadow_x );
+	gEngfuncs.Cvar_RegisterVariable( &r_shadow_y );
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo );
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo_dlightmode );
 	gEngfuncs.Cvar_RegisterVariable( &r_vbo_overbrightmode );
