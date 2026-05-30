@@ -104,7 +104,7 @@ static qboolean recreateSwapchainIfNeeded( qboolean force ) {
 			.imageArrayLayers = 1,
 			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | (vk_core.rtx ? /* TODO is it used really? why not? */ VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0),
 			.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-			.preTransform = surface_caps.currentTransform,
+			.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
 			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 			.presentMode = VK_PRESENT_MODE_FIFO_KHR, // TODO caps, MAILBOX is better
 			//.presentMode = VK_PRESENT_MODE_MAILBOX_KHR, // TODO caps, MAILBOX is better
@@ -231,9 +231,9 @@ r_vk_swapchain_framebuffer_t R_VkSwapchainAcquire(  VkSemaphore sem_image_availa
 				break;
 
 			case VK_SUBOPTIMAL_KHR:
-				// Would need to wait on the semaphore here somehow
-				gEngine.Con_Printf(S_WARN "vkAcquireNextImageKHR returned %s (%0#x), will recreate swapchain for the next frame\n", R_VkResultName(acquire_result), acquire_result);
-				++g_swapchain.recreate_requested;
+				// Swapchain is still fully usable with IDENTITY preTransform.
+				// Recreating with same preTransform would loop; just proceed.
+				g_swapchain.recreate_requested = 0;
 				break;
 
 			case VK_ERROR_OUT_OF_HOST_MEMORY:
@@ -320,8 +320,8 @@ void R_VkSwapchainPresent(uint32_t index) {
 			break;
 
 		case VK_SUBOPTIMAL_KHR:
-			gEngine.Con_Printf(S_WARN "vkQueuePresentKHR returned %s\n", R_VkResultName(present_result));
-			++g_swapchain.recreate_requested;
+			// VK_SUBOPTIMAL_KHR is harmless: image is still presented correctly.
+			// Avoid recreate loop — just continue with the current swapchain.
 			break;
 
 		default:

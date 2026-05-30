@@ -86,9 +86,10 @@ static VkBool32 VKAPI_PTR debugCallback(
 	void *pUserData) {
 	(void)(pUserData);
 	(void)(messageTypes);
-	(void)(messageSeverity);
+	// Suppress VERBOSE and INFO to avoid validation layer spam
+	if (messageSeverity < VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+		return VK_FALSE;
 
-	// TODO better messages, not only errors, what are other arguments for, ...
 	if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
 		gEngine.Con_Printf(S_ERROR "vk/dbg: %s\n", pCallbackData->pMessage);
 #ifdef _MSC_VER
@@ -210,7 +211,7 @@ static qboolean createInstance( void )
 			if (vkCreateDebugUtilsMessengerEXT) {
 				VkDebugUtilsMessengerCreateInfoEXT debug_create_info = {
 					.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-					.messageSeverity = 0x1111, //:vovka: VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT,
+					.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
 					.messageType = 0x07,
 					.pfnUserCallback = debugCallback,
 				};
