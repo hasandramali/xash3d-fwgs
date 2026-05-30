@@ -649,6 +649,8 @@ static qboolean spriteIsOccluded( const cl_entity_t *e, vec3_t origin, float *ps
 }
 
 static vk_render_type_e spriteRenderModeToRenderType( int render_mode ) {
+	// High nibble of render_mode may contain EF_ beam flags - mask to low nibble only
+	render_mode &= 0x0F;
 	switch (render_mode) {
 		case kRenderNormal:       return kVkRenderTypeSolid;
 		case kRenderTransColor:   return kVkRenderType_A_1mA_RW;

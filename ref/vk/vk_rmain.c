@@ -53,6 +53,11 @@ static void GL_ClearExtensions( void )
 {
 	// Nothing to do for Vulkan
 }
+static void GL_InitExtensionsStub( void )
+{
+	// Vulkan doesn't need OpenGL extension initialization
+}
+
 static void GL_BackendStartFrame_UNUSED( void )
 {
 	/* Unused in Vulkan renderer. GL renderer only uses this to clear the r_speeds_msg string */
@@ -533,7 +538,7 @@ static const ref_interface_t gReffuncs =
 	.R_GetConfigName = R_GetConfigName,
 	.R_SetDisplayTransform = R_SetDisplayTransform,
 	.GL_SetupAttributes = GL_SetupAttributes,
-	.GL_InitExtensions = NULL,
+	.GL_InitExtensions = GL_InitExtensionsStub,
 	.GL_ClearExtensions = GL_ClearExtensions,
 	.R_GammaChanged = R_GammaChanged,
 	.R_BeginFrame = R_BeginFrame,

@@ -815,7 +815,6 @@ static int addSpotLight( const vk_light_entity_t *le, float radius, float solid_
 	VectorCopy(le->origin, plight->origin);
 	plight->radius = radius;
 
-	VectorCopy(plight->base_color, plight->color);
 	plight->lightstyle = lightstyle;
 
 	VectorCopy(le->dir, plight->dir);
@@ -839,6 +838,7 @@ static int addSpotLight( const vk_light_entity_t *le, float radius, float solid_
 	}
 
 	VectorScale(le->color, hack_attenuation, plight->base_color);
+	VectorCopy(plight->base_color, plight->color);
 
 	if (all_clusters)
 		addPointLightToAllClusters( index );

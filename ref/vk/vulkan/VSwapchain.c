@@ -104,7 +104,7 @@ static qboolean recreateSwapchainIfNeeded( qboolean force ) {
 			.imageArrayLayers = 1,
 			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | (vk_core.rtx ? /* TODO is it used really? why not? */ VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0),
 			.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-			.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+			.preTransform = surface_caps.currentTransform,
 			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 			.presentMode = VK_PRESENT_MODE_FIFO_KHR, // TODO caps, MAILBOX is better
 			//.presentMode = VK_PRESENT_MODE_MAILBOX_KHR, // TODO caps, MAILBOX is better
