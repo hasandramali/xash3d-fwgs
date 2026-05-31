@@ -1935,6 +1935,17 @@ void R_DrawBrushModel( cl_entity_t *e )
 		float vec_x = r_shadow_x.value;
 		float vec_y = r_shadow_y.value;
 
+		if( gp_movevars && gp_movevars->skyvec[2] < 0.0f )
+		{
+			float sx = -gp_movevars->skyvec[0] / gp_movevars->skyvec[2];
+			float sy = -gp_movevars->skyvec[1] / gp_movevars->skyvec[2];
+			if( fabs( sx ) <= 5.0f && fabs( sy ) <= 5.0f )
+			{
+				vec_x = sx;
+				vec_y = sy;
+			}
+		}
+
 		vec3_t refEnd;
 		VectorCopy( e->origin, refEnd );
 		refEnd[2] -= 1024.0f;

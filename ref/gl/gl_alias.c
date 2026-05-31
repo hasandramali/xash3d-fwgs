@@ -686,6 +686,18 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
+	// use light_environment direction if available
+	if( gp_movevars && gp_movevars->skyvec[2] < 0.0f )
+	{
+		float sx = -gp_movevars->skyvec[0] / gp_movevars->skyvec[2];
+		float sy = -gp_movevars->skyvec[1] / gp_movevars->skyvec[2];
+		if( fabs( sx ) <= 5.0f && fabs( sy ) <= 5.0f )
+		{
+			vec_x = sx;
+			vec_y = sy;
+		}
+	}
+
 	// find ground reference Z for consistent offset across all vertices
 	vec3_t refEnd;
 	VectorCopy( RI.currententity->origin, refEnd );
@@ -775,7 +787,7 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 			}
 			triSwap = !triSwap;
 
-			// trace each vertex along the shadow direction to find the surface
+			// trace each vertex to find the shadow on the ground
 			vec3_t shadowPos[3];
 			qboolean valid = true;
 
@@ -785,38 +797,26 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 				float sx = av[idx][0] - (vec_x * ( av[idx][2] - groundRefZ ));
 				float sy = av[idx][1] - (vec_y * ( av[idx][2] - groundRefZ ));
 
-				// trace from vertex diagonally toward the projected position
-				// to catch walls/cliffs between the entity and the shadow
+				// trace straight down from the projected position to find the ground surface
+				// this naturally splits the shadow across cliff edges: parts over the cliff
+				// go to the lower ground, parts on the surface stay on the surface
 				vec3_t start, end;
-				start[0] = av[idx][0]; start[1] = av[idx][1];
-				start[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 8.0f;
+				start[0] = sx; start[1] = sy;
+				start[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 32.0f;
 				end[0] = sx; end[1] = sy;
-				end[2] = groundRefZ - 2.0f;
+				end[2] = entityZ - 1024.0f;
 
 				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
 
 				if( tr.fraction >= 1.0f || tr.allsolid || tr.startsolid )
 				{
-					// cliff edge: trace down from vertex to prevent stretching
-					vec3_t downEnd;
-					downEnd[0] = av[idx][0]; downEnd[1] = av[idx][1];
-					downEnd[2] = entityZ - 1024.0f;
-					pmtrace_t downTr = gEngfuncs.CL_TraceLine( start, downEnd, PM_WORLD_ONLY );
-					if( downTr.fraction >= 1.0f || downTr.allsolid || downTr.startsolid )
-					{
-						valid = false;
-						break;
-					}
-					shadowPos[vv][0] = downTr.endpos[0];
-					shadowPos[vv][1] = downTr.endpos[1];
-					shadowPos[vv][2] = downTr.endpos[2] + r_shadow_height.value + 0.15f;
+					valid = false;
+					break;
 				}
-				else
-				{
-					shadowPos[vv][0] = tr.endpos[0];
-					shadowPos[vv][1] = tr.endpos[1];
-					shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
-				}
+
+				shadowPos[vv][0] = tr.endpos[0];
+				shadowPos[vv][1] = tr.endpos[1];
+				shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
 			}
 
 			if( valid )
