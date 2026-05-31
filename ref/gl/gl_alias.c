@@ -682,7 +682,6 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	if( glState.stencilEnabled )
 		pglEnable( GL_STENCIL_TEST );
 
-	float entityZ = RI.currententity->origin[2];
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
@@ -691,7 +690,7 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	VectorCopy( RI.currententity->origin, refEnd );
 	refEnd[2] -= 1024.0f;
 
-	float groundRefZ = entityZ;
+	float groundRefZ = RI.currententity->origin[2];
 	pmtrace_t refTr = gEngfuncs.CL_TraceLine( RI.currententity->origin, refEnd, PM_WORLD_ONLY );
 	if( refTr.fraction < 1.0f && !refTr.allsolid && !refTr.startsolid )
 		groundRefZ = refTr.endpos[2];
@@ -775,64 +774,16 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 			}
 			triSwap = !triSwap;
 
-			// trace each vertex along the shadow direction to find the surface
-			vec3_t shadowPos[3];
-			qboolean valid = true;
-
+			// simple ground-plane projection (hl-shadows style)
+			// no per-vertex traces: all vertices project onto the same Z-plane
 			for( int vv = 0; vv < 3; vv++ )
 			{
 				int idx = vOrder[vv];
-				float sx = av[idx][0] - (vec_x * ( av[idx][2] - groundRefZ ));
-				float sy = av[idx][1] - (vec_y * ( av[idx][2] - groundRefZ ));
-
-				// trace diagonally from vertex toward projected position (catches walls)
-				vec3_t start, end;
-				start[0] = av[idx][0]; start[1] = av[idx][1];
-				start[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 8.0f;
-				end[0] = sx; end[1] = sy;
-				end[2] = entityZ - 1024.0f;
-
-				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
-
-				if( tr.fraction >= 1.0f || tr.allsolid || tr.startsolid )
-				{
-					valid = false;
-					break;
-				}
-
-				// if trace endpoint is far below the entity's ground, the shadow
-				// stretched down a cliff face - fall back to straight-down at (sx,sy)
-				if( tr.endpos[2] < groundRefZ - 16.0f )
-				{
-					vec3_t dStart, dEnd;
-					dStart[0] = sx; dStart[1] = sy;
-					dStart[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 32.0f;
-					dEnd[0] = sx; dEnd[1] = sy;
-					dEnd[2] = entityZ - 1024.0f;
-
-					pmtrace_t dTr = gEngfuncs.CL_TraceLine( dStart, dEnd, PM_WORLD_ONLY );
-					if( dTr.fraction >= 1.0f || dTr.allsolid || dTr.startsolid )
-					{
-						valid = false;
-						break;
-					}
-
-					shadowPos[vv][0] = dTr.endpos[0];
-					shadowPos[vv][1] = dTr.endpos[1];
-					shadowPos[vv][2] = dTr.endpos[2] + r_shadow_height.value + 0.15f;
-				}
-				else
-				{
-					shadowPos[vv][0] = tr.endpos[0];
-					shadowPos[vv][1] = tr.endpos[1];
-					shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
-				}
-			}
-
-			if( valid )
-			{
-				for( int vv = 0; vv < 3; vv++ )
-					pglVertex3fv( shadowPos[vv] );
+				vec3_t point;
+				point[0] = av[idx][0] - (vec_x * ( av[idx][2] - groundRefZ ));
+				point[1] = av[idx][1] - (vec_y * ( av[idx][2] - groundRefZ ));
+				point[2] = groundRefZ + r_shadow_height.value + 0.15f;
+				pglVertex3fv( point );
 			}
 
 			// shift for next triangle in strip/fan
