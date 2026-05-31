@@ -2718,6 +2718,7 @@ static void R_StudioDrawPointsShadow( void )
 		pglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
 		pglDisable( GL_STENCIL_TEST );
 	}
+}
 
 /*
 ===============
