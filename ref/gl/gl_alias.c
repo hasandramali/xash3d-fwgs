@@ -689,15 +689,17 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
-	// find ground reference Z for consistent offset across all vertices
-	vec3_t refEnd;
-	VectorCopy( RI.currententity->origin, refEnd );
-	refEnd[2] -= 1024.0f;
+	// find ground Z using player-sized hull trace straight down
+	vec3_t endDown;
+	VectorCopy( RI.currententity->origin, endDown );
+	endDown[2] -= 8192.0f;
+
+	pmtrace_t groundTr = *gEngfuncs.PM_TraceLine( RI.currententity->origin, endDown,
+		PM_WORLD_ONLY, 2, -1 );
 
 	float groundRefZ = RI.currententity->origin[2];
-	pmtrace_t refTr = gEngfuncs.CL_TraceLine( RI.currententity->origin, refEnd, PM_WORLD_ONLY );
-	if( refTr.fraction < 1.0f && !refTr.allsolid && !refTr.startsolid )
-		groundRefZ = refTr.endpos[2];
+	if( groundTr.fraction < 1.0f && !groundTr.allsolid && !groundTr.startsolid )
+		groundRefZ = groundTr.endpos[2];
 
 	r_stats.c_alias_polys += paliashdr->numtris;
 
@@ -706,122 +708,42 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 	verts0 += g_alias.oldpose * paliashdr->poseverts;
 	verts1 += g_alias.newpose * paliashdr->poseverts;
 
-	pglBegin( GL_TRIANGLES );
-
 	int *order = paliashdr->commands;
-	vec3_t av[3];
+	vec3_t av;
 
 	while( 1 )
 	{
-		// get the vertex count and primitive type
 		int count = *order++;
-		if( !count ) break; // done
+		if( !count ) break;
 
-		qboolean isFan = ( count < 0 );
-		if( isFan ) count = -count;
-
-		if( count < 3 )
+		if( count < 0 )
 		{
-			order += count * 2;
-			verts0 += count;
-			verts1 += count;
-			continue;
+			pglBegin( GL_TRIANGLE_FAN );
+			count = -count;
+		}
+		else
+		{
+			pglBegin( GL_TRIANGLE_STRIP );
 		}
 
-		// read first two vertices
-		for( int side = 0; side < 2; side++ )
+		for( ; count > 0; count--, order += 2 )
 		{
-			order += 2; // skip texcoords
-			VectorLerp( verts0->v, g_alias.lerpfrac, verts1->v, av[side] );
-			av[side][0] = av[side][0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
-			av[side][1] = av[side][1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
-			av[side][2] = av[side][2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
-			Matrix3x4_VectorTransform( RI.objectMatrix, av[side], av[side] );
+			VectorLerp( verts0->v, g_alias.lerpfrac, verts1->v, av );
+			av[0] = av[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+			av[1] = av[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+			av[2] = av[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+			Matrix3x4_VectorTransform( RI.objectMatrix, av, av );
 			verts0++; verts1++;
+
+			vec3_t point;
+			point[0] = av[0] - (vec_x * ( av[2] - groundRefZ ));
+			point[1] = av[1] - (vec_y * ( av[2] - groundRefZ ));
+			point[2] = groundRefZ + r_shadow_height.value + 0.15f;
+			pglVertex3fv( point );
 		}
-		count -= 2;
 
-		qboolean triSwap = false;
-
-		while( count > 0 )
-		{
-			order += 2; // skip texcoords
-			VectorLerp( verts0->v, g_alias.lerpfrac, verts1->v, av[2] );
-			av[2][0] = av[2][0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
-			av[2][1] = av[2][1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
-			av[2][2] = av[2][2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
-			Matrix3x4_VectorTransform( RI.objectMatrix, av[2], av[2] );
-			verts0++; verts1++;
-			count--;
-
-			// determine triangle order for strip/fan winding
-			int vOrder[3];
-			if( isFan )
-			{
-				vOrder[0] = 0;
-				vOrder[1] = 1;
-				vOrder[2] = 2;
-			}
-			else
-			{
-				if( triSwap )
-				{
-					vOrder[0] = 1;
-					vOrder[1] = 0;
-				}
-				else
-				{
-					vOrder[0] = 0;
-					vOrder[1] = 1;
-				}
-				vOrder[2] = 2;
-			}
-			triSwap = !triSwap;
-
-			// ground-aware diagonal trace with surface normal rejection
-			for( int vv = 0; vv < 3; vv++ )
-			{
-				int idx = vOrder[vv];
-				vec3_t point;
-				point[0] = av[idx][0] - (vec_x * ( av[idx][2] - groundRefZ ));
-				point[1] = av[idx][1] - (vec_y * ( av[idx][2] - groundRefZ ));
-
-				vec3_t start, end;
-				start[0] = av[idx][0]; start[1] = av[idx][1];
-				start[2] = av[idx][2] + 2.0f;
-				end[0] = point[0]; end[1] = point[1];
-				end[2] = RI.currententity->origin[2] - 1024.0f;
-
-				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
-				if( tr.fraction < 1.0f && !tr.allsolid && !tr.startsolid
-				&& tr.plane.normal[2] > 0.3f
-				&& groundRefZ - tr.endpos[2] < r_shadow_height.value * 2.0f )
-				{
-					point[0] = tr.endpos[0];
-					point[1] = tr.endpos[1];
-					point[2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
-				}
-				else
-				{
-					point[2] = groundRefZ + r_shadow_height.value + 0.15f;
-				}
-				pglVertex3fv( point );
-			}
-
-			// shift for next triangle in strip/fan
-			if( isFan )
-			{
-				VectorCopy( av[2], av[1] );
-			}
-			else
-			{
-				VectorCopy( av[1], av[0] );
-				VectorCopy( av[2], av[1] );
-			}
-		}
+		pglEnd();
 	}
-
-	pglEnd();
 
 	if( glState.stencilEnabled )
 	{

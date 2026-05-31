@@ -2608,18 +2608,17 @@ static void R_StudioDrawPointsShadow( void )
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
-	// find ground reference Z for consistent offset across all vertices
-	// prevents "bag" distortion on flying entities
-	vec3_t refEnd;
-	VectorCopy( RI.currententity->origin, refEnd );
-	refEnd[2] -= 1024.0f;
+	// find ground Z using player-sized hull trace straight down
+	vec3_t endDown;
+	VectorCopy( RI.currententity->origin, endDown );
+	endDown[2] -= 8192.0f;
+
+	pmtrace_t groundTr = *gEngfuncs.PM_TraceLine( RI.currententity->origin, endDown,
+		PM_WORLD_ONLY, 2, -1 );
 
 	float groundRefZ = RI.currententity->origin[2];
-	pmtrace_t refTr = gEngfuncs.CL_TraceLine( RI.currententity->origin, refEnd, PM_WORLD_ONLY );
-	if( refTr.fraction < 1.0f && !refTr.allsolid && !refTr.startsolid )
-		groundRefZ = refTr.endpos[2];
-
-	pglBegin( GL_TRIANGLES );
+	if( groundTr.fraction < 1.0f && !groundTr.allsolid && !groundTr.startsolid )
+		groundRefZ = groundTr.endpos[2];
 
 	for( int k = 0; k < m_pSubModel->nummesh; k++ )
 	{
@@ -2631,86 +2630,29 @@ static void R_StudioDrawPointsShadow( void )
 		int i;
 		while(( i = *( ptricmds++ )))
 		{
-			qboolean isFan = ( i < 0 );
-			if( isFan ) i = -i;
-
-			if( i < 3 )
+			if( i < 0 )
 			{
-				ptricmds += i * 4;
-				continue;
+				pglBegin( GL_TRIANGLE_FAN );
+				i = -i;
+			}
+			else
+			{
+				pglBegin( GL_TRIANGLE_STRIP );
 			}
 
-			// read first two vertex indices
-			short idx0 = ptricmds[0];
-			short idx1 = ptricmds[4];
-			ptricmds += 8;
-			i -= 2;
-
-			qboolean triSwap = false;
-
-			while( i > 0 )
+			for( ; i > 0; i--, ptricmds += 4 )
 			{
-				short idx2 = ptricmds[0];
-				ptricmds += 4;
-				i--;
-
-				float *v[3];
-				if( isFan )
-				{
-					v[0] = g_studio.verts[idx0];
-					v[1] = g_studio.verts[idx1];
-					v[2] = g_studio.verts[idx2];
-				}
-				else
-				{
-					if( triSwap )
-					{
-						v[0] = g_studio.verts[idx1];
-						v[1] = g_studio.verts[idx0];
-					}
-					else
-					{
-						v[0] = g_studio.verts[idx0];
-						v[1] = g_studio.verts[idx1];
-					}
-					v[2] = g_studio.verts[idx2];
-					idx0 = idx1;
-				}
-				idx1 = idx2;
-				triSwap = !triSwap;
-
-			for( int vv = 0; vv < 3; vv++ )
-				{
+				float *av = g_studio.verts[ptricmds[0]];
 				vec3_t point;
-				point[0] = v[vv][0] - (vec_x * ( v[vv][2] - groundRefZ ));
-				point[1] = v[vv][1] - (vec_y * ( v[vv][2] - groundRefZ ));
-
-				vec3_t start, end;
-				start[0] = v[vv][0]; start[1] = v[vv][1];
-				start[2] = v[vv][2] + 2.0f;
-				end[0] = point[0]; end[1] = point[1];
-				end[2] = RI.currententity->origin[2] - 1024.0f;
-
-				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
-				if( tr.fraction < 1.0f && !tr.allsolid && !tr.startsolid
-				&& tr.plane.normal[2] > 0.3f	// ground-like surface, not a wall
-				&& groundRefZ - tr.endpos[2] < r_shadow_height.value * 2.0f ) // not a cliff drop
-				{
-					point[0] = tr.endpos[0];
-					point[1] = tr.endpos[1];
-					point[2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
-				}
-				else
-				{
-					point[2] = groundRefZ + r_shadow_height.value + 0.15f;
-				}
+				point[0] = av[0] - (vec_x * ( av[2] - groundRefZ ));
+				point[1] = av[1] - (vec_y * ( av[2] - groundRefZ ));
+				point[2] = groundRefZ + r_shadow_height.value + 0.15f;
 				pglVertex3fv( point );
-				}
 			}
+
+			pglEnd();
 		}
 	}
-
-	pglEnd();
 
 	if( glState.stencilEnabled )
 	{
