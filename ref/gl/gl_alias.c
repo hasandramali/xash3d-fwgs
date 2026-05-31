@@ -778,32 +778,14 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 			}
 			triSwap = !triSwap;
 
-			// per-vertex diagonal trace toward projected position
-			// catches walls, follows sloped surfaces; no threshold fallback
+			// flat projection onto ground plane
 			for( int vv = 0; vv < 3; vv++ )
 			{
 				int idx = vOrder[vv];
 				vec3_t point;
 				point[0] = av[idx][0] - (vec_x * ( av[idx][2] - groundRefZ ));
 				point[1] = av[idx][1] - (vec_y * ( av[idx][2] - groundRefZ ));
-
-				vec3_t start, end;
-				start[0] = av[idx][0]; start[1] = av[idx][1];
-				start[2] = av[idx][2] + 2.0f;
-				end[0] = point[0]; end[1] = point[1];
-				end[2] = RI.currententity->origin[2] - 1024.0f;
-
-				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
-				if( tr.fraction < 1.0f && !tr.allsolid && !tr.startsolid )
-				{
-					point[0] = tr.endpos[0];
-					point[1] = tr.endpos[1];
-					point[2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
-				}
-				else
-				{
-					point[2] = groundRefZ + r_shadow_height.value + 0.15f;
-				}
+				point[2] = groundRefZ + r_shadow_height.value + 0.15f;
 				pglVertex3fv( point );
 			}
 
