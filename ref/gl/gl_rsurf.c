@@ -17,6 +17,7 @@ GNU General Public License for more details.
 #include "xash3d_mathlib.h"
 #include "mod_local.h"
 #include "atlas.h"
+#include "pm_local.h"
 
 #define TURBSCALE		( 256.0f / ( M_PI2 ))
 
