@@ -2684,7 +2684,19 @@ static void R_StudioDrawPointsShadow( void )
 				vec3_t point;
 				point[0] = v[vv][0] - (vec_x * ( v[vv][2] - groundRefZ ));
 				point[1] = v[vv][1] - (vec_y * ( v[vv][2] - groundRefZ ));
-				point[2] = groundRefZ + r_shadow_height.value + 0.15f;
+
+				// trace straight down from sheared position to find ground
+				vec3_t start, end;
+				start[0] = point[0]; start[1] = point[1];
+				start[2] = RI.currententity->origin[2] + 2.0f;
+				end[0] = point[0]; end[1] = point[1];
+				end[2] = RI.currententity->origin[2] - 1024.0f;
+
+				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
+				if( tr.fraction < 1.0f && !tr.allsolid && !tr.startsolid )
+					point[2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
+				else
+					point[2] = groundRefZ + r_shadow_height.value + 0.15f;
 				pglVertex3fv( point );
 				}
 			}
