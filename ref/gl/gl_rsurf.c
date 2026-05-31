@@ -17,7 +17,6 @@ GNU General Public License for more details.
 #include "xash3d_mathlib.h"
 #include "mod_local.h"
 #include "atlas.h"
-#include "pm_local.h"
 
 #define TURBSCALE		( 256.0f / ( M_PI2 ))
 
@@ -1928,106 +1927,6 @@ void R_DrawBrushModel( cl_entity_t *e )
 	pglAlphaFunc( GL_GREATER, DEFAULT_ALPHATEST );
 	pglDisable( GL_BLEND );
 	pglDepthMask( GL_TRUE );
-
-	if( r_shadows.value && e->curstate.movetype == MOVETYPE_PUSHSTEP )
-	{
-		float entityZ = e->origin[2];
-		float vec_x = r_shadow_x.value;
-		float vec_y = r_shadow_y.value;
-
-		if( gp_movevars && gp_movevars->skyvec[2] < 0.0f )
-		{
-			float sx = -gp_movevars->skyvec[0] / gp_movevars->skyvec[2];
-			float sy = -gp_movevars->skyvec[1] / gp_movevars->skyvec[2];
-			if( fabs( sx ) <= 5.0f && fabs( sy ) <= 5.0f )
-			{
-				vec_x = sx;
-				vec_y = sy;
-			}
-		}
-
-		vec3_t refEnd;
-		VectorCopy( e->origin, refEnd );
-		refEnd[2] -= 1024.0f;
-		float groundRefZ = entityZ;
-		pmtrace_t refTr = gEngfuncs.CL_TraceLine( e->origin, refEnd, PM_WORLD_ONLY );
-		if( refTr.fraction < 1.0f && !refTr.allsolid && !refTr.startsolid )
-			groundRefZ = refTr.endpos[2];
-
-		vec3_t shadowVerts[8];
-		int numVerts = 0;
-
-		for( int i = 0; i < 8; i++ )
-		{
-			vec3_t local, world;
-			local[0] = (i & 1) ? clmodel->maxs[0] : clmodel->mins[0];
-			local[1] = (i & 2) ? clmodel->maxs[1] : clmodel->mins[1];
-			local[2] = (i & 4) ? clmodel->maxs[2] : clmodel->mins[2];
-
-			if( rotated )
-				Matrix3x4_VectorTransform( RI.objectMatrix, local, world );
-			else
-				VectorAdd( local, e->origin, world );
-
-			float sx = world[0] - (vec_x * ( world[2] - groundRefZ ));
-			float sy = world[1] - (vec_y * ( world[2] - groundRefZ ));
-
-			vec3_t start, end;
-			start[0] = sx; start[1] = sy;
-			start[2] = world[2] + 8.0f;
-			end[0] = sx; end[1] = sy;
-			end[2] = groundRefZ - 1024.0f;
-
-			pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
-			if( tr.fraction < 1.0f && !tr.allsolid && !tr.startsolid )
-			{
-				VectorCopy( tr.endpos, shadowVerts[numVerts] );
-				shadowVerts[numVerts][2] += r_shadow_height.value + 0.15f;
-				numVerts++;
-			}
-		}
-
-		if( numVerts >= 3 )
-		{
-			pglDisable( GL_TEXTURE_2D );
-			pglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
-			pglEnable( GL_BLEND );
-			pglColor4f( 0.0f, 0.0f, 0.0f, 0.5f );
-
-			vec3_t centroid = { 0, 0, 0 };
-			for( int i = 0; i < numVerts; i++ )
-				VectorAdd( centroid, shadowVerts[i], centroid );
-			VectorScale( centroid, 1.0f / numVerts, centroid );
-
-			for( int i = 0; i < numVerts - 1; i++ )
-			{
-				for( int j = i + 1; j < numVerts; j++ )
-				{
-					if( atan2( shadowVerts[i][1] - centroid[1], shadowVerts[i][0] - centroid[0] )
-						> atan2( shadowVerts[j][1] - centroid[1], shadowVerts[j][0] - centroid[0] ))
-					{
-						vec3_t tmp;
-						VectorCopy( shadowVerts[i], tmp );
-						VectorCopy( shadowVerts[j], shadowVerts[i] );
-						VectorCopy( tmp, shadowVerts[j] );
-					}
-				}
-			}
-
-			pglDepthFunc( GL_LESS );
-			pglBegin( GL_TRIANGLE_FAN );
-			pglVertex3fv( centroid );
-			for( int i = 0; i < numVerts; i++ )
-				pglVertex3fv( shadowVerts[i] );
-			pglVertex3fv( shadowVerts[0] );
-			pglEnd();
-
-			pglDepthFunc( GL_LEQUAL );
-			pglEnable( GL_TEXTURE_2D );
-			pglDisable( GL_BLEND );
-			pglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
-		}
-	}
 
 	if( r_showhull->value > 0.0f )
 	{

@@ -2605,18 +2605,6 @@ static void R_StudioDrawPointsShadow( void )
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
-	// use light_environment direction if available
-	if( gp_movevars && gp_movevars->skyvec[2] < 0.0f )
-	{
-		float sx = -gp_movevars->skyvec[0] / gp_movevars->skyvec[2];
-		float sy = -gp_movevars->skyvec[1] / gp_movevars->skyvec[2];
-		if( fabs( sx ) <= 5.0f && fabs( sy ) <= 5.0f )
-		{
-			vec_x = sx;
-			vec_y = sy;
-		}
-	}
-
 	// find ground reference Z for consistent offset across all vertices
 	// prevents "bag" distortion on flying entities
 	vec3_t refEnd;
@@ -2688,7 +2676,7 @@ static void R_StudioDrawPointsShadow( void )
 				idx1 = idx2;
 				triSwap = !triSwap;
 
-				// trace each vertex to find the shadow on the ground
+				// trace each vertex along the shadow direction to find the surface
 				vec3_t shadowPos[3];
 				qboolean valid = true;
 
@@ -2699,12 +2687,10 @@ static void R_StudioDrawPointsShadow( void )
 					float sx = v[vv][0] - (vec_x * ( v[vv][2] - groundRefZ ));
 					float sy = v[vv][1] - (vec_y * ( v[vv][2] - groundRefZ ));
 
-					// trace straight down from the projected position to find the ground surface
-					// this naturally splits the shadow across cliff edges: parts over the cliff
-					// go to the lower ground, parts on the surface stay on the surface
+					// trace diagonally from vertex toward projected position (catches walls)
 					vec3_t start, end;
-					start[0] = sx; start[1] = sy;
-					start[2] = (v[vv][2] > entityZ ? v[vv][2] : entityZ) + 32.0f;
+					start[0] = v[vv][0]; start[1] = v[vv][1];
+					start[2] = (v[vv][2] > entityZ ? v[vv][2] : entityZ) + 8.0f;
 					end[0] = sx; end[1] = sy;
 					end[2] = entityZ - 1024.0f;
 
@@ -2716,9 +2702,33 @@ static void R_StudioDrawPointsShadow( void )
 						break;
 					}
 
-					shadowPos[vv][0] = tr.endpos[0];
-					shadowPos[vv][1] = tr.endpos[1];
-					shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
+					// if trace endpoint is far below the entity's ground, the shadow
+					// stretched down a cliff face - fall back to straight-down at (sx,sy)
+					if( tr.endpos[2] < groundRefZ - 16.0f )
+					{
+						vec3_t dStart, dEnd;
+						dStart[0] = sx; dStart[1] = sy;
+						dStart[2] = (v[vv][2] > entityZ ? v[vv][2] : entityZ) + 32.0f;
+						dEnd[0] = sx; dEnd[1] = sy;
+						dEnd[2] = entityZ - 1024.0f;
+
+						pmtrace_t dTr = gEngfuncs.CL_TraceLine( dStart, dEnd, PM_WORLD_ONLY );
+						if( dTr.fraction >= 1.0f || dTr.allsolid || dTr.startsolid )
+						{
+							valid = false;
+							break;
+						}
+
+						shadowPos[vv][0] = dTr.endpos[0];
+						shadowPos[vv][1] = dTr.endpos[1];
+						shadowPos[vv][2] = dTr.endpos[2] + r_shadow_height.value + 0.15f;
+					}
+					else
+					{
+						shadowPos[vv][0] = tr.endpos[0];
+						shadowPos[vv][1] = tr.endpos[1];
+						shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
+					}
 				}
 
 				if( valid )
