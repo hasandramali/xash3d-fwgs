@@ -3993,6 +3993,7 @@ void R_ShadowWorldCompose( void )
 	model_t *world = WORLDMODEL;
 	if( !world ) goto restore;
 
+	{
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
 
@@ -4039,6 +4040,7 @@ void R_ShadowWorldCompose( void )
 			pglVertex3fv( v );
 		}
 		pglEnd();
+	}
 	}
 
 restore:
