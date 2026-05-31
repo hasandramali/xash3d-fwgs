@@ -3965,3 +3965,88 @@ void GL_BuildLightmaps( void )
 	}
 }
 
+/*
+==================
+R_ShadowWorldCompose
+
+Darken world surfaces in stencil-marked shadow areas.
+Uses light-facing surface culling to prevent shadows on back-walls.
+==================
+*/
+void R_ShadowWorldCompose( void )
+{
+	if( !glState.stencilEnabled || !r_shadows.value )
+		return;
+
+	pglPushAttrib( GL_ALL_ATTRIB_BITS );
+
+	pglDepthMask( GL_FALSE );
+	pglDisable( GL_TEXTURE_2D );
+	pglDisable( GL_CULL_FACE );
+	pglEnable( GL_BLEND );
+	pglBlendFunc( GL_DST_COLOR, GL_ZERO );
+	pglColor4f( 0.5f, 0.5f, 0.5f, 1.0f );
+	pglDepthFunc( GL_LEQUAL );
+
+	pglStencilFunc( GL_EQUAL, 1, ~0 );
+	pglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+	pglEnable( GL_STENCIL_TEST );
+
+	model_t *world = WORLDMODEL;
+	if( !world ) goto restore;
+
+	float vec_x = r_shadow_x.value;
+	float vec_y = r_shadow_y.value;
+
+	msurface_t *surf = world->surfaces;
+	for( int i = 0; i < world->numsurfaces; i++, surf++ )
+	{
+		if( surf->visframe != tr.framecount )
+			continue;
+
+		if( surf->flags & ( SURF_DRAWSKY | SURF_DRAWTURB | SURF_UNDERWATER | SURF_TRANSPARENT ))
+			continue;
+
+		mplane_t *plane = surf->plane;
+		float dot;
+
+		switch( plane->type )
+		{
+		case PLANE_X:
+			dot = -vec_x;
+			break;
+		case PLANE_Y:
+			dot = -vec_y;
+			break;
+		case PLANE_Z:
+			dot = -1.0f;
+			break;
+		default:
+			dot = plane->normal[0] * -vec_x + plane->normal[1] * -vec_y - plane->normal[2];
+			break;
+		}
+
+		if(( dot > 0.0f ) && ( surf->flags & SURF_PLANEBACK ))
+			continue;
+		if(( dot < 0.0f ) && !( surf->flags & SURF_PLANEBACK ))
+			continue;
+
+		glpoly2_t *p = surf->polys;
+		if( !p ) continue;
+
+		float *v = p->verts[0];
+		pglBegin( GL_POLYGON );
+		for( int j = 0; j < p->numverts; j++, v += VERTEXSIZE )
+		{
+			pglVertex3fv( v );
+		}
+		pglEnd();
+	}
+
+restore:
+	pglPopAttrib();
+
+	pglStencilFunc( GL_ALWAYS, 0, ~0 );
+	pglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+}
+

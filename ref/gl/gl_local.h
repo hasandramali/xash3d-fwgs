@@ -385,6 +385,7 @@ void R_LightmapCoord( const vec3_t v, const msurface_t *surf, const float sample
 qboolean R_HasGeneratedVBO( void );
 void R_EnableVBO( qboolean enable );
 qboolean R_HasEnabledVBO( void );
+void R_ShadowWorldCompose( void );
 
 //
 // gl_rpart.c

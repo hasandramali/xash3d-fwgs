@@ -974,6 +974,8 @@ void R_RenderScene( void )
 
 	R_DrawEntitiesOnList();
 
+	R_ShadowWorldCompose();
+
 	R_DrawWaterSurfaces();
 }
 

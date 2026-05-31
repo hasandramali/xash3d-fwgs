@@ -2599,7 +2599,11 @@ static void R_StudioDrawPointsShadow( void )
 		return;
 
 	if( glState.stencilEnabled )
+	{
 		pglEnable( GL_STENCIL_TEST );
+		pglStencilFunc( GL_ALWAYS, 1, ~0 );
+		pglStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	}
 
 	float vec_x = r_shadow_x.value;
 	float vec_y = r_shadow_y.value;
@@ -2709,8 +2713,11 @@ static void R_StudioDrawPointsShadow( void )
 	pglEnd();
 
 	if( glState.stencilEnabled )
+	{
+		pglStencilFunc( GL_ALWAYS, 0, ~0 );
+		pglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
 		pglDisable( GL_STENCIL_TEST );
-}
+	}
 
 /*
 ===============
