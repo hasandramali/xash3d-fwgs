@@ -3978,8 +3978,6 @@ void R_ShadowWorldCompose( void )
 	if( !glState.stencilEnabled || !r_shadows.value )
 		return;
 
-	pglPushAttrib( GL_ALL_ATTRIB_BITS );
-
 	pglDepthMask( GL_FALSE );
 	pglDisable( GL_TEXTURE_2D );
 	pglDisable( GL_CULL_FACE );
@@ -4044,7 +4042,12 @@ void R_ShadowWorldCompose( void )
 	}
 
 restore:
-	pglPopAttrib();
+	pglDepthMask( GL_TRUE );
+	pglEnable( GL_TEXTURE_2D );
+	GL_Cull( GL_FRONT );
+	pglDisable( GL_BLEND );
+	pglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
+	pglDepthFunc( GL_LEQUAL );
 
 	pglStencilFunc( GL_ALWAYS, 0, ~0 );
 	pglStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
