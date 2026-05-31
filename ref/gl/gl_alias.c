@@ -791,19 +791,32 @@ static void GL_DrawAliasShadow( aliashdr_t *paliashdr )
 				start[0] = av[idx][0]; start[1] = av[idx][1];
 				start[2] = (av[idx][2] > entityZ ? av[idx][2] : entityZ) + 8.0f;
 				end[0] = sx; end[1] = sy;
-				end[2] = entityZ - 1024.0f;
+				end[2] = groundRefZ - 2.0f;
 
 				pmtrace_t tr = gEngfuncs.CL_TraceLine( start, end, PM_WORLD_ONLY );
 
 				if( tr.fraction >= 1.0f || tr.allsolid || tr.startsolid )
 				{
-					valid = false;
-					break;
+					// cliff edge: trace down from vertex to prevent stretching
+					vec3_t downEnd;
+					downEnd[0] = av[idx][0]; downEnd[1] = av[idx][1];
+					downEnd[2] = entityZ - 1024.0f;
+					pmtrace_t downTr = gEngfuncs.CL_TraceLine( start, downEnd, PM_WORLD_ONLY );
+					if( downTr.fraction >= 1.0f || downTr.allsolid || downTr.startsolid )
+					{
+						valid = false;
+						break;
+					}
+					shadowPos[vv][0] = downTr.endpos[0];
+					shadowPos[vv][1] = downTr.endpos[1];
+					shadowPos[vv][2] = downTr.endpos[2] + r_shadow_height.value + 0.15f;
 				}
-
-				shadowPos[vv][0] = tr.endpos[0];
-				shadowPos[vv][1] = tr.endpos[1];
-				shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
+				else
+				{
+					shadowPos[vv][0] = tr.endpos[0];
+					shadowPos[vv][1] = tr.endpos[1];
+					shadowPos[vv][2] = tr.endpos[2] + r_shadow_height.value + 0.15f;
+				}
 			}
 
 			if( valid )
