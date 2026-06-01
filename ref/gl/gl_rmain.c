@@ -974,6 +974,7 @@ void R_RenderScene( void )
 
 	R_DrawEntitiesOnList();
 
+	// Water surfaces (PrimeXT-style shader hooks live inside EmitWaterPolys).
 	R_DrawWaterSurfaces();
 }
 

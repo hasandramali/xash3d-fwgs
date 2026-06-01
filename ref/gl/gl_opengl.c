@@ -1116,12 +1116,18 @@ void GL_InitExtensions( void )
 
 	R_RenderInfo( true );
 
+	// PrimeXT-inspired water shader (no-op stub on nanogl/wes/regal).
+	R_WaterShader_Init();
+	R_WaterShader_VidInit();
+
 	tr.framecount = tr.visframecount = 1;
 	glw_state.initialized = true;
 }
 
 void GL_ClearExtensions( void )
 {
+	R_WaterShader_Shutdown();
+
 	// now all extensions are disabled
 	memset( glConfig.extension, 0, sizeof( glConfig.extension ));
 	glw_state.initialized = false;
