@@ -30,8 +30,8 @@ CVAR_DEFINE_AUTO( r_water_normalscale,        "1.0",   FCVAR_GLCONFIG, "bump-map
 CVAR_DEFINE_AUTO( r_water_choppy,             "0.04",  FCVAR_GLCONFIG, "vertex choppy wave offset (0..0.2)" );
 CVAR_DEFINE_AUTO( r_water_wave,               "1",     FCVAR_GLCONFIG, "enable wave/ripple animation (0=static, 1=animated)" );
 CVAR_DEFINE_AUTO( r_water_animspeed,          "1.0",   FCVAR_GLCONFIG, "wave animation speed multiplier (0=frozen, 2=double speed)" );
-CVAR_DEFINE_AUTO( r_water_waveheight,         "0.5",   FCVAR_GLCONFIG, "vertex displacement amplitude in game units (0=flat, 2=storm)" );
-CVAR_DEFINE_AUTO( r_water_wavefreq,           "0.05",  FCVAR_GLCONFIG, "vertex wave spatial frequency (0.01=long swells, 0.2=chop)" );
+CVAR_DEFINE_AUTO( r_water_waveheight,         "1.0",   FCVAR_GLCONFIG, "vertex displacement amplitude in game units (0=flat, 3=storm)" );
+CVAR_DEFINE_AUTO( r_water_wavefreq,           "0.08",  FCVAR_GLCONFIG, "vertex wave spatial frequency (0.01=long swells, 0.2=chop)" );
 CVAR_DEFINE_AUTO( r_water_specular_min,       "0.15",  FCVAR_GLCONFIG, "sun specular floor in dark wave troughs (0..1)" );
 CVAR_DEFINE_AUTO( r_water_specular,           "1.0",   FCVAR_GLCONFIG, "sun specular highlight intensity (0..2)" );
 CVAR_DEFINE_AUTO( r_water_specular_color_r,   "255",   FCVAR_GLCONFIG, "sun specular highlight red (0-255)" );
@@ -258,15 +258,25 @@ static const char *water_frag_above_source =
 	"           - (prev.xy / z) * choppy;\n"
 	"}\n"
 	"\n"
+	"/* Paranoia2-style: time-based UV offset creates wave motion from a\n"
+	" * single normal map by shifting sample positions over time. */\n"
+	"vec2 animUV( vec2 uv, float t )\n"
+	"{\n"
+	"    vec2 dir = vec2( sin(t * 0.7 + uv.y * 3.0), cos(t * 0.5 + uv.x * 2.5));\n"
+	"    return uv + dir * 0.012;\n"
+	"}\n"
+	"\n"
 	"void main()\n"
 	"{\n"
 	"    vec2  uv = v_worldPos.xy * WAVE_SCALE;\n"
 	"    float t  = u_time;\n"
-	"    /* layered normal-map fetches (PrimeXT-style chop chaining) */\n"
-	"    vec3 n0 = texture2D( u_normalMap, waveUV(uv,  1.0, 0.10, t, vec3(0.0), u_choppy)).rgb * 2.0 - 1.0;\n"
-	"    vec3 n1 = texture2D( u_normalMap, waveUV(uv,  2.0, 0.18, t, n0, u_choppy)).rgb * 2.0 - 1.0;\n"
-	"    vec3 n2 = texture2D( u_normalMap, waveUV(uv,  4.0, 0.30, t, n1, u_choppy)).rgb * 2.0 - 1.0;\n"
-	"    vec3 n3 = texture2D( u_normalMap, waveUV(uv,  8.0, 0.55, t, n2, u_choppy)).rgb * 2.0 - 1.0;\n"
+	"    /* Paranoia2-style layered normal-map with animated UV offsets.\n"
+	"     * Each layer samples at a different time-offset and UV scale,\n"
+	"     * producing the same "~~~" visual as 29-frame animated textures. */\n"
+	"    vec3 n0 = texture2D( u_normalMap, animUV(waveUV(uv,  1.0, 0.10, t, vec3(0.0), u_choppy), t)).rgb * 2.0 - 1.0;\n"
+	"    vec3 n1 = texture2D( u_normalMap, animUV(waveUV(uv,  2.0, 0.18, t, n0, u_choppy), t * 1.3)).rgb * 2.0 - 1.0;\n"
+	"    vec3 n2 = texture2D( u_normalMap, animUV(waveUV(uv,  4.0, 0.30, t, n1, u_choppy), t * 0.7)).rgb * 2.0 - 1.0;\n"
+	"    vec3 n3 = texture2D( u_normalMap, animUV(waveUV(uv,  8.0, 0.55, t, n2, u_choppy), t * 1.1)).rgb * 2.0 - 1.0;\n"
 	"    vec3 n  = normalize( n0*0.30 + n1*0.25 + n2*0.25 + n3*0.20 );\n"
 	"    float bump = BUMP_BASE * u_normalscale;\n"
 	"    /* Per-fragment detail normal: combine the normal-map detail with the\n"
@@ -295,21 +305,16 @@ static const char *water_frag_above_source =
 	"    vec3  skyTint   = u_skyColor;\n"
 	"    vec3  finalColor = mix( baseColor, skyTint, clamp( fresnel * u_skyblend, 0.0, 0.98 ));\n"
 	"\n"
-	"    /* sun specular term.  We use the LOW-FREQUENCY geometric normal here\n"
-	"     * (rather than the per-fragment detail normal) so the highlight is a\n"
-	"     * broad, transparent rim that fades in/out with the wave slope.\n"
-	"     *\n"
-	"     * The blend with v_geoNormal.z is a cheap \"light proxy\":\n"
-	"     *   - flat water (N.z ~ 1)   -> 1.0 multiplier  (full sun)\n"
-	"     *   - tilted wave peak        -> N.z less than 1 -> dimmer\n"
-	"     *   - very steep trough face  -> N.z near 0     -> u_specularMin floor\n"
-	"     * This way the sun glint is invisible in the \"dark\" wave troughs and\n"
-	"     * bright on the flat tops, exactly the look the user asked for. */\n"
+	"    /* Paranoia2-style sun specular: use DETAIL normal for sharp glint\n"
+	"     * on wave crests, with geo normal for broad light proxy.\n"
+	"     * Two specular terms: broad (geo normal) + sharp (detail normal). */\n"
 	"    vec3  R = reflect( -V, v_geoNormal );\n"
 	"    vec3  sunDir = normalize( vec3( 0.4, 0.4, 0.82 ));\n"
-	"    float specRaw = pow( max( dot(R, sunDir), 0.0 ), 64.0 );\n"
+	"    float specBroad = pow( max( dot(R, sunDir), 0.0 ), 32.0 );\n"
+	"    vec3  R2 = reflect( -V, N );\n"
+	"    float specSharp = pow( max( dot(R2, sunDir), 0.0 ), 192.0 );\n"
 	"    float lightAmount = mix( u_specularMin, 1.0, clamp( v_geoNormal.z, 0.0, 1.0 ));\n"
-	"    float spec   = specRaw * 0.9 * u_specular * lightAmount;\n"
+	"    float spec   = (specBroad * 0.5 + specSharp * 1.2) * u_specular * lightAmount;\n"
 	"    finalColor += u_specularColor * spec;\n"
 	"\n"
 	"    if( u_fogEnabled > 0.5 )\n"
@@ -773,51 +778,54 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 		                 RI.rvp.vieworigin[2] );
 	}
 
-	/* Per-entity water tint and transparency from func_water (Half-Life):
-	 *   - rendercolor (when non-black) overrides the cvars
-	 *   - renderamt  drives the alpha so map-defined func_water transparencies
-	 *     work out of the box without the mapper needing to know about our cvars
-	 *   - rendermode kRenderTrans* OR renderamt != 255 activates the per-entity
-	 *     path; the default engine state (kRenderNormal + renderamt 255) keeps
-	 *     the global cvars in control. */
+	/* Console cvars override entity settings. Entity rendercolor/renderamt
+	 * are only used as fallback when the console cvars are at default.
+	 * This means the user can always override with:
+	 *   r_water_color_r 255  (forces red tint regardless of entity)
+	 *   r_water_alpha 0.5     (forces transparency regardless of entity) */
 	{
-		cl_entity_t *e = RI.currententity;
-		const qboolean hasPerEntity =
-			( e != NULL ) &&
-			( e->curstate.rendermode != kRenderNormal ||
-			  e->curstate.renderamt != 255 );
-
 		float r = r_water_color_r.value / 255.0f;
 		float g = r_water_color_g.value / 255.0f;
 		float b = r_water_color_b.value / 255.0f;
 		float a = r_water_alpha.value;
 
-		if( hasPerEntity )
+		/* If entity has per-entity tint AND cvar is at default, use entity */
+		cl_entity_t *e = RI.currententity;
+		if( e )
 		{
-			if( e->curstate.rendercolor.r || e->curstate.rendercolor.g || e->curstate.rendercolor.b )
+			qboolean cvarModified = ( r_water_color_r.value != 32.0f
+				|| r_water_color_g.value != 64.0f
+				|| r_water_color_b.value != 80.0f );
+			qboolean cvarAlphaModified = ( r_water_alpha.value != 0.70f );
+
+			if( !cvarModified &&
+			    ( e->curstate.rendercolor.r || e->curstate.rendercolor.g || e->curstate.rendercolor.b ))
 			{
 				r = e->curstate.rendercolor.r / 255.0f;
 				g = e->curstate.rendercolor.g / 255.0f;
 				b = e->curstate.rendercolor.b / 255.0f;
 			}
 
-			switch( e->curstate.rendermode )
+			if( !cvarAlphaModified )
 			{
-			case kRenderTransTexture:
-			case kRenderTransColor:
-			case kRenderTransAlpha:
-			case kRenderTransAdd:
-			case kRenderGlow:
-				a = e->curstate.renderamt / 255.0f;
-				break;
-			default:
-				break;
+				switch( e->curstate.rendermode )
+				{
+				case kRenderTransTexture:
+				case kRenderTransColor:
+				case kRenderTransAlpha:
+				case kRenderTransAdd:
+				case kRenderGlow:
+					a = e->curstate.renderamt / 255.0f;
+					break;
+				default:
+					break;
+				}
 			}
 		}
 
 		if( r_water_debug.value >= 2.0f )
 		{
-			r = 1.0f; g = 0.0f; b = 0.0f;  /* debug tint */
+			r = 1.0f; g = 0.0f; b = 0.0f;
 		}
 
 		if( prog->u_waterColor >= 0 )

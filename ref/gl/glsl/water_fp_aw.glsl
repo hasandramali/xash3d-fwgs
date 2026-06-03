@@ -68,16 +68,26 @@ vec2 waveUV(vec2 uv, float scale, float speed, float t, vec3 prev, float choppy)
            - (prev.xy / z) * choppy;
 }
 
+/* Paranoia2-style: time-based UV offset creates wave motion from a
+ * single normal map by shifting sample positions over time. */
+vec2 animUV(vec2 uv, float t)
+{
+    vec2 dir = vec2(sin(t * 0.7 + uv.y * 3.0), cos(t * 0.5 + uv.x * 2.5));
+    return uv + dir * 0.012;
+}
+
 void main()
 {
     vec2  uv = v_worldPos.xy * WAVE_SCALE;
     float t  = u_time;
 
-    /* layered normal-map fetches (PrimeXT-style chop chaining) */
-    vec3 n0 = texture2D(u_normalMap, waveUV(uv, 1.0, 0.10, t, vec3(0.0), u_choppy)).rgb * 2.0 - 1.0;
-    vec3 n1 = texture2D(u_normalMap, waveUV(uv, 2.0, 0.18, t, n0, u_choppy)).rgb * 2.0 - 1.0;
-    vec3 n2 = texture2D(u_normalMap, waveUV(uv, 4.0, 0.30, t, n1, u_choppy)).rgb * 2.0 - 1.0;
-    vec3 n3 = texture2D(u_normalMap, waveUV(uv, 8.0, 0.55, t, n2, u_choppy)).rgb * 2.0 - 1.0;
+    /* Paranoia2-style layered normal-map with animated UV offsets.
+     * Each layer samples at a different time-offset and UV scale,
+     * producing the same "~~~" visual as 29-frame animated textures. */
+    vec3 n0 = texture2D(u_normalMap, animUV(waveUV(uv, 1.0, 0.10, t, vec3(0.0), u_choppy), t)).rgb * 2.0 - 1.0;
+    vec3 n1 = texture2D(u_normalMap, animUV(waveUV(uv, 2.0, 0.18, t, n0, u_choppy), t * 1.3)).rgb * 2.0 - 1.0;
+    vec3 n2 = texture2D(u_normalMap, animUV(waveUV(uv, 4.0, 0.30, t, n1, u_choppy), t * 0.7)).rgb * 2.0 - 1.0;
+    vec3 n3 = texture2D(u_normalMap, animUV(waveUV(uv, 8.0, 0.55, t, n2, u_choppy), t * 1.1)).rgb * 2.0 - 1.0;
     vec3 n  = normalize(n0 * 0.30 + n1 * 0.25 + n2 * 0.25 + n3 * 0.20);
     float bump = BUMP_BASE * u_normalscale;
     vec3  Ndetail = vec3(-n.x * bump, -n.y * bump, n.z);
@@ -102,14 +112,16 @@ void main()
     vec3 skyTint    = u_skyColor;
     vec3 finalColor = mix(baseColor, skyTint, clamp(fresnel * u_skyblend, 0.0, 0.98));
 
-    /* sun specular term (cheap rim highlight on wave peaks).
-     * v_geoNormal is the LOW-FREQUENCY geometric normal, not the per-fragment
-     * detail normal, so the highlight is a broad, transparent rim. */
+    /* Paranoia2-style sun specular: use DETAIL normal for sharp glint
+     * on wave crests, with geo normal for broad light proxy.
+     * Two specular terms: broad (geo normal) + sharp (detail normal). */
     vec3  R          = reflect(-V, v_geoNormal);
     vec3  sunDir     = normalize(vec3(0.4, 0.4, 0.82));
-    float specRaw    = pow(max(dot(R, sunDir), 0.0), 64.0);
+    float specBroad  = pow(max(dot(R, sunDir), 0.0), 32.0);
+    vec3  R2         = reflect(-V, N);
+    float specSharp  = pow(max(dot(R2, sunDir), 0.0), 192.0);
     float lightAmount = mix(u_specularMin, 1.0, clamp(v_geoNormal.z, 0.0, 1.0));
-    float spec       = specRaw * 0.9 * u_specular * lightAmount;
+    float spec       = (specBroad * 0.5 + specSharp * 1.2) * u_specular * lightAmount;
     finalColor      += u_specularColor * spec;
 
     if (u_fogEnabled > 0.5)
