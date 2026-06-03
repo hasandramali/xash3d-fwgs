@@ -30,6 +30,9 @@ CVAR_DEFINE_AUTO( r_water_normalscale,        "1.0",   FCVAR_GLCONFIG, "bump-map
 CVAR_DEFINE_AUTO( r_water_choppy,             "0.04",  FCVAR_GLCONFIG, "vertex choppy wave offset (0..0.2)" );
 CVAR_DEFINE_AUTO( r_water_wave,               "1",     FCVAR_GLCONFIG, "enable wave/ripple animation (0=static, 1=animated)" );
 CVAR_DEFINE_AUTO( r_water_animspeed,          "1.0",   FCVAR_GLCONFIG, "wave animation speed multiplier (0=frozen, 2=double speed)" );
+CVAR_DEFINE_AUTO( r_water_waveheight,         "0.5",   FCVAR_GLCONFIG, "vertex displacement amplitude in game units (0=flat, 2=storm)" );
+CVAR_DEFINE_AUTO( r_water_wavefreq,           "0.05",  FCVAR_GLCONFIG, "vertex wave spatial frequency (0.01=long swells, 0.2=chop)" );
+CVAR_DEFINE_AUTO( r_water_specular_min,       "0.15",  FCVAR_GLCONFIG, "sun specular floor in dark wave troughs (0..1)" );
 CVAR_DEFINE_AUTO( r_water_specular,           "1.0",   FCVAR_GLCONFIG, "sun specular highlight intensity (0..2)" );
 CVAR_DEFINE_AUTO( r_water_specular_color_r,   "255",   FCVAR_GLCONFIG, "sun specular highlight red (0-255)" );
 CVAR_DEFINE_AUTO( r_water_specular_color_g,   "246",   FCVAR_GLCONFIG, "sun specular highlight green (0-255)" );
@@ -66,6 +69,9 @@ void R_WaterShader_Init( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_choppy );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wave );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_animspeed );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_specular_min );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_specular );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_specular_color_r );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_specular_color_g );
@@ -120,6 +126,18 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
  * does not need to ship loose files at runtime).
  * --------------------------------------------------------------------- */
 
+/* Vertex shader with Paranoia2-style layered wave displacement.
+ *
+ * The base plane is deformed by three superposed sin/cos waves at slightly
+ * different frequencies, producing the "~~~" up/down motion. The geometric
+ * normal is rebuilt from the analytical derivatives of that displacement so
+ * the fragment shader can use it as a "light proxy" (flat water = lit,
+ * tilted wave peak = dark).
+ *
+ * The vertex shader is shared between above-water and underwater programs;
+ * the only difference between the two fragment programs is how they colour
+ * the surface.
+ */
 static const char *water_vertex_source =
 	"#ifdef GL_ES\n"
 	"precision highp float;\n"
@@ -128,14 +146,50 @@ static const char *water_vertex_source =
 	"attribute vec2 a_texCoord;\n"
 	"uniform mat4 u_modelView;\n"
 	"uniform mat4 u_projection;\n"
+	"uniform float u_time;\n"
+	"uniform float u_waveheight;\n"
+	"uniform float u_wavefreq;\n"
 	"varying vec3 v_worldPos;\n"
 	"varying vec3 v_viewPos;\n"
 	"varying vec2 v_texCoord;\n"
+	"varying vec3 v_geoNormal;\n"
+	"\n"
+	"/* Same wave function as in the fragment, so the geometric normal here\n"
+	" * matches the high-frequency normal map detail there. */\n"
+	"float waveHeight( vec2 p, float t, float freq, float amp )\n"
+	"{\n"
+	"    float f1 = freq;\n"
+	"    float f2 = freq * 0.83;\n"
+	"    float f3 = freq * 1.31;\n"
+	"    float h1 = sin( p.x * f1 + t * 1.1 ) * 0.55;\n"
+	"    float h2 = cos( p.y * f2 + t * 0.7 ) * 0.30;\n"
+	"    float h3 = sin((p.x + p.y) * f3 + t * 1.5 ) * 0.20;\n"
+	"    return (h1 + h2 + h3) * amp;\n"
+	"}\n"
+	"\n"
 	"void main()\n"
 	"{\n"
-	"    v_worldPos = a_position.xyz;\n"
+	"    vec3  pos     = a_position.xyz;\n"
+	"    float t       = u_time;\n"
+	"    float freq    = max( u_wavefreq, 0.001 );\n"
+	"    float amp     = u_waveheight;\n"
+	"    pos.z        += waveHeight( pos.xy, t, freq, amp );\n"
+	"\n"
+	"    /* analytical derivatives of waveHeight w.r.t. x and y */\n"
+	"    float f1 = freq;\n"
+	"    float f2 = freq * 0.83;\n"
+	"    float f3 = freq * 1.31;\n"
+	"    float dHdx =  cos( pos.x * f1 + t * 1.1 ) * 0.55 * f1\n"
+	"               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.20 * f3;\n"
+	"    float dHdy = -sin( pos.y * f2 + t * 0.7 ) * 0.30 * f2\n"
+	"               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.20 * f3;\n"
+	"    dHdx *= amp;\n"
+	"    dHdy *= amp;\n"
+	"    v_geoNormal = normalize( vec3( -dHdx, -dHdy, 1.0 ));\n"
+	"\n"
+	"    v_worldPos = pos;\n"
 	"    v_texCoord = a_texCoord;\n"
-	"    vec4 viewPos = u_modelView * a_position;\n"
+	"    vec4 viewPos = u_modelView * vec4( pos, 1.0 );\n"
 	"    v_viewPos = viewPos.xyz;\n"
 	"    gl_Position = u_projection * viewPos;\n"
 	"}\n";
@@ -171,6 +225,7 @@ static const char *water_frag_above_source =
 	"uniform float     u_normalscale;\n"
 	"uniform float     u_choppy;\n"
 	"uniform float     u_specular;\n"
+	"uniform float     u_specularMin;\n"
 	"uniform float     u_skyblend;\n"
 	"uniform float     u_fogBlend;\n"
 	"uniform vec3      u_fogColor;\n"
@@ -180,6 +235,7 @@ static const char *water_frag_above_source =
 	"varying vec3 v_worldPos;\n"
 	"varying vec3 v_viewPos;\n"
 	"varying vec2 v_texCoord;\n"
+	"varying vec3 v_geoNormal;\n"
 	"\n"
 	"const float WATER_F0   = 0.15;\n"
 	"const float WAVE_SCALE = 0.0035;\n"
@@ -205,7 +261,11 @@ static const char *water_frag_above_source =
 	"    vec3 n3 = texture2D( u_normalMap, waveUV(uv,  8.0, 0.55, t, n2, u_choppy)).rgb * 2.0 - 1.0;\n"
 	"    vec3 n  = normalize( n0*0.30 + n1*0.25 + n2*0.25 + n3*0.20 );\n"
 	"    float bump = BUMP_BASE * u_normalscale;\n"
-	"    vec3  N    = normalize( vec3(-n.x * bump, -n.y * bump, n.z) );\n"
+	"    /* Per-fragment detail normal: combine the normal-map detail with the\n"
+	"     * low-frequency geometric normal coming from the vertex displacement,\n"
+	"     * so the surface looks like a single coherent height field. */\n"
+	"    vec3  Ndetail = vec3(-n.x * bump, -n.y * bump, n.z);\n"
+	"    vec3  N       = normalize( v_geoNormal + Ndetail * 0.6 );\n"
 	"\n"
 	"    vec3  V  = normalize( u_cameraPos - v_worldPos );\n"
 	"    float cosTheta = clamp( dot(N, V), 0.0, 1.0 );\n"
@@ -227,10 +287,21 @@ static const char *water_frag_above_source =
 	"    vec3  skyTint   = u_skyColor;\n"
 	"    vec3  finalColor = mix( baseColor, skyTint, clamp( fresnel * u_skyblend, 0.0, 0.98 ));\n"
 	"\n"
-	"    /* sun specular term (cheap rim highlight on wave peaks) */\n"
+	"    /* sun specular term.  We use the LOW-FREQUENCY geometric normal here\n"
+	"     * (rather than the per-fragment detail normal) so the highlight is a\n"
+	"     * broad, transparent rim that fades in/out with the wave slope.\n"
+	"     *\n"
+	"     * The blend with v_geoNormal.z is a cheap \"light proxy\":\n"
+	"     *   - flat water (N.z ~ 1)   -> 1.0 multiplier  (full sun)\n"
+	"     *   - tilted wave peak        -> N.z less than 1 -> dimmer\n"
+	"     *   - very steep trough face  -> N.z near 0     -> u_specularMin floor\n"
+	"     * This way the sun glint is invisible in the \"dark\" wave troughs and\n"
+	"     * bright on the flat tops, exactly the look the user asked for. */\n"
+	"    vec3  R = reflect( -V, v_geoNormal );\n"
 	"    vec3  sunDir = normalize( vec3( 0.4, 0.4, 0.82 ));\n"
-	"    vec3  R      = reflect( -V, N );\n"
-	"    float spec   = pow( max( dot(R, sunDir), 0.0 ), 192.0 ) * 1.6 * u_specular;\n"
+	"    float specRaw = pow( max( dot(R, sunDir), 0.0 ), 64.0 );\n"
+	"    float lightAmount = mix( u_specularMin, 1.0, clamp( v_geoNormal.z, 0.0, 1.0 ));\n"
+	"    float spec   = specRaw * 0.9 * u_specular * lightAmount;\n"
 	"    finalColor += u_specularColor * spec;\n"
 	"\n"
 	"    if( u_fogEnabled > 0.5 )\n"
@@ -262,6 +333,7 @@ static const char *water_frag_underwater_source =
 	"varying vec3 v_worldPos;\n"
 	"varying vec3 v_viewPos;\n"
 	"varying vec2 v_texCoord;\n"
+	"varying vec3 v_geoNormal;\n"
 	"\n"
 	"void main()\n"
 	"{\n"
@@ -393,6 +465,7 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_normalScale     = pglGetUniformLocationARB( p->program, "u_normalscale" );
 	p->u_choppy          = pglGetUniformLocationARB( p->program, "u_choppy" );
 	p->u_specular        = pglGetUniformLocationARB( p->program, "u_specular" );
+	p->u_specularMin     = pglGetUniformLocationARB( p->program, "u_specularMin" );
 	p->u_specularColor   = pglGetUniformLocationARB( p->program, "u_specularColor" );
 	p->u_skyblend        = pglGetUniformLocationARB( p->program, "u_skyblend" );
 	p->u_skyColor        = pglGetUniformLocationARB( p->program, "u_skyColor" );
@@ -402,6 +475,10 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_underwaterColor    = pglGetUniformLocationARB( p->program, "u_underwaterColor" );
 	p->u_underwaterAlpha    = pglGetUniformLocationARB( p->program, "u_underwaterAlpha" );
 	p->u_underwaterDensity  = pglGetUniformLocationARB( p->program, "u_underwaterDensity" );
+
+	/* vertex-shader uniforms (always present in both programs) */
+	p->u_waveheight      = pglGetUniformLocationARB( p->program, "u_waveheight" );
+	p->u_wavefreq        = pglGetUniformLocationARB( p->program, "u_wavefreq" );
 
 	p->a_position = WATER_ATTRIB_POSITION;
 	p->a_texCoord = WATER_ATTRIB_TEXCOORD;
@@ -537,6 +614,9 @@ void R_WaterShader_Init( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_choppy );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wave );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_animspeed );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_specular_min );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_specular );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_specular_color_r );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_specular_color_g );
@@ -667,23 +747,45 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 		                 RI.rvp.vieworigin[2] );
 	}
 
-	/* Per-entity water tint: prefer rendercolor when the brush entity uses
-	 * kRenderTrans*, fall back to the cvars (PrimeXT exposes u_RenderColor
-	 * which is the same thing). */
-	if( prog->u_waterColor >= 0 )
+	/* Per-entity water tint and transparency from func_water (Half-Life):
+	 *   - rendercolor (when non-black) overrides the cvars
+	 *   - renderamt  drives the alpha so map-defined func_water transparencies
+	 *     work out of the box without the mapper needing to know about our cvars
+	 *   - rendermode kRenderTrans* OR renderamt != 255 activates the per-entity
+	 *     path; the default engine state (kRenderNormal + renderamt 255) keeps
+	 *     the global cvars in control. */
 	{
+		cl_entity_t *e = RI.currententity;
+		const qboolean hasPerEntity =
+			( e != NULL ) &&
+			( e->curstate.rendermode != kRenderNormal ||
+			  e->curstate.renderamt != 255 );
+
 		float r = r_water_color_r.value / 255.0f;
 		float g = r_water_color_g.value / 255.0f;
 		float b = r_water_color_b.value / 255.0f;
+		float a = r_water_alpha.value;
 
-		cl_entity_t *e = RI.currententity;
-		if( e && e->curstate.rendermode != kRenderNormal )
+		if( hasPerEntity )
 		{
 			if( e->curstate.rendercolor.r || e->curstate.rendercolor.g || e->curstate.rendercolor.b )
 			{
 				r = e->curstate.rendercolor.r / 255.0f;
 				g = e->curstate.rendercolor.g / 255.0f;
 				b = e->curstate.rendercolor.b / 255.0f;
+			}
+
+			switch( e->curstate.rendermode )
+			{
+			case kRenderTransTexture:
+			case kRenderTransColor:
+			case kRenderTransAlpha:
+			case kRenderTransAdd:
+			case kRenderGlow:
+				a = e->curstate.renderamt / 255.0f;
+				break;
+			default:
+				break;
 			}
 		}
 
@@ -692,7 +794,10 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 			r = 1.0f; g = 0.0f; b = 0.0f;  /* debug tint */
 		}
 
-		pglUniform3fARB( prog->u_waterColor, r, g, b );
+		if( prog->u_waterColor >= 0 )
+			pglUniform3fARB( prog->u_waterColor, r, g, b );
+		if( prog->u_alpha >= 0 )
+			pglUniform1fARB( prog->u_alpha, Q_min( 1.0f, Q_max( 0.0f, a )));
 	}
 
 	if( prog->u_time >= 0 )
@@ -718,9 +823,8 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	if( prog->u_fogEnabled >= 0 )
 		pglUniform1fARB( prog->u_fogEnabled, RI.fogEnabled ? 1.0f : 0.0f );
 
-	/* above-water tuning uniforms */
-	if( prog->u_alpha >= 0 )
-		pglUniform1fARB( prog->u_alpha, r_water_alpha.value );
+	/* above-water tuning uniforms (u_alpha/u_waterColor are set above
+	 * from per-entity rendercolor + renderamt) */
 	if( prog->u_ambient >= 0 )
 		pglUniform1fARB( prog->u_ambient, r_water_ambient.value );
 	if( prog->u_density >= 0 )
@@ -731,6 +835,8 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 		pglUniform1fARB( prog->u_choppy, r_water_choppy.value );
 	if( prog->u_specular >= 0 )
 		pglUniform1fARB( prog->u_specular, r_water_specular.value );
+	if( prog->u_specularMin >= 0 )
+		pglUniform1fARB( prog->u_specularMin, r_water_specular_min.value );
 	if( prog->u_specularColor >= 0 )
 		pglUniform3fARB( prog->u_specularColor,
 		                 r_water_specular_color_r.value / 255.0f,
@@ -756,6 +862,22 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 		                 r_water_underwater_color_b.value / 255.0f );
 	if( prog->u_underwaterDensity >= 0 )
 		pglUniform1fARB( prog->u_underwaterDensity, r_water_underwater_density.value );
+
+	/* vertex-shader uniforms (wave height and frequency).
+	 * Per-entity scale acts as a multiplier on the global wave height, so
+	 * a func_water with scale=0.5 has half-amplitude waves and a scale=2.0
+	 * func_water is twice as choppy.  scale==1.0 (the engine default) is a
+	 * no-op. */
+	{
+		float waveHeight = r_water_waveheight.value;
+		cl_entity_t *ec = RI.currententity;
+		if( ec && ec->curstate.scale > 0.001f && fabsf( ec->curstate.scale - 1.0f ) > 0.001f )
+			waveHeight *= ec->curstate.scale;
+		if( prog->u_waveheight >= 0 )
+			pglUniform1fARB( prog->u_waveheight, waveHeight );
+		if( prog->u_wavefreq >= 0 )
+			pglUniform1fARB( prog->u_wavefreq, r_water_wavefreq.value );
+	}
 
 	/* Bind animated normal map on unit 0. We bind manually because GL_Bind
 	 * works on engine texture indices and we already hold the raw handle. */

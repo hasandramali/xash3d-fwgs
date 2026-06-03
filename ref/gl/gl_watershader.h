@@ -54,10 +54,15 @@ typedef struct
 	GLint   u_normalScale;
 	GLint   u_choppy;
 	GLint   u_specular;
+	GLint   u_specularMin;
 	GLint   u_specularColor;
 	GLint   u_skyblend;
 	GLint   u_skyColor;
 	GLint   u_fogBlend;
+
+	// vertex-shader uniforms (always present in both programs)
+	GLint   u_waveheight;
+	GLint   u_wavefreq;
 
 	// underwater uniforms (set to -1 on the above-water program)
 	GLint   u_underwaterColor;
@@ -92,6 +97,9 @@ extern convar_t r_water_normalscale;
 extern convar_t r_water_choppy;
 extern convar_t r_water_wave;
 extern convar_t r_water_animspeed;
+extern convar_t r_water_waveheight;
+extern convar_t r_water_wavefreq;
+extern convar_t r_water_specular_min;
 extern convar_t r_water_specular;
 extern convar_t r_water_specular_color_r;
 extern convar_t r_water_specular_color_g;

@@ -8,6 +8,16 @@
  *     F = F0 + (1 - F0) * pow(1 - cosTheta, power)
  * with PrimeXT's WATER_F0_VALUE (0.15) and FRESNEL_FACTOR (default 5.0).
  *
+ * The sun specular term uses the LOW-FREQUENCY geometric normal coming
+ * from the vertex displacement (v_geoNormal), so the highlight is a
+ * broad, transparent rim that fades in/out with the wave slope.  The
+ * blend with v_geoNormal.z is a cheap "light proxy":
+ *   - flat water (N.z ~ 1)   -> 1.0 multiplier  (full sun)
+ *   - tilted wave peak        -> N.z less than 1 -> dimmer
+ *   - very steep trough face  -> N.z near 0     -> u_specularMin floor
+ * This way the sun glint is invisible in the dark wave troughs and
+ * bright on the flat tops, exactly the look the user asked for.
+ *
  * Every visual knob is exposed through a uniform and a matching r_water_*
  * cvar (see ref/gl/gl_watershader.c).
  *
@@ -32,6 +42,7 @@ uniform float     u_density;
 uniform float     u_normalscale;
 uniform float     u_choppy;
 uniform float     u_specular;
+uniform float     u_specularMin;
 uniform float     u_skyblend;
 uniform float     u_fogBlend;
 uniform vec3      u_fogColor;
@@ -42,6 +53,7 @@ uniform float     u_fogEnabled;
 varying vec3 v_worldPos;
 varying vec3 v_viewPos;
 varying vec2 v_texCoord;
+varying vec3 v_geoNormal;
 
 const float WATER_F0   = 0.15;
 const float WAVE_SCALE = 0.0035;
@@ -68,7 +80,8 @@ void main()
     vec3 n3 = texture2D(u_normalMap, waveUV(uv, 8.0, 0.55, t, n2, u_choppy)).rgb * 2.0 - 1.0;
     vec3 n  = normalize(n0 * 0.30 + n1 * 0.25 + n2 * 0.25 + n3 * 0.20);
     float bump = BUMP_BASE * u_normalscale;
-    vec3  N    = normalize(vec3(-n.x * bump, -n.y * bump, n.z));
+    vec3  Ndetail = vec3(-n.x * bump, -n.y * bump, n.z);
+    vec3  N       = normalize(v_geoNormal + Ndetail * 0.6);
 
     vec3  V        = normalize(u_cameraPos - v_worldPos);
     float cosTheta = clamp(dot(N, V), 0.0, 1.0);
@@ -89,11 +102,15 @@ void main()
     vec3 skyTint    = u_skyColor;
     vec3 finalColor = mix(baseColor, skyTint, clamp(fresnel * u_skyblend, 0.0, 0.98));
 
-    /* sun specular term (cheap rim highlight on wave peaks) */
-    vec3  sunDir = normalize(vec3(0.4, 0.4, 0.82));
-    vec3  R      = reflect(-V, N);
-    float spec   = pow(max(dot(R, sunDir), 0.0), 192.0) * 1.6 * u_specular;
-    finalColor  += u_specularColor * spec;
+    /* sun specular term (cheap rim highlight on wave peaks).
+     * v_geoNormal is the LOW-FREQUENCY geometric normal, not the per-fragment
+     * detail normal, so the highlight is a broad, transparent rim. */
+    vec3  R          = reflect(-V, v_geoNormal);
+    vec3  sunDir     = normalize(vec3(0.4, 0.4, 0.82));
+    float specRaw    = pow(max(dot(R, sunDir), 0.0), 64.0);
+    float lightAmount = mix(u_specularMin, 1.0, clamp(v_geoNormal.z, 0.0, 1.0));
+    float spec       = specRaw * 0.9 * u_specular * lightAmount;
+    finalColor      += u_specularColor * spec;
 
     if (u_fogEnabled > 0.5)
     {
