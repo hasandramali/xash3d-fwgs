@@ -2,7 +2,7 @@
  * PrimeXT-inspired water vertex shader with Paranoia2-style layered
  * wave displacement (GLSL ES 1.00 / gl4es).
  *
- * Three superposed sin/cos waves at slightly different frequencies
+ * Four superposed sin/cos waves at slightly different frequencies
  * produce the "~~~" up/down motion. The geometric normal is rebuilt
  * from the analytical derivatives of that displacement so the
  * fragment shader can use it as a "light proxy" (flat water = lit,
@@ -37,10 +37,12 @@ float waveHeight(vec2 p, float t, float freq, float amp)
     float f1 = freq;
     float f2 = freq * 0.83;
     float f3 = freq * 1.31;
-    float h1 = sin( p.x * f1 + t * 1.1 ) * 0.55;
+    float f4 = freq * 0.57;
+    float h1 = sin( p.x * f1 + t * 1.1 ) * 0.50;
     float h2 = cos( p.y * f2 + t * 0.7 ) * 0.30;
-    float h3 = sin((p.x + p.y) * f3 + t * 1.5 ) * 0.20;
-    return (h1 + h2 + h3) * amp;
+    float h3 = sin((p.x + p.y) * f3 + t * 1.5 ) * 0.15;
+    float h4 = cos( p.x * 0.7 - p.y * 0.7 + t * 0.9 ) * 0.15;
+    return (h1 + h2 + h3 + h4) * amp;
 }
 
 void main()
@@ -55,10 +57,13 @@ void main()
     float f1 = freq;
     float f2 = freq * 0.83;
     float f3 = freq * 1.31;
-    float dHdx =  cos( pos.x * f1 + t * 1.1 ) * 0.55 * f1
-               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.20 * f3;
+    float f4 = freq * 0.57;
+    float dHdx =  cos( pos.x * f1 + t * 1.1 ) * 0.50 * f1
+               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.15 * f3
+               -   sin( pos.x * 0.7 - pos.y * 0.7 + t * 0.9 ) * 0.15 * f4 * 0.7;
     float dHdy = -sin( pos.y * f2 + t * 0.7 ) * 0.30 * f2
-               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.20 * f3;
+               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.15 * f3
+               +   sin( pos.x * 0.7 - pos.y * 0.7 + t * 0.9 ) * 0.15 * f4 * (-0.7);
     dHdx *= amp;
     dHdy *= amp;
     v_geoNormal = normalize(vec3(-dHdx, -dHdy, 1.0));

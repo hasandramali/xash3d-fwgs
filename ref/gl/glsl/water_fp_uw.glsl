@@ -93,5 +93,3 @@ void main()
     }
     gl_FragColor = vec4(color, clamp(u_underwaterAlpha, 0.0, 1.0));
 }
-    gl_FragColor = vec4(finalColor, clamp(u_underwaterAlpha, 0.0, 1.0));
-}

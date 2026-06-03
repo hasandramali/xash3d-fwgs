@@ -10,13 +10,10 @@
  *
  * The sun specular term uses the LOW-FREQUENCY geometric normal coming
  * from the vertex displacement (v_geoNormal), so the highlight is a
- * broad, transparent rim that fades in/out with the wave slope.  The
- * blend with v_geoNormal.z is a cheap "light proxy":
- *   - flat water (N.z ~ 1)   -> 1.0 multiplier  (full sun)
- *   - tilted wave peak        -> N.z less than 1 -> dimmer
- *   - very steep trough face  -> N.z near 0     -> u_specularMin floor
- * This way the sun glint is invisible in the dark wave troughs and
- * bright on the flat tops, exactly the look the user asked for.
+ * broad, transparent rim that fades in/out with the wave slope.
+ *
+ * CPU ripple texture (u_waterTex) from the engine's R_UploadRipples
+ * is blended subtly on top for the original "texture feel".
  *
  * Every visual knob is exposed through a uniform and a matching r_water_*
  * cvar (see ref/gl/gl_watershader.c).
@@ -29,6 +26,7 @@
 precision mediump float;
 #endif
 uniform sampler2D u_normalMap;
+uniform sampler2D u_waterTex;
 uniform vec3      u_cameraPos;
 uniform vec3      u_waterColor;
 uniform vec3      u_skyColor;
@@ -46,6 +44,7 @@ uniform float     u_specularMin;
 uniform float     u_skyblend;
 uniform float     u_scattering;
 uniform float     u_rainIntensity;
+uniform float     u_waterTexBlend;
 uniform float     u_fogBlend;
 uniform vec3      u_fogColor;
 uniform float     u_fogStart;
@@ -120,7 +119,7 @@ void main()
 
     float bump = BUMP_BASE * u_normalscale;
     vec3  Ndetail = vec3(-n.x * bump, -n.y * bump, n.z);
-    vec3  N       = normalize(v_geoNormal + Ndetail * 0.6);
+    vec3  N       = normalize(v_geoNormal + Ndetail * 0.3);
 
     vec3  V  = normalize(u_cameraPos - v_worldPos);
     float cosTheta = clamp(dot(N, V), 0.0, 1.0);
@@ -155,69 +154,9 @@ void main()
     vec3  scatterColor  = vec3(0.25, 0.50, 0.75) * scatterFactor;
     finalColor += scatterColor;
 
-    if (u_fogEnabled > 0.5)
-    {
-        float fogF = clamp((dist - u_fogStart) / max(u_fogEnd - u_fogStart, 1.0), 0.0, 1.0);
-        finalColor = mix(finalColor, u_fogColor, fogF * u_fogBlend);
-    }
-    gl_FragColor = vec4(finalColor, clamp(u_alpha, 0.0, 1.0));
-}
-
-/* Paranoia2-style: time-based UV offset creates wave motion from a
- * single normal map by shifting sample positions over time. */
-vec2 animUV(vec2 uv, float t)
-{
-    vec2 dir = vec2(sin(t * 0.7 + uv.y * 3.0), cos(t * 0.5 + uv.x * 2.5));
-    return uv + dir * 0.012;
-}
-
-void main()
-{
-    vec2  uv = v_worldPos.xy * WAVE_SCALE;
-    float t  = u_time;
-
-    /* Paranoia2-style layered normal-map with animated UV offsets.
-     * Each layer samples at a different time-offset and UV scale,
-     * producing the same "~~~" visual as 29-frame animated textures. */
-    vec3 n0 = texture2D(u_normalMap, animUV(waveUV(uv, 1.0, 0.10, t, vec3(0.0), u_choppy), t)).rgb * 2.0 - 1.0;
-    vec3 n1 = texture2D(u_normalMap, animUV(waveUV(uv, 2.0, 0.18, t, n0, u_choppy), t * 1.3)).rgb * 2.0 - 1.0;
-    vec3 n2 = texture2D(u_normalMap, animUV(waveUV(uv, 4.0, 0.30, t, n1, u_choppy), t * 0.7)).rgb * 2.0 - 1.0;
-    vec3 n3 = texture2D(u_normalMap, animUV(waveUV(uv, 8.0, 0.55, t, n2, u_choppy), t * 1.1)).rgb * 2.0 - 1.0;
-    vec3 n  = normalize(n0 * 0.30 + n1 * 0.25 + n2 * 0.25 + n3 * 0.20);
-    float bump = BUMP_BASE * u_normalscale;
-    vec3  Ndetail = vec3(-n.x * bump, -n.y * bump, n.z);
-    vec3  N       = normalize(v_geoNormal + Ndetail * 0.6);
-
-    vec3  V        = normalize(u_cameraPos - v_worldPos);
-    float cosTheta = clamp(dot(N, V), 0.0, 1.0);
-
-    /* Schlick Fresnel from PrimeXT/fresnel.h */
-    float fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - cosTheta, u_fresnelFactor);
-    fresnel = clamp(fresnel, 0.0, 0.95);
-
-    /* depth-based water tint (waterBorderFactor analogue) */
-    float dist        = length(v_viewPos);
-    float depthFactor = clamp(dist * (0.0025 * u_density), 0.0, 1.0);
-    vec3  deepColor    = u_waterColor * 0.55;
-    vec3  shallowColor = u_waterColor + vec3(0.05, 0.08, 0.10);
-    vec3  baseColor    = mix(shallowColor, deepColor, depthFactor);
-    baseColor *= u_ambient; /* tame the fullbright look */
-
-    /* fake sky reflection (no FBO planar reflection in this backend) */
-    vec3 skyTint    = u_skyColor;
-    vec3 finalColor = mix(baseColor, skyTint, clamp(fresnel * u_skyblend, 0.0, 0.98));
-
-    /* Paranoia2-style sun specular: use DETAIL normal for sharp glint
-     * on wave crests, with geo normal for broad light proxy.
-     * Two specular terms: broad (geo normal) + sharp (detail normal). */
-    vec3  R          = reflect(-V, v_geoNormal);
-    vec3  sunDir     = normalize(vec3(0.4, 0.4, 0.82));
-    float specBroad  = pow(max(dot(R, sunDir), 0.0), 32.0);
-    vec3  R2         = reflect(-V, N);
-    float specSharp  = pow(max(dot(R2, sunDir), 0.0), 192.0);
-    float lightAmount = mix(u_specularMin, 1.0, clamp(v_geoNormal.z, 0.0, 1.0));
-    float spec       = (specBroad * 0.5 + specSharp * 1.2) * u_specular * lightAmount;
-    finalColor      += u_specularColor * spec;
+    /* CPU ripple water texture overlay for original texture feel */
+    vec4 waterTexel = texture2D(u_waterTex, v_texCoord);
+    finalColor = mix(finalColor, waterTexel.rgb, u_waterTexBlend);
 
     if (u_fogEnabled > 0.5)
     {

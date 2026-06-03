@@ -69,6 +69,10 @@ typedef struct
 	GLint   u_scattering;
 	GLint   u_rainIntensity;
 
+	// water color texture from CPU ripples (unit 1 when available)
+	GLint   u_waterTex;
+	GLint   u_waterTexBlend;
+
 	// underwater uniforms (set to -1 on the above-water program)
 	GLint   u_underwaterColor;
 	GLint   u_underwaterAlpha;
@@ -128,6 +132,7 @@ extern convar_t r_water_sun_y;
 extern convar_t r_water_sun_z;
 extern convar_t r_water_sunlight_scattering;
 extern convar_t r_water_rain_intensity;
+extern convar_t r_water_texblend;
 extern convar_t r_water_debug;
 
 extern gl_water_shader_state_t gWaterShader;

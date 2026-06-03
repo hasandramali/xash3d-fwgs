@@ -30,8 +30,8 @@ CVAR_DEFINE_AUTO( r_water_normalscale,        "1.0",   FCVAR_GLCONFIG, "bump-map
 CVAR_DEFINE_AUTO( r_water_choppy,             "0.04",  FCVAR_GLCONFIG, "vertex choppy wave offset (0..0.2)" );
 CVAR_DEFINE_AUTO( r_water_wave,               "1",     FCVAR_GLCONFIG, "enable wave/ripple animation (0=static, 1=animated)" );
 CVAR_DEFINE_AUTO( r_water_animspeed,          "1.0",   FCVAR_GLCONFIG, "wave animation speed multiplier (0=frozen, 2=double speed)" );
-CVAR_DEFINE_AUTO( r_water_waveheight,         "3.0",   FCVAR_GLCONFIG, "vertex displacement amplitude in game units (0=flat, 5=storm)" );
-CVAR_DEFINE_AUTO( r_water_wavefreq,           "0.06",  FCVAR_GLCONFIG, "vertex wave spatial frequency (0.01=long swells, 0.2=chop)" );
+CVAR_DEFINE_AUTO( r_water_waveheight,         "7.0",   FCVAR_GLCONFIG, "vertex displacement amplitude in game units (0=flat, 10=storm)" );
+CVAR_DEFINE_AUTO( r_water_wavefreq,           "0.04",  FCVAR_GLCONFIG, "vertex wave spatial frequency (0.01=long swells, 0.2=chop)" );
 CVAR_DEFINE_AUTO( r_water_specular_min,       "0.15",  FCVAR_GLCONFIG, "sun specular floor in dark wave troughs (0..1)" );
 CVAR_DEFINE_AUTO( r_water_specular,           "1.0",   FCVAR_GLCONFIG, "sun specular highlight intensity (0..2)" );
 CVAR_DEFINE_AUTO( r_water_specular_color_r,   "255",   FCVAR_GLCONFIG, "sun specular highlight red (0-255)" );
@@ -57,6 +57,7 @@ CVAR_DEFINE_AUTO( r_water_sun_y,              "0.4",   FCVAR_GLCONFIG, "sun dire
 CVAR_DEFINE_AUTO( r_water_sun_z,              "0.82",  FCVAR_GLCONFIG, "sun direction Z for water specular/scattering" );
 CVAR_DEFINE_AUTO( r_water_sunlight_scattering,"0.25",  FCVAR_GLCONFIG, "subsurface sunlight scattering strength (0..1)" );
 CVAR_DEFINE_AUTO( r_water_rain_intensity,      "0",     FCVAR_GLCONFIG, "rain/procedural ripple intensity (0=off, 1=max)" );
+CVAR_DEFINE_AUTO( r_water_texblend,           "0.15",  FCVAR_GLCONFIG, "CPU ripple water texture blend (0=off, 1=full texture)" );
 
 gl_water_shader_state_t gWaterShader;
 
@@ -109,6 +110,7 @@ void R_WaterShader_Init( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_z );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_sunlight_scattering );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_rain_intensity );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_texblend );
 }
 
 void R_WaterShader_Shutdown( void ) {}
@@ -179,10 +181,12 @@ static const char *water_vertex_source =
 	"    float f1 = freq;\n"
 	"    float f2 = freq * 0.83;\n"
 	"    float f3 = freq * 1.31;\n"
-	"    float h1 = sin( p.x * f1 + t * 1.1 ) * 0.55;\n"
+	"    float f4 = freq * 0.57;\n"
+	"    float h1 = sin( p.x * f1 + t * 1.1 ) * 0.50;\n"
 	"    float h2 = cos( p.y * f2 + t * 0.7 ) * 0.30;\n"
-	"    float h3 = sin((p.x + p.y) * f3 + t * 1.5 ) * 0.20;\n"
-	"    return (h1 + h2 + h3) * amp;\n"
+	"    float h3 = sin((p.x + p.y) * f3 + t * 1.5 ) * 0.15;\n"
+	"    float h4 = cos( p.x * 0.7 - p.y * 0.7 + t * 0.9 ) * 0.15;\n"
+	"    return (h1 + h2 + h3 + h4) * amp;\n"
 	"}\n"
 	"\n"
 	"void main()\n"
@@ -197,10 +201,13 @@ static const char *water_vertex_source =
 	"    float f1 = freq;\n"
 	"    float f2 = freq * 0.83;\n"
 	"    float f3 = freq * 1.31;\n"
-	"    float dHdx =  cos( pos.x * f1 + t * 1.1 ) * 0.55 * f1\n"
-	"               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.20 * f3;\n"
+	"    float f4 = freq * 0.57;\n"
+	"    float dHdx =  cos( pos.x * f1 + t * 1.1 ) * 0.50 * f1\n"
+	"               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.15 * f3\n"
+	"               -   sin( pos.x * 0.7 - pos.y * 0.7 + t * 0.9 ) * 0.15 * f4 * 0.7;\n"
 	"    float dHdy = -sin( pos.y * f2 + t * 0.7 ) * 0.30 * f2\n"
-	"               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.20 * f3;\n"
+	"               +   cos((pos.x + pos.y) * f3 + t * 1.5 ) * 0.15 * f3\n"
+	"               +   sin( pos.x * 0.7 - pos.y * 0.7 + t * 0.9 ) * 0.15 * f4 * (-0.7);\n"
 	"    dHdx *= amp;\n"
 	"    dHdy *= amp;\n"
 	"    v_geoNormal = normalize( vec3( -dHdx, -dHdy, 1.0 ));\n"
@@ -231,6 +238,7 @@ static const char *water_frag_above_source =
 	"precision mediump float;\n"
 	"#endif\n"
 	"uniform sampler2D u_normalMap;\n"
+	"uniform sampler2D u_waterTex;\n"
 	"uniform vec3      u_cameraPos;\n"
 	"uniform vec3      u_waterColor;\n"
 	"uniform vec3      u_skyColor;\n"
@@ -248,6 +256,7 @@ static const char *water_frag_above_source =
 	"uniform float     u_skyblend;\n"
 	"uniform float     u_scattering;\n"
 	"uniform float     u_rainIntensity;\n"
+	"uniform float     u_waterTexBlend;\n"
 	"uniform float     u_fogBlend;\n"
 	"uniform vec3      u_fogColor;\n"
 	"uniform float     u_fogStart;\n"
@@ -326,7 +335,7 @@ static const char *water_frag_above_source =
 	"\n"
 	"    float bump = BUMP_BASE * u_normalscale;\n"
 	"    vec3  Ndetail = vec3(-n.x * bump, -n.y * bump, n.z);\n"
-	"    vec3  N       = normalize( v_geoNormal + Ndetail * 0.6 );\n"
+	"    vec3  N       = normalize( v_geoNormal + Ndetail * 0.3 );\n"
 	"\n"
 	"    vec3  V  = normalize( u_cameraPos - v_worldPos );\n"
 	"    float cosTheta = clamp( dot(N, V), 0.0, 1.0 );\n"
@@ -361,6 +370,10 @@ static const char *water_frag_above_source =
 	"    float scatterFactor = u_scattering * pow( max( dot(N, u_sunDir), 0.0 ), 8.0 );\n"
 	"    vec3  scatterColor  = vec3( 0.25, 0.50, 0.75 ) * scatterFactor;\n"
 	"    finalColor += scatterColor;\n"
+	"\n"
+	"    /* CPU ripple water texture overlay for original texture feel */\n"
+	"    vec4 waterTexel = texture2D( u_waterTex, v_texCoord );\n"
+	"    finalColor = mix( finalColor, waterTexel.rgb, u_waterTexBlend );\n"
 	"\n"
 	"    if( u_fogEnabled > 0.5 )\n"
 	"    {\n"
@@ -547,6 +560,8 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_modelView     = pglGetUniformLocationARB( p->program, "u_modelView" );
 	p->u_projection    = pglGetUniformLocationARB( p->program, "u_projection" );
 	p->u_normalMap     = pglGetUniformLocationARB( p->program, "u_normalMap" );
+	p->u_waterTex      = pglGetUniformLocationARB( p->program, "u_waterTex" );
+	p->u_waterTexBlend = pglGetUniformLocationARB( p->program, "u_waterTexBlend" );
 	p->u_cameraPos     = pglGetUniformLocationARB( p->program, "u_cameraPos" );
 	p->u_time          = pglGetUniformLocationARB( p->program, "u_time" );
 	p->u_fresnelFactor = pglGetUniformLocationARB( p->program, "u_fresnelFactor" );
@@ -755,6 +770,7 @@ void R_WaterShader_Init( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_z );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_sunlight_scattering );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_rain_intensity );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_texblend );
 	}
 
 	/* Skip the expensive GL state work if we already finished a previous
@@ -1029,6 +1045,41 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	pglBindTexture( GL_TEXTURE_2D, normalTex );
 	if( prog->u_normalMap >= 0 )
 		pglUniform1iARB( prog->u_normalMap, 0 );
+
+	/* Bind CPU ripple water texture on unit 1 (if available).
+	 * R_UploadRipples() was already called by EmitWaterPolys' caller
+	 * and creates/updates tex->fb_texturenum. */
+	if( prog->u_waterTex >= 0 )
+	{
+		texture_t *wt = warp->texinfo ? warp->texinfo->texture : NULL;
+		GLuint waterTexNum = ( wt && wt->fb_texturenum ) ? wt->fb_texturenum : 0;
+		if( waterTexNum )
+		{
+			pglActiveTextureARB( GL_TEXTURE1_ARB );
+			pglBindTexture( GL_TEXTURE_2D, waterTexNum );
+			pglUniform1iARB( prog->u_waterTex, 1 );
+		}
+		else
+		{
+			/* No ripple texture available — still need a valid bind or
+			 * sampling will produce undefined results.  Bind a 1x1 white
+			 * texture that the blend will zero out (texBlend=0 by default
+			 * means no contribution). */
+			pglActiveTextureARB( GL_TEXTURE1_ARB );
+			pglBindTexture( GL_TEXTURE_2D, normalTex );
+			pglUniform1iARB( prog->u_waterTex, 1 );
+		}
+	}
+	if( prog->u_waterTexBlend >= 0 )
+	{
+		float blend = r_water_texblend.value;
+		if( blend < 0.001f || !warp->texinfo || !warp->texinfo->texture || !warp->texinfo->texture->fb_texturenum )
+			blend = 0.0f;
+		pglUniform1fARB( prog->u_waterTexBlend, Q_max( 0.0f, Q_min( 1.0f, blend )));
+	}
+
+	/* Restore active texture unit to 0 for legacy texture management. */
+	pglActiveTextureARB( GL_TEXTURE0_ARB );
 
 	/* Render state: alpha-blended over the existing scene, no depth write,
 	 * no clip plane (PrimeXT enables a clip plane when it does a planar
