@@ -60,6 +60,14 @@ gl_water_shader_state_t gWaterShader;
 
 void R_WaterShader_Init( void )
 {
+	/* The cvars persist for the whole engine session. R_WaterShader_Init
+	 * can be called more than once (e.g. vid_restart) and the engine's
+	 * Cvar_RegisterVariable refuses to re-link an existing name. Only
+	 * register them once, then leave the rest of the no-op stub. */
+	static qboolean s_waterCvarsRegistered = false;
+	if( s_waterCvarsRegistered ) return;
+	s_waterCvarsRegistered = true;
+
 	memset( &gWaterShader, 0, sizeof( gWaterShader ));
 	gEngfuncs.Cvar_RegisterVariable( &r_water_shader );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_alpha );
@@ -146,9 +154,9 @@ static const char *water_vertex_source =
 	"attribute vec2 a_texCoord;\n"
 	"uniform mat4 u_modelView;\n"
 	"uniform mat4 u_projection;\n"
-	"uniform float u_time;\n"
-	"uniform float u_waveheight;\n"
-	"uniform float u_wavefreq;\n"
+	"uniform highp float u_time;\n"
+	"uniform highp float u_waveheight;\n"
+	"uniform highp float u_wavefreq;\n"
 	"varying vec3 v_worldPos;\n"
 	"varying vec3 v_viewPos;\n"
 	"varying vec2 v_texCoord;\n"
@@ -217,7 +225,7 @@ static const char *water_frag_above_source =
 	"uniform vec3      u_waterColor;\n"
 	"uniform vec3      u_skyColor;\n"
 	"uniform vec3      u_specularColor;\n"
-	"uniform float     u_time;\n"
+	"uniform highp float u_time;\n"
 	"uniform float     u_fresnelFactor;\n"
 	"uniform float     u_alpha;\n"
 	"uniform float     u_ambient;\n"
@@ -322,7 +330,7 @@ static const char *water_frag_underwater_source =
 	"uniform sampler2D u_normalMap;\n"
 	"uniform vec3      u_cameraPos;\n"
 	"uniform vec3      u_underwaterColor;\n"
-	"uniform float     u_time;\n"
+	"uniform highp float u_time;\n"
 	"uniform float     u_underwaterAlpha;\n"
 	"uniform float     u_underwaterDensity;\n"
 	"uniform float     u_fogBlend;\n"
@@ -604,10 +612,21 @@ static GLuint R_WaterShader_CurrentNormalFrame( void )
 
 void R_WaterShader_Init( void )
 {
-	memset( &gWaterShader, 0, sizeof( gWaterShader ));
+	/* The cvars persist for the whole engine session. R_WaterShader_Init
+	 * can be called more than once (e.g. vid_restart) and the second call
+	 * would spam "is already defined" warnings for every cvar, since the
+	 * engine's Cvar_RegisterVariable refuses to re-link an existing name.
+	 * We only register them once, but always re-evaluate shader compilation
+	 * because R_WaterShader_Shutdown may have run in between. */
+	static qboolean s_waterCvarsRegistered = false;
 
-	gEngfuncs.Cvar_RegisterVariable( &r_water_shader );
-	gEngfuncs.Cvar_RegisterVariable( &r_water_alpha );
+	if( !s_waterCvarsRegistered )
+	{
+		s_waterCvarsRegistered = true;
+		memset( &gWaterShader, 0, sizeof( gWaterShader ));
+
+		gEngfuncs.Cvar_RegisterVariable( &r_water_shader );
+		gEngfuncs.Cvar_RegisterVariable( &r_water_alpha );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_ambient );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_density );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_normalscale );
@@ -636,6 +655,13 @@ void R_WaterShader_Init( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_color_g );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_color_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
+	}
+
+	/* Skip the expensive GL state work if we already finished a previous
+	 * Init->Shutdown cycle's worth of compilation, but always re-run if
+	 * Shutdown zeroed gWaterShader since. */
+	if( gWaterShader.initialized )
+		return;
 
 	if( !GL_Support( GL_SHADER_GLSL100_EXT ))
 	{

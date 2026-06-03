@@ -19,7 +19,7 @@ precision mediump float;
 uniform sampler2D u_normalMap;
 uniform vec3      u_cameraPos;
 uniform vec3      u_underwaterColor;
-uniform float     u_time;
+uniform highp float u_time;
 uniform float     u_underwaterAlpha;
 uniform float     u_underwaterDensity;
 uniform float     u_fogBlend;

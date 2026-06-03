@@ -34,7 +34,7 @@ uniform vec3      u_cameraPos;
 uniform vec3      u_waterColor;
 uniform vec3      u_skyColor;
 uniform vec3      u_specularColor;
-uniform float     u_time;
+uniform highp float u_time;
 uniform float     u_fresnelFactor;
 uniform float     u_alpha;
 uniform float     u_ambient;
