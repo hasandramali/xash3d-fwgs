@@ -428,7 +428,7 @@ void GameUI_UnloadProgs( void )
 	if( gameui.mempool )
 	{
 		Mem_FreePool( &gameui.mempool );
-		gameui.mempool = NULL;
+		gameui.mempool = 0;
 	}
 
 	memset( &gameuiNext, 0, sizeof( gameuiNext ));

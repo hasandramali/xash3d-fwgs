@@ -1302,8 +1302,8 @@ static int GAME_EXPORT pfnNAT_GetPublicIP( void )
 
 	NET_GetLocalAddress( &ip4, &ip6 );
 
-	if( ip4.type != NA_LOOPBACK && ip4.type != NA_UNUSED )
-		return ip4.ip;
+	if( ip4.type != NA_LOOPBACK && ip4.type != NA_UNDEFINED )
+		return *(int *)ip4.ip;
 
 	return 0;
 }
@@ -1315,7 +1315,7 @@ static int GAME_EXPORT pfnNAT_IsAvailable( void )
 
 	NET_GetLocalAddress( &ip4, &ip6 );
 
-	if( ip4.type != NA_LOOPBACK && ip4.type != NA_UNUSED )
+	if( ip4.type != NA_LOOPBACK && ip4.type != NA_UNDEFINED )
 		return 1;
 
 	return 0;

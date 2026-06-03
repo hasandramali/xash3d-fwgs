@@ -19,6 +19,7 @@ the Free Software Foundation, either version 3 of the License, or
 //
 typedef struct gameui_next_s
 {
+	qboolean	active;		// is GameUI active
 	void		*hInstance;	// GameUI DLL handle
 
 	// Bridge function pointers (wraps IGameUI methods into UI_FUNCTIONS)
