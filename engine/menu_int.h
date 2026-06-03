@@ -229,6 +229,17 @@ typedef struct ui_extendedfuncs_s {
 	// returns 1 if cvar has read-only flag
 	// or -1 if cvar not found
 	int (*pfnIsCvarReadOnly)( const char *name );
+
+	// === GameUI extensions ===
+	// NAT punch-through support
+	int (*pfnNAT_GetPublicIP)( void );		// returns public IP in network byte order, 0 if unavailable
+	int (*pfnNAT_IsAvailable)( void );		// returns 1 if NAT punch is available
+	
+	// Direct Connect helper
+	void (*pfnDirectConnect)( const char *address );	// connect directly to IP:port
+	
+	// Game info extensions
+	int (*pfnGetServerCount)( void );		// returns number of known servers
 } ui_extendedfuncs_t;
 
 // deprecated export from old engine

@@ -402,6 +402,15 @@ void FS_Init( void )
 
 	if( !Sys_GetParmFromCmdLine( "-menulib", host.menulib ))
 		host.menulib[0] = 0;
+
+	if( Sys_CheckParm( "-gameui" ))
+	{
+		host.gameui_mode = true;
+
+		// Default menulib to @GameUI if no explicit -menulib given
+		if( host.menulib[0] == '\0' )
+			Q_strncpy( host.menulib, "@GameUI", sizeof( host.menulib ));
+	}
 }
 
 /*

@@ -178,6 +178,7 @@ static void Host_PrintUsage( const char *exename )
 #if !XASH_DEDICATED
 	O("-clientlib <path>  ", "override client DLL path")
 	O("-menulib <path>    ", "override menu DLL path")
+	O("-gameui            ", "use GameUI instead of MainUI")
 	O("-console           ", "run engine with console enabled")
 	O("-toconsole         ", "run engine witn console open")
 	O("-oldfont           ", "enable unused Quake font in Half-Life")

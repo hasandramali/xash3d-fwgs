@@ -20,6 +20,7 @@ GNU General Public License for more details.
 #include "input.h"
 #include "server.h" // !!svgame.hInstance
 #include "vid_common.h"
+#include "dll_int/cl_gameui_next.h"
 
 static void 	UI_UpdateUserinfo( void );
 
@@ -1288,6 +1289,64 @@ static int pfnIsCvarReadOnly( const char *name )
 	return FBitSet( cv->flags, FCVAR_READ_ONLY ) ? 1 : 0;
 }
 
+/*
+=====================
+GameUI Extension: NAT Support
+
+Provides NAT punch-through information to the menu system.
+=====================
+*/
+static int GAME_EXPORT pfnNAT_GetPublicIP( void )
+{
+	netadr_t ip4, ip6;
+
+	NET_GetLocalAddress( &ip4, &ip6 );
+
+	if( ip4.type != NA_LOOPBACK && ip4.type != NA_UNUSED )
+		return ip4.ip;
+
+	return 0;
+}
+
+static int GAME_EXPORT pfnNAT_IsAvailable( void )
+{
+	// NAT punch is available if we have a non-local IP
+	netadr_t ip4, ip6;
+
+	NET_GetLocalAddress( &ip4, &ip6 );
+
+	if( ip4.type != NA_LOOPBACK && ip4.type != NA_UNUSED )
+		return 1;
+
+	return 0;
+}
+
+/*
+=====================
+GameUI Extension: Direct Connect
+=====================
+*/
+static void GAME_EXPORT pfnDirectConnect( const char *address )
+{
+	if( COM_StringEmptyOrNULL( address ))
+		return;
+
+	Cbuf_AddTextf( "connect %s\n", address );
+	Cbuf_Execute();
+}
+
+/*
+=====================
+GameUI Extension: Get Server Count
+=====================
+*/
+static int GAME_EXPORT pfnGetServerCount( void )
+{
+	// TODO: return count from server browser
+	// placeholder - will be connected when server browser is integrated
+	return 0;
+}
+
 static ui_extendedfuncs_t gExtendedfuncs =
 {
 	pfnEnableTextInput,
@@ -1304,10 +1363,28 @@ static ui_extendedfuncs_t gExtendedfuncs =
 	pfnGetGameInfo,
 	pfnGetModInfo,
 	pfnIsCvarReadOnly,
+	pfnNAT_GetPublicIP,
+	pfnNAT_IsAvailable,
+	pfnDirectConnect,
+	pfnGetServerCount,
 };
 
 void UI_UnloadProgs( void )
 {
+	// If GameUI mode is active, unload via GameUI bridge
+	if( host.gameui_mode && GameUI_IsActive( ))
+	{
+		Cmd_RemoveCommand( "ui_allowconsole" );
+		Cvar_FullSet( "host_gameuiloaded", "0", FCVAR_READ_ONLY );
+
+		Cvar_Unlink( FCVAR_GAMEUIDLL );
+		Cmd_Unlink( CMD_GAMEUIDLL );
+
+		GameUI_UnloadProgs(); // handles library free + pool cleanup
+		memset( &gameui, 0, sizeof( gameui ));
+		return;
+	}
+
 	if( !gameui.hInstance ) return;
 
 	// deinitialize game
@@ -1344,31 +1421,62 @@ qboolean UI_LoadProgs( void )
 
 	if( gameui.hInstance ) UI_UnloadProgs();
 
-	// setup globals
 	gameui.globals = &gpGlobals;
 
-	COM_GetCommonLibraryPath( LIBRARY_GAMEUI, dllpath, sizeof( dllpath ));
-
-	if(!( gameui.hInstance = COM_LoadLibrary( dllpath, false, false )))
+	// GameUI mode: try CreateInterface bridge first, fallback to GetMenuAPI
+	if( host.gameui_mode )
 	{
-		string path = OS_LIB_PREFIX "menu." OS_LIB_EXT;
-
-		FS_AllowDirectPaths( true );
-
-		// no use to load it from engine directory, as library loader
-		// that implements internal gamelibs already knows how to load it
-#ifndef XASH_INTERNAL_GAMELIBS
-		if(!( gameui.hInstance = COM_LoadLibrary( path, false, true )))
-#endif
+		if( GameUI_LoadProgs( ))
 		{
-			FS_AllowDirectPaths( false );
+			// Check if bridge was setup (gameui.dllFuncs populated by GameUI_LoadProgs)
+			if( gameui.dllFuncs.pfnInit )
+			{
+				// CreateInterface bridge mode - already fully initialized
+				Cvar_FullSet( "host_gameuiloaded", "2", FCVAR_READ_ONLY );
+				Cmd_AddRestrictedCommand( "ui_allowconsole", UI_ToggleAllowConsole_f, "unlocks developer console" );
+				UI_ConvertGameInfo( &gameui.gameInfo, FI->GameInfo );
+				gameui.globals->developer = host.allow_console;
+				gameui.dllFuncs.pfnInit();
+				return true;
+			}
+
+			// GetMenuAPI was found by GameUI_LoadProgs - finish setup here
+			// (gameui.hInstance and mempool already set up)
+			GetMenuAPI = (MENUAPI)COM_GetProcAddress( gameui.hInstance, "GetMenuAPI" );
+		}
+		else
+		{
+			Con_Printf( S_ERROR "GameUI mode: can't load GameUI DLL\n" );
+			gameui.globals = NULL;
 			return false;
 		}
 	}
+	else
+	{
+		// Standard mode: load via GetMenuAPI
+		COM_GetCommonLibraryPath( LIBRARY_GAMEUI, dllpath, sizeof( dllpath ));
 
-	FS_AllowDirectPaths( false );
+		if(!( gameui.hInstance = COM_LoadLibrary( dllpath, false, false )))
+		{
+			string path = OS_LIB_PREFIX "menu." OS_LIB_EXT;
 
-	if(( GetMenuAPI = (MENUAPI)COM_GetProcAddress( gameui.hInstance, "GetMenuAPI" )) == NULL )
+			FS_AllowDirectPaths( true );
+
+#ifndef XASH_INTERNAL_GAMELIBS
+			if(!( gameui.hInstance = COM_LoadLibrary( path, false, true )))
+#endif
+			{
+				FS_AllowDirectPaths( false );
+				return false;
+			}
+		}
+
+		FS_AllowDirectPaths( false );
+
+		GetMenuAPI = (MENUAPI)COM_GetProcAddress( gameui.hInstance, "GetMenuAPI" );
+	}
+
+	if( GetMenuAPI == NULL )
 	{
 		COM_FreeLibrary( gameui.hInstance );
 		Con_Reportf( "%s: can't init menu API\n", __func__ );
@@ -1376,13 +1484,13 @@ qboolean UI_LoadProgs( void )
 		return false;
 	}
 
-
 	gameui.use_extended_api = false;
 
 	// make local copy of engfuncs to prevent overwrite it with user dll
 	gpEngfuncs = gEngfuncs;
 
-	gameui.mempool = Mem_AllocPool( "Menu Pool" );
+	if( !gameui.mempool )
+		gameui.mempool = Mem_AllocPool( "Menu Pool" );
 
 	if( !GetMenuAPI( &gameui.dllFuncs, &gpEngfuncs, gameui.globals ))
 	{
@@ -1413,7 +1521,7 @@ qboolean UI_LoadProgs( void )
 		{
 			Con_Reportf( "%s: extended text API found\n", __func__ );
 			Con_Reportf( S_WARN "Text API is deprecated! If you are mod developer, consider moving to Extended Menu API!\n" );
-			if( GiveTextApi( &gpExtendedfuncs ) ) // they are binary compatible, so we can just pass extended funcs API to menu
+			if( GiveTextApi( &gpExtendedfuncs ) )
 			{
 				Con_Reportf( "%s: extended text API initialized\n", __func__ );
 				gameui.use_extended_api = true;
@@ -1428,15 +1536,13 @@ qboolean UI_LoadProgs( void )
 		}
 	}
 
-	Cvar_FullSet( "host_gameuiloaded", "1", FCVAR_READ_ONLY );
+	Cvar_FullSet( "host_gameuiloaded", host.gameui_mode ? "2" : "1", FCVAR_READ_ONLY );
 	Cmd_AddRestrictedCommand( "ui_allowconsole", UI_ToggleAllowConsole_f, "unlocks developer console" );
 
-	UI_ConvertGameInfo( &gameui.gameInfo, FI->GameInfo ); // current gameinfo
+	UI_ConvertGameInfo( &gameui.gameInfo, FI->GameInfo );
 
-	// setup globals
 	gameui.globals->developer = host.allow_console;
 
-	// initialize game
 	gameui.dllFuncs.pfnInit();
 
 	return true;

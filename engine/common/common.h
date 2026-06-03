@@ -335,6 +335,7 @@ typedef struct host_parm_s
 	uint userinfo_changed    : 1; // some settings were changed and needs to global update
 	uint movevars_changed    : 1;
 	uint renderinfo_changed  : 1;
+	uint gameui_mode         : 1; // use GameUI DLL instead of MainUI
 
 	// for IN_MouseMove() easy access
 	int      window_center_x;
