@@ -272,7 +272,7 @@ static const char *water_frag_above_source =
 	"    float t  = u_time;\n"
 	"    /* Paranoia2-style layered normal-map with animated UV offsets.\n"
 	"     * Each layer samples at a different time-offset and UV scale,\n"
-	"     * producing the same "~~~" visual as 29-frame animated textures. */\n"
+	"     * producing the same wave motion as 29-frame animated textures. */\n"
 	"    vec3 n0 = texture2D( u_normalMap, animUV(waveUV(uv,  1.0, 0.10, t, vec3(0.0), u_choppy), t)).rgb * 2.0 - 1.0;\n"
 	"    vec3 n1 = texture2D( u_normalMap, animUV(waveUV(uv,  2.0, 0.18, t, n0, u_choppy), t * 1.3)).rgb * 2.0 - 1.0;\n"
 	"    vec3 n2 = texture2D( u_normalMap, animUV(waveUV(uv,  4.0, 0.30, t, n1, u_choppy), t * 0.7)).rgb * 2.0 - 1.0;\n"
