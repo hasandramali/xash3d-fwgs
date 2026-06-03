@@ -30,8 +30,8 @@ CVAR_DEFINE_AUTO( r_water_normalscale,        "1.0",   FCVAR_GLCONFIG, "bump-map
 CVAR_DEFINE_AUTO( r_water_choppy,             "0.04",  FCVAR_GLCONFIG, "vertex choppy wave offset (0..0.2)" );
 CVAR_DEFINE_AUTO( r_water_wave,               "1",     FCVAR_GLCONFIG, "enable wave/ripple animation (0=static, 1=animated)" );
 CVAR_DEFINE_AUTO( r_water_animspeed,          "1.0",   FCVAR_GLCONFIG, "wave animation speed multiplier (0=frozen, 2=double speed)" );
-CVAR_DEFINE_AUTO( r_water_waveheight,         "1.0",   FCVAR_GLCONFIG, "vertex displacement amplitude in game units (0=flat, 3=storm)" );
-CVAR_DEFINE_AUTO( r_water_wavefreq,           "0.08",  FCVAR_GLCONFIG, "vertex wave spatial frequency (0.01=long swells, 0.2=chop)" );
+CVAR_DEFINE_AUTO( r_water_waveheight,         "3.0",   FCVAR_GLCONFIG, "vertex displacement amplitude in game units (0=flat, 5=storm)" );
+CVAR_DEFINE_AUTO( r_water_wavefreq,           "0.06",  FCVAR_GLCONFIG, "vertex wave spatial frequency (0.01=long swells, 0.2=chop)" );
 CVAR_DEFINE_AUTO( r_water_specular_min,       "0.15",  FCVAR_GLCONFIG, "sun specular floor in dark wave troughs (0..1)" );
 CVAR_DEFINE_AUTO( r_water_specular,           "1.0",   FCVAR_GLCONFIG, "sun specular highlight intensity (0..2)" );
 CVAR_DEFINE_AUTO( r_water_specular_color_r,   "255",   FCVAR_GLCONFIG, "sun specular highlight red (0-255)" );
@@ -41,7 +41,7 @@ CVAR_DEFINE_AUTO( r_water_skyblend,           "1.0",   FCVAR_GLCONFIG, "sky refl
 CVAR_DEFINE_AUTO( r_water_skycolor_r,         "200",   FCVAR_GLCONFIG, "fake sky reflection red (0-255)" );
 CVAR_DEFINE_AUTO( r_water_skycolor_g,         "230",   FCVAR_GLCONFIG, "fake sky reflection green (0-255)" );
 CVAR_DEFINE_AUTO( r_water_skycolor_b,         "255",   FCVAR_GLCONFIG, "fake sky reflection blue (0-255)" );
-CVAR_DEFINE_AUTO( r_water_underwater_alpha,   "1.0",   FCVAR_GLCONFIG, "underwater pass alpha (0..1)" );
+CVAR_DEFINE_AUTO( r_water_underwater_alpha,   "0.35",  FCVAR_GLCONFIG, "underwater pass alpha (0=transparent, 1=opaque)" );
 CVAR_DEFINE_AUTO( r_water_underwater_color_r, "24",    FCVAR_GLCONFIG, "underwater base color red (0-255)" );
 CVAR_DEFINE_AUTO( r_water_underwater_color_g, "48",    FCVAR_GLCONFIG, "underwater base color green (0-255)" );
 CVAR_DEFINE_AUTO( r_water_underwater_color_b, "64",    FCVAR_GLCONFIG, "underwater base color blue (0-255)" );
@@ -52,6 +52,11 @@ CVAR_DEFINE_AUTO( r_water_color_r,            "32",    FCVAR_GLCONFIG, "default 
 CVAR_DEFINE_AUTO( r_water_color_g,            "64",    FCVAR_GLCONFIG, "default water color green (0-255)" );
 CVAR_DEFINE_AUTO( r_water_color_b,            "80",    FCVAR_GLCONFIG, "default water color blue (0-255)" );
 CVAR_DEFINE_AUTO( r_water_debug,              "0",     0,              "debug water shader (1=log, 2=tint red)" );
+CVAR_DEFINE_AUTO( r_water_sun_x,              "0.4",   FCVAR_GLCONFIG, "sun direction X for water specular/scattering" );
+CVAR_DEFINE_AUTO( r_water_sun_y,              "0.4",   FCVAR_GLCONFIG, "sun direction Y for water specular/scattering" );
+CVAR_DEFINE_AUTO( r_water_sun_z,              "0.82",  FCVAR_GLCONFIG, "sun direction Z for water specular/scattering" );
+CVAR_DEFINE_AUTO( r_water_sunlight_scattering,"0.25",  FCVAR_GLCONFIG, "subsurface sunlight scattering strength (0..1)" );
+CVAR_DEFINE_AUTO( r_water_rain_intensity,      "0",     FCVAR_GLCONFIG, "rain/procedural ripple intensity (0=off, 1=max)" );
 
 gl_water_shader_state_t gWaterShader;
 
@@ -99,6 +104,11 @@ void R_WaterShader_Init( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_color_g );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_color_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_x );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_y );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_z );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sunlight_scattering );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_rain_intensity );
 }
 
 void R_WaterShader_Shutdown( void ) {}
@@ -225,6 +235,7 @@ static const char *water_frag_above_source =
 	"uniform vec3      u_waterColor;\n"
 	"uniform vec3      u_skyColor;\n"
 	"uniform vec3      u_specularColor;\n"
+	"uniform vec3      u_sunDir;\n"
 	"uniform highp float u_time;\n"
 	"uniform float     u_fresnelFactor;\n"
 	"uniform float     u_alpha;\n"
@@ -235,6 +246,8 @@ static const char *water_frag_above_source =
 	"uniform float     u_specular;\n"
 	"uniform float     u_specularMin;\n"
 	"uniform float     u_skyblend;\n"
+	"uniform float     u_scattering;\n"
+	"uniform float     u_rainIntensity;\n"
 	"uniform float     u_fogBlend;\n"
 	"uniform vec3      u_fogColor;\n"
 	"uniform float     u_fogStart;\n"
@@ -251,71 +264,103 @@ static const char *water_frag_above_source =
 	"const vec2  WIND_DIR   = vec2( 0.6, -0.8 );\n"
 	"const float WIND_SPEED = 0.18;\n"
 	"\n"
-	"vec2 waveUV( vec2 uv, float scale, float speed, float t, vec3 prev, float choppy )\n"
+	"/* OpenMW-style normal coords with choppy offset.\n"
+	" * Each layer scrolls at a different speed and feeds the\n"
+	" * previous layer's normal into the next as UV offset. */\n"
+	"vec2 normalCoords( vec2 uv, float scale, float speed, float t, vec3 prev, float choppy )\n"
 	"{\n"
 	"    float z = max( abs(prev.z), 0.05 );\n"
 	"    return uv * scale + WIND_DIR * t * (WIND_SPEED * speed)\n"
 	"           - (prev.xy / z) * choppy;\n"
 	"}\n"
 	"\n"
-	"/* Paranoia2-style: time-based UV offset creates wave motion from a\n"
-	" * single normal map by shifting sample positions over time. */\n"
+	"/* Paranoia2-style animUV: time-based micro-offset for extra motion. */\n"
 	"vec2 animUV( vec2 uv, float t )\n"
 	"{\n"
 	"    vec2 dir = vec2( sin(t * 0.7 + uv.y * 3.0), cos(t * 0.5 + uv.x * 2.5));\n"
 	"    return uv + dir * 0.012;\n"
 	"}\n"
 	"\n"
+	"/* Procedural raindrop/impact ripple.\n"
+	" * Returns 0..1 where 1=flat, 0=strong ring. */\n"
+	"float rainRipple( vec2 pos, float t )\n"
+	"{\n"
+	"    float best = 1.0;\n"
+	"    for( int i = 0; i < 4; i++ )\n"
+	"    {\n"
+	"        float fi = float(i);\n"
+	"        vec2  origin = vec2(\n"
+	"            sin( fi * 3.14159 + 1.0 ) * 400.0,\n"
+	"            cos( fi * 2.71828 + 2.0 ) * 400.0 );\n"
+	"        float phase  = fract( t * 1.5 + fi * 0.7 );\n"
+	"        float dist   = distance( pos, origin );\n"
+	"        float ring   = abs( dist - phase * 180.0 );\n"
+	"        float width  = 12.0;\n"
+	"        float ripple = exp( -ring * ring / (width * width) );\n"
+	"        best = min( best, 1.0 - ripple * 0.5 );\n"
+	"    }\n"
+	"    return best;\n"
+	"}\n"
+	"\n"
 	"void main()\n"
 	"{\n"
 	"    vec2  uv = v_worldPos.xy * WAVE_SCALE;\n"
 	"    float t  = u_time;\n"
-	"    /* Paranoia2-style layered normal-map with animated UV offsets.\n"
-	"     * Each layer samples at a different time-offset and UV scale,\n"
-	"     * producing the same wave motion as 29-frame animated textures. */\n"
-	"    vec3 n0 = texture2D( u_normalMap, animUV(waveUV(uv,  1.0, 0.10, t, vec3(0.0), u_choppy), t)).rgb * 2.0 - 1.0;\n"
-	"    vec3 n1 = texture2D( u_normalMap, animUV(waveUV(uv,  2.0, 0.18, t, n0, u_choppy), t * 1.3)).rgb * 2.0 - 1.0;\n"
-	"    vec3 n2 = texture2D( u_normalMap, animUV(waveUV(uv,  4.0, 0.30, t, n1, u_choppy), t * 0.7)).rgb * 2.0 - 1.0;\n"
-	"    vec3 n3 = texture2D( u_normalMap, animUV(waveUV(uv,  8.0, 0.55, t, n2, u_choppy), t * 1.1)).rgb * 2.0 - 1.0;\n"
-	"    vec3 n  = normalize( n0*0.30 + n1*0.25 + n2*0.25 + n3*0.20 );\n"
+	"\n"
+	"    /* OpenMW-style 6-layer normal sampling:\n"
+	"     * big waves (0.05/0.1 scale), mid waves (0.25/0.5),\n"
+	"     * small chop (1.0/2.0). Each feeds the next. */\n"
+	"    vec3 n0 = texture2D( u_normalMap, animUV( normalCoords( uv, 0.05, 0.04, t, vec3(0.0), u_choppy ), t )).rgb * 2.0 - 1.0;\n"
+	"    vec3 n1 = texture2D( u_normalMap, animUV( normalCoords( uv, 0.10, 0.08, t, n0, u_choppy ), t * 1.3 )).rgb * 2.0 - 1.0;\n"
+	"    vec3 n2 = texture2D( u_normalMap, animUV( normalCoords( uv, 0.25, 0.15, t, n1, u_choppy ), t * 0.7 )).rgb * 2.0 - 1.0;\n"
+	"    vec3 n3 = texture2D( u_normalMap, animUV( normalCoords( uv, 0.50, 0.25, t, n2, u_choppy ), t * 1.1 )).rgb * 2.0 - 1.0;\n"
+	"    vec3 n4 = texture2D( u_normalMap, animUV( normalCoords( uv, 1.00, 0.40, t, n3, u_choppy ), t * 0.5 )).rgb * 2.0 - 1.0;\n"
+	"    vec3 n5 = texture2D( u_normalMap, animUV( normalCoords( uv, 2.00, 0.60, t, n4, u_choppy ), t * 1.7 )).rgb * 2.0 - 1.0;\n"
+	"\n"
+	"    /* Blend all 6 layers with OpenMW-style weights */\n"
+	"    vec3 n = normalize( n0*0.20 + n1*0.18 + n2*0.16 + n3*0.15 + n4*0.13 + n5*0.08 );\n"
+	"\n"
+	"    /* Rain / impact ripple disturbance */\n"
+	"    float ripple = u_rainIntensity * (1.0 - rainRipple( v_worldPos.xy, t ));\n"
+	"    n = normalize( n + vec3(ripple, ripple, 0.0));\n"
+	"\n"
 	"    float bump = BUMP_BASE * u_normalscale;\n"
-	"    /* Per-fragment detail normal: combine the normal-map detail with the\n"
-	"     * low-frequency geometric normal coming from the vertex displacement,\n"
-	"     * so the surface looks like a single coherent height field. */\n"
 	"    vec3  Ndetail = vec3(-n.x * bump, -n.y * bump, n.z);\n"
 	"    vec3  N       = normalize( v_geoNormal + Ndetail * 0.6 );\n"
 	"\n"
 	"    vec3  V  = normalize( u_cameraPos - v_worldPos );\n"
 	"    float cosTheta = clamp( dot(N, V), 0.0, 1.0 );\n"
-	"    /* Schlick Fresnel (PrimeXT fresnel.h) */\n"
+	"\n"
+	"    /* Schlick Fresnel (air-to-water IOR ~1.333/1.0) */\n"
 	"    float fresnel = WATER_F0 + (1.0 - WATER_F0) * pow( 1.0 - cosTheta, u_fresnelFactor );\n"
 	"    fresnel = clamp( fresnel, 0.0, 0.95 );\n"
 	"\n"
-	"    /* depth-based water tint (waterBorderFactor analogue) */\n"
+	"    /* depth-based water tint */\n"
 	"    float dist        = length( v_viewPos );\n"
 	"    float depthFactor = clamp( dist * (0.0025 * u_density), 0.0, 1.0 );\n"
-	"    vec3  deepColor   = u_waterColor * 0.55;\n"
-	"    vec3  shallowColor= u_waterColor + vec3( 0.05, 0.08, 0.10 );\n"
-	"    vec3  baseColor   = mix( shallowColor, deepColor, depthFactor );\n"
-	"    /* ambient multiplier: lets the user tame the fullbright look without\n"
-	"     * dimming the sky reflection part of the mix. */\n"
+	"    vec3  deepColor    = u_waterColor * 0.55;\n"
+	"    vec3  shallowColor = u_waterColor + vec3( 0.05, 0.08, 0.10 );\n"
+	"    vec3  baseColor    = mix( shallowColor, deepColor, depthFactor );\n"
 	"    baseColor *= u_ambient;\n"
 	"\n"
-	"    /* fake sky reflection (no FBO planar reflection in this backend) */\n"
-	"    vec3  skyTint   = u_skyColor;\n"
+	"    /* fake sky reflection */\n"
+	"    vec3  skyTint    = u_skyColor;\n"
 	"    vec3  finalColor = mix( baseColor, skyTint, clamp( fresnel * u_skyblend, 0.0, 0.98 ));\n"
 	"\n"
-	"    /* Paranoia2-style sun specular: use DETAIL normal for sharp glint\n"
-	"     * on wave crests, with geo normal for broad light proxy.\n"
-	"     * Two specular terms: broad (geo normal) + sharp (detail normal). */\n"
+	"    /* Dual specular: broad (geo normal) + sharp (detail normal) */\n"
 	"    vec3  R = reflect( -V, v_geoNormal );\n"
-	"    vec3  sunDir = normalize( vec3( 0.4, 0.4, 0.82 ));\n"
-	"    float specBroad = pow( max( dot(R, sunDir), 0.0 ), 32.0 );\n"
+	"    float specBroad = pow( max( dot(R, u_sunDir), 0.0 ), 32.0 );\n"
 	"    vec3  R2 = reflect( -V, N );\n"
-	"    float specSharp = pow( max( dot(R2, sunDir), 0.0 ), 192.0 );\n"
+	"    float specSharp = pow( max( dot(R2, u_sunDir), 0.0 ), 192.0 );\n"
 	"    float lightAmount = mix( u_specularMin, 1.0, clamp( v_geoNormal.z, 0.0, 1.0 ));\n"
 	"    float spec   = (specBroad * 0.5 + specSharp * 1.2) * u_specular * lightAmount;\n"
 	"    finalColor += u_specularColor * spec;\n"
+	"\n"
+	"    /* OpenMW-style sunlight scattering through wave crests.\n"
+	"     * Wavelength-dependent: red scatters least, blue most. */\n"
+	"    float scatterFactor = u_scattering * pow( max( dot(N, u_sunDir), 0.0 ), 8.0 );\n"
+	"    vec3  scatterColor  = vec3( 0.25, 0.50, 0.75 ) * scatterFactor;\n"
+	"    finalColor += scatterColor;\n"
 	"\n"
 	"    if( u_fogEnabled > 0.5 )\n"
 	"    {\n"
@@ -325,19 +370,22 @@ static const char *water_frag_above_source =
 	"    gl_FragColor = vec4( finalColor, clamp( u_alpha, 0.0, 1.0 ));\n"
 	"}\n";
 
-/* Underwater fragment shader.
- * Mirrors PrimeXT's LIQUID_UNDERWATER branch: heavier tint, caustic-ish
- * highlights, separate alpha so the scene behind is fully replaced. */
+
+/* Underwater fragment shader with OpenMW-style caustics and light shafts.
+ * The water surface is drawn alpha-blended OVER the existing scene, so a
+ * low-ish default alpha (0.4) lets the terrain/structure behind show through.
+ * Caustics and sun shafts give the "3D" underwater feel without RTT. */
 static const char *water_frag_underwater_source =
 	"#ifdef GL_ES\n"
 	"precision mediump float;\n"
 	"#endif\n"
 	"uniform sampler2D u_normalMap;\n"
-	"uniform vec3      u_cameraPos;\n"
+	"uniform vec3      u_sunDir;\n"
 	"uniform vec3      u_underwaterColor;\n"
 	"uniform highp float u_time;\n"
 	"uniform float     u_underwaterAlpha;\n"
 	"uniform float     u_underwaterDensity;\n"
+	"uniform float     u_scattering;\n"
 	"uniform float     u_fogBlend;\n"
 	"uniform vec3      u_fogColor;\n"
 	"uniform float     u_fogStart;\n"
@@ -345,32 +393,69 @@ static const char *water_frag_underwater_source =
 	"uniform float     u_fogEnabled;\n"
 	"varying vec3 v_worldPos;\n"
 	"varying vec3 v_viewPos;\n"
-	"varying vec2 v_texCoord;\n"
 	"varying vec3 v_geoNormal;\n"
+	"varying vec2 v_texCoord;\n"
+	"\n"
+	"/* Procedural caustic pattern using world position + time.\n"
+	" * Simulates the light-net projected on surfaces underwater. */\n"
+	"float caustic( vec2 pos, float t )\n"
+	"{\n"
+	"    vec2 uv = pos * 0.002;\n"
+	"    float c1 = sin( uv.x * 3.0 + t * 0.8 ) * cos( uv.y * 2.5 - t * 0.6 );\n"
+	"    float c2 = sin((uv.x + uv.y) * 4.0 + t * 1.2 ) * 0.5;\n"
+	"    float c3 = cos((uv.x - uv.y) * 5.0 - t * 0.9 ) * 0.3;\n"
+	"    return clamp( c1 * 0.5 + c2 + c3, 0.0, 1.0 );\n"
+	"}\n"
+	"\n"
+	"/* Floating underwater particles (procedural). */\n"
+	"float particles( vec3 pos, float t )\n"
+	"{\n"
+	"    float sum = 0.0;\n"
+	"    for( int i = 0; i < 6; i++ )\n"
+	"    {\n"
+	"        float fi = float( i );\n"
+	"        vec3  origin = vec3(\n"
+	"            sin( fi * 12.9898 + 1.0 ) * 800.0,\n"
+	"            cos( fi * 78.233  + 2.0 ) * 800.0,\n"
+	"            sin( fi * 43.1243 + 3.0 ) * 200.0 );\n"
+	"        origin.z += t * 10.0 * (0.5 + fi * 0.2);\n"
+	"        float d = distance( pos, origin );\n"
+	"        sum += exp( -d * d * 0.01 ) * 0.3;\n"
+	"    }\n"
+	"    return sum;\n"
+	"}\n"
 	"\n"
 	"void main()\n"
 	"{\n"
-	"    vec2  uv = v_worldPos.xy * 0.0035;\n"
-	"    float t  = u_time;\n"
-	"    vec3  n0 = texture2D( u_normalMap, uv * 1.0 + vec2( t*0.025,  t*0.035)).rgb * 2.0 - 1.0;\n"
-	"    vec3  n1 = texture2D( u_normalMap, uv * 2.0 + vec2(-t*0.040,  t*0.030)).rgb * 2.0 - 1.0;\n"
-	"    vec3  N  = normalize( n0 + n1 );\n"
-	"\n"
-	"    float caustic    = pow( max( N.z, 0.0 ), 2.0 );\n"
 	"    float dist       = length( v_viewPos );\n"
-	"    float depthFactor= clamp( dist * (0.004 * u_underwaterDensity), 0.0, 1.0 );\n"
+	"    float depthFactor= clamp( dist * (0.003 * u_underwaterDensity), 0.0, 1.0 );\n"
 	"\n"
-	"    vec3  baseColor   = u_underwaterColor;\n"
-	"    vec3  causticColor= u_underwaterColor * 1.5 + vec3( 0.10, 0.20, 0.10 );\n"
-	"    vec3  finalColor  = mix( causticColor, baseColor, 1.0 - caustic * 0.25 );\n"
-	"    finalColor = mix( finalColor, u_underwaterColor * 0.20, depthFactor );\n"
+	"    /* Caustic light pattern on the sea floor */\n"
+	"    float c = caustic( v_worldPos.xy, u_time );\n"
+	"\n"
+	"    /* Sun shafts: brighter near surface, dim with depth */\n"
+	"    float sunFactor = clamp( 1.0 - depthFactor, 0.0, 1.0 );\n"
+	"    float sunAngle  = max( dot( v_geoNormal, u_sunDir ), 0.0 );\n"
+	"\n"
+	"    /* Base water colour darkens with depth */\n"
+	"    vec3 color = u_underwaterColor * (1.0 - depthFactor * 0.7);\n"
+	"\n"
+	"    /* Caustic highlights (yellow-green light nets) */\n"
+	"    color += vec3( 0.15, 0.25, 0.10 ) * c * (1.0 - depthFactor * 0.5);\n"
+	"\n"
+	"    /* Sun light shafts from the surface */\n"
+	"    color += vec3( 0.3, 0.4, 0.5 ) * sunFactor * sunAngle * u_scattering;\n"
+	"\n"
+	"    /* Floating particle motes */\n"
+	"    float p = particles( v_worldPos, u_time );\n"
+	"    color += vec3( 0.4, 0.5, 0.6 ) * p * 0.3;\n"
 	"\n"
 	"    if( u_fogEnabled > 0.5 )\n"
 	"    {\n"
 	"        float fogF = clamp((dist - u_fogStart) / max(u_fogEnd - u_fogStart, 1.0), 0.0, 1.0);\n"
-	"        finalColor = mix( finalColor, u_fogColor, fogF * u_fogBlend );\n"
+	"        color = mix( color, u_fogColor, fogF * u_fogBlend );\n"
 	"    }\n"
-	"    gl_FragColor = vec4( finalColor, clamp( u_underwaterAlpha, 0.0, 1.0 ));\n"
+	"    gl_FragColor = vec4( color, clamp( u_underwaterAlpha, 0.0, 1.0 ));\n"
 	"}\n";
 
 /* ---------------------------------------------------------------------- */
@@ -492,6 +577,11 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	/* vertex-shader uniforms (always present in both programs) */
 	p->u_waveheight      = pglGetUniformLocationARB( p->program, "u_waveheight" );
 	p->u_wavefreq        = pglGetUniformLocationARB( p->program, "u_wavefreq" );
+
+	/* OpenMW-style uniforms (always present in both programs) */
+	p->u_sunDir          = pglGetUniformLocationARB( p->program, "u_sunDir" );
+	p->u_scattering      = pglGetUniformLocationARB( p->program, "u_scattering" );
+	p->u_rainIntensity   = pglGetUniformLocationARB( p->program, "u_rainIntensity" );
 
 	p->a_position = WATER_ATTRIB_POSITION;
 	p->a_texCoord = WATER_ATTRIB_TEXCOORD;
@@ -660,6 +750,11 @@ void R_WaterShader_Init( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_color_g );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_color_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_x );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_y );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sun_z );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_sunlight_scattering );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_rain_intensity );
 	}
 
 	/* Skip the expensive GL state work if we already finished a previous
@@ -856,6 +951,21 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 
 	if( prog->u_fogEnabled >= 0 )
 		pglUniform1fARB( prog->u_fogEnabled, RI.fogEnabled ? 1.0f : 0.0f );
+
+	/* OpenMW-style uniforms (sun direction, scattering, ripples) */
+	if( prog->u_sunDir >= 0 )
+	{
+		vec3_t dir;
+		dir[0] = r_water_sun_x.value;
+		dir[1] = r_water_sun_y.value;
+		dir[2] = r_water_sun_z.value;
+		VectorNormalize( dir );
+		pglUniform3fARB( prog->u_sunDir, dir[0], dir[1], dir[2] );
+	}
+	if( prog->u_scattering >= 0 )
+		pglUniform1fARB( prog->u_scattering, r_water_sunlight_scattering.value );
+	if( prog->u_rainIntensity >= 0 )
+		pglUniform1fARB( prog->u_rainIntensity, r_water_rain_intensity.value );
 
 	/* above-water tuning uniforms (u_alpha/u_waterColor are set above
 	 * from per-entity rendercolor + renderamt) */

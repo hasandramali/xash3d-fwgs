@@ -64,6 +64,11 @@ typedef struct
 	GLint   u_waveheight;
 	GLint   u_wavefreq;
 
+	// OpenMW-style uniforms (always present in both programs)
+	GLint   u_sunDir;
+	GLint   u_scattering;
+	GLint   u_rainIntensity;
+
 	// underwater uniforms (set to -1 on the above-water program)
 	GLint   u_underwaterColor;
 	GLint   u_underwaterAlpha;
@@ -118,6 +123,11 @@ extern convar_t r_water_fogblend;
 extern convar_t r_water_color_r;
 extern convar_t r_water_color_g;
 extern convar_t r_water_color_b;
+extern convar_t r_water_sun_x;
+extern convar_t r_water_sun_y;
+extern convar_t r_water_sun_z;
+extern convar_t r_water_sunlight_scattering;
+extern convar_t r_water_rain_intensity;
 extern convar_t r_water_debug;
 
 extern gl_water_shader_state_t gWaterShader;
