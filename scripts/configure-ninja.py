@@ -89,6 +89,14 @@ def main():
 	run_cmake(mainui_path, mainui_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root,
 		args.min_sdk_version, "-DBUILD_AS_PART_OF_ENGINE=ON")
 
+	# configure vgui2 (reGoldSrc)
+	vgui2_path = os.path.join(args.wscript_path, "NextClient", "GameEngine-reGoldSrc", "vgui2")
+	vgui2_out_path = os.path.join(args.configuration_dir, "vgui2")
+
+	stb_path = os.path.join(args.wscript_path, "3rdparty", "mainui", "font")
+	run_cmake(vgui2_path, vgui2_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root,
+		args.min_sdk_version, "-DSTB_PATH={}".format(stb_path))
+
 	# waf configure
 	waf_path = os.path.join(args.wscript_path, "waf")
 	out_path = os.path.join(args.configuration_dir, "xash3d-fwgs")

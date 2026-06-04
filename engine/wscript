@@ -291,6 +291,78 @@ def build(bld):
 			source += bld.path.ant_glob('client/**/*.c')
 			libs += ['bzip2', 'MultiEmulator', 'opus', 'opusfile', 'vorbis', 'vorbisfile']
 
+		# VGUI2 (reGoldSrc) static library
+		nextclient_dir = bld.path.find_dir('../NextClient/GameEngine-reGoldSrc')
+		if nextclient_dir:
+			vgui2_includes = []
+			vgui2_sources = []
+
+			# reGoldSrc public/ + common/ (portable VGUI2 interfaces)
+			for subdir in ['public', 'common']:
+				inc_node = nextclient_dir.find_dir(subdir)
+				if inc_node:
+					vgui2_includes.append(inc_node.abspath())
+
+			# reGoldSrc engine/ (for bridge files, before Xash3D paths)
+			re_engine = nextclient_dir.find_dir('engine')
+			if re_engine:
+				vgui2_includes.append(re_engine.abspath())
+
+			# reGoldSrc engine/vgui2/ + vgui2/src/ (bridge headers + key_translation)
+			for subdir in ['engine/vgui2', 'vgui2/src']:
+				inc_node = nextclient_dir.find_dir(subdir)
+				if inc_node:
+					vgui2_includes.append(inc_node.abspath())
+
+			# Xash3D engine/ + common/ (for our adapter files: library.h, common.h)
+			vgui2_includes += [bld.path.abspath()]
+			com_node = bld.path.find_dir('common')
+			if com_node:
+				vgui2_includes.append(com_node.abspath())
+
+			# stb_truetype for font rendering
+			stb_node = bld.path.find_dir('../3rdparty/mainui/font')
+			if stb_node:
+				vgui2_includes.append(stb_node.abspath())
+
+			# VGUI2 core + controls + surface/font
+			re_vgui2_src = nextclient_dir.find_dir('vgui2/src')
+			if re_vgui2_src:
+				vgui2_sources += re_vgui2_src.ant_glob('*.cpp')
+			vgui2_controls = nextclient_dir.find_dir('vgui2/controls')
+			if vgui2_controls:
+				vgui2_sources += vgui2_controls.ant_glob('*.cpp')
+			vgui2_surface = nextclient_dir.find_dir('vgui2/vgui2_surfacelib')
+			if vgui2_surface:
+				vgui2_sources += vgui2_surface.ant_glob('FontAmalgam.cpp FontManager.cpp')
+				vgui2_sources += vgui2_surface.ant_glob('Win32Font_android.cpp')
+
+			# reGoldSrc engine/vgui2/ bridge files (BaseUISurface, BaseUI_Interface, etc.)
+			re_engine_vgui2 = nextclient_dir.find_dir('engine/vgui2')
+			if re_engine_vgui2:
+				vgui2_sources += re_engine_vgui2.ant_glob('*.cpp')
+
+			# Xash3D engine/vgui2/ adapter files (Sys_LoadModule, etc.)
+			xash_vgui2_dir = bld.path.find_dir('vgui2')
+			if xash_vgui2_dir:
+				vgui2_sources += xash_vgui2_dir.ant_glob('*.cpp')
+
+			vgui2_defines = [
+				'NO_MALLOC_OVERRIDE', 'MATHLIB_HEADER_ONLY',
+				'NO_STEAM', 'NO_HTML', 'POSIX',
+				'ANDROID',
+			]
+
+			if vgui2_sources:
+				bld.stlib(
+					source = vgui2_sources,
+					target = 'vgui2_for_engine',
+					includes = vgui2_includes,
+					defines = vgui2_defines,
+					features = 'cxx',
+				)
+				libs += ['vgui2_for_engine']
+
 		# Android port is linked differently
 		if bld.env.DEST_OS == 'android':
 			f = bld.shlib
