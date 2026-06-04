@@ -1,11 +1,3 @@
-#include <cstdio>
-#include <cstdarg>
-#include <cstring>
-
-#include "interface.h"
-#include "GameUI/IGameUI.h"
-#include "GameUI/IGameConsole.h"
-#include "GameUI/ICareerUI.h"
 #include "stub_gameui.h"
 
 InterfaceReg* InterfaceReg::s_pInterfaceRegs = NULL;
