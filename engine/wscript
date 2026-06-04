@@ -340,7 +340,7 @@ def build(bld):
 			# reGoldSrc engine/vgui2/ bridge files (BaseUISurface, BaseUI_Interface, etc.)
 			re_engine_vgui2 = nextclient_dir.find_dir('engine/vgui2')
 			if re_engine_vgui2:
-				vgui2_sources += re_engine_vgui2.ant_glob('*.cpp')
+				vgui2_sources += re_engine_vgui2.ant_glob('*.cpp', excl=['BaseUI_Interface.cpp'])
 
 			# Xash3D engine/vgui2/ adapter files (Sys_LoadModule, etc.)
 			xash_vgui2_dir = bld.path.find_dir('vgui2')
@@ -362,6 +362,21 @@ def build(bld):
 					features = 'cxx',
 				)
 				libs += ['vgui2_for_engine']
+
+			# GameUI shared library (stub implementation)
+			gameui_sources = []
+			gameui_dir = bld.path.find_dir('gameui')
+			if gameui_dir:
+				gameui_sources += gameui_dir.ant_glob('*.cpp')
+
+			if gameui_sources:
+				bld.shlib(
+					source = gameui_sources,
+					target = 'GameUI',
+					includes = vgui2_includes,
+					defines = vgui2_defines,
+					features = 'cxx',
+				)
 
 		# Android port is linked differently
 		if bld.env.DEST_OS == 'android':
