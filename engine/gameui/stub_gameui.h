@@ -188,6 +188,10 @@ public:
 // Stub classes
 // ------------------------------------------------------------------
 
+extern "C" {
+	EXPORT_FUNCTION IBaseInterface* CreateInterface(const char* pName, int* pReturnCode);
+}
+
 class CStubGameUI : public IGameUI
 {
 public:

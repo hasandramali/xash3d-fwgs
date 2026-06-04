@@ -2,7 +2,7 @@
 
 InterfaceReg* InterfaceReg::s_pInterfaceRegs = NULL;
 
-EXPORT_FUNCTION IBaseInterface* CreateInterface(const char* pName, int* pReturnCode)
+extern "C" EXPORT_FUNCTION IBaseInterface* CreateInterface(const char* pName, int* pReturnCode)
 {
 	InterfaceReg* pCur;
 	for (pCur = InterfaceReg::s_pInterfaceRegs; pCur; pCur = pCur->m_pNext)
