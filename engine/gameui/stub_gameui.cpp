@@ -2,14 +2,6 @@
 
 InterfaceReg* InterfaceReg::s_pInterfaceRegs = NULL;
 
-InterfaceReg::InterfaceReg(InstantiateInterfaceFn fn, const char* pName) :
-	m_pName(pName)
-{
-	m_CreateFn = fn;
-	m_pNext = s_pInterfaceRegs;
-	s_pInterfaceRegs = this;
-}
-
 EXPORT_FUNCTION IBaseInterface* CreateInterface(const char* pName, int* pReturnCode)
 {
 	InterfaceReg* pCur;
