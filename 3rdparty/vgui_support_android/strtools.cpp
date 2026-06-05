@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
@@ -12,6 +12,10 @@
 // We in this module are of a higher caste and thus are privileged in their use.
 #ifdef strncpy
 	#undef strncpy
+#endif
+
+#ifdef ANDROID
+#include <unistd.h>
 #endif
 
 #ifdef _snprintf
@@ -1603,7 +1607,7 @@ bool V_ExtractFilePath (const char *path, char *dest, int destSize )
 		src--;
 	}
 
-	int copysize = min( src - path, destSize - 1 );
+	int copysize = min( (ptrdiff_t)( src - path ), (ptrdiff_t)( destSize - 1 ) );
 	memcpy( dest, path, copysize );
 	dest[copysize] = 0;
 
