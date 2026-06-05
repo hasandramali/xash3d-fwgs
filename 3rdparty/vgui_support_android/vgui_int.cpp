@@ -1,130 +1,193 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <ctime>
+#include <cassert>
 
 #include "vgui_api.h"
+#include "xash3d_types.h"
 
-#include "vgui_main.h"
+#include "vgui_surface.h"
 
-vguiapi_t *g_api = NULL;
-static CRootPanel *g_pRootPanel = NULL;
+#include <vgui/IVGui.h>
+#include <vgui/IPanel.h>
+#include <vgui/ISurface.h>
+#include <vgui/IInput.h>
+#include <vgui/IInputInternal.h>
+#include <vgui/IScheme.h>
+#include <vgui/ISystem.h>
+#include <vgui/ILocalize.h>
+#include <vgui/Cursor.h>
+#include <vgui/KeyCode.h>
+#include <vgui/MouseCode.h>
 
-CRootPanel::CRootPanel()
-	: m_Width( 640 ), m_Height( 480 ), m_bVisible( true )
+#include <vgui_controls/Controls.h>
+#include <vgui_controls/Panel.h>
+
+#include <KeyValues.h>
+#include <vstdlib/IKeyValuesSystem.h>
+#include <FileSystem.h>
+#include "interface.h"
+
+#include "input.h"
+
+using namespace vgui2;
+
+static vguiapi_t *g_pAPI = NULL;
+static Panel *g_pRootPanel = NULL;
+
+static IBaseInterface* VGuiFactory(const char *pName, int *pReturnCode)
 {
+	return CreateInterface(pName, pReturnCode);
 }
 
-CRootPanel::~CRootPanel()
+static void VGui_Startup(int width, int height)
 {
-}
+	if (g_pRootPanel)
+	{
+		g_pRootPanel->SetSize(width, height);
+		return;
+	}
 
-void CRootPanel::SetSize( int width, int height )
-{
-	m_Width = width;
-	m_Height = height;
-}
-
-void CRootPanel::GetSize( int &width, int &height )
-{
-	width = m_Width;
-	height = m_Height;
-}
-
-void CRootPanel::Paint()
-{
-	if( !g_api || !g_api->DrawInit )
+	if (!g_pAPI)
 		return;
 
-	g_api->DrawInit();
-	g_api->DrawShutdown();
-}
+	g_pAPI->DrawInit();
 
-void CRootPanel::MouseEvent( VGUI_MouseAction action, int code )
-{
-}
-
-void CRootPanel::KeyEvent( VGUI_KeyAction action, VGUI_KeyCode code )
-{
-}
-
-void CRootPanel::MouseMove( int x, int y )
-{
-}
-
-void CRootPanel::TextInput( const char *text )
-{
-}
-
-static void VGui_Startup( int width, int height )
-{
-	if( !g_pRootPanel )
+	CreateInterfaceFn factoryList[1];
+	factoryList[0] = VGuiFactory;
+	if (!vgui2::VGui_InitInterfacesList("vgui_support", factoryList, 1))
 	{
-		g_pRootPanel = new CRootPanel;
+		fprintf(stderr, "CAndroidSurface:: VGui_InitInterfacesList failed\n");
+		return;
 	}
-	g_pRootPanel->SetSize( width, height );
 
-	if( g_api && g_api->DrawInit )
-		g_api->DrawInit();
+	if (vgui2::surface())
+		static_cast<CAndroidSurface*>(vgui2::surface())->SetAPI(g_pAPI);
+
+	int w = width, h = height;
+	if (g_pAPI)
+		g_pAPI->GetTextureSizes(&w, &h);
+
+	g_pRootPanel = new Panel(NULL, "RootPanel");
+	g_pRootPanel->SetSize(w, h);
+	g_pRootPanel->SetPaintBorderEnabled(false);
+	g_pRootPanel->SetPaintBackgroundEnabled(false);
+	g_pRootPanel->SetVisible(true);
+	g_pRootPanel->SetCursor(dc_none);
+
+	vgui2::surface()->SetEmbeddedPanel((VPANEL)g_pRootPanel->GetVPanel());
+
+	if (ivgui())
+		ivgui()->Start();
 }
 
 static void VGui_Shutdown()
 {
+	if (ivgui())
+		ivgui()->Stop();
+
 	delete g_pRootPanel;
 	g_pRootPanel = NULL;
 
-	if( g_api && g_api->DrawShutdown )
-		g_api->DrawShutdown();
-}
-
-static void *VGui_GetPanel()
-{
-	if( g_pRootPanel )
-		return g_pRootPanel->GetHandle();
-	return NULL;
+	if (g_pAPI)
+		g_pAPI->DrawShutdown();
 }
 
 static void VGui_Paint()
 {
-	if( g_pRootPanel )
-		g_pRootPanel->Paint();
+	if (!g_pRootPanel || !g_pAPI)
+		return;
+
+	if (!g_pAPI->IsInGame())
+		return;
+
+	if (ivgui())
+		ivgui()->RunFrame();
+
+	VPANEL embedded = vgui2::surface()->GetEmbeddedPanel();
+	if (embedded)
+	{
+		vgui2::surface()->SolveTraverse(embedded, false);
+		vgui2::surface()->PaintTraverse(embedded);
+	}
 }
 
-static void VGui_Mouse( VGUI_MouseAction action, int code )
+static void *VGui_GetPanel()
 {
-	if( g_pRootPanel )
-		g_pRootPanel->MouseEvent( action, code );
+	return (void *)g_pRootPanel;
 }
 
-static void VGui_Key( VGUI_KeyAction action, VGUI_KeyCode code )
+static void VGui_Mouse(VGUI_MouseAction action, int code)
 {
-	if( g_pRootPanel )
-		g_pRootPanel->KeyEvent( action, code );
+	if (!g_pRootPanel) return;
+
+	vgui2::MouseCode mouseCode = (vgui2::MouseCode)code;
+
+	switch (action)
+	{
+	case MA_PRESSED:
+		input()->InternalMousePressed(mouseCode);
+		break;
+	case MA_RELEASED:
+		input()->InternalMouseReleased(mouseCode);
+		break;
+	case MA_DOUBLE:
+		input()->InternalMouseDoublePressed(mouseCode);
+		break;
+	case MA_WHEEL:
+		input()->InternalMouseWheeled(mouseCode);
+		break;
+	}
 }
 
-static void VGui_MouseMove( int x, int y )
+static void VGui_Key(VGUI_KeyAction action, VGUI_KeyCode code)
 {
-	if( g_pRootPanel )
-		g_pRootPanel->MouseMove( x, y );
+	if (!input()) return;
+
+	switch (action)
+	{
+	case KA_TYPED:
+	case KA_PRESSED:
+		input()->InternalKeyCodePressed((vgui2::KeyCode)code);
+		break;
+	case KA_RELEASED:
+		input()->InternalKeyCodeReleased((vgui2::KeyCode)code);
+		break;
+	}
 }
 
-static void VGui_TextInput( const char *text )
+static void VGui_MouseMove(int x, int y)
 {
-	if( g_pRootPanel )
-		g_pRootPanel->TextInput( text );
+	if (input())
+		input()->InternalCursorMoved(x, y);
 }
 
-extern "C" EXPORT void InitAPI( vguiapi_t *api )
+static void VGui_TextInput(const char *text)
 {
-	g_api = api;
+	if (input())
+	{
+		for (const char *p = text; *p; p++)
+		{
+			wchar_t wch = (wchar_t)(unsigned char)*p;
+			input()->InternalKeyCodeTyped((vgui2::KeyCode)wch);
+		}
+	}
+}
 
-	g_api->Startup = VGui_Startup;
-	g_api->Shutdown = VGui_Shutdown;
-	g_api->GetPanel = VGui_GetPanel;
-	g_api->Paint = VGui_Paint;
-	g_api->Mouse = VGui_Mouse;
-	g_api->Key = VGui_Key;
-	g_api->MouseMove = VGui_MouseMove;
-	g_api->TextInput = VGui_TextInput;
+extern "C" EXPORT void InitAPI(vguiapi_t *api)
+{
+	if (!api) return;
+
+	g_pAPI = api;
+
+	api->Startup = VGui_Startup;
+	api->Shutdown = VGui_Shutdown;
+	api->GetPanel = VGui_GetPanel;
+	api->Paint = VGui_Paint;
+	api->Mouse = VGui_Mouse;
+	api->Key = VGui_Key;
+	api->MouseMove = VGui_MouseMove;
+	api->TextInput = VGui_TextInput;
+
+	api->initialized = true;
 }

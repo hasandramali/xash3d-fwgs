@@ -1,0 +1,49 @@
+#! /usr/bin/env python
+# encoding: utf-8
+# Android libvgui_support.so build for VGUI2 .res-based menus
+
+def options(opt):
+	pass
+
+def configure(conf):
+	pass
+
+def build(bld):
+	includes = [
+		'.',
+		'include',
+		'include/public',
+		'vgui2/src',
+		'../../engine',
+		'../../common',
+		'../../3rdparty/mainui/font',
+	]
+
+	defines = [
+		'NO_MALLOC_OVERRIDE',
+		'ANDROID',
+	]
+
+	source = bld.path.ant_glob([
+		'vgui_interface.cpp',
+		'filesystem_android.cpp',
+		'KeyValues.cpp',
+		'StringPool.cpp',
+		'strtools.cpp',
+		'UtlBuffer.cpp',
+		'UtlSymbol.cpp',
+		'vgui_int.cpp',
+		'vgui_surface.cpp',
+		'vgui2/src/*.cpp',
+		'vgui2/controls/*.cpp',
+		'vgui2/vgui2_surfacelib/*.cpp',
+	])
+
+	bld.shlib(
+		source       = source,
+		target       = 'vgui_support',
+		includes     = includes,
+		defines      = defines,
+		features     = 'cxx cshlib',
+		install_path = bld.env.LIBDIR,
+	)

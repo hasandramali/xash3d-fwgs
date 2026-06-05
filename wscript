@@ -103,6 +103,7 @@ SUBDIRS = [
 	Subproject('3rdparty/maintui',      lambda x: x.env.CLIENT and x.env.TUI),
 	Subproject('3rdparty/mainui',       lambda x: x.env.CLIENT and x.env.DEST_OS != 'android'),
 	Subproject('3rdparty/vgui_support', lambda x: x.env.CLIENT),
+	Subproject('3rdparty/vgui_support_android', lambda x: x.env.CLIENT and x.env.DEST_OS == 'android'),
 	Subproject('3rdparty/MultiEmulator',lambda x: x.env.CLIENT),
 #	Subproject('3rdparty/freevgui',     lambda x: x.env.CLIENT),
 	Subproject('stub/client',           lambda x: x.env.CLIENT),
