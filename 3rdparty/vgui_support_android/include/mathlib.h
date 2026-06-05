@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,5 +6,6 @@
 //=============================================================================//
 
 #ifndef MATH_BASE_H
+#define MATH_BASE_H
 #include "mathlib/math_base.h"
 #endif

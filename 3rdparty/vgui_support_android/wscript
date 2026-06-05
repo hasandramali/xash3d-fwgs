@@ -40,7 +40,7 @@ def build(bld):
 		'vgui2/src/*.cpp',
 		'vgui2/controls/*.cpp',
 		'vgui2/vgui2_surfacelib/*.cpp',
-	], excl=['vgui2/src/vgui_key_translation.cpp'])
+	], excl=['vgui2/src/vgui_key_translation.cpp', 'vgui2/controls/HTML.cpp'])
 
 	bld.shlib(
 		source       = source,

@@ -3,6 +3,8 @@
 
 #include "KeyValues.h"
 
+#define ARRAYSIZE(p) (sizeof(p)/sizeof(p[0]))
+
 #include <vgui/IClientPanel.h>
 #include <vgui/IPanel.h>
 #include <vgui/ISurface.h>

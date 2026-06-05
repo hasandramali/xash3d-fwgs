@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: Implementation of vgui generic open file dialog
 //
@@ -20,7 +20,7 @@
 //TODO: platform specific code should be avoided. - Solokiller
 #include <cstdlib>
 #define _stat stat
-#define _wcsnicmp wcsncmp
+#define _wcsnicmp wcsncasecmp
 #endif
 #undef GetCurrentDirectory
 #include "FileSystem.h"
@@ -939,7 +939,7 @@ void FileOpenDialog::ValidatePath()
 	// cleanup the path, we format tabs into the list to make it pretty in the UI
 	Q_StripPrecedingAndTrailingWhitespace( fullpath );
 
-	struct _stat buf;
+	_stat buf;
 	if( ( 0 == _stat( fullpath, &buf ) ) &&
 		( 0 != ( buf.st_mode & S_IFDIR ) ) )
 	{

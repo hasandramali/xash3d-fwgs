@@ -8,6 +8,8 @@
 
 #include "LocalizedStringTable.h"
 
+#define ARRAYSIZE(p) (sizeof(p)/sizeof(p[0]))
+
 using vgui2::ILocalize;
 using vgui2::CLocalizedStringtable_VGUI_Localize002;
 
@@ -655,7 +657,9 @@ void CLocalizedStringTable::ConstructString( wchar_t *unicodeOutput, int unicode
 void CLocalizedStringTable::ConstructString( wchar_t *unicodeOuput, int unicodeBufferSizeInBytes, wchar_t *formatString, int numFormatParameters, va_list argList )
 {
 	//This only works if callers only pass wchar_t* as varargs parameters.
-	auto ppszStrings = reinterpret_cast<const wchar_t**>( argList );
+	const wchar_t *ppszStrings[32];
+	for (int i = 0; i < numFormatParameters && i < 32; i++)
+		ppszStrings[i] = va_arg(argList, const wchar_t *);
 
 	auto bufSize = unicodeBufferSizeInBytes / sizeof( wchar_t );
 

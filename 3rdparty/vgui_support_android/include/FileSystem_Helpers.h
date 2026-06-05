@@ -6,7 +6,8 @@
 
 class IFileSystem;
 
-struct characterset_t;
+struct characterset_s;
+typedef struct characterset_s characterset_t;
 const char* ParseFile( const char* pFileBytes, char* pToken, bool* pWasQuoted, characterset_t *pCharSet = NULL );
 char* ParseFile( char* pFileBytes, char* pToken, bool* pWasQuoted );
 bool FS_GetFileTypeForFullPath( char const *pFullPath, wchar_t *buf, size_t bufSizeInBytes );
