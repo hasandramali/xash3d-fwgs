@@ -159,7 +159,8 @@ void CAndroidFileSystem::FileTimeToString(char *pStrip, int maxCharsIncludingTer
 	if (pStrip && maxCharsIncludingTerminator > 0)
 	{
 		time_t t = (time_t)fileTime;
-		struct tm *lt = localtime(&t);
+		struct tm lt_storage;
+		struct tm *lt = localtime_r(&t, &lt_storage);
 		if (lt)
 			strftime(pStrip, maxCharsIncludingTerminator, "%c", lt);
 		else
@@ -247,14 +248,14 @@ const char *CAndroidFileSystem::FindFirst(const char *pWildCard, FileFindHandle_
 		return NULL;
 	}
 
-	*pHandle = (FileFindHandle_t)&g_FindState;
+	*pHandle = (FileFindHandle_t)(uintptr_t)&g_FindState;
 	return FindNext(*pHandle);
 }
 
 const char *CAndroidFileSystem::FindNext(FileFindHandle_t handle)
 {
 	if (!handle) return NULL;
-	FindState *state = (FindState *)handle;
+	FindState *state = (FindState *)(uintptr_t)handle;
 	struct dirent *entry;
 	while ((entry = readdir(state->dir)) != NULL)
 	{
@@ -275,7 +276,7 @@ void CAndroidFileSystem::FindClose(FileFindHandle_t handle)
 {
 	if (handle)
 	{
-		FindState *state = (FindState *)handle;
+		FindState *state = (FindState *)(uintptr_t)handle;
 		if (state->dir)
 		{
 			closedir(state->dir);
