@@ -4,6 +4,10 @@
 #include <vgui/ISystem.h>
 #include <vgui_controls/Controls.h>
 
+#if !defined(ARRAYSIZE)
+#define ARRAYSIZE(p) (sizeof(p)/sizeof(p[0]))
+#endif
+
 #include "Bitmap.h"
 #include "Border.h"
 #include "Scheme.h"

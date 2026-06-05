@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,7 @@
 #pragma once
 #endif
 
-#include "utlvector.h"
+#include "UtlVector.h"
 
 // T is the type stored in the queue, it must include the priority
 // The head of the list contains the element with GREATEST priority
