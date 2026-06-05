@@ -63,6 +63,7 @@ def main():
 		sdl_bin_path = os.path.join(args.out_dir, "SDL")
 		hlsdk_bin_path = os.path.join(args.out_dir, "hlsdk-portable")
 		mainui_bin_path = os.path.join(args.out_dir, "mainui")
+		vgui_support_bin_path = os.path.join(args.out_dir, "vgui_support_android")
 
 		abi = args.waflock.replace(".lock-waf_android_", "").replace("_build", "")
 		inst_path = os.path.join(args.top_dir, "android", "app", "src", "main", "jniLibs", abi)
@@ -73,6 +74,7 @@ def main():
 		run_cmake(sdl_bin_path, ["libSDL2.so"], inst_path)
 		run_cmake(hlsdk_bin_path, None, inst_path)
 		run_cmake(mainui_bin_path, None, inst_path)
+		run_cmake(vgui_support_bin_path, None, inst_path)
 
 	process = subprocess.Popen(waf_exec, env=env)
 	process.communicate()
