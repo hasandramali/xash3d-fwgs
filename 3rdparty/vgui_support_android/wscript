@@ -10,10 +10,11 @@ def configure(conf):
 
 def build(bld):
 	includes = [
-		bld.path,
+		str(bld.path),
 		'include',
 		'include/public',
 		'include/tier0',
+		'include/tier1',
 		'vgui2/src',
 		'../../engine',
 		'../../common',

@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <cassert>
+#include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>

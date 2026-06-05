@@ -13,6 +13,7 @@
 
 #include "archtypes.h"     // DAL
 #include "interface.h"
+#include <stdint.h>
 
 /**
 *	@defgroup FileSystemV009 GoldSource Filesystem interface
@@ -31,7 +32,7 @@ typedef void * FileHandle_t;
 /**
 *	Filesystem find handle.
 */
-typedef int FileFindHandle_t;
+typedef intptr_t FileFindHandle_t;
 
 /**
 *	Filesystem wait for resources handle.
