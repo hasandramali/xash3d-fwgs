@@ -14,12 +14,13 @@
 
 #include <tier1/UtlRBTree.h>
 
+extern bool s_bSupportsUnicode;
+
 #if defined( _WIN32 ) && !defined( ANDROID )
 #include <winsani_in.h>
 #include <windows.h>
 #include <winsani_out.h>
 #undef GetCharABCWidths
-extern bool s_bSupportsUnicode;
 #endif
 
 //-----------------------------------------------------------------------------

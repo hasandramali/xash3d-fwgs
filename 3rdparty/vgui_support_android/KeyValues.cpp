@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1965,7 +1965,7 @@ bool KeyValues::WriteAsBinary( CUtlBuffer &buffer )
 			}
 		case TYPE_PTR:
 			{
-				buffer.PutUnsignedInt( (int)dat->m_pValue );
+				buffer.PutUnsignedInt( (unsigned int)(uintptr_t)dat->m_pValue );
 			}
 
 		default:
@@ -2060,7 +2060,7 @@ bool KeyValues::ReadAsBinary( CUtlBuffer &buffer )
 			}
 		case TYPE_PTR:
 			{
-				dat->m_pValue = (void*)buffer.GetUnsignedInt();
+				dat->m_pValue = (void*)(uintptr_t)buffer.GetUnsignedInt();
 			}
 
 		default:

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright ï¿½ 1996-2002, Valve LLC, All rights reserved. ============
 //
 // Purpose: 
 //
@@ -16,6 +16,10 @@
 #undef CreateFont
 
 static CFontManager s_FontManager;
+
+#if !defined( _WIN32 ) || defined( ANDROID )
+bool s_bSupportsUnicode = false;
+#endif
 
 #define MAX_INITIAL_FONTS	100
 

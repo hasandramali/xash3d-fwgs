@@ -19,6 +19,7 @@ def build(bld):
 		'../../engine',
 		'../../common',
 		'../../3rdparty/mainui/font',
+		'../../3rdparty/mainui/sdk_includes/public',
 	]
 
 	defines = [
