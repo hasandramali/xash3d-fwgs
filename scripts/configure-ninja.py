@@ -89,6 +89,13 @@ def main():
 	run_cmake(mainui_path, mainui_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root,
 		args.min_sdk_version, "-DBUILD_AS_PART_OF_ENGINE=ON")
 
+	# configure vgui_support_android
+	vgui_support_path = os.path.join(args.wscript_path, "3rdparty", "vgui_support_android")
+	vgui_support_out_path = os.path.join(args.configuration_dir, "vgui_support_android")
+
+	run_cmake(vgui_support_path, vgui_support_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root,
+		args.min_sdk_version)
+
 	# waf configure
 	waf_path = os.path.join(args.wscript_path, "waf")
 	out_path = os.path.join(args.configuration_dir, "xash3d-fwgs")
