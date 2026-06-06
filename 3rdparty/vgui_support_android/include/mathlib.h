@@ -7,5 +7,4 @@
 
 #ifndef MATH_BASE_H
 #define MATH_BASE_H
-#include "mathlib/math_base.h"
 #endif

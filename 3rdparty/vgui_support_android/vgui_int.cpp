@@ -73,7 +73,7 @@ static void VGui_Startup(int width, int height)
 	g_pRootPanel->SetPaintBorderEnabled(false);
 	g_pRootPanel->SetPaintBackgroundEnabled(false);
 	g_pRootPanel->SetVisible(true);
-	g_pRootPanel->SetCursor(dc_none);
+	g_pRootPanel->SetCursor(vgui2::dc_none);
 
 	vgui2::surface()->SetEmbeddedPanel((VPANEL)g_pRootPanel->GetVPanel());
 

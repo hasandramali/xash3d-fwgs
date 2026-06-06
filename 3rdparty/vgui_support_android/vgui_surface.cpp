@@ -16,6 +16,21 @@
 
 #include "tier0/platform.h"
 #include "VPanel.h"
+#include "SDK_Color.h"
+
+#define CURSOR_NONE dc_none
+#define CURSOR_ARROW dc_arrow
+#define CURSOR_IBEAM dc_ibeam
+#define CURSOR_HOURGLASS dc_hourglass
+#define CURSOR_CROSSHAIR dc_crosshair
+#define CURSOR_UP dc_up
+#define CURSOR_SIZENWSE dc_sizenwse
+#define CURSOR_SIZENESW dc_sizenesw
+#define CURSOR_SIZEWE dc_sizewe
+#define CURSOR_SIZENS dc_sizens
+#define CURSOR_SIZEALL dc_sizeall
+#define CURSOR_NO dc_no
+#define CURSOR_HAND dc_hand
 
 CAndroidSurface::CAndroidSurface()
 	: m_pAPI(NULL)
@@ -290,7 +305,7 @@ void CAndroidSurface::SetForegroundWindow(VPANEL panel) {}
 
 void CAndroidSurface::SetPanelVisible(VPANEL panel, bool state)
 {
-	vgui2::VHandleToPanel(panel)->SetVisible(state);
+	vgui2::	vgui2::VHandleToPanel(panel)->SetVisible(state);
 }
 
 void CAndroidSurface::SetMinimized(VPANEL panel, bool state) {}
@@ -452,13 +467,13 @@ void CAndroidSurface::MovePopupToBack(VPANEL panel)
 void CAndroidSurface::SolveTraverse(VPANEL panel, bool forceApplySchemeSettings)
 {
 	if (!panel) return;
-	VHandleToPanel(panel)->SolveTraverse(forceApplySchemeSettings);
+	vgui2::VHandleToPanel(panel)->SolveTraverse(forceApplySchemeSettings);
 }
 
 void CAndroidSurface::PaintTraverse(VPANEL panel)
 {
 	if (!panel) return;
-	VHandleToPanel(panel)->PaintTraverse();
+	vgui2::VHandleToPanel(panel)->PaintTraverse();
 }
 
 void CAndroidSurface::EnableMouseCapture(VPANEL panel, bool state) {}
