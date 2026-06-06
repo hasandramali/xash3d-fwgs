@@ -19,8 +19,9 @@
 #elif defined( POSIX )
 //TODO: platform specific code should be avoided. - Solokiller
 #include <cstdlib>
+#include <wctype.h>
 #define _stat stat
-#define _wcsnicmp wcsncasecmp
+static inline int _wcsnicmp(const wchar_t *s1, const wchar_t *s2, size_t n) { while (n && towlower(*s1) == towlower(*s2)) { if (!*s1) return 0; s1++; s2++; n--; } return n ? (towlower(*s1) - towlower(*s2)) : 0; }
 #endif
 #undef GetCurrentDirectory
 #include "FileSystem.h"
@@ -939,7 +940,7 @@ void FileOpenDialog::ValidatePath()
 	// cleanup the path, we format tabs into the list to make it pretty in the UI
 	Q_StripPrecedingAndTrailingWhitespace( fullpath );
 
-	_stat buf;
+	struct _stat buf;
 	if( ( 0 == _stat( fullpath, &buf ) ) &&
 		( 0 != ( buf.st_mode & S_IFDIR ) ) )
 	{

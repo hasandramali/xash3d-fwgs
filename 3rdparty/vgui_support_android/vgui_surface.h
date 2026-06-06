@@ -14,6 +14,8 @@
 
 #include "vgui_api.h"
 
+using vgui2::VPANEL;
+
 class CAndroidSurface : public vgui2::ISurface
 {
 public:
