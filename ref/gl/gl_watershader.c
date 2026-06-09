@@ -715,7 +715,7 @@ void R_WaterShader_VidInit( void )
 	R_WaterShader_GenerateCubemap();
 
 	R_WaterShader_CreateScreenGrabTexture(
-	    glState.width, glState.height );
+	    gpGlobals->width, gpGlobals->height );
 }
 
 /* ---------------------------------------------------------------------- */
@@ -917,7 +917,7 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	/* unit 2: refraction (screen grab) */
 	if( prog->u_refractMap >= 0 && !underwater && gWaterShader.screenGrabTexture )
 	{
-		pglActiveTextureARB( GL_TEXTURE2_ARB );
+		pglActiveTextureARB( GL_TEXTURE0_ARB + 2 );
 		pglBindTexture( GL_TEXTURE_2D, gWaterShader.screenGrabTexture );
 		pglUniform1iARB( prog->u_refractMap, 2 );
 	}
@@ -925,7 +925,7 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	/* unit 3: reflection cubemap */
 	if( prog->u_reflectCube >= 0 && !underwater && gWaterShader.reflectCubemap )
 	{
-		pglActiveTextureARB( GL_TEXTURE3_ARB );
+		pglActiveTextureARB( GL_TEXTURE0_ARB + 3 );
 		pglBindTexture( GL_TEXTURE_CUBE_MAP, gWaterShader.reflectCubemap );
 		pglUniform1iARB( prog->u_reflectCube, 3 );
 	}
