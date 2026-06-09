@@ -1,14 +1,15 @@
 /*
- * HL2-inspired above-water fragment shader (GLSL ES 1.00 / gl4es).
+ * HL2 above-water fragment shader (GLSL ES 1.00 / gl4es).
  *
- * Adapted from fteqw's altwater.glsl / water.glsl approach:
- *   - q1-style texture coordinate warping
- *   - two-layer scrolling normalmap sampling
- *   - Schlick Fresnel
- *   - fake refraction = water color + depth tint
- *   - fake reflection = sky color (Fresnel-blended)
- *   - specular highlight
- *   - optional diffuse warp texture overlay
+ * Faithful port of fteqw's water.glsl / altwater.glsl:
+ *   - screen-space UVs from clip-space position
+ *   - Q1-style texture coordinate warping
+ *   - two-layer scrolling normalmap
+ *   - Fresnel: pow(1 - abs(dot(N, normalize(V))), exponent)
+ *   - refraction: screen-grab texture with normal distortion
+ *   - reflection: cubemap sampled by normal
+ *   - Fresnel blend
+ *   - diffuse (warp) texture overlay
  *   - fog
  *
  * NOTE: mirrors the source string embedded in ref/gl/gl_watershader.c
@@ -19,79 +20,71 @@ precision mediump float;
 #endif
 
 uniform sampler2D u_normalMap;
-uniform sampler2D u_waterTex;
-uniform vec3      u_cameraPos;
-uniform vec3      u_waterColor;
-uniform vec3      u_skyColor;
-uniform vec3      u_specularColor;
-uniform vec3      u_sunDir;
+uniform sampler2D u_diffuseMap;
+uniform sampler2D u_refractMap;
+uniform samplerCube u_reflectCube;
+
 uniform highp float u_time;
-uniform float     u_fresnelFactor;
-uniform float     u_alpha;
-uniform float     u_density;
-uniform float     u_specular;
-uniform float     u_skyblend;
-uniform float     u_sunlightScattering;
-uniform float     u_fogBlend;
-uniform vec3      u_fogColor;
-uniform float     u_fogStart;
-uniform float     u_fogEnd;
-uniform float     u_fogEnabled;
+uniform float u_fresnelExp;
+uniform float u_strengthRefr;
+uniform vec3  u_tintRefr;
+uniform vec3  u_tintRefl;
+uniform float u_alpha;
+uniform float u_distScale;
+uniform float u_fogBlend;
+uniform vec3  u_fogColor;
+uniform float u_fogStart;
+uniform float u_fogEnd;
+uniform float u_fogEnabled;
+uniform float u_refractEnabled;
 
-varying vec3 v_worldPos;
-varying vec3 v_viewPos;
-varying vec2 v_texCoord;
-varying vec3 v_geoNormal;
-
-const float WATER_F0 = 0.15;
-const float WAVE_SCALE = 0.004;
+varying vec2  v_texCoord;
+varying vec4  v_clipPos;
+varying vec3  v_normal;
+varying vec3  v_eye;
 
 void main()
 {
-    vec2 uv = v_worldPos.xy * WAVE_SCALE;
-    float t = u_time;
+    /* screen-space texcoords (matching fteqw's (1.0+tf.xy/tf.w)*0.5) */
+    vec2 stc = (1.0 + (v_clipPos.xy / v_clipPos.w)) * 0.5;
 
-    /* q1-style warp for normalmap coords (HL2 water style) */
+    /* Q1-style warp for normalmap coords (fteqw's ntc) */
     vec2 ntc;
-    ntc.s = uv.s + sin(uv.t * 3.0 + t) * 0.1;
-    ntc.t = uv.t + cos(uv.s * 3.0 + t * 0.8) * 0.1;
+    ntc.s = v_texCoord.s + sin(v_texCoord.t + u_time) * 0.125;
+    ntc.t = v_texCoord.t + sin(v_texCoord.s + u_time) * 0.125;
 
-    /* two-layer scrolling normalmap (HL2 altwater approach) */
-    vec3 n1 = texture2D(u_normalMap, ntc * 1.2 + vec2(t * 0.08, 0.0)).xyz;
-    vec3 n2 = texture2D(u_normalMap, ntc * 0.6 - vec2(0.0, t * 0.06)).xyz;
-    vec3 N = normalize((n1 + n2) * 2.0 - 1.0);
+    /* two-layer scrolling normalmap (fteqw's altwater approach) */
+    vec3 n  = texture2D(u_normalMap, ntc * 1.0 + vec2(u_time * 0.10, 0.0)).xyz;
+    n      += texture2D(u_normalMap, ntc * 0.5 - vec2(0.0, u_time * 0.097)).xyz;
+    n      -= 1.0 - 4.0 / 256.0;
+    n       = normalize(n);
 
-    vec3 V = normalize(u_cameraPos - v_worldPos);
-    float NdotV = max(dot(N, V), 0.0);
+    /* Fresnel term (fteqw: pow(1-abs(dot(n,normalize(eye))), EXP)) */
+    float fres = pow(1.0 - abs(dot(n, normalize(v_eye))), u_fresnelExp);
 
-    /* Schlick Fresnel */
-    float fresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - NdotV, u_fresnelFactor);
-    fresnel = clamp(fresnel, 0.0, 0.95);
+    /* refraction = screen grab with distortion, tinted */
+    vec3 refr;
+    if (u_refractEnabled > 0.5)
+        refr = texture2D(u_refractMap, stc + n.st * u_strengthRefr).rgb * u_tintRefr;
+    else
+        refr = vec3(0.12, 0.25, 0.33) * u_tintRefr;
 
-    /* fake refraction = water color with depth-based darkening */
-    float dist = length(v_viewPos);
-    float depthFactor = clamp(dist * u_density, 0.0, 1.0);
-    vec3 refr = u_waterColor * (1.0 - depthFactor * 0.6);
+    /* distance-based depth darkening */
+    float dist = length(v_eye);
+    float depthF = clamp(dist * u_distScale, 0.0, 1.0);
+    refr = mix(refr, refr * 0.4, depthF);
 
-    /* subsurface sunlight scattering */
-    float scatter = u_sunlightScattering * pow(max(dot(N, u_sunDir), 0.0), 8.0);
-    refr += vec3(0.2, 0.4, 0.6) * scatter;
-
-    /* fake reflection = sky color */
-    vec3 refl = u_skyColor;
+    /* reflection = cubemap sampled by normal, tinted */
+    vec3 refl = textureCube(u_reflectCube, n).rgb * u_tintRefl;
 
     /* Fresnel blend */
-    vec3 color = mix(refr, refl, fresnel * u_skyblend);
+    vec3 color = mix(refr, refl, clamp(fres, 0.0, 0.95));
 
-    /* specular */
-    vec3 R = reflect(-V, N);
-    float spec = pow(max(dot(R, u_sunDir), 0.0), 64.0) * u_specular;
-    color += u_specularColor * spec;
+    /* diffuse (warp) texture overlay — like fteqw's ALPHA path */
+    vec4 ts = texture2D(u_diffuseMap, ntc);
+    color = mix(color, ts.rgb, 0.25 * ts.a);
 
-    /* diffuse warp texture overlay (like HL2 water texture on top) */
-    vec4 waterTexel = texture2D(u_waterTex, v_texCoord);
-    color = mix(color, waterTexel.rgb, 0.15);
-
+    /* fog */
     if (u_fogEnabled > 0.5)
     {
         float fogF = clamp((dist - u_fogStart) / max(u_fogEnd - u_fogStart, 1.0), 0.0, 1.0);
