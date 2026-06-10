@@ -36,6 +36,7 @@ uniform float u_distScale;
 uniform vec3  u_distColor;
 uniform float u_causticIntensity;
 uniform vec3  u_causticColor;
+uniform float u_refractEnabled;
 
 varying vec2  v_texCoord;
 varying vec4  v_clipPos;
@@ -59,37 +60,57 @@ void main()
     float rs = u_refractionSpeed;
     float ws = u_waveSpeed;
 
+    /* water colour and distance */
+    float dist = length(v_eye);
+    float depthF = clamp(dist * u_distScale * 0.5, 0.0, 1.0);
+    vec3 wc = u_waterColor * u_waterGamma;
+
+    /* Q1-style warp */
     vec2 ntc;
     ntc.s = v_texCoord.s + sin(v_texCoord.t + t * ws) * 0.125;
     ntc.t = v_texCoord.t + sin(v_texCoord.s + t * ws) * 0.125;
 
+    /* two-layer scrolling normalmap */
     vec3 n  = texture2D(u_normalMap, ntc * 1.0 + vec2(t * 0.10 * rs, 0.0)).xyz;
     n      += texture2D(u_normalMap, ntc * 0.5 - vec2(0.0, t * 0.097 * rs)).xyz;
     n      -= 1.0 - 4.0 / 256.0;
     n       = normalize(n);
 
+    /* normal-based surface animation */
     float surfAnim = sin(ntc.s * 8.0 + t * 0.5) * cos(ntc.t * 6.0 - t * 0.7) * 0.5 + 0.5;
 
+    /* caustic pattern */
     float c = caustic(gl_FragCoord.xy, t * rs);
     c = c * 0.5 + surfAnim * 0.5;
 
-    float twitch = sin(t * 0.5 + ntc.s * 10.0) * 0.003;
+    /* refraction with refract-enabled check */
     vec3 refr;
-    refr = texture2D(u_refractMap, stc + n.st * u_strengthRefrUnder + vec2(twitch, twitch * 0.7)).rgb;
+    if (u_refractEnabled > 0.5)
+    {
+        float twitch = sin(t * 0.5 + ntc.s * 10.0) * 0.003;
+        refr = texture2D(u_refractMap, stc + n.st * u_strengthRefrUnder + vec2(twitch, twitch * 0.7)).rgb;
+    }
+    else
+    {
+        refr = wc * 0.6;
+    }
 
-    float dist = length(v_eye);
-    float depthF = clamp(dist * u_distScale * 0.5, 0.0, 1.0);
+    /* distance-based tint */
+    refr = mix(refr, refr * u_distColor, depthF);
 
-    vec3 wc = u_waterColor * u_waterGamma;
+    /* underwater colour: blend screen with water color, caustics, and animated surface */
     float wcBlend = depthF * 0.4;
     vec3 color = mix(refr, wc * 0.6, wcBlend);
 
+    /* apply caustic light with configurable color and intensity */
     float cStrength = u_causticIntensity * (1.0 - depthF * 0.5);
     color += u_causticColor * c * cStrength;
 
+    /* subtle surface shimmer from normal map */
     vec3 shimmer = vec3(0.02, 0.03, 0.02) * (n.x + n.y) * (1.0 - depthF);
     color += shimmer;
 
+    /* fog */
     if (u_fogEnabled > 0.5)
     {
         float fogF = clamp((dist - u_fogStart) / max(u_fogEnd - u_fogStart, 1.0), 0.0, 1.0);

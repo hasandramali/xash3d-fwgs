@@ -302,6 +302,7 @@ static const char *water_frag_under_source =
 	"uniform vec3  u_distColor;\n"
 	"uniform float u_causticIntensity;\n"
 	"uniform vec3  u_causticColor;\n"
+	"uniform float u_refractEnabled;\n"
 	"varying vec2  v_texCoord;\n"
 	"varying vec4  v_clipPos;\n"
 	"varying vec3  v_normal;\n"
@@ -324,6 +325,11 @@ static const char *water_frag_under_source =
 	"    float rs = u_refractionSpeed;\n"
 	"    float ws = u_waveSpeed;\n"
 	"\n"
+	"    /* water colour and distance */\n"
+	"    float dist = length( v_eye );\n"
+	"    float depthF = clamp( dist * u_distScale * 0.5, 0.0, 1.0 );\n"
+	"    vec3 wc = u_waterColor * u_waterGamma;\n"
+	"\n"
 	"    /* Q1-style warp */\n"
 	"    vec2 ntc;\n"
 	"    ntc.s = v_texCoord.s + sin( v_texCoord.t + t * ws ) * 0.125;\n"
@@ -343,16 +349,21 @@ static const char *water_frag_under_source =
 	"    c = c * 0.5 + surfAnim * 0.5;\n"
 	"\n"
 	"    /* refraction: distort the screen grab with normal + separate underwater strength */\n"
-	"    float twitch = sin( t * 0.5 + ntc.s * 10.0 ) * 0.003;\n"
 	"    vec3 refr;\n"
-	"    refr = texture2D( u_refractMap, stc + n.st * u_strengthRefrUnder + vec2( twitch, twitch * 0.7 )).rgb;\n"
+	"    if( u_refractEnabled > 0.5 )\n"
+	"    {\n"
+	"        float twitch = sin( t * 0.5 + ntc.s * 10.0 ) * 0.003;\n"
+	"        refr = texture2D( u_refractMap, stc + n.st * u_strengthRefrUnder + vec2( twitch, twitch * 0.7 )).rgb;\n"
+	"    }\n"
+	"    else\n"
+	"    {\n"
+	"        refr = wc * 0.6;\n"
+	"    }\n"
 	"\n"
 	"    /* distance-based tint */\n"
-	"    float dist = length( v_eye );\n"
-	"    float depthF = clamp( dist * u_distScale * 0.5, 0.0, 1.0 );\n"
+	"    refr = mix( refr, refr * u_distColor, depthF );\n"
 	"\n"
 	"    /* underwater colour: blend screen with water color, caustics, and animated surface */\n"
-	"    vec3 wc = u_waterColor * u_waterGamma;\n"
 	"    float wcBlend = depthF * 0.4;\n"
 	"    vec3 color = mix( refr, wc * 0.6, wcBlend );\n"
 	"\n"
@@ -701,6 +712,7 @@ void R_WaterShader_Init( void )
 	if( !GL_Support( GL_SHADER_GLSL100_EXT ))
 	{
 		gEngfuncs.Con_Printf( "R_WaterShader: GLSL not supported, disabled\n" );
+		gWaterShader.initialized = 1;	// mark as attempted so we don't retry every frame
 		return;
 	}
 
@@ -708,6 +720,7 @@ void R_WaterShader_Init( void )
 	                                   water_vertex_source, water_frag_above_source ))
 	{
 		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build above-water program\n" );
+		gWaterShader.initialized = 1;
 		return;
 	}
 
@@ -716,6 +729,7 @@ void R_WaterShader_Init( void )
 	{
 		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build underwater program\n" );
 		R_WaterShader_DeleteProgram( &gWaterShader.program );
+		gWaterShader.initialized = 1;
 		return;
 	}
 
@@ -764,9 +778,7 @@ void R_WaterShader_Shutdown( void )
 
 void R_WaterShader_VidInit( void )
 {
-	if( !gWaterShader.shaderSupport )
-		return;
-
+	/* delete old textures before re-creating */
 	if( gWaterShader.normalTexture )
 	{
 		pglDeleteTextures( 1, &gWaterShader.normalTexture );
@@ -785,8 +797,11 @@ void R_WaterShader_VidInit( void )
 
 	R_WaterShader_LoadNormalTexture();
 
-	R_WaterShader_CreateScreenGrabTexture(
-	    gpGlobals->width, gpGlobals->height );
+	if( gpGlobals->width > 0 && gpGlobals->height > 0 )
+	{
+		R_WaterShader_CreateScreenGrabTexture(
+		    gpGlobals->width, gpGlobals->height );
+	}
 
 	/* warp screen capture texture */
 	{
@@ -990,19 +1005,20 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 
 qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 {
-	if( !gWaterShader.shaderSupport )
-	{
-		/* lazy init: retry if GL wasn't ready at startup */
-		if( r_water_shader.value )
-		{
-			R_WaterShader_Init();
-			R_WaterShader_VidInit();
-		}
-		if( !gWaterShader.shaderSupport )      return false;
-	}
 	if( !r_water_shader.value )            return false;
 	if( !warp || !warp->polys )            return false;
-	if( !gWaterShader.normalTexture )      return false;
+
+	/* lazy init: ensure programs are compiled */
+	if( !gWaterShader.program.program || !gWaterShader.programUnderwater.program )
+	{
+		R_WaterShader_Init();
+		if( !gWaterShader.program.program || !gWaterShader.programUnderwater.program )
+			return false;
+
+		/* ensure textures are created (VidInit might have been skipped) */
+		if( !gWaterShader.screenGrabTexture )
+			R_WaterShader_VidInit();
+	}
 
 	/* above-water vs underwater */
 	const qboolean underwater =
