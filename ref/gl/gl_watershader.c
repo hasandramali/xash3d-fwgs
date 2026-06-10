@@ -8,24 +8,28 @@
  *
  * No cubemap or FBO reflection — the Fresnel term blends between the
  * refracted scene and the water body colour for a simple "fake reflection".
- * Underwater surfaces fall back to the engine's fixed-function warp.
+ * Underwater surfaces use a dedicated shader with caustics and colour tint.
  */
 
 #include "gl_local.h"
 #include "gl_watershader.h"
 
-CVAR_DEFINE_AUTO( r_water_shader,         "0",     FCVAR_GLCONFIG, "enable HL2-style water shader" );
-CVAR_DEFINE_AUTO( r_water_alpha,          "0.85",  FCVAR_GLCONFIG, "water opacity (0=transparent, 1=opaque)" );
-CVAR_DEFINE_AUTO( r_water_fresnel,        "4.0",   FCVAR_GLCONFIG, "Fresnel exponent (HL2 default ~4)" );
-CVAR_DEFINE_AUTO( r_water_strength,       "0.05",  FCVAR_GLCONFIG, "refraction distortion strength" );
-CVAR_DEFINE_AUTO( r_water_watercolor_r,   "30",    FCVAR_GLCONFIG, "water body color red (0-255)" );
-CVAR_DEFINE_AUTO( r_water_watercolor_g,   "60",    FCVAR_GLCONFIG, "water body color green (0-255)" );
-CVAR_DEFINE_AUTO( r_water_watercolor_b,   "80",    FCVAR_GLCONFIG, "water body color blue (0-255)" );
-CVAR_DEFINE_AUTO( r_water_distscale,      "0.002", FCVAR_GLCONFIG, "distance-based depth tint scale" );
-CVAR_DEFINE_AUTO( r_water_fogblend,       "1.0",   FCVAR_GLCONFIG, "fog influence on water (0..1)" );
-CVAR_DEFINE_AUTO( r_water_debug,          "0",     FCVAR_GLCONFIG, "debug (1=log, 2=tint red)" );
-CVAR_DEFINE_AUTO( r_water_waveheight,     "3.0",   FCVAR_GLCONFIG, "vertex wave displacement amplitude" );
-CVAR_DEFINE_AUTO( r_water_wavefreq,       "0.04",  FCVAR_GLCONFIG, "vertex wave spatial frequency" );
+CVAR_DEFINE_AUTO( r_water_shader,           "0",     FCVAR_GLCONFIG, "enable HL2-style water shader" );
+CVAR_DEFINE_AUTO( r_water_alpha,            "0.85",  FCVAR_GLCONFIG, "water opacity (0=transparent, 1=opaque)" );
+CVAR_DEFINE_AUTO( r_water_fresnel,          "4.0",   FCVAR_GLCONFIG, "Fresnel exponent (HL2 default ~4)" );
+CVAR_DEFINE_AUTO( r_water_fresnel_min,      "0.0",   FCVAR_GLCONFIG, "minimum Fresnel reflectivity (0..1)" );
+CVAR_DEFINE_AUTO( r_water_fresnel_range,    "1.0",   FCVAR_GLCONFIG, "Fresnel range (0..1)" );
+CVAR_DEFINE_AUTO( r_water_strength,         "0.05",  FCVAR_GLCONFIG, "refraction distortion strength" );
+CVAR_DEFINE_AUTO( r_water_watercolor_r,     "30",    FCVAR_GLCONFIG, "water body color red (0-255)" );
+CVAR_DEFINE_AUTO( r_water_watercolor_g,     "60",    FCVAR_GLCONFIG, "water body color green (0-255)" );
+CVAR_DEFINE_AUTO( r_water_watercolor_b,     "80",    FCVAR_GLCONFIG, "water body color blue (0-255)" );
+CVAR_DEFINE_AUTO( r_water_distscale,        "0.002", FCVAR_GLCONFIG, "distance-based depth tint scale" );
+CVAR_DEFINE_AUTO( r_water_fogblend,         "1.0",   FCVAR_GLCONFIG, "fog influence on water (0..1)" );
+CVAR_DEFINE_AUTO( r_water_debug,            "0",     FCVAR_GLCONFIG, "debug (1=log, 2=tint red)" );
+CVAR_DEFINE_AUTO( r_water_waveheight,       "3.0",   FCVAR_GLCONFIG, "vertex wave displacement amplitude" );
+CVAR_DEFINE_AUTO( r_water_wavefreq,         "0.04",  FCVAR_GLCONFIG, "vertex wave spatial frequency" );
+CVAR_DEFINE_AUTO( r_water_wavespeed,        "1.0",   FCVAR_GLCONFIG, "vertex wave speed multiplier" );
+CVAR_DEFINE_AUTO( r_water_refraction_speed, "1.0",   FCVAR_GLCONFIG, "refraction normalmap scroll speed" );
 
 gl_water_shader_state_t gWaterShader;
 
@@ -40,6 +44,8 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_shader );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_alpha );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_min );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_range );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_strength );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_r );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_g );
@@ -49,6 +55,8 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_wavespeed );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_refraction_speed );
 }
 
 void R_WaterShader_Init( void )    { R_WaterShader_RegisterCvars(); memset( &gWaterShader, 0, sizeof( gWaterShader )); }
@@ -95,6 +103,7 @@ static const char *water_vertex_source =
 	"uniform highp float u_time;\n"
 	"uniform highp float u_waveheight;\n"
 	"uniform highp float u_wavefreq;\n"
+	"uniform highp float u_waveSpeed;\n"
 	"uniform vec3 u_cameraPos;\n"
 	"varying vec2 v_texCoord;\n"
 	"varying vec4 v_clipPos;\n"
@@ -117,7 +126,7 @@ static const char *water_vertex_source =
 	"void main()\n"
 	"{\n"
 	"    vec3  pos     = a_position.xyz;\n"
-	"    float t       = u_time;\n"
+	"    float t       = u_time * u_waveSpeed;\n"
 	"    float freq    = max( u_wavefreq, 0.001 );\n"
 	"    float amp     = u_waveheight;\n"
 	"    if( amp > 0.001 )\n"
@@ -138,8 +147,8 @@ static const char *water_vertex_source =
  * Pure refraction shader:
  *   - screen-space UVs from clip-space position
  *   - Q1-style texture coordinate warping
- *   - two-layer scrolling normalmap
- *   - Fresnel: pow(1 - abs(dot(N, normalize(V))), exponent)
+ *   - two-layer scrolling normalmap (speed controlled by u_refractionSpeed)
+ *   - Fresnel: pow(1-abs(dot(N,V)), EXP) * RANGE + MIN
  *   - refraction: screen-grab texture with normal distortion
  *   - Fresnel blends refracted scene with water body colour
  *   - diffuse (warp) texture overlay
@@ -154,6 +163,8 @@ static const char *water_frag_above_source =
 	"uniform sampler2D u_refractMap;\n"
 	"uniform highp float u_time;\n"
 	"uniform float u_fresnelExp;\n"
+	"uniform float u_fresnelMin;\n"
+	"uniform float u_fresnelRange;\n"
 	"uniform float u_strengthRefr;\n"
 	"uniform vec3  u_waterColor;\n"
 	"uniform float u_alpha;\n"
@@ -164,6 +175,8 @@ static const char *water_frag_above_source =
 	"uniform float u_fogEnd;\n"
 	"uniform float u_fogEnabled;\n"
 	"uniform float u_refractEnabled;\n"
+	"uniform float u_refractionSpeed;\n"
+	"uniform float u_waveSpeed;\n"
 	"varying vec2  v_texCoord;\n"
 	"varying vec4  v_clipPos;\n"
 	"varying vec3  v_normal;\n"
@@ -171,22 +184,26 @@ static const char *water_frag_above_source =
 	"\n"
 	"void main()\n"
 	"{\n"
-	"    /* screen-space texcoords */\n"
 	"    vec2 stc = (1.0 + (v_clipPos.xy / v_clipPos.w)) * 0.5;\n"
+	"\n"
+	"    float t = u_time;\n"
+	"    float rs = u_refractionSpeed;\n"
+	"    float ws = u_waveSpeed;\n"
 	"\n"
 	"    /* Q1-style warp for normalmap coords */\n"
 	"    vec2 ntc;\n"
-	"    ntc.s = v_texCoord.s + sin( v_texCoord.t + u_time ) * 0.125;\n"
-	"    ntc.t = v_texCoord.t + sin( v_texCoord.s + u_time ) * 0.125;\n"
+	"    ntc.s = v_texCoord.s + sin( v_texCoord.t + t * ws ) * 0.125;\n"
+	"    ntc.t = v_texCoord.t + sin( v_texCoord.s + t * ws ) * 0.125;\n"
 	"\n"
-	"    /* two-layer scrolling normalmap */\n"
-	"    vec3 n  = texture2D( u_normalMap, ntc * 1.0 + vec2( u_time * 0.10, 0.0 )).xyz;\n"
-	"    n      += texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, u_time * 0.097 )).xyz;\n"
+	"    /* two-layer scrolling normalmap with refraction speed control */\n"
+	"    vec3 n  = texture2D( u_normalMap, ntc * 1.0 + vec2( t * 0.10 * rs, 0.0 )).xyz;\n"
+	"    n      += texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, t * 0.097 * rs )).xyz;\n"
 	"    n      -= 1.0 - 4.0 / 256.0;\n"
 	"    n       = normalize( n );\n"
 	"\n"
-	"    /* Fresnel term */\n"
-	"    float fres = pow( 1.0 - abs( dot( n, normalize( v_eye ))), u_fresnelExp );\n"
+	"    /* Fresnel term with min/range from fteqw */\n"
+	"    float fres = pow( 1.0 - abs( dot( n, normalize( v_eye ))), u_fresnelExp )\n"
+	"                 * u_fresnelRange + u_fresnelMin;\n"
 	"\n"
 	"    /* refraction = screen grab with distortion */\n"
 	"    vec3 refr;\n"
@@ -217,7 +234,95 @@ static const char *water_frag_above_source =
 	"    gl_FragColor = vec4( color, clamp( u_alpha, 0.0, 1.0 ));\n"
 	"}\n";
 
-
+/* -----------------------------------------------------------------------
+ * Underwater fragment shader
+ *
+ * Used when the camera is underwater, looking up at the water surface:
+ *   - screen-space UVs from clip-space position
+ *   - Q1-style warp
+ *   - two-layer scrolling normalmap
+ *   - screen-grab distortion for refraction (objects above water appear to move)
+ *   - caustic-like modulation
+ *   - deep-water colour tint
+ *   - fog
+ * --------------------------------------------------------------------- */
+static const char *water_frag_under_source =
+	"#ifdef GL_ES\n"
+	"precision mediump float;\n"
+	"#endif\n"
+	"uniform sampler2D u_normalMap;\n"
+	"uniform sampler2D u_diffuseMap;\n"
+	"uniform sampler2D u_refractMap;\n"
+	"uniform highp float u_time;\n"
+	"uniform float u_strengthRefr;\n"
+	"uniform vec3  u_waterColor;\n"
+	"uniform float u_alpha;\n"
+	"uniform float u_fogBlend;\n"
+	"uniform vec3  u_fogColor;\n"
+	"uniform float u_fogStart;\n"
+	"uniform float u_fogEnd;\n"
+	"uniform float u_fogEnabled;\n"
+	"uniform float u_refractionSpeed;\n"
+	"uniform float u_waveSpeed;\n"
+	"uniform float u_distScale;\n"
+	"varying vec2  v_texCoord;\n"
+	"varying vec4  v_clipPos;\n"
+	"varying vec3  v_normal;\n"
+	"varying vec3  v_eye;\n"
+	"\n"
+	"float caustic( vec2 p, float t )\n"
+	"{\n"
+	"    vec2 uv = p * 0.002;\n"
+	"    float c1 = sin( uv.x * 3.0 + t * 0.8 ) * cos( uv.y * 2.5 - t * 0.6 );\n"
+	"    float c2 = sin((uv.x + uv.y) * 4.0 + t * 1.2 ) * 0.5;\n"
+	"    float c3 = cos((uv.x - uv.y) * 5.0 - t * 0.9 ) * 0.3;\n"
+	"    return clamp( c1 * 0.5 + c2 + c3, 0.0, 1.0 );\n"
+	"}\n"
+	"\n"
+	"void main()\n"
+	"{\n"
+	"    vec2 stc = (1.0 + (v_clipPos.xy / v_clipPos.w)) * 0.5;\n"
+	"\n"
+	"    float t = u_time;\n"
+	"    float rs = u_refractionSpeed;\n"
+	"    float ws = u_waveSpeed;\n"
+	"\n"
+	"    /* Q1-style warp */\n"
+	"    vec2 ntc;\n"
+	"    ntc.s = v_texCoord.s + sin( v_texCoord.t + t * ws ) * 0.125;\n"
+	"    ntc.t = v_texCoord.t + sin( v_texCoord.s + t * ws ) * 0.125;\n"
+	"\n"
+	"    /* two-layer scrolling normalmap */\n"
+	"    vec3 n  = texture2D( u_normalMap, ntc * 1.0 + vec2( t * 0.10 * rs, 0.0 )).xyz;\n"
+	"    n      += texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, t * 0.097 * rs )).xyz;\n"
+	"    n      -= 1.0 - 4.0 / 256.0;\n"
+	"    n       = normalize( n );\n"
+	"\n"
+	"    /* caustic pattern */\n"
+	"    float c = caustic( gl_FragCoord.xy, t * rs );\n"
+	"\n"
+	"    /* refraction: distort the screen grab with normal, add time-varying wobble */\n"
+	"    float twitch = sin( t * 0.5 + ntc.s * 10.0 ) * 0.002;\n"
+	"    vec3 refr;\n"
+	"    refr = texture2D( u_refractMap, stc + n.st * u_strengthRefr + vec2( twitch, twitch * 0.7 )).rgb;\n"
+	"\n"
+	"    /* distance-based darkening */\n"
+	"    float dist = length( v_eye );\n"
+	"    float depthF = clamp( dist * u_distScale * 0.5, 0.0, 1.0 );\n"
+	"\n"
+	"    /* underwater colour: blend screen with water color and caustics */\n"
+	"    vec3 color = mix( refr, u_waterColor * 0.6, depthF * 0.5 );\n"
+	"    color += vec3( 0.1, 0.15, 0.08 ) * c * (1.0 - depthF * 0.5 );\n"
+	"\n"
+	"    /* fog */\n"
+	"    if( u_fogEnabled > 0.5 )\n"
+	"    {\n"
+	"        float fogF = clamp((dist - u_fogStart) / max(u_fogEnd - u_fogStart, 1.0), 0.0, 1.0);\n"
+	"        color = mix( color, u_fogColor, fogF * u_fogBlend );\n"
+	"    }\n"
+	"\n"
+	"    gl_FragColor = vec4( color, clamp( u_alpha, 0.0, 1.0 ));\n"
+	"}\n";
 
 /* ---------------------------------------------------------------------- */
 /* Shader compilation helper                                              */
@@ -308,6 +413,8 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_cameraPos      = pglGetUniformLocationARB( p->program, "u_cameraPos" );
 	p->u_time           = pglGetUniformLocationARB( p->program, "u_time" );
 	p->u_fresnelExp     = pglGetUniformLocationARB( p->program, "u_fresnelExp" );
+	p->u_fresnelMin     = pglGetUniformLocationARB( p->program, "u_fresnelMin" );
+	p->u_fresnelRange   = pglGetUniformLocationARB( p->program, "u_fresnelRange" );
 	p->u_strengthRefr   = pglGetUniformLocationARB( p->program, "u_strengthRefr" );
 	p->u_waterColor     = pglGetUniformLocationARB( p->program, "u_waterColor" );
 	p->u_alpha          = pglGetUniformLocationARB( p->program, "u_alpha" );
@@ -319,6 +426,8 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_fogEnabled     = pglGetUniformLocationARB( p->program, "u_fogEnabled" );
 	p->u_waveheight     = pglGetUniformLocationARB( p->program, "u_waveheight" );
 	p->u_wavefreq       = pglGetUniformLocationARB( p->program, "u_wavefreq" );
+	p->u_waveSpeed      = pglGetUniformLocationARB( p->program, "u_waveSpeed" );
+	p->u_refractionSpeed = pglGetUniformLocationARB( p->program, "u_refractionSpeed" );
 	p->u_refractEnabled = pglGetUniformLocationARB( p->program, "u_refractEnabled" );
 
 	p->a_position = WATER_ATTRIB_POSITION;
@@ -443,6 +552,8 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_shader );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_alpha );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_min );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_range );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_strength );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_r );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_g );
@@ -452,6 +563,8 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_wavespeed );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_refraction_speed );
 }
 
 void R_WaterShader_Init( void )
@@ -473,14 +586,22 @@ void R_WaterShader_Init( void )
 	if( !R_WaterShader_CompileProgram( &gWaterShader.program,
 	                                   water_vertex_source, water_frag_above_source ))
 	{
-		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build program\n" );
+		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build above-water program\n" );
+		return;
+	}
+
+	if( !R_WaterShader_CompileProgram( &gWaterShader.programUnderwater,
+	                                   water_vertex_source, water_frag_under_source ))
+	{
+		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build underwater program\n" );
+		R_WaterShader_DeleteProgram( &gWaterShader.program );
 		return;
 	}
 
 	gWaterShader.shaderSupport = 1;
 	gWaterShader.initialized   = 1;
 
-	gEngfuncs.Con_Reportf( "R_WaterShader: ready (pure refraction, no cubemap)\n" );
+	gEngfuncs.Con_Reportf( "R_WaterShader: ready (refraction + underwater)\n" );
 }
 
 void R_WaterShader_Shutdown( void )
@@ -491,6 +612,7 @@ void R_WaterShader_Shutdown( void )
 	if( glw_state.initialized )
 	{
 		R_WaterShader_DeleteProgram( &gWaterShader.program );
+		R_WaterShader_DeleteProgram( &gWaterShader.programUnderwater );
 
 		if( gWaterShader.normalTexture )
 			pglDeleteTextures( 1, &gWaterShader.normalTexture );
@@ -528,23 +650,9 @@ void R_WaterShader_VidInit( void )
 /* Per-surface drawing                                                    */
 /* ---------------------------------------------------------------------- */
 
-qboolean R_WaterShader_EmitPolys( msurface_t *warp )
+static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
+                                        msurface_t *warp )
 {
-	if( !gWaterShader.shaderSupport )      return false;
-	if( !r_water_shader.value )            return false;
-	if( !warp || !warp->polys )            return false;
-	if( !gWaterShader.normalTexture )      return false;
-
-	/* underwater surfaces: fall back to engine fixed-function warp */
-	const qboolean underwater =
-	    ( warp->polys->verts[0][2] >= RI.rvp.vieworigin[2] );
-	if( underwater )
-		return false;
-
-	gl_water_program_t *prog = &gWaterShader.program;
-
-	pglUseProgramObjectARB( prog->program );
-
 	/* ---- matrices ---- */
 	if( prog->u_modelView >= 0 )
 	{
@@ -568,17 +676,31 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 		                 RI.rvp.vieworigin[2] );
 	}
 
+	float time = (float)gp_cl->time;
+
 	/* ---- time ---- */
 	if( prog->u_time >= 0 )
-		pglUniform1fARB( prog->u_time, (float)gp_cl->time );
+		pglUniform1fARB( prog->u_time, time );
 
-	/* ---- Fresnel exponent ---- */
+	/* ---- wave speed ---- */
+	if( prog->u_waveSpeed >= 0 )
+		pglUniform1fARB( prog->u_waveSpeed, r_water_wavespeed.value );
+
+	/* ---- refraction speed ---- */
+	if( prog->u_refractionSpeed >= 0 )
+		pglUniform1fARB( prog->u_refractionSpeed, r_water_refraction_speed.value );
+
+	/* ---- Fresnel exponent (above-water only) ---- */
 	if( prog->u_fresnelExp >= 0 )
 	{
 		float fexp = r_water_fresnel.value;
 		if( fexp < 0.1f ) fexp = 4.0f;
 		pglUniform1fARB( prog->u_fresnelExp, fexp );
 	}
+	if( prog->u_fresnelMin >= 0 )
+		pglUniform1fARB( prog->u_fresnelMin, r_water_fresnel_min.value );
+	if( prog->u_fresnelRange >= 0 )
+		pglUniform1fARB( prog->u_fresnelRange, r_water_fresnel_range.value );
 
 	/* ---- refraction strength ---- */
 	if( prog->u_strengthRefr >= 0 )
@@ -621,7 +743,7 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 			pglUniform1fARB( prog->u_alpha, Q_min( 1.0f, Q_max( 0.0f, a )));
 	}
 
-	/* ---- distance scale (depth darkening) ---- */
+	/* ---- distance scale ---- */
 	if( prog->u_distScale >= 0 )
 		pglUniform1fARB( prog->u_distScale, r_water_distscale.value );
 
@@ -671,6 +793,26 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	{
 		pglUniform1fARB( prog->u_refractEnabled, 0.0f );
 	}
+}
+
+qboolean R_WaterShader_EmitPolys( msurface_t *warp )
+{
+	if( !gWaterShader.shaderSupport )      return false;
+	if( !r_water_shader.value )            return false;
+	if( !warp || !warp->polys )            return false;
+	if( !gWaterShader.normalTexture )      return false;
+
+	/* above-water vs underwater */
+	const qboolean underwater =
+	    ( warp->polys->verts[0][2] >= RI.rvp.vieworigin[2] );
+
+	gl_water_program_t *prog = underwater
+	    ? &gWaterShader.programUnderwater
+	    : &gWaterShader.program;
+
+	pglUseProgramObjectARB( prog->program );
+
+	R_WaterShader_SetUniforms( prog, warp );
 
 	/* ---- bind textures ---- */
 
@@ -750,7 +892,8 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	pglBindTexture( GL_TEXTURE_2D, 0 );
 
 	if( r_water_debug.value >= 1.0f )
-		gEngfuncs.Con_Reportf( "R_WaterShader: drew warp %p\n", (void *)warp );
+		gEngfuncs.Con_Reportf( "R_WaterShader: drew warp %p (%s)\n",
+		                       (void *)warp, underwater ? "underwater" : "above" );
 
 	return true;
 }

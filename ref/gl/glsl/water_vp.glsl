@@ -7,8 +7,6 @@
  *   v_clipPos  = tf    (clip-space position, for screen UVs)
  *   v_normal   = norm  (surface normal)
  *   v_eye      = eye   (view direction)
- *
- * NOTE: mirrors the source string embedded in ref/gl/gl_watershader.c
  */
 
 #ifdef GL_ES
@@ -22,6 +20,7 @@ uniform mat4 u_projection;
 uniform highp float u_time;
 uniform highp float u_waveheight;
 uniform highp float u_wavefreq;
+uniform highp float u_waveSpeed;
 uniform vec3 u_cameraPos;
 
 varying vec2 v_texCoord;
@@ -45,7 +44,7 @@ float waveHeight(vec2 p, float t, float freq, float amp)
 void main()
 {
     vec3  pos  = a_position.xyz;
-    float t    = u_time;
+    float t    = u_time * u_waveSpeed;
     float freq = max(u_wavefreq, 0.001);
     float amp  = u_waveheight;
     if (amp > 0.001)

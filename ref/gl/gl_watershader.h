@@ -8,7 +8,7 @@
  *
  * No cubemap or FBO reflection — the Fresnel term blends between the
  * refracted scene and the water body colour for a simple "fake reflection".
- * Underwater surfaces fall back to the engine's fixed-function warp.
+ * Underwater surfaces use a dedicated shader with caustics and colour tint.
  */
 
 #ifndef GL_WATERSHADER_H
@@ -30,6 +30,8 @@ typedef struct
 	GLint   u_cameraPos;
 	GLint   u_time;
 	GLint   u_fresnelExp;
+	GLint   u_fresnelMin;
+	GLint   u_fresnelRange;
 	GLint   u_strengthRefr;
 	GLint   u_waterColor;
 	GLint   u_alpha;
@@ -41,6 +43,8 @@ typedef struct
 	GLint   u_fogEnabled;
 	GLint   u_waveheight;
 	GLint   u_wavefreq;
+	GLint   u_waveSpeed;
+	GLint   u_refractionSpeed;
 	GLint   u_refractEnabled;
 
 	GLint   a_position;
@@ -54,6 +58,7 @@ typedef struct
 	int                 framebufferWidth;
 	int                 framebufferHeight;
 	gl_water_program_t  program;
+	gl_water_program_t  programUnderwater;
 	GLuint              normalTexture;
 	GLuint              screenGrabTexture;
 	int                 lastFrameCaptured;
@@ -62,6 +67,8 @@ typedef struct
 extern convar_t r_water_shader;
 extern convar_t r_water_alpha;
 extern convar_t r_water_fresnel;
+extern convar_t r_water_fresnel_min;
+extern convar_t r_water_fresnel_range;
 extern convar_t r_water_strength;
 extern convar_t r_water_watercolor_r;
 extern convar_t r_water_watercolor_g;
@@ -71,6 +78,8 @@ extern convar_t r_water_fogblend;
 extern convar_t r_water_debug;
 extern convar_t r_water_waveheight;
 extern convar_t r_water_wavefreq;
+extern convar_t r_water_wavespeed;
+extern convar_t r_water_refraction_speed;
 
 extern gl_water_shader_state_t gWaterShader;
 
