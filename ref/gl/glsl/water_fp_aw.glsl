@@ -26,6 +26,7 @@ uniform float u_fresnelMin;
 uniform float u_fresnelRange;
 uniform float u_strengthRefr;
 uniform vec3  u_waterColor;
+uniform float u_waterGamma;
 uniform float u_alpha;
 uniform float u_distScale;
 uniform float u_fogBlend;
@@ -34,8 +35,8 @@ uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform float u_fogEnabled;
 uniform float u_refractEnabled;
-uniform float u_refractionSpeed;
-uniform float u_waveSpeed;
+uniform highp float u_refractionSpeed;
+uniform highp float u_waveSpeed;
 
 varying vec2  v_texCoord;
 varying vec4  v_clipPos;
@@ -72,7 +73,8 @@ void main()
     float depthF = clamp(dist * u_distScale, 0.0, 1.0);
     refr = mix(refr, refr * 0.4, depthF);
 
-    vec3 color = mix(refr, u_waterColor, clamp(fres, 0.0, 0.95));
+    vec3 wc = u_waterColor * u_waterGamma;
+    vec3 color = mix(refr, wc, clamp(fres, 0.0, 0.95));
 
     vec4 ts = texture2D(u_diffuseMap, ntc);
     color = mix(color, ts.rgb, 0.25 * ts.a);

@@ -30,6 +30,7 @@ CVAR_DEFINE_AUTO( r_water_waveheight,       "3.0",   FCVAR_GLCONFIG, "vertex wav
 CVAR_DEFINE_AUTO( r_water_wavefreq,         "0.04",  FCVAR_GLCONFIG, "vertex wave spatial frequency" );
 CVAR_DEFINE_AUTO( r_water_wavespeed,        "1.0",   FCVAR_GLCONFIG, "vertex wave speed multiplier" );
 CVAR_DEFINE_AUTO( r_water_refraction_speed, "1.0",   FCVAR_GLCONFIG, "refraction normalmap scroll speed" );
+CVAR_DEFINE_AUTO( r_water_gamma,            "1.0",   FCVAR_GLCONFIG, "water brightness multiplier" );
 
 gl_water_shader_state_t gWaterShader;
 
@@ -57,6 +58,7 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavespeed );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_refraction_speed );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_gamma );
 }
 
 void R_WaterShader_Init( void )    { R_WaterShader_RegisterCvars(); memset( &gWaterShader, 0, sizeof( gWaterShader )); }
@@ -167,6 +169,7 @@ static const char *water_frag_above_source =
 	"uniform float u_fresnelRange;\n"
 	"uniform float u_strengthRefr;\n"
 	"uniform vec3  u_waterColor;\n"
+	"uniform float u_waterGamma;\n"
 	"uniform float u_alpha;\n"
 	"uniform float u_distScale;\n"
 	"uniform float u_fogBlend;\n"
@@ -175,8 +178,8 @@ static const char *water_frag_above_source =
 	"uniform float u_fogEnd;\n"
 	"uniform float u_fogEnabled;\n"
 	"uniform float u_refractEnabled;\n"
-	"uniform float u_refractionSpeed;\n"
-	"uniform float u_waveSpeed;\n"
+	"uniform highp float u_refractionSpeed;\n"
+	"uniform highp float u_waveSpeed;\n"
 	"varying vec2  v_texCoord;\n"
 	"varying vec4  v_clipPos;\n"
 	"varying vec3  v_normal;\n"
@@ -218,7 +221,8 @@ static const char *water_frag_above_source =
 	"    refr = mix( refr, refr * 0.4, depthF );\n"
 	"\n"
 	"    /* Fresnel blend between refraction and water body colour */\n"
-	"    vec3 color = mix( refr, u_waterColor, clamp( fres, 0.0, 0.95 ));\n"
+	"    vec3 wc = u_waterColor * u_waterGamma;\n"
+	"    vec3 color = mix( refr, wc, clamp( fres, 0.0, 0.95 ));\n"
 	"\n"
 	"    /* diffuse (warp) texture overlay */\n"
 	"    vec4 ts = texture2D( u_diffuseMap, ntc );\n"
@@ -256,14 +260,15 @@ static const char *water_frag_under_source =
 	"uniform highp float u_time;\n"
 	"uniform float u_strengthRefr;\n"
 	"uniform vec3  u_waterColor;\n"
+	"uniform float u_waterGamma;\n"
 	"uniform float u_alpha;\n"
 	"uniform float u_fogBlend;\n"
 	"uniform vec3  u_fogColor;\n"
 	"uniform float u_fogStart;\n"
 	"uniform float u_fogEnd;\n"
 	"uniform float u_fogEnabled;\n"
-	"uniform float u_refractionSpeed;\n"
-	"uniform float u_waveSpeed;\n"
+	"uniform highp float u_refractionSpeed;\n"
+	"uniform highp float u_waveSpeed;\n"
 	"uniform float u_distScale;\n"
 	"varying vec2  v_texCoord;\n"
 	"varying vec4  v_clipPos;\n"
@@ -311,7 +316,8 @@ static const char *water_frag_under_source =
 	"    float depthF = clamp( dist * u_distScale * 0.5, 0.0, 1.0 );\n"
 	"\n"
 	"    /* underwater colour: blend screen with water color and caustics */\n"
-	"    vec3 color = mix( refr, u_waterColor * 0.6, depthF * 0.5 );\n"
+	"    vec3 wc = u_waterColor * u_waterGamma;\n"
+	"    vec3 color = mix( refr, wc * 0.6, depthF * 0.5 );\n"
 	"    color += vec3( 0.1, 0.15, 0.08 ) * c * (1.0 - depthF * 0.5 );\n"
 	"\n"
 	"    /* fog */\n"
@@ -417,6 +423,7 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_fresnelRange   = pglGetUniformLocationARB( p->program, "u_fresnelRange" );
 	p->u_strengthRefr   = pglGetUniformLocationARB( p->program, "u_strengthRefr" );
 	p->u_waterColor     = pglGetUniformLocationARB( p->program, "u_waterColor" );
+	p->u_waterGamma     = pglGetUniformLocationARB( p->program, "u_waterGamma" );
 	p->u_alpha          = pglGetUniformLocationARB( p->program, "u_alpha" );
 	p->u_distScale      = pglGetUniformLocationARB( p->program, "u_distScale" );
 	p->u_fogBlend       = pglGetUniformLocationARB( p->program, "u_fogBlend" );
@@ -712,6 +719,8 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 		                 r_water_watercolor_r.value / 255.0f,
 		                 r_water_watercolor_g.value / 255.0f,
 		                 r_water_watercolor_b.value / 255.0f );
+	if( prog->u_waterGamma >= 0 )
+		pglUniform1fARB( prog->u_waterGamma, r_water_gamma.value );
 
 	/* ---- alpha ---- */
 	{

@@ -22,14 +22,15 @@ uniform sampler2D u_refractMap;
 uniform highp float u_time;
 uniform float u_strengthRefr;
 uniform vec3  u_waterColor;
+uniform float u_waterGamma;
 uniform float u_alpha;
 uniform float u_fogBlend;
 uniform vec3  u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform float u_fogEnabled;
-uniform float u_refractionSpeed;
-uniform float u_waveSpeed;
+uniform highp float u_refractionSpeed;
+uniform highp float u_waveSpeed;
 uniform float u_distScale;
 
 varying vec2  v_texCoord;
@@ -72,7 +73,8 @@ void main()
     float dist = length(v_eye);
     float depthF = clamp(dist * u_distScale * 0.5, 0.0, 1.0);
 
-    vec3 color = mix(refr, u_waterColor * 0.6, depthF * 0.5);
+    vec3 wc = u_waterColor * u_waterGamma;
+    vec3 color = mix(refr, wc * 0.6, depthF * 0.5);
     color += vec3(0.1, 0.15, 0.08) * c * (1.0 - depthF * 0.5);
 
     if (u_fogEnabled > 0.5)

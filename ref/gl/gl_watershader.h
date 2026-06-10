@@ -34,6 +34,7 @@ typedef struct
 	GLint   u_fresnelRange;
 	GLint   u_strengthRefr;
 	GLint   u_waterColor;
+	GLint   u_waterGamma;
 	GLint   u_alpha;
 	GLint   u_distScale;
 	GLint   u_fogBlend;
@@ -80,6 +81,7 @@ extern convar_t r_water_waveheight;
 extern convar_t r_water_wavefreq;
 extern convar_t r_water_wavespeed;
 extern convar_t r_water_refraction_speed;
+extern convar_t r_water_gamma;
 
 extern gl_water_shader_state_t gWaterShader;
 
