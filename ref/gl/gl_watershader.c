@@ -19,12 +19,22 @@ CVAR_DEFINE_AUTO( r_water_alpha,            "0.85",  FCVAR_GLCONFIG, "water opac
 CVAR_DEFINE_AUTO( r_water_fresnel,          "4.0",   FCVAR_GLCONFIG, "Fresnel exponent (HL2 default ~4)" );
 CVAR_DEFINE_AUTO( r_water_fresnel_min,      "0.0",   FCVAR_GLCONFIG, "minimum Fresnel reflectivity (0..1)" );
 CVAR_DEFINE_AUTO( r_water_fresnel_range,    "1.0",   FCVAR_GLCONFIG, "Fresnel range (0..1)" );
-CVAR_DEFINE_AUTO( r_water_strength,         "0.05",  FCVAR_GLCONFIG, "refraction distortion strength" );
+CVAR_DEFINE_AUTO( r_water_strength,         "0.05",  FCVAR_GLCONFIG, "refraction distortion strength (above water)" );
+CVAR_DEFINE_AUTO( r_water_strength_under,   "0.10",  FCVAR_GLCONFIG, "refraction distortion strength (underwater)" );
 CVAR_DEFINE_AUTO( r_water_watercolor_r,     "30",    FCVAR_GLCONFIG, "water body color red (0-255)" );
 CVAR_DEFINE_AUTO( r_water_watercolor_g,     "60",    FCVAR_GLCONFIG, "water body color green (0-255)" );
 CVAR_DEFINE_AUTO( r_water_watercolor_b,     "80",    FCVAR_GLCONFIG, "water body color blue (0-255)" );
 CVAR_DEFINE_AUTO( r_water_distscale,        "0.002", FCVAR_GLCONFIG, "distance-based depth tint scale" );
+CVAR_DEFINE_AUTO( r_water_distcolor_r,      "255",   FCVAR_GLCONFIG, "distance depth tint color red (0-255) 0=black" );
+CVAR_DEFINE_AUTO( r_water_distcolor_g,      "255",   FCVAR_GLCONFIG, "distance depth tint color green (0-255) 0=black" );
+CVAR_DEFINE_AUTO( r_water_distcolor_b,      "255",   FCVAR_GLCONFIG, "distance depth tint color blue (0-255) 0=black" );
 CVAR_DEFINE_AUTO( r_water_fogblend,         "1.0",   FCVAR_GLCONFIG, "fog influence on water (0..1)" );
+CVAR_DEFINE_AUTO( r_water_caustic_intensity,"0.5",   FCVAR_GLCONFIG, "underwater caustic brightness (0=off)" );
+CVAR_DEFINE_AUTO( r_water_caustic_color_r,  "25",    FCVAR_GLCONFIG, "underwater caustic color red (0-255)" );
+CVAR_DEFINE_AUTO( r_water_caustic_color_g,  "38",    FCVAR_GLCONFIG, "underwater caustic color green (0-255)" );
+CVAR_DEFINE_AUTO( r_water_caustic_color_b,  "20",    FCVAR_GLCONFIG, "underwater caustic color blue (0-255)" );
+CVAR_DEFINE_AUTO( r_water_diffuse_overlay,  "0.25",  FCVAR_GLCONFIG, "diffuse texture overlay strength (0=off)" );
+CVAR_DEFINE_AUTO( r_water_refract,          "1",     FCVAR_GLCONFIG, "refraction: 0=off, 1=normal, 2=opaque water (hide non-refracted)" );
 CVAR_DEFINE_AUTO( r_water_debug,            "0",     FCVAR_GLCONFIG, "debug (1=log, 2=tint red)" );
 CVAR_DEFINE_AUTO( r_water_waveheight,       "3.0",   FCVAR_GLCONFIG, "vertex wave displacement amplitude" );
 CVAR_DEFINE_AUTO( r_water_wavefreq,         "0.04",  FCVAR_GLCONFIG, "vertex wave spatial frequency" );
@@ -48,11 +58,21 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_min );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_range );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_strength );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_strength_under );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_r );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_g );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_distscale );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_distcolor_r );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_distcolor_g );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_distcolor_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fogblend );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_intensity );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_r );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_g );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_b );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_diffuse_overlay );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_refract );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
@@ -172,12 +192,14 @@ static const char *water_frag_above_source =
 	"uniform float u_waterGamma;\n"
 	"uniform float u_alpha;\n"
 	"uniform float u_distScale;\n"
+	"uniform vec3  u_distColor;\n"
 	"uniform float u_fogBlend;\n"
 	"uniform vec3  u_fogColor;\n"
 	"uniform float u_fogStart;\n"
 	"uniform float u_fogEnd;\n"
 	"uniform float u_fogEnabled;\n"
 	"uniform float u_refractEnabled;\n"
+	"uniform float u_diffuseOverlay;\n"
 	"uniform highp float u_refractionSpeed;\n"
 	"uniform highp float u_waveSpeed;\n"
 	"varying vec2  v_texCoord;\n"
@@ -215,18 +237,21 @@ static const char *water_frag_above_source =
 	"    else\n"
 	"        refr = vec3( 0.12, 0.25, 0.33 );\n"
 	"\n"
-	"    /* distance-based depth darkening */\n"
+	"    /* distance-based depth tint */\n"
 	"    float dist = length( v_eye );\n"
 	"    float depthF = clamp( dist * u_distScale, 0.0, 1.0 );\n"
-	"    refr = mix( refr, refr * 0.4, depthF );\n"
+	"    refr = mix( refr, refr * u_distColor, depthF );\n"
 	"\n"
 	"    /* Fresnel blend between refraction and water body colour */\n"
 	"    vec3 wc = u_waterColor * u_waterGamma;\n"
 	"    vec3 color = mix( refr, wc, clamp( fres, 0.0, 0.95 ));\n"
 	"\n"
 	"    /* diffuse (warp) texture overlay */\n"
-	"    vec4 ts = texture2D( u_diffuseMap, ntc );\n"
-	"    color = mix( color, ts.rgb, 0.25 * ts.a );\n"
+	"    if( u_diffuseOverlay > 0.001 )\n"
+	"    {\n"
+	"        vec4 ts = texture2D( u_diffuseMap, ntc );\n"
+	"        color = mix( color, ts.rgb, min( u_diffuseOverlay, 1.0 ) * ts.a );\n"
+	"    }\n"
 	"\n"
 	"    /* fog */\n"
 	"    if( u_fogEnabled > 0.5 )\n"
@@ -259,6 +284,7 @@ static const char *water_frag_under_source =
 	"uniform sampler2D u_refractMap;\n"
 	"uniform highp float u_time;\n"
 	"uniform float u_strengthRefr;\n"
+	"uniform float u_strengthRefrUnder;\n"
 	"uniform vec3  u_waterColor;\n"
 	"uniform float u_waterGamma;\n"
 	"uniform float u_alpha;\n"
@@ -270,6 +296,9 @@ static const char *water_frag_under_source =
 	"uniform highp float u_refractionSpeed;\n"
 	"uniform highp float u_waveSpeed;\n"
 	"uniform float u_distScale;\n"
+	"uniform vec3  u_distColor;\n"
+	"uniform float u_causticIntensity;\n"
+	"uniform vec3  u_causticColor;\n"
 	"varying vec2  v_texCoord;\n"
 	"varying vec4  v_clipPos;\n"
 	"varying vec3  v_normal;\n"
@@ -277,11 +306,11 @@ static const char *water_frag_under_source =
 	"\n"
 	"float caustic( vec2 p, float t )\n"
 	"{\n"
-	"    vec2 uv = p * 0.002;\n"
-	"    float c1 = sin( uv.x * 3.0 + t * 0.8 ) * cos( uv.y * 2.5 - t * 0.6 );\n"
-	"    float c2 = sin((uv.x + uv.y) * 4.0 + t * 1.2 ) * 0.5;\n"
-	"    float c3 = cos((uv.x - uv.y) * 5.0 - t * 0.9 ) * 0.3;\n"
-	"    return clamp( c1 * 0.5 + c2 + c3, 0.0, 1.0 );\n"
+	"    float c1 = sin( p.x * 3.0 + p.y * 2.0 + t * 0.8 ) * cos( p.y * 2.5 - t * 0.6 );\n"
+	"    float c2 = sin((p.x + p.y) * 4.0 + t * 1.2 ) * 0.5;\n"
+	"    float c3 = cos((p.x - p.y) * 5.0 - t * 0.9 ) * 0.3;\n"
+	"    float c4 = sin( p.x * 6.0 - p.y * 3.0 + t * 1.5 ) * 0.2;\n"
+	"    return clamp( c1 * 0.5 + c2 + c3 + c4, 0.0, 1.0 );\n"
 	"}\n"
 	"\n"
 	"void main()\n"
@@ -303,22 +332,34 @@ static const char *water_frag_under_source =
 	"    n      -= 1.0 - 4.0 / 256.0;\n"
 	"    n       = normalize( n );\n"
 	"\n"
+	"    /* normal-based surface animation visible even when fog is heavy */\n"
+	"    float surfAnim = sin( ntc.s * 8.0 + t * 0.5 ) * cos( ntc.t * 6.0 - t * 0.7 ) * 0.5 + 0.5;\n"
+	"\n"
 	"    /* caustic pattern */\n"
 	"    float c = caustic( gl_FragCoord.xy, t * rs );\n"
+	"    c = c * 0.5 + surfAnim * 0.5;\n"
 	"\n"
-	"    /* refraction: distort the screen grab with normal, add time-varying wobble */\n"
-	"    float twitch = sin( t * 0.5 + ntc.s * 10.0 ) * 0.002;\n"
+	"    /* refraction: distort the screen grab with normal + separate underwater strength */\n"
+	"    float twitch = sin( t * 0.5 + ntc.s * 10.0 ) * 0.003;\n"
 	"    vec3 refr;\n"
-	"    refr = texture2D( u_refractMap, stc + n.st * u_strengthRefr + vec2( twitch, twitch * 0.7 )).rgb;\n"
+	"    refr = texture2D( u_refractMap, stc + n.st * u_strengthRefrUnder + vec2( twitch, twitch * 0.7 )).rgb;\n"
 	"\n"
-	"    /* distance-based darkening */\n"
+	"    /* distance-based tint */\n"
 	"    float dist = length( v_eye );\n"
 	"    float depthF = clamp( dist * u_distScale * 0.5, 0.0, 1.0 );\n"
 	"\n"
-	"    /* underwater colour: blend screen with water color and caustics */\n"
+	"    /* underwater colour: blend screen with water color, caustics, and animated surface */\n"
 	"    vec3 wc = u_waterColor * u_waterGamma;\n"
-	"    vec3 color = mix( refr, wc * 0.6, depthF * 0.5 );\n"
-	"    color += vec3( 0.1, 0.15, 0.08 ) * c * (1.0 - depthF * 0.5 );\n"
+	"    float wcBlend = depthF * 0.4;\n"
+	"    vec3 color = mix( refr, wc * 0.6, wcBlend );\n"
+	"\n"
+	"    /* apply caustic light with configurable color and intensity */\n"
+	"    float cStrength = u_causticIntensity * (1.0 - depthF * 0.5);\n"
+	"    color += u_causticColor * c * cStrength;\n"
+	"\n"
+	"    /* subtle surface shimmer from normal map */\n"
+	"    vec3 shimmer = vec3( 0.02, 0.03, 0.02 ) * (n.x + n.y) * (1.0 - depthF);\n"
+	"    color += shimmer;\n"
 	"\n"
 	"    /* fog */\n"
 	"    if( u_fogEnabled > 0.5 )\n"
@@ -421,11 +462,16 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_fresnelExp     = pglGetUniformLocationARB( p->program, "u_fresnelExp" );
 	p->u_fresnelMin     = pglGetUniformLocationARB( p->program, "u_fresnelMin" );
 	p->u_fresnelRange   = pglGetUniformLocationARB( p->program, "u_fresnelRange" );
-	p->u_strengthRefr   = pglGetUniformLocationARB( p->program, "u_strengthRefr" );
-	p->u_waterColor     = pglGetUniformLocationARB( p->program, "u_waterColor" );
-	p->u_waterGamma     = pglGetUniformLocationARB( p->program, "u_waterGamma" );
-	p->u_alpha          = pglGetUniformLocationARB( p->program, "u_alpha" );
-	p->u_distScale      = pglGetUniformLocationARB( p->program, "u_distScale" );
+	p->u_strengthRefr      = pglGetUniformLocationARB( p->program, "u_strengthRefr" );
+	p->u_strengthRefrUnder = pglGetUniformLocationARB( p->program, "u_strengthRefrUnder" );
+	p->u_waterColor        = pglGetUniformLocationARB( p->program, "u_waterColor" );
+	p->u_waterGamma        = pglGetUniformLocationARB( p->program, "u_waterGamma" );
+	p->u_alpha             = pglGetUniformLocationARB( p->program, "u_alpha" );
+	p->u_distScale         = pglGetUniformLocationARB( p->program, "u_distScale" );
+	p->u_distColor         = pglGetUniformLocationARB( p->program, "u_distColor" );
+	p->u_causticIntensity  = pglGetUniformLocationARB( p->program, "u_causticIntensity" );
+	p->u_causticColor      = pglGetUniformLocationARB( p->program, "u_causticColor" );
+	p->u_diffuseOverlay    = pglGetUniformLocationARB( p->program, "u_diffuseOverlay" );
 	p->u_fogBlend       = pglGetUniformLocationARB( p->program, "u_fogBlend" );
 	p->u_fogColor       = pglGetUniformLocationARB( p->program, "u_fogColor" );
 	p->u_fogStart       = pglGetUniformLocationARB( p->program, "u_fogStart" );
@@ -562,16 +608,27 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_min );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fresnel_range );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_strength );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_strength_under );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_r );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_g );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_watercolor_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_distscale );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_distcolor_r );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_distcolor_g );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_distcolor_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_fogblend );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_intensity );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_r );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_g );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_b );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_diffuse_overlay );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_refract );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavespeed );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_refraction_speed );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_gamma );
 }
 
 void R_WaterShader_Init( void )
@@ -709,9 +766,13 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 	if( prog->u_fresnelRange >= 0 )
 		pglUniform1fARB( prog->u_fresnelRange, r_water_fresnel_range.value );
 
-	/* ---- refraction strength ---- */
+	/* ---- refraction strength (above) ---- */
 	if( prog->u_strengthRefr >= 0 )
 		pglUniform1fARB( prog->u_strengthRefr, r_water_strength.value );
+
+	/* ---- refraction strength (underwater) ---- */
+	if( prog->u_strengthRefrUnder >= 0 )
+		pglUniform1fARB( prog->u_strengthRefrUnder, r_water_strength_under.value );
 
 	/* ---- water colour ---- */
 	if( prog->u_waterColor >= 0 )
@@ -748,6 +809,9 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 		if( r_water_debug.value >= 2.0f )
 			a = 1.0f;
 
+		if( r_water_refract.value >= 2.0f )
+			a = 1.0f;	// opaque: hide normal underwater objects, show only refracted
+
 		if( prog->u_alpha >= 0 )
 			pglUniform1fARB( prog->u_alpha, Q_min( 1.0f, Q_max( 0.0f, a )));
 	}
@@ -755,6 +819,28 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 	/* ---- distance scale ---- */
 	if( prog->u_distScale >= 0 )
 		pglUniform1fARB( prog->u_distScale, r_water_distscale.value );
+
+	/* ---- distance tint color ---- */
+	if( prog->u_distColor >= 0 )
+		pglUniform3fARB( prog->u_distColor,
+		                 r_water_distcolor_r.value / 255.0f,
+		                 r_water_distcolor_g.value / 255.0f,
+		                 r_water_distcolor_b.value / 255.0f );
+
+	/* ---- caustic intensity ---- */
+	if( prog->u_causticIntensity >= 0 )
+		pglUniform1fARB( prog->u_causticIntensity, r_water_caustic_intensity.value );
+
+	/* ---- caustic color ---- */
+	if( prog->u_causticColor >= 0 )
+		pglUniform3fARB( prog->u_causticColor,
+		                 r_water_caustic_color_r.value / 255.0f,
+		                 r_water_caustic_color_g.value / 255.0f,
+		                 r_water_caustic_color_b.value / 255.0f );
+
+	/* ---- diffuse overlay ---- */
+	if( prog->u_diffuseOverlay >= 0 )
+		pglUniform1fARB( prog->u_diffuseOverlay, r_water_diffuse_overlay.value );
 
 	/* ---- fog ---- */
 	if( prog->u_fogColor >= 0 )
@@ -783,7 +869,8 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 	/* ------------------------------------------------------------------ */
 	/* Screen grab: copy current framebuffer to texture once per frame     */
 	/* ------------------------------------------------------------------ */
-	if( gWaterShader.screenGrabTexture &&
+	if( r_water_refract.value > 0.5f &&
+	    gWaterShader.screenGrabTexture &&
 	    gWaterShader.framebufferWidth > 0 && gWaterShader.framebufferHeight > 0 )
 	{
 		if( gWaterShader.lastFrameCaptured != tr.framecount )
@@ -798,9 +885,10 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 		if( prog->u_refractEnabled >= 0 )
 			pglUniform1fARB( prog->u_refractEnabled, 1.0f );
 	}
-	else if( prog->u_refractEnabled >= 0 )
+	else
 	{
-		pglUniform1fARB( prog->u_refractEnabled, 0.0f );
+		if( prog->u_refractEnabled >= 0 )
+			pglUniform1fARB( prog->u_refractEnabled, 0.0f );
 	}
 }
 
@@ -842,7 +930,8 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	}
 
 	/* unit 2: refraction (screen grab) */
-	if( prog->u_refractMap >= 0 && gWaterShader.screenGrabTexture )
+	if( prog->u_refractMap >= 0 && gWaterShader.screenGrabTexture
+	    && r_water_refract.value > 0.5f )
 	{
 		pglActiveTextureARB( GL_TEXTURE0_ARB + 2 );
 		pglBindTexture( GL_TEXTURE_2D, gWaterShader.screenGrabTexture );

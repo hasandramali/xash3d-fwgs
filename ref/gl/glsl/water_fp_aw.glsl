@@ -29,12 +29,14 @@ uniform vec3  u_waterColor;
 uniform float u_waterGamma;
 uniform float u_alpha;
 uniform float u_distScale;
+uniform vec3  u_distColor;
 uniform float u_fogBlend;
 uniform vec3  u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform float u_fogEnabled;
 uniform float u_refractEnabled;
+uniform float u_diffuseOverlay;
 uniform highp float u_refractionSpeed;
 uniform highp float u_waveSpeed;
 
@@ -71,13 +73,16 @@ void main()
 
     float dist = length(v_eye);
     float depthF = clamp(dist * u_distScale, 0.0, 1.0);
-    refr = mix(refr, refr * 0.4, depthF);
+    refr = mix(refr, refr * u_distColor, depthF);
 
     vec3 wc = u_waterColor * u_waterGamma;
     vec3 color = mix(refr, wc, clamp(fres, 0.0, 0.95));
 
-    vec4 ts = texture2D(u_diffuseMap, ntc);
-    color = mix(color, ts.rgb, 0.25 * ts.a);
+    if (u_diffuseOverlay > 0.001)
+    {
+        vec4 ts = texture2D(u_diffuseMap, ntc);
+        color = mix(color, ts.rgb, min(u_diffuseOverlay, 1.0) * ts.a);
+    }
 
     if (u_fogEnabled > 0.5)
     {
