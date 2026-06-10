@@ -88,6 +88,7 @@ void R_WaterShader_Shutdown( void ) {}
 void R_WaterShader_VidInit( void )  {}
 
 qboolean R_WaterShader_EmitPolys( msurface_t *warp ) { (void)warp; return false; }
+void R_WaterShader_UnderwaterWarp( void ) {}
 
 #else  /* !XASH_NANOGL && !XASH_WES && !XASH_REGAL */
 
@@ -1109,7 +1110,7 @@ void R_WaterShader_UnderwaterWarp( void )
 	if( !r_water_underwaterwarp.value )                  return;
 	if( !gWaterShader.warpProgram.program )               return;
 	if( !gWaterShader.warpScreenTexture )                 return;
-	if( gp_cl->waterlevel < 2 )                           return;
+	if( ENGINE_GET_PARM( PARM_WATER_LEVEL ) < 2 )         return;
 
 	int w = gpGlobals->width;
 	int h = gpGlobals->height;
