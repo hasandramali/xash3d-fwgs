@@ -52,6 +52,7 @@ typedef struct
 	GLint   u_waveSpeed;
 	GLint   u_refractionSpeed;
 	GLint   u_refractEnabled;
+	GLint   u_warpStrength;
 
 	GLint   a_position;
 	GLint   a_texCoord;
@@ -63,11 +64,16 @@ typedef struct
 	int                 shaderSupport;
 	int                 framebufferWidth;
 	int                 framebufferHeight;
+	int                 normalFromFile;       // true if normalmap was loaded from disk
 	gl_water_program_t  program;
 	gl_water_program_t  programUnderwater;
+	gl_water_program_t  warpProgram;          // underwater fullscreen warp
 	GLuint              normalTexture;
 	GLuint              screenGrabTexture;
+	GLuint              warpScreenTexture;    // post-process capture for warp
+	GLuint              warpNormalTexture;    // warp noise texture
 	int                 lastFrameCaptured;
+	int                 lastWarpCaptured;
 } gl_water_shader_state_t;
 
 extern convar_t r_water_shader;
@@ -91,6 +97,7 @@ extern convar_t r_water_caustic_color_g;
 extern convar_t r_water_caustic_color_b;
 extern convar_t r_water_diffuse_overlay;
 extern convar_t r_water_refract;
+extern convar_t r_water_underwaterwarp;
 extern convar_t r_water_debug;
 extern convar_t r_water_waveheight;
 extern convar_t r_water_wavefreq;
@@ -104,5 +111,6 @@ void    R_WaterShader_Init( void );
 void    R_WaterShader_Shutdown( void );
 void    R_WaterShader_VidInit( void );
 qboolean R_WaterShader_EmitPolys( msurface_t *warp );
+void    R_WaterShader_UnderwaterWarp( void );
 
 #endif

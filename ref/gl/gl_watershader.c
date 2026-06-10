@@ -35,6 +35,7 @@ CVAR_DEFINE_AUTO( r_water_caustic_color_g,  "38",    FCVAR_GLCONFIG, "underwater
 CVAR_DEFINE_AUTO( r_water_caustic_color_b,  "20",    FCVAR_GLCONFIG, "underwater caustic color blue (0-255)" );
 CVAR_DEFINE_AUTO( r_water_diffuse_overlay,  "0.25",  FCVAR_GLCONFIG, "diffuse texture overlay strength (0=off)" );
 CVAR_DEFINE_AUTO( r_water_refract,          "1",     FCVAR_GLCONFIG, "refraction: 0=off, 1=normal, 2=opaque water (hide non-refracted)" );
+CVAR_DEFINE_AUTO( r_water_underwaterwarp,   "1",     FCVAR_GLCONFIG, "underwater fullscreen warp effect (0=off)" );
 CVAR_DEFINE_AUTO( r_water_debug,            "0",     FCVAR_GLCONFIG, "debug (1=log, 2=tint red)" );
 CVAR_DEFINE_AUTO( r_water_waveheight,       "3.0",   FCVAR_GLCONFIG, "vertex wave displacement amplitude" );
 CVAR_DEFINE_AUTO( r_water_wavefreq,         "0.04",  FCVAR_GLCONFIG, "vertex wave spatial frequency" );
@@ -73,6 +74,7 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_diffuse_overlay );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_refract );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_underwaterwarp );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
@@ -371,9 +373,59 @@ static const char *water_frag_under_source =
 	"    gl_FragColor = vec4( color, clamp( u_alpha, 0.0, 1.0 ));\n"
 	"}\n";
 
-/* ---------------------------------------------------------------------- */
-/* Shader compilation helper                                              */
-/* ---------------------------------------------------------------------- */
+/* -----------------------------------------------------------------------
+ * Underwater fullscreen warp (post-processing) shaders
+ *
+ * Drawn as a full-screen quad when the view is underwater to simulate
+ * refractive distortion of the entire screen (weapons, walls, etc.).
+ *
+ * Based on fteqw's underwaterwarp.glsl but simplified: uses the normal
+ * map for distortion instead of a dedicated warp texture, so no
+ * additional texture assets are needed.
+ * --------------------------------------------------------------------- */
+static const char *water_warp_vertex_source =
+	"#ifdef GL_ES\n"
+	"precision highp float;\n"
+	"#endif\n"
+	"attribute vec2 a_position;\n"
+	"attribute vec2 a_texCoord;\n"
+	"varying vec2 v_texCoord;\n"
+	"void main()\n"
+	"{\n"
+	"    gl_Position = vec4( a_position, 0.0, 1.0 );\n"
+	"    v_texCoord = a_texCoord;\n"
+	"}\n";
+
+static const char *water_warp_frag_source =
+	"#ifdef GL_ES\n"
+	"precision mediump float;\n"
+	"#endif\n"
+	"uniform sampler2D u_refractMap;\n"
+	"uniform sampler2D u_normalMap;\n"
+	"uniform highp float u_time;\n"
+	"uniform float u_warpStrength;\n"
+	"varying vec2 v_texCoord;\n"
+	"\n"
+	"void main()\n"
+	"{\n"
+	"    vec2 uv = v_texCoord;\n"
+	"\n"
+	"    /* sample normal map for distortion */\n"
+	"    vec2 ntc = uv * 2.0 + vec2( u_time * 0.05, u_time * 0.03 );\n"
+	"    vec3 n  = texture2D( u_normalMap, ntc ).xyz;\n"
+	"    n      += texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, u_time * 0.04 )).xyz;\n"
+	"    n      -= 1.0 - 4.0 / 256.0;\n"
+	"\n"
+	"    /* apply distortion with strength control */\n"
+	"    float strength = u_warpStrength * 0.025;\n"
+	"    uv += n.st * strength;\n"
+	"\n"
+	"    /* fallback sin/cos wobble when normal map is flat */\n"
+	"    uv.x += sin( uv.y * 40.0 + u_time * 1.5 ) * strength * 0.3;\n"
+	"    uv.y += cos( uv.x * 35.0 + u_time * 1.2 ) * strength * 0.3;\n"
+	"\n"
+	"    gl_FragColor = texture2D( u_screenMap, uv );\n"
+	"}\n";
 
 static GLuint R_WaterShader_CompileShader( GLenum type, const char *src )
 {
@@ -482,6 +534,7 @@ static qboolean R_WaterShader_CompileProgram( gl_water_program_t *p,
 	p->u_waveSpeed      = pglGetUniformLocationARB( p->program, "u_waveSpeed" );
 	p->u_refractionSpeed = pglGetUniformLocationARB( p->program, "u_refractionSpeed" );
 	p->u_refractEnabled = pglGetUniformLocationARB( p->program, "u_refractEnabled" );
+	p->u_warpStrength   = pglGetUniformLocationARB( p->program, "u_warpStrength" );
 
 	p->a_position = WATER_ATTRIB_POSITION;
 	p->a_texCoord = WATER_ATTRIB_TEXCOORD;
@@ -584,11 +637,13 @@ static void R_WaterShader_LoadNormalTexture( void )
 		if( t && t->texnum )
 		{
 			gWaterShader.normalTexture = t->texnum;
+			gWaterShader.normalFromFile = 1;
 			gEngfuncs.Con_Reportf( "R_WaterShader: loaded normalmap\n" );
 			return;
 		}
 	}
 	gWaterShader.normalTexture = R_WaterShader_UploadProceduralNormal();
+	gWaterShader.normalFromFile = 0;
 	if( gWaterShader.normalTexture )
 		gEngfuncs.Con_Reportf( "R_WaterShader: using procedural normalmap\n" );
 }
@@ -623,6 +678,7 @@ static void R_WaterShader_RegisterCvars( void )
 	gEngfuncs.Cvar_RegisterVariable( &r_water_caustic_color_b );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_diffuse_overlay );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_refract );
+	gEngfuncs.Cvar_RegisterVariable( &r_water_underwaterwarp );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_debug );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_waveheight );
 	gEngfuncs.Cvar_RegisterVariable( &r_water_wavefreq );
@@ -666,6 +722,17 @@ void R_WaterShader_Init( void )
 	gWaterShader.initialized   = 1;
 
 	gEngfuncs.Con_Reportf( "R_WaterShader: ready (refraction + underwater)\n" );
+
+	/* warp program is optional (non-fatal if it fails) */
+	if( !R_WaterShader_CompileProgram( &gWaterShader.warpProgram,
+	                                   water_warp_vertex_source, water_warp_frag_source ))
+	{
+		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build underwater warp program\n" );
+	}
+	else
+	{
+		gEngfuncs.Con_Reportf( "R_WaterShader: underwater warp ready\n" );
+	}
 }
 
 void R_WaterShader_Shutdown( void )
@@ -677,15 +744,21 @@ void R_WaterShader_Shutdown( void )
 	{
 		R_WaterShader_DeleteProgram( &gWaterShader.program );
 		R_WaterShader_DeleteProgram( &gWaterShader.programUnderwater );
+		R_WaterShader_DeleteProgram( &gWaterShader.warpProgram );
 
 		if( gWaterShader.normalTexture )
 			pglDeleteTextures( 1, &gWaterShader.normalTexture );
 		if( gWaterShader.screenGrabTexture )
 			pglDeleteTextures( 1, &gWaterShader.screenGrabTexture );
+		if( gWaterShader.warpScreenTexture )
+			pglDeleteTextures( 1, &gWaterShader.warpScreenTexture );
+		if( gWaterShader.warpNormalTexture )
+			pglDeleteTextures( 1, &gWaterShader.warpNormalTexture );
 	}
 
 	memset( &gWaterShader, 0, sizeof( gWaterShader ));
 	gWaterShader.lastFrameCaptured = -1;
+	gWaterShader.lastWarpCaptured = -1;
 }
 
 void R_WaterShader_VidInit( void )
@@ -703,11 +776,33 @@ void R_WaterShader_VidInit( void )
 		pglDeleteTextures( 1, &gWaterShader.screenGrabTexture );
 		gWaterShader.screenGrabTexture = 0;
 	}
+	if( gWaterShader.warpScreenTexture )
+	{
+		pglDeleteTextures( 1, &gWaterShader.warpScreenTexture );
+		gWaterShader.warpScreenTexture = 0;
+	}
 
 	R_WaterShader_LoadNormalTexture();
 
 	R_WaterShader_CreateScreenGrabTexture(
 	    gpGlobals->width, gpGlobals->height );
+
+	/* warp screen capture texture */
+	{
+		int w = gpGlobals->width;
+		int h = gpGlobals->height;
+		if( w > 0 && h > 0 )
+		{
+			pglGenTextures( 1, &gWaterShader.warpScreenTexture );
+			pglBindTexture( GL_TEXTURE_2D, gWaterShader.warpScreenTexture );
+			pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			pglTexImage2D( GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL );
+			gWaterShader.lastWarpCaptured = -1;
+		}
+	}
 }
 
 /* ---------------------------------------------------------------------- */
@@ -894,7 +989,16 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 
 qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 {
-	if( !gWaterShader.shaderSupport )      return false;
+	if( !gWaterShader.shaderSupport )
+	{
+		/* lazy init: retry if GL wasn't ready at startup */
+		if( r_water_shader.value )
+		{
+			R_WaterShader_Init();
+			R_WaterShader_VidInit();
+		}
+		if( !gWaterShader.shaderSupport )      return false;
+	}
 	if( !r_water_shader.value )            return false;
 	if( !warp || !warp->polys )            return false;
 	if( !gWaterShader.normalTexture )      return false;
@@ -994,6 +1098,84 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 		                       (void *)warp, underwater ? "underwater" : "above" );
 
 	return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Underwater fullscreen warp (post-processing)                        */
+/* ------------------------------------------------------------------ */
+void R_WaterShader_UnderwaterWarp( void )
+{
+	if( !gWaterShader.shaderSupport )                    return;
+	if( !r_water_underwaterwarp.value )                  return;
+	if( !gWaterShader.warpProgram.program )               return;
+	if( !gWaterShader.warpScreenTexture )                 return;
+	if( gp_cl->waterlevel < 2 )                           return;
+
+	int w = gpGlobals->width;
+	int h = gpGlobals->height;
+	if( w < 1 || h < 1 ) return;
+
+	/* capture current framebuffer */
+	pglBindTexture( GL_TEXTURE_2D, gWaterShader.warpScreenTexture );
+	pglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h );
+
+	gl_water_program_t *prog = &gWaterShader.warpProgram;
+	pglUseProgramObjectARB( prog->program );
+
+	/* uniforms */
+	if( prog->u_time >= 0 )
+		pglUniform1fARB( prog->u_time, (float)gp_cl->time );
+
+	if( prog->u_warpStrength >= 0 )
+		pglUniform1fARB( prog->u_warpStrength, r_water_underwaterwarp.value );
+
+	/* textures */
+	/* unit 0: screen capture */
+	pglActiveTextureARB( GL_TEXTURE0_ARB );
+	pglBindTexture( GL_TEXTURE_2D, gWaterShader.warpScreenTexture );
+	if( prog->u_refractMap >= 0 )
+		pglUniform1iARB( prog->u_refractMap, 0 );
+
+	/* unit 1: normal map (for distortion) */
+	pglActiveTextureARB( GL_TEXTURE1_ARB );
+	pglBindTexture( GL_TEXTURE_2D, gWaterShader.normalTexture ? gWaterShader.normalTexture : gWaterShader.warpScreenTexture );
+	if( prog->u_normalMap >= 0 )
+		pglUniform1iARB( prog->u_normalMap, 1 );
+
+	/* state */
+	pglDisable( GL_DEPTH_TEST );
+	pglDisable( GL_BLEND );
+	pglDisable( GL_CULL_FACE );
+	pglDepthMask( GL_FALSE );
+
+	/* fullscreen quad vertices (NDC) */
+	static const float verts[] = {
+		-1.0f, -1.0f,
+		 1.0f, -1.0f,
+		-1.0f,  1.0f,
+		 1.0f,  1.0f
+	};
+	static const float uvs[] = {
+		0.0f, 0.0f,
+		1.0f, 0.0f,
+		0.0f, 1.0f,
+		1.0f, 1.0f
+	};
+
+	pglEnableVertexAttribArrayARB( prog->a_position );
+	pglEnableVertexAttribArrayARB( prog->a_texCoord );
+	pglVertexAttribPointerARB( prog->a_position, 2, GL_FLOAT, GL_FALSE, 0, verts );
+	pglVertexAttribPointerARB( prog->a_texCoord, 2, GL_FLOAT, GL_FALSE, 0, uvs );
+	pglDrawArrays( GL_TRIANGLE_STRIP, 0, 4 );
+	pglDisableVertexAttribArrayARB( prog->a_position );
+	pglDisableVertexAttribArrayARB( prog->a_texCoord );
+
+	pglEnable( GL_DEPTH_TEST );
+	pglDepthMask( GL_TRUE );
+
+	pglUseProgramObjectARB( 0 );
+	pglActiveTextureARB( GL_TEXTURE0_ARB );
+	pglBindTexture( GL_TEXTURE_2D, 0 );
 }
 
 #endif  /* !XASH_NANOGL && !XASH_WES && !XASH_REGAL */
