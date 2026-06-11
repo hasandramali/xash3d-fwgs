@@ -725,19 +725,17 @@ void R_WaterShader_Init( void )
 		return;
 	}
 
-	if( !R_WaterShader_CompileProgram( &gWaterShader.programUnderwater,
-	                                   water_vertex_source, water_frag_under_source ))
-	{
-		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build underwater program\n" );
-		R_WaterShader_DeleteProgram( &gWaterShader.program );
-		gWaterShader.initialized = 1;
-		return;
-	}
-
 	gWaterShader.shaderSupport = 1;
 	gWaterShader.initialized   = 1;
 
-	gEngfuncs.Con_Reportf( "R_WaterShader: ready (refraction + underwater)\n" );
+	gEngfuncs.Con_Reportf( "R_WaterShader: ready\n" );
+
+	/* underwater surface program is optional (no longer used by default) */
+	if( !R_WaterShader_CompileProgram( &gWaterShader.programUnderwater,
+	                                   water_vertex_source, water_frag_under_source ))
+	{
+		gEngfuncs.Con_Printf( S_ERROR "R_WaterShader: failed to build underwater program (optional)\n" );
+	}
 
 	/* warp program is optional (non-fatal if it fails) */
 	if( !R_WaterShader_CompileProgram( &gWaterShader.warpProgram,
@@ -969,7 +967,13 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 	if( prog->u_fogEnabled >= 0 )
 		pglUniform1fARB( prog->u_fogEnabled, RI.fogEnabled ? 1.0f : 0.0f );
 	if( prog->u_fogBlend >= 0 )
-		pglUniform1fARB( prog->u_fogBlend, r_water_fogblend.value );
+	{
+		float fb = r_water_fogblend.value;
+		/* screen-grab already contains scene fog — reduce double-fog */
+		if( r_water_refract.value > 0.5f && gWaterShader.screenGrabTexture )
+			fb *= 0.3f;
+		pglUniform1fARB( prog->u_fogBlend, Q_max( 0.0f, fb ));
+	}
 
 	/* ---- wave uniforms ---- */
 	if( prog->u_waveheight >= 0 )
@@ -1014,11 +1018,11 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	if( !r_water_shader.value )            return false;
 	if( !warp || !warp->polys )            return false;
 
-	/* lazy init: ensure programs are compiled */
-	if( !gWaterShader.program.program || !gWaterShader.programUnderwater.program )
+	/* lazy init: compile the above-water program if not ready yet */
+	if( !gWaterShader.program.program )
 	{
 		R_WaterShader_Init();
-		if( !gWaterShader.program.program || !gWaterShader.programUnderwater.program )
+		if( !gWaterShader.program.program )
 			return false;
 
 		/* ensure textures are created (VidInit might have been skipped) */
@@ -1026,11 +1030,11 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 			R_WaterShader_VidInit();
 	}
 
-	/* Use the above-water program for all views.  The engine's built-in fog
-	 * and FOV warp already handle the underwater feel.  Using a separate
-	 * underwater shader only adds complexity and breaks refraction because
-	 * the screen-grab (captured after engine fog is applied) is uniformly
-	 * foggy, giving a flat blue result. */
+	/* Use the same program for all views — no separate underwater variant.
+	 * The engine's built-in fog and FOV warp provide the underwater feel;
+	 * a dedicated underwater shader only adds complexity and makes the
+	 * water surface look flat blue (the screen-grab is captured after the
+	 * engine applies underwater fog, turning it into a uniform fog colour). */
 	gl_water_program_t *prog = &gWaterShader.program;
 
 	pglUseProgramObjectARB( prog->program );
