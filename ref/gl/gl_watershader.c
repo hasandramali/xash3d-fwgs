@@ -1026,22 +1026,12 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 			R_WaterShader_VidInit();
 	}
 
-	/*
-	 * Determine which side of the water surface the camera is on.
-	 * Transform camera to model-local space so the comparison works
-	 * correctly for both world water (identity transform) and
-	 * entity/brush water (func_water with non-trivial objectMatrix).
-	 */
-	qboolean underwater;
-	{
-		vec3_t localCam;
-		Matrix4x4_VectorITransform( RI.objectMatrix, RI.rvp.vieworigin, localCam );
-		underwater = ( warp->polys->verts[0][2] >= localCam[2] );
-	}
-
-	gl_water_program_t *prog = underwater
-	    ? &gWaterShader.programUnderwater
-	    : &gWaterShader.program;
+	/* Use the above-water program for all views.  The engine's built-in fog
+	 * and FOV warp already handle the underwater feel.  Using a separate
+	 * underwater shader only adds complexity and breaks refraction because
+	 * the screen-grab (captured after engine fog is applied) is uniformly
+	 * foggy, giving a flat blue result. */
+	gl_water_program_t *prog = &gWaterShader.program;
 
 	pglUseProgramObjectARB( prog->program );
 
