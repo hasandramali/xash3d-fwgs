@@ -1120,8 +1120,7 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	pglBindTexture( GL_TEXTURE_2D, 0 );
 
 	if( r_water_debug.value >= 1.0f )
-		gEngfuncs.Con_Reportf( "R_WaterShader: drew warp %p (%s)\n",
-		                       (void *)warp, underwater ? "underwater" : "above" );
+		gEngfuncs.Con_Reportf( "R_WaterShader: drew warp %p\n", (void *)warp );
 
 	return true;
 }
