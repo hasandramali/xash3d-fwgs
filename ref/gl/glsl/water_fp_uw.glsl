@@ -92,7 +92,8 @@ void main()
     }
     else
     {
-        refr = wc * 0.6;
+        /* no screen grab — simulate a wavy pattern from normal map */
+        refr = wc * (0.55 + 0.25 * (n.x * 0.5 + 0.5));
     }
 
     /* distance-based tint */
@@ -107,7 +108,7 @@ void main()
     color += u_causticColor * c * cStrength;
 
     /* subtle surface shimmer from normal map */
-    vec3 shimmer = vec3(0.02, 0.03, 0.02) * (n.x + n.y) * (1.0 - depthF);
+    vec3 shimmer = vec3(0.06, 0.09, 0.06) * (n.x + n.y) * (1.0 - depthF);
     color += shimmer;
 
     /* fog */

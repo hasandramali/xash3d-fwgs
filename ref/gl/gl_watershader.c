@@ -355,10 +355,11 @@ static const char *water_frag_under_source =
 	"        float twitch = sin( t * 0.5 + ntc.s * 10.0 ) * 0.003;\n"
 	"        refr = texture2D( u_refractMap, stc + n.st * u_strengthRefrUnder + vec2( twitch, twitch * 0.7 )).rgb;\n"
 	"    }\n"
-	"    else\n"
-	"    {\n"
-	"        refr = wc * 0.6;\n"
-	"    }\n"
+    "    else\n"
+    "    {\n"
+    "        /* no screen grab — simulate a wavy pattern from normal map */\n"
+    "        refr = wc * (0.55 + 0.25 * (n.x * 0.5 + 0.5));\n"
+    "    }\n"
 	"\n"
 	"    /* distance-based tint */\n"
 	"    refr = mix( refr, refr * u_distColor, depthF );\n"
@@ -372,7 +373,7 @@ static const char *water_frag_under_source =
 	"    color += u_causticColor * c * cStrength;\n"
 	"\n"
 	"    /* subtle surface shimmer from normal map */\n"
-	"    vec3 shimmer = vec3( 0.02, 0.03, 0.02 ) * (n.x + n.y) * (1.0 - depthF);\n"
+    "    vec3 shimmer = vec3( 0.06, 0.09, 0.06 ) * (n.x + n.y) * (1.0 - depthF);\n"
 	"    color += shimmer;\n"
 	"\n"
 	"    /* fog */\n"
@@ -436,7 +437,7 @@ static const char *water_warp_frag_source =
 	"    uv.x += sin( uv.y * 40.0 + u_time * 1.5 ) * strength * 0.3;\n"
 	"    uv.y += cos( uv.x * 35.0 + u_time * 1.2 ) * strength * 0.3;\n"
 	"\n"
-	"    gl_FragColor = texture2D( u_screenMap, uv );\n"
+	"    gl_FragColor = texture2D( u_refractMap, uv );\n"
 	"}\n";
 
 static GLuint R_WaterShader_CompileShader( GLenum type, const char *src )
@@ -1025,18 +1026,18 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 			R_WaterShader_VidInit();
 	}
 
-	/* above-water vs underwater */
 	/*
-	 * When the player is physically in water (waterlevel >= 2), use the
-	 * underwater shader for ALL water surfaces.  The vertex-height check
-	 * works for BSP world water, but func_water entities may have
-	 * inconsistent poly Z values when the camera is inside the brush.
+	 * Determine which side of the water surface the camera is on.
+	 * Transform camera to model-local space so the comparison works
+	 * correctly for both world water (identity transform) and
+	 * entity/brush water (func_water with non-trivial objectMatrix).
 	 */
 	qboolean underwater;
-	if( ENGINE_GET_PARM( PARM_WATER_LEVEL ) >= 2 )
-		underwater = true;
-	else
-		underwater = ( warp->polys->verts[0][2] >= RI.rvp.vieworigin[2] );
+	{
+		vec3_t localCam;
+		Matrix4x4_VectorITransform( RI.objectMatrix, RI.rvp.vieworigin, localCam );
+		underwater = ( warp->polys->verts[0][2] >= localCam[2] );
+	}
 
 	gl_water_program_t *prog = underwater
 	    ? &gWaterShader.programUnderwater
@@ -1140,7 +1141,7 @@ void R_WaterShader_UnderwaterWarp( void )
 	if( !r_water_underwaterwarp.value )                  return;
 	if( !gWaterShader.warpProgram.program )               return;
 	if( !gWaterShader.warpScreenTexture )                 return;
-	if( ENGINE_GET_PARM( PARM_WATER_LEVEL ) < 2 )         return;
+	if( ENGINE_GET_PARM( PARM_WATER_LEVEL ) < 3 )         return;
 
 	int w = gpGlobals->width;
 	int h = gpGlobals->height;
