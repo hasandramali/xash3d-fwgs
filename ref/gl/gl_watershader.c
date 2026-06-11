@@ -842,13 +842,18 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 		pglUniformMatrix4fvARB( prog->u_projection, 1, GL_FALSE, m );
 	}
 
-	/* ---- camera position ---- */
+	/*
+	 * Camera position in model-local space.
+	 * For world water, RI.objectMatrix is identity, so this is a no-op.
+	 * For entity water (func_water), transforms the camera from world space
+	 * to the brush model's local space, matching the vertex positions.
+	 */
 	if( prog->u_cameraPos >= 0 )
 	{
+		vec3_t localOrigin;
+		Matrix4x4_VectorITransform( RI.objectMatrix, RI.rvp.vieworigin, localOrigin );
 		pglUniform3fARB( prog->u_cameraPos,
-		                 RI.rvp.vieworigin[0],
-		                 RI.rvp.vieworigin[1],
-		                 RI.rvp.vieworigin[2] );
+		                 localOrigin[0], localOrigin[1], localOrigin[2] );
 	}
 
 	float time = (float)gp_cl->time;
@@ -1021,8 +1026,17 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	}
 
 	/* above-water vs underwater */
-	const qboolean underwater =
-	    ( warp->polys->verts[0][2] >= RI.rvp.vieworigin[2] );
+	/*
+	 * When the player is physically in water (waterlevel >= 2), use the
+	 * underwater shader for ALL water surfaces.  The vertex-height check
+	 * works for BSP world water, but func_water entities may have
+	 * inconsistent poly Z values when the camera is inside the brush.
+	 */
+	qboolean underwater;
+	if( ENGINE_GET_PARM( PARM_WATER_LEVEL ) >= 2 )
+		underwater = true;
+	else
+		underwater = ( warp->polys->verts[0][2] >= RI.rvp.vieworigin[2] );
 
 	gl_water_program_t *prog = underwater
 	    ? &gWaterShader.programUnderwater
