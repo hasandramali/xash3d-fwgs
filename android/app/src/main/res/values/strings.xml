@@ -41,6 +41,9 @@
     <string name="render_resolution_dialog">Enter render resolution</string>
     <string name="stretch_resolution">Fullscreen</string>
     <string name="stretch_resolution_summary">Scale the selected render resolution to fill the screen</string>
+    <string name="msaa">Anti-aliasing (MSAA)</string>
+    <string name="msaa_summary">Disabled</string>
+
     <string name="keyboard_resizes_screen">Keyboard resizes screen</string>
     <string name="keyboard_resizes_screen_summary">Resize the game window when the keyboard is shown</string>
     <string name="fix_font">Fix font</string>

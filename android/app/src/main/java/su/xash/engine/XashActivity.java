@@ -261,6 +261,11 @@ public class XashActivity extends SDLActivity {
             argv += " -noresize";
         }
 
+        if (!hasArgument(argv, "gl_msaa_samples")) {
+            String msaa = mPreferences.getString("msaa", "0");
+            argv += " +gl_msaa_samples " + msaa;
+        }
+
         if (argv.indexOf(" -dll ") < 0 && gamelibdir == null) {
             final List<String> mobile_hacks_gamedirs = Arrays.asList(new String[]{
                 "aom", "bdlands", "biglolly", "bshift", "caseclosed",
