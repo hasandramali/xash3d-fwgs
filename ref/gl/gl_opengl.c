@@ -11,14 +11,22 @@ CVAR_DEFINE_AUTO( gl_texture_lodbias, "0.0", FCVAR_GLCONFIG, "LOD bias for mipma
 CVAR_DEFINE_AUTO( gl_texture_nearest, "0", FCVAR_GLCONFIG, "disable texture filter" );
 CVAR_DEFINE_AUTO( gl_lightmap_nearest, "0", FCVAR_GLCONFIG, "disable lightmap filter" );
 CVAR_DEFINE_AUTO( gl_keeptjunctions, "1", FCVAR_GLCONFIG, "removing tjuncs causes blinking pixels" );
+#if defined( XASH_MOBILE_PLATFORM )
+CVAR_DEFINE_AUTO( gl_check_errors, "0", FCVAR_GLCONFIG, "ignore video engine errors" );
+#else
 CVAR_DEFINE_AUTO( gl_check_errors, "1", FCVAR_GLCONFIG, "ignore video engine errors" );
+#endif
 CVAR_DEFINE_AUTO( gl_polyoffset, "2", FCVAR_GLCONFIG, "polygon offset for decals" );
 CVAR_DEFINE_AUTO( gl_polyoffset_bmodels, "2", FCVAR_GLCONFIG, "polygon offset for brush models" );
 CVAR_DEFINE_AUTO( gl_wireframe, "0", FCVAR_GLCONFIG|FCVAR_SPONLY, "show wireframe overlay" );
 CVAR_DEFINE_AUTO( gl_finish, "0", FCVAR_GLCONFIG, "use glFinish instead of glFlush" );
 CVAR_DEFINE_AUTO( gl_nosort, "0", FCVAR_GLCONFIG, "disable sorting of translucent surfaces" );
 CVAR_DEFINE_AUTO( gl_test, "0", 0, "engine developer cvar for quick testing new features" );
+#if defined( XASH_MOBILE_PLATFORM )
+CVAR_DEFINE_AUTO( gl_msaa, "0", FCVAR_GLCONFIG, "enable or disable multisample anti-aliasing" );
+#else
 CVAR_DEFINE_AUTO( gl_msaa, "1", FCVAR_GLCONFIG, "enable or disable multisample anti-aliasing" );
+#endif
 CVAR_DEFINE_AUTO( gl_stencilbits, "8", FCVAR_GLCONFIG|FCVAR_READ_ONLY, "pixelformat stencil bits (0 - auto)" );
 CVAR_DEFINE_AUTO( gl_overbright, "1", FCVAR_GLCONFIG, "overbrights" );
 CVAR_DEFINE_AUTO( gl_fog, "1", FCVAR_GLCONFIG, "allow for rendering fog using built-in OpenGL fog implementation" );
@@ -1540,6 +1548,10 @@ void GL_OnContextCreated( void )
 	gEngfuncs.GL_GetAttribute( REF_GL_MULTISAMPLESAMPLES, &glConfig.msaasamples );
 	gEngfuncs.GL_GetAttribute( REF_GL_CONTEXT_MAJOR_VERSION, &glConfig.version_major );
 	gEngfuncs.GL_GetAttribute( REF_GL_CONTEXT_MINOR_VERSION, &glConfig.version_minor );
+
+	gEngfuncs.Con_Printf( "MSAA STATUS: %s\n", glConfig.msaasamples > 1 ? "enabled" : "disabled" );
+	if( glConfig.msaasamples > 1 )
+		gEngfuncs.Con_Printf( "MSAA SAMPLES: %dX\n", glConfig.msaasamples );
 
 #if XASH_WES
 	wes_init( "" );
