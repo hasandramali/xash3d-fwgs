@@ -297,11 +297,11 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 Log.d("SteamCM", "[download] License for app ${info.appId}: granted=$licenseGranted")
             } catch (e: Exception) { Log.w("SteamCM", "[license] ${e.message}") }
 
-            val cdnHost: String
+            val cdnHosts: List<String>
             try {
-                cdnHost = client.requestCDNServerList()
+                cdnHosts = client.requestCDNServerList()
             } catch (e: Exception) { throw Exception("[cdn] ${e.message}", e) }
-            Log.d("SteamCM", "[download] CDN host: $cdnHost")
+            Log.d("SteamCM", "[download] CDN hosts: $cdnHosts")
 
             data class DepotSetup(val depotId: Int, val manifestId: Long, val depotKey: ByteArray, val requestCode: Long)
             val depots = mutableListOf<DepotSetup>()
@@ -336,7 +336,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
             val allFiles = mutableListOf<DepotFile>()
             for (ds in depots) {
                 onStatus("Downloading manifest for depot ${ds.depotId}...")
-                val manifestBytes = downloadManifestFromCDN(ds.depotId, ds.manifestId, ds.requestCode, cdnHost)
+                val manifestBytes = downloadManifestFromCDN(ds.depotId, ds.manifestId, ds.requestCode, cdnHosts)
                 if (manifestBytes == null) {
                     Log.w("SteamCM", "[download] Could not download manifest for depot ${ds.depotId}")
                     continue
@@ -362,7 +362,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                                 df.file.path.removePrefix("$gamedir/") else df.file.path
                             val outFile = File(gameDataDir, relativePath)
                             outFile.parentFile?.mkdirs()
-                            val success = assembleFileFromChunks(df.depotSetup.depotId, df.file, outFile, df.depotSetup.depotKey, cdnHost)
+                            val success = assembleFileFromChunks(df.depotSetup.depotId, df.file, outFile, df.depotSetup.depotKey, cdnHosts)
                             if (!success) {
                                 Log.w("SteamCM", "[download] Failed: ${df.file.path}")
                             }
@@ -983,7 +983,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 }
             }
 
-        suspend fun requestCDNServerList(): String = suspendCancellableCoroutine { cont ->
+        suspend fun requestCDNServerList(): List<String> = suspendCancellableCoroutine { cont ->
             try {
                 val body = ByteArrayOutputStream()
                 body.write(Proto.packVarint(1 shl 3 or 0)); body.write(Proto.packVarint(1))
@@ -1017,6 +1017,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                                 gis.close()
                                 Log.d("SteamCM", "[cdn] Multi decompressed: ${msgBody.size} -> ${subData.size}")
                             }
+                            val servers = mutableListOf<String>()
                             var off2 = 0
                             while (off2 < subData.size) {
                                 val subSize = Proto.readInt32LE(subData, off2)
@@ -1029,83 +1030,20 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                                     val subHdrLen = Proto.readInt32LE(subMsg, 4)
                                     val subOff = 8 + subHdrLen
                                     val subBody = subMsg.copyOfRange(subOff, subMsg.size)
-                                    val subRdr = ProtoReader(subBody)
-                                    while (subRdr.remaining > 0) {
-                                        val stag = subRdr.readVarint()
-                                        val sfn = stag shr 3
-                                        val swt = stag and 0x7
-                                        if (sfn == 1 && swt == 2) {
-                                            val serverLen = subRdr.readVarint()
-                                            val serverBytes = subRdr.readBytes(serverLen)
-                                            val serverRdr = ProtoReader(serverBytes)
-                                            var host: String? = null
-                                            var vhost: String? = null
-                                            var httpsSupport: String? = null
-                                            while (serverRdr.remaining > 0) {
-                                                val ftag = serverRdr.readVarint()
-                                                val ffn = ftag shr 3
-                                                val fwt = ftag and 0x7
-                                                if (ffn == 8 && fwt == 2) {
-                                                    val hLen = serverRdr.readVarint()
-                                                    host = String(serverRdr.readBytes(hLen), Charsets.UTF_8)
-                                                } else if (ffn == 9 && fwt == 2) {
-                                                    val hLen = serverRdr.readVarint()
-                                                    vhost = String(serverRdr.readBytes(hLen), Charsets.UTF_8)
-                                                } else if (ffn == 12 && fwt == 2) {
-                                                    val hLen = serverRdr.readVarint()
-                                                    httpsSupport = String(serverRdr.readBytes(hLen), Charsets.UTF_8)
-                                                } else {
-                                                    when (fwt) { 0 -> serverRdr.readVarint64(); 1 -> serverRdr.skip(8); 2 -> { val l = serverRdr.readVarint(); serverRdr.skip(l) }; 5 -> serverRdr.skip(4); else -> serverRdr.skipField() }
-                                                }
-                                            }
-                                            if (host != null && !host.isNullOrEmpty()) {
-                                                val useHost = if (vhost != null && vhost.isNotEmpty()) vhost else host
-                                                Log.d("SteamCM", "[cdn] Using CDN server: host=$host vhost=$vhost https=$httpsSupport")
-                                                cont.resume(useHost)
-                                                return@suspendCancellableCoroutine
-                                            }
-                                        } else {
-                                            when (swt) { 0 -> subRdr.readVarint64(); 1 -> subRdr.skip(8); 2 -> { val l = subRdr.readVarint(); subRdr.skip(l) }; 5 -> subRdr.skip(4); else -> subRdr.skipField() }
-                                        }
-                                    }
+                                    parseServerList(subBody, servers)
                                 }
+                            }
+                            if (servers.isNotEmpty()) {
+                                cont.resume(servers)
+                                return@suspendCancellableCoroutine
                             }
                         }
                     } else if (emsg == 147) {
-                        val rdr = ProtoReader(data)
-                        while (rdr.remaining > 0) {
-                            val tag = rdr.readVarint()
-                            val fn = tag shr 3
-                            val wt = tag and 0x7
-                            if (fn == 1 && wt == 2) {
-                                val serverLen = rdr.readVarint()
-                                val serverBytes = rdr.readBytes(serverLen)
-                                val serverRdr = ProtoReader(serverBytes)
-                                var host: String? = null
-                                var vhost: String? = null
-                                while (serverRdr.remaining > 0) {
-                                    val ftag = serverRdr.readVarint()
-                                    val ffn = ftag shr 3
-                                    val fwt = ftag and 0x7
-                                    if (ffn == 8 && fwt == 2) {
-                                        val hLen = serverRdr.readVarint()
-                                        host = String(serverRdr.readBytes(hLen), Charsets.UTF_8)
-                                    } else if (ffn == 9 && fwt == 2) {
-                                        val hLen = serverRdr.readVarint()
-                                        vhost = String(serverRdr.readBytes(hLen), Charsets.UTF_8)
-                                    } else {
-                                        when (fwt) { 0 -> serverRdr.readVarint64(); 1 -> serverRdr.skip(8); 2 -> { val l = serverRdr.readVarint(); serverRdr.skip(l) }; 5 -> serverRdr.skip(4); else -> serverRdr.skipField() }
-                                    }
-                                }
-                                if (host != null && !host.isNullOrEmpty()) {
-                                    val useHost = if (vhost != null && vhost.isNotEmpty()) vhost else host
-                                    Log.d("SteamCM", "[cdn] Using CDN server (direct): $useHost")
-                                    cont.resume(useHost)
-                                    return@suspendCancellableCoroutine
-                                }
-                            } else {
-                                when (wt) { 0 -> rdr.readVarint64(); 1 -> rdr.skip(8); 2 -> { val l = rdr.readVarint(); rdr.skip(l) }; 5 -> rdr.skip(4); else -> rdr.skipField() }
-                            }
+                        val servers = mutableListOf<String>()
+                        parseServerList(data, servers)
+                        if (servers.isNotEmpty()) {
+                            cont.resume(servers)
+                            return@suspendCancellableCoroutine
                         }
                     } else if (emsg == 757) {
                         Log.e("SteamCM", "[cdn] Got logged off")
@@ -1117,6 +1055,41 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
             } catch (e: Exception) {
                 Log.e("SteamCM", "[cdn] Exception: ${e.message}")
                 cont.resumeWithException(e)
+            }
+        }
+
+        private fun parseServerList(data: ByteArray, servers: MutableList<String>) {
+            val rdr = ProtoReader(data)
+            while (rdr.remaining > 0) {
+                val stag = rdr.readVarint()
+                val sfn = stag shr 3
+                val swt = stag and 0x7
+                if (sfn == 1 && swt == 2) {
+                    val serverLen = rdr.readVarint()
+                    val serverBytes = rdr.readBytes(serverLen)
+                    val serverRdr = ProtoReader(serverBytes)
+                    var type: String? = null
+                    var host: String? = null
+                    var vhost: String? = null
+                    while (serverRdr.remaining > 0) {
+                        val ftag = serverRdr.readVarint()
+                        val ffn = ftag shr 3
+                        val fwt = ftag and 0x7
+                        when (ffn) {
+                            1 -> if (fwt == 2) { val l = serverRdr.readVarint(); type = String(serverRdr.readBytes(l), Charsets.UTF_8) }
+                            8 -> if (fwt == 2) { val l = serverRdr.readVarint(); host = String(serverRdr.readBytes(l), Charsets.UTF_8) }
+                            9 -> if (fwt == 2) { val l = serverRdr.readVarint(); vhost = String(serverRdr.readBytes(l), Charsets.UTF_8) }
+                            else -> when (fwt) { 0 -> serverRdr.readVarint64(); 1 -> serverRdr.skip(8); 2 -> { val l = serverRdr.readVarint(); serverRdr.skip(l) }; 5 -> serverRdr.skip(4); else -> serverRdr.skipField() }
+                        }
+                    }
+                    if (host != null && host.isNotEmpty()) {
+                        val useHost = if (vhost != null && vhost.isNotEmpty()) vhost else host
+                        Log.d("SteamCM", "[cdn] Server candidate: $useHost type=$type")
+                        servers.add(useHost)
+                    }
+                } else {
+                    when (swt) { 0 -> rdr.readVarint64(); 1 -> rdr.skip(8); 2 -> { val l = rdr.readVarint(); rdr.skip(l) }; 5 -> rdr.skip(4); else -> rdr.skipField() }
+                }
             }
         }
 
@@ -1583,9 +1556,11 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
         return parseNode()
     }
 
-    suspend fun downloadManifestFromCDN(depotId: Int, manifestId: Long, requestCode: Long, cdnHost: String = "liveru.steamcontent.com"): ByteArray? {
+    suspend fun downloadManifestFromCDN(depotId: Int, manifestId: Long, requestCode: Long, cdnHosts: List<String> = listOf("liveru.steamcontent.com")): ByteArray? {
+        var hostIndex = 0
         while (true) {
             yield()
+            val host = cdnHosts[hostIndex % cdnHosts.size]
             try {
                 val rcUnsigned = requestCode.toULong()
                 val path = if (rcUnsigned > 0U) {
@@ -1593,24 +1568,25 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 } else {
                     "depot/$depotId/manifest/$manifestId/5"
                 }
-                val url = URL("https://$cdnHost/$path")
+                val url = URL("https://$host/$path")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.setRequestProperty("User-Agent", "Valve/Steam HTTP Client 1.0")
                 conn.connectTimeout = 15000
                 conn.readTimeout = 15000
-                if (conn.responseCode != 200) { conn.disconnect(); delay(3000); continue }
+                if (conn.responseCode != 200) { conn.disconnect(); hostIndex++; delay(3000); continue }
                 val data = conn.inputStream.readBytes()
                 conn.disconnect()
-                if (data.isEmpty()) { Log.w("SteamCM", "[cdn] Empty response, retrying..."); delay(3000); continue }
+                if (data.isEmpty()) { Log.w("SteamCM", "[cdn] Empty response from $host, retrying..."); hostIndex++; delay(3000); continue }
                 val zip = java.util.zip.ZipInputStream(ByteArrayInputStream(data))
                 val entry = zip.nextEntry
-                if (entry == null) { zip.close(); delay(3000); continue }
+                if (entry == null) { zip.close(); hostIndex++; delay(3000); continue }
                 val manifestBytes = zip.readBytes()
                 zip.closeEntry(); zip.close()
-                if (manifestBytes.isEmpty()) { delay(3000); continue }
+                if (manifestBytes.isEmpty()) { hostIndex++; delay(3000); continue }
                 return manifestBytes
             } catch (e: Exception) {
-                Log.w("SteamCM", "[cdn] Manifest download failed, retrying: ${e.message}")
+                Log.w("SteamCM", "[cdn] Manifest download failed on $host: ${e.message}")
+                hostIndex++
                 delay(3000)
             }
         }
@@ -1722,22 +1698,24 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
         return files
     }
 
-    suspend fun downloadChunkAndDecrypt(depotId: Int, chunk: ChunkInfo, depotKey: ByteArray, cdnHost: String = "liveru.steamcontent.com"): ByteArray {
+    suspend fun downloadChunkAndDecrypt(depotId: Int, chunk: ChunkInfo, depotKey: ByteArray, cdnHosts: List<String> = listOf("liveru.steamcontent.com")): ByteArray {
         val hex = chunk.sha1.joinToString("") { "%02x".format(it) }
+        var hostIndex = 0
         while (true) {
             yield()
+            val host = cdnHosts[hostIndex % cdnHosts.size]
             try {
-                val url = URL("https://$cdnHost/depot/$depotId/chunk/$hex")
+                val url = URL("https://$host/depot/$depotId/chunk/$hex")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.setRequestProperty("User-Agent", "Valve/Steam HTTP Client 1.0")
                 conn.connectTimeout = 15000
                 conn.readTimeout = 15000
-                if (conn.responseCode != 200) { conn.disconnect(); delay(3000); continue }
+                if (conn.responseCode != 200) { conn.disconnect(); hostIndex++; delay(3000); continue }
                 val encrypted = conn.inputStream.readBytes()
                 conn.disconnect()
                 if (encrypted.size < 16) {
-                    Log.w("SteamCM", "[chunk] Too small (${encrypted.size} bytes), retrying...")
-                    delay(3000); continue
+                    Log.w("SteamCM", "[chunk] Too small (${encrypted.size} bytes) from $host, retrying...")
+                    hostIndex++; delay(3000); continue
                 }
 
                 val ecb = Cipher.getInstance("AES/ECB/NoPadding")
@@ -1804,19 +1782,19 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
 
                 val chunkAdler = adler32(decompressed)
                 if (chunkAdler != chunk.checksum) {
-                    Log.e("SteamCM", "[chunk] Checksum mismatch, retrying...")
-                    delay(3000); continue
+                    Log.e("SteamCM", "[chunk] Checksum mismatch on $host, retrying...")
+                    hostIndex++; delay(3000); continue
                 }
 
                 return decompressed
             } catch (e: Exception) {
-                Log.w("SteamCM", "[chunk] Retrying after failure: ${e.message}")
-                delay(3000)
+                Log.w("SteamCM", "[chunk] Retrying after failure on $host: ${e.message}")
+                hostIndex++; delay(3000)
             }
         }
     }
 
-    suspend fun assembleFileFromChunks(depotId: Int, file: ManifestFile, out: File, depotKey: ByteArray, cdnHost: String = "liveru.steamcontent.com"): Boolean {
+    suspend fun assembleFileFromChunks(depotId: Int, file: ManifestFile, out: File, depotKey: ByteArray, cdnHosts: List<String> = listOf("liveru.steamcontent.com")): Boolean {
         return try {
             if (file.chunks.isEmpty()) {
                 if (out.name.contains('.')) {
@@ -1841,7 +1819,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 coroutineScope {
                     file.chunks.map { chunk ->
                         async<Unit>(Dispatchers.IO) {
-                            val data = downloadChunkAndDecrypt(depotId, chunk, depotKey, cdnHost)
+                            val data = downloadChunkAndDecrypt(depotId, chunk, depotKey, cdnHosts)
                             synchronized(raf) {
                                 raf.seek(chunk.offset)
                                 raf.write(data)
