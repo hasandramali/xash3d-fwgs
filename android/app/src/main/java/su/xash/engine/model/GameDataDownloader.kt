@@ -12,6 +12,7 @@ import java.io.InputStream
 import java.io.RandomAccessFile
 import org.tukaani.xz.LZMAInputStream
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
@@ -1034,16 +1035,26 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                                 }
                             }
                             if (servers.isNotEmpty()) {
-                                cont.resume(servers)
-                                return@suspendCancellableCoroutine
+                                val resolvable = filterResolvableHosts(servers)
+                                if (resolvable.isEmpty()) {
+                                    Log.w("SteamCM", "[cdn] No resolvable hosts from Multi")
+                                } else {
+                                    cont.resume(resolvable)
+                                    return@suspendCancellableCoroutine
+                                }
                             }
                         }
                     } else if (emsg == 147) {
                         val servers = mutableListOf<String>()
                         parseServerList(data, servers)
                         if (servers.isNotEmpty()) {
-                            cont.resume(servers)
-                            return@suspendCancellableCoroutine
+                            val resolvable = filterResolvableHosts(servers)
+                            if (resolvable.isEmpty()) {
+                                Log.w("SteamCM", "[cdn] No resolvable hosts from direct")
+                            } else {
+                                cont.resume(resolvable)
+                                return@suspendCancellableCoroutine
+                            }
                         }
                     } else if (emsg == 757) {
                         Log.e("SteamCM", "[cdn] Got logged off")
@@ -1068,7 +1079,6 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                     val serverLen = rdr.readVarint()
                     val serverBytes = rdr.readBytes(serverLen)
                     val serverRdr = ProtoReader(serverBytes)
-                    var type: String? = null
                     var host: String? = null
                     var vhost: String? = null
                     while (serverRdr.remaining > 0) {
@@ -1076,7 +1086,6 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                         val ffn = ftag shr 3
                         val fwt = ftag and 0x7
                         when (ffn) {
-                            1 -> if (fwt == 2) { val l = serverRdr.readVarint(); type = String(serverRdr.readBytes(l), Charsets.UTF_8) }
                             8 -> if (fwt == 2) { val l = serverRdr.readVarint(); host = String(serverRdr.readBytes(l), Charsets.UTF_8) }
                             9 -> if (fwt == 2) { val l = serverRdr.readVarint(); vhost = String(serverRdr.readBytes(l), Charsets.UTF_8) }
                             else -> when (fwt) { 0 -> serverRdr.readVarint64(); 1 -> serverRdr.skip(8); 2 -> { val l = serverRdr.readVarint(); serverRdr.skip(l) }; 5 -> serverRdr.skip(4); else -> serverRdr.skipField() }
@@ -1084,11 +1093,24 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                     }
                     if (host != null && host.isNotEmpty()) {
                         val useHost = if (vhost != null && vhost.isNotEmpty()) vhost else host
-                        Log.d("SteamCM", "[cdn] Server candidate: $useHost type=$type")
+                        Log.d("SteamCM", "[cdn] Server candidate: $useHost")
                         servers.add(useHost)
                     }
                 } else {
                     when (swt) { 0 -> rdr.readVarint64(); 1 -> rdr.skip(8); 2 -> { val l = rdr.readVarint(); rdr.skip(l) }; 5 -> rdr.skip(4); else -> rdr.skipField() }
+                }
+            }
+        }
+
+        private fun filterResolvableHosts(hosts: List<String>): List<String> {
+            return hosts.filter { host ->
+                try {
+                    InetAddress.getAllByName(host)
+                    Log.d("SteamCM", "[cdn] Host resolves: $host")
+                    true
+                } catch (e: Exception) {
+                    Log.w("SteamCM", "[cdn] Skipping unresolvable host: $host (${e.message})")
+                    false
                 }
             }
         }
@@ -1558,6 +1580,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
 
     suspend fun downloadManifestFromCDN(depotId: Int, manifestId: Long, requestCode: Long, cdnHosts: List<String> = listOf("liveru.steamcontent.com")): ByteArray? {
         var hostIndex = 0
+        var retryDelay = 500L
         while (true) {
             yield()
             val host = cdnHosts[hostIndex % cdnHosts.size]
@@ -1573,21 +1596,22 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 conn.setRequestProperty("User-Agent", "Valve/Steam HTTP Client 1.0")
                 conn.connectTimeout = 15000
                 conn.readTimeout = 15000
-                if (conn.responseCode != 200) { conn.disconnect(); hostIndex++; delay(3000); continue }
+                if (conn.responseCode != 200) { hostIndex++; delay(retryDelay); continue }
                 val data = conn.inputStream.readBytes()
-                conn.disconnect()
-                if (data.isEmpty()) { Log.w("SteamCM", "[cdn] Empty response from $host, retrying..."); hostIndex++; delay(3000); continue }
+                if (data.isEmpty()) { Log.w("SteamCM", "[cdn] Empty response from $host, retrying..."); hostIndex++; delay(retryDelay); continue }
                 val zip = java.util.zip.ZipInputStream(ByteArrayInputStream(data))
                 val entry = zip.nextEntry
-                if (entry == null) { zip.close(); hostIndex++; delay(3000); continue }
+                if (entry == null) { zip.close(); hostIndex++; delay(retryDelay); continue }
                 val manifestBytes = zip.readBytes()
                 zip.closeEntry(); zip.close()
-                if (manifestBytes.isEmpty()) { hostIndex++; delay(3000); continue }
+                if (manifestBytes.isEmpty()) { hostIndex++; delay(retryDelay); continue }
                 return manifestBytes
             } catch (e: Exception) {
                 Log.w("SteamCM", "[cdn] Manifest download failed on $host: ${e.message}")
                 hostIndex++
-                delay(3000)
+                if (hostIndex >= cdnHosts.size) hostIndex = 0
+                retryDelay = (retryDelay * 1.5).toLong().coerceAtMost(5000L)
+                delay(retryDelay)
             }
         }
     }
@@ -1701,6 +1725,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
     suspend fun downloadChunkAndDecrypt(depotId: Int, chunk: ChunkInfo, depotKey: ByteArray, cdnHosts: List<String> = listOf("liveru.steamcontent.com")): ByteArray {
         val hex = chunk.sha1.joinToString("") { "%02x".format(it) }
         var hostIndex = 0
+        var retryDelay = 500L
         while (true) {
             yield()
             val host = cdnHosts[hostIndex % cdnHosts.size]
@@ -1710,12 +1735,11 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 conn.setRequestProperty("User-Agent", "Valve/Steam HTTP Client 1.0")
                 conn.connectTimeout = 15000
                 conn.readTimeout = 15000
-                if (conn.responseCode != 200) { conn.disconnect(); hostIndex++; delay(3000); continue }
+                if (conn.responseCode != 200) { hostIndex++; delay(retryDelay); continue }
                 val encrypted = conn.inputStream.readBytes()
-                conn.disconnect()
                 if (encrypted.size < 16) {
                     Log.w("SteamCM", "[chunk] Too small (${encrypted.size} bytes) from $host, retrying...")
-                    hostIndex++; delay(3000); continue
+                    hostIndex++; delay(retryDelay); continue
                 }
 
                 val ecb = Cipher.getInstance("AES/ECB/NoPadding")
@@ -1783,13 +1807,16 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 val chunkAdler = adler32(decompressed)
                 if (chunkAdler != chunk.checksum) {
                     Log.e("SteamCM", "[chunk] Checksum mismatch on $host, retrying...")
-                    hostIndex++; delay(3000); continue
+                    hostIndex++; delay(retryDelay); continue
                 }
 
                 return decompressed
             } catch (e: Exception) {
                 Log.w("SteamCM", "[chunk] Retrying after failure on $host: ${e.message}")
-                hostIndex++; delay(3000)
+                hostIndex++
+                if (hostIndex >= cdnHosts.size) hostIndex = 0
+                retryDelay = (retryDelay * 1.5).toLong().coerceAtMost(5000L)
+                delay(retryDelay)
             }
         }
     }
@@ -1814,15 +1841,18 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
             }
             out.parentFile?.mkdirs()
             val tmp = File(out.parentFile, "${out.name}.tmp")
+            val chunkSemaphore = Semaphore(8)
             RandomAccessFile(tmp, "rw").use { raf ->
                 raf.setLength(file.size)
                 coroutineScope {
                     file.chunks.map { chunk ->
-                        async<Unit>(Dispatchers.IO) {
-                            val data = downloadChunkAndDecrypt(depotId, chunk, depotKey, cdnHosts)
-                            synchronized(raf) {
-                                raf.seek(chunk.offset)
-                                raf.write(data)
+                        async(Dispatchers.IO) {
+                            chunkSemaphore.withPermit {
+                                val data = downloadChunkAndDecrypt(depotId, chunk, depotKey, cdnHosts)
+                                synchronized(raf) {
+                                    raf.seek(chunk.offset)
+                                    raf.write(data)
+                                }
                             }
                         }
                     }.awaitAll()
