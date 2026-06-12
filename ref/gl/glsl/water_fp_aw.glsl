@@ -67,7 +67,11 @@ void main()
 
     vec3 refr;
     if (u_refractEnabled > 0.5)
-        refr = texture2D(u_refractMap, stc + n.st * u_strengthRefr).rgb;
+    {
+        vec2 refrUv = stc + n.st * u_strengthRefr;
+        refrUv = clamp(refrUv, 0.005, 0.995);
+        refr = texture2D(u_refractMap, refrUv).rgb;
+    }
     else
         refr = vec3(0.12, 0.25, 0.33);
 

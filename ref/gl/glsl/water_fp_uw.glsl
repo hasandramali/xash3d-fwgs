@@ -6,7 +6,9 @@
  *   - Q1-style warp
  *   - two-layer scrolling normalmap
  *   - screen-grab distortion for refraction (objects above water appear to move)
+ *   - Fresnel-blended water colour
  *   - caustic-like modulation
+ *   - diffuse (warp) texture overlay
  *   - deep-water colour tint
  *   - fog
  */
@@ -37,6 +39,10 @@ uniform vec3  u_distColor;
 uniform float u_causticIntensity;
 uniform vec3  u_causticColor;
 uniform float u_refractEnabled;
+uniform float u_fresnelExp;
+uniform float u_fresnelMin;
+uniform float u_fresnelRange;
+uniform float u_diffuseOverlay;
 
 varying vec2  v_texCoord;
 varying vec4  v_clipPos;
@@ -88,7 +94,9 @@ void main()
     if (u_refractEnabled > 0.5)
     {
         float twitch = sin(t * 0.5 + ntc.s * 10.0) * 0.003;
-        refr = texture2D(u_refractMap, stc + n.st * u_strengthRefrUnder + vec2(twitch, twitch * 0.7)).rgb;
+        vec2 refrUv = stc + n.st * u_strengthRefrUnder + vec2(twitch, twitch * 0.7);
+        refrUv = clamp(refrUv, 0.005, 0.995);
+        refr = texture2D(u_refractMap, refrUv).rgb;
     }
     else
     {
@@ -99,8 +107,10 @@ void main()
     /* distance-based tint */
     refr = mix(refr, refr * u_distColor, depthF);
 
-    /* underwater colour: blend screen with water color, caustics, and animated surface */
-    float wcBlend = depthF * 0.4;
+    /* Fresnel term: angle-dependent water colour blending (underwater) */
+    float fres = pow(1.0 - abs(dot(n, normalize(v_eye))), u_fresnelExp)
+                 * u_fresnelRange + u_fresnelMin;
+    float wcBlend = max(depthF * 0.4, clamp(fres, 0.0, 0.95) * 0.4);
     vec3 color = mix(refr, wc * 0.6, wcBlend);
 
     /* apply caustic light with configurable color and intensity */
@@ -110,6 +120,13 @@ void main()
     /* subtle surface shimmer from normal map */
     vec3 shimmer = vec3(0.06, 0.09, 0.06) * (n.x + n.y) * (1.0 - depthF);
     color += shimmer;
+
+    /* diffuse (warp) texture overlay */
+    if (u_diffuseOverlay > 0.001)
+    {
+        vec4 ts = texture2D(u_diffuseMap, ntc);
+        color = mix(color, ts.rgb, min(u_diffuseOverlay, 1.0) * ts.a);
+    }
 
     /* fog */
     if (u_fogEnabled > 0.5)

@@ -33,14 +33,14 @@ CVAR_DEFINE_AUTO( r_water_caustic_intensity,"0.5",   FCVAR_GLCONFIG, "underwater
 CVAR_DEFINE_AUTO( r_water_caustic_color_r,  "25",    FCVAR_GLCONFIG, "underwater caustic color red (0-255)" );
 CVAR_DEFINE_AUTO( r_water_caustic_color_g,  "38",    FCVAR_GLCONFIG, "underwater caustic color green (0-255)" );
 CVAR_DEFINE_AUTO( r_water_caustic_color_b,  "20",    FCVAR_GLCONFIG, "underwater caustic color blue (0-255)" );
-CVAR_DEFINE_AUTO( r_water_diffuse_overlay,  "0.25",  FCVAR_GLCONFIG, "diffuse texture overlay strength (0=off)" );
-CVAR_DEFINE_AUTO( r_water_refract,          "1",     FCVAR_GLCONFIG, "refraction: 0=off, 1=normal, 2=opaque water (hide non-refracted)" );
+CVAR_DEFINE_AUTO( r_water_diffuse_overlay,  "0.02",  FCVAR_GLCONFIG, "diffuse texture overlay strength (0=off)" );
+CVAR_DEFINE_AUTO( r_water_refract,          "2",     FCVAR_GLCONFIG, "refraction: 0=off, 1=normal, 2=opaque water (hide non-refracted)" );
 CVAR_DEFINE_AUTO( r_water_underwaterwarp,   "1",     FCVAR_GLCONFIG, "underwater fullscreen warp effect (0=off)" );
 CVAR_DEFINE_AUTO( r_water_debug,            "0",     FCVAR_GLCONFIG, "debug (1=log, 2=tint red)" );
-CVAR_DEFINE_AUTO( r_water_waveheight,       "3.0",   FCVAR_GLCONFIG, "vertex wave displacement amplitude" );
+CVAR_DEFINE_AUTO( r_water_waveheight,       "2.0",   FCVAR_GLCONFIG, "vertex wave displacement amplitude" );
 CVAR_DEFINE_AUTO( r_water_wavefreq,         "0.04",  FCVAR_GLCONFIG, "vertex wave spatial frequency" );
 CVAR_DEFINE_AUTO( r_water_wavespeed,        "1.0",   FCVAR_GLCONFIG, "vertex wave speed multiplier" );
-CVAR_DEFINE_AUTO( r_water_refraction_speed, "1.0",   FCVAR_GLCONFIG, "refraction normalmap scroll speed" );
+CVAR_DEFINE_AUTO( r_water_refraction_speed, "2.0",   FCVAR_GLCONFIG, "refraction normalmap scroll speed" );
 CVAR_DEFINE_AUTO( r_water_gamma,            "1.0",   FCVAR_GLCONFIG, "water brightness multiplier" );
 
 gl_water_shader_state_t gWaterShader;
@@ -236,7 +236,11 @@ static const char *water_frag_above_source =
 	"    /* refraction = screen grab with distortion */\n"
 	"    vec3 refr;\n"
 	"    if( u_refractEnabled > 0.5 )\n"
-	"        refr = texture2D( u_refractMap, stc + n.st * u_strengthRefr ).rgb;\n"
+	"    {\n"
+	"        vec2 refrUv = stc + n.st * u_strengthRefr;\n"
+	"        refrUv = clamp( refrUv, 0.005, 0.995 );\n"
+	"        refr = texture2D( u_refractMap, refrUv ).rgb;\n"
+	"    }\n"
 	"    else\n"
 	"        refr = vec3( 0.12, 0.25, 0.33 );\n"
 	"\n"
@@ -303,6 +307,10 @@ static const char *water_frag_under_source =
 	"uniform float u_causticIntensity;\n"
 	"uniform vec3  u_causticColor;\n"
 	"uniform float u_refractEnabled;\n"
+	"uniform float u_fresnelExp;\n"
+	"uniform float u_fresnelMin;\n"
+	"uniform float u_fresnelRange;\n"
+	"uniform float u_diffuseOverlay;\n"
 	"varying vec2  v_texCoord;\n"
 	"varying vec4  v_clipPos;\n"
 	"varying vec3  v_normal;\n"
@@ -353,19 +361,23 @@ static const char *water_frag_under_source =
 	"    if( u_refractEnabled > 0.5 )\n"
 	"    {\n"
 	"        float twitch = sin( t * 0.5 + ntc.s * 10.0 ) * 0.003;\n"
-	"        refr = texture2D( u_refractMap, stc + n.st * u_strengthRefrUnder + vec2( twitch, twitch * 0.7 )).rgb;\n"
+	"        vec2 refrUv = stc + n.st * u_strengthRefrUnder + vec2( twitch, twitch * 0.7 );\n"
+	"        refrUv = clamp( refrUv, 0.005, 0.995 );\n"
+	"        refr = texture2D( u_refractMap, refrUv ).rgb;\n"
 	"    }\n"
-    "    else\n"
-    "    {\n"
-    "        /* no screen grab — simulate a wavy pattern from normal map */\n"
-    "        refr = wc * (0.55 + 0.25 * (n.x * 0.5 + 0.5));\n"
-    "    }\n"
+	"    else\n"
+	"    {\n"
+	"        /* no screen grab — simulate a wavy pattern from normal map */\n"
+	"        refr = wc * (0.55 + 0.25 * (n.x * 0.5 + 0.5));\n"
+	"    }\n"
 	"\n"
 	"    /* distance-based tint */\n"
 	"    refr = mix( refr, refr * u_distColor, depthF );\n"
 	"\n"
-	"    /* underwater colour: blend screen with water color, caustics, and animated surface */\n"
-	"    float wcBlend = depthF * 0.4;\n"
+	"    /* Fresnel term: angle-dependent water colour blending (underwater) */\n"
+	"    float fres = pow( 1.0 - abs( dot( n, normalize( v_eye ))), u_fresnelExp )\n"
+	"                 * u_fresnelRange + u_fresnelMin;\n"
+	"    float wcBlend = max( depthF * 0.4, clamp( fres, 0.0, 0.95 ) * 0.4 );\n"
 	"    vec3 color = mix( refr, wc * 0.6, wcBlend );\n"
 	"\n"
 	"    /* apply caustic light with configurable color and intensity */\n"
@@ -373,8 +385,15 @@ static const char *water_frag_under_source =
 	"    color += u_causticColor * c * cStrength;\n"
 	"\n"
 	"    /* subtle surface shimmer from normal map */\n"
-    "    vec3 shimmer = vec3( 0.06, 0.09, 0.06 ) * (n.x + n.y) * (1.0 - depthF);\n"
+	"    vec3 shimmer = vec3( 0.06, 0.09, 0.06 ) * (n.x + n.y) * (1.0 - depthF);\n"
 	"    color += shimmer;\n"
+	"\n"
+	"    /* diffuse (warp) texture overlay */\n"
+	"    if( u_diffuseOverlay > 0.001 )\n"
+	"    {\n"
+	"        vec4 ts = texture2D( u_diffuseMap, ntc );\n"
+	"        color = mix( color, ts.rgb, min( u_diffuseOverlay, 1.0 ) * ts.a );\n"
+	"    }\n"
 	"\n"
 	"    /* fog */\n"
 	"    if( u_fogEnabled > 0.5 )\n"
