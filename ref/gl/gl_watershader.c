@@ -1030,12 +1030,14 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 			R_WaterShader_VidInit();
 	}
 
-	/* Use the same program for all views — no separate underwater variant.
-	 * The engine's built-in fog and FOV warp provide the underwater feel;
-	 * a dedicated underwater shader only adds complexity and makes the
-	 * water surface look flat blue (the screen-grab is captured after the
-	 * engine applies underwater fog, turning it into a uniform fog colour). */
-	gl_water_program_t *prog = &gWaterShader.program;
+	/* Use underwater program when the view is fully submerged */
+	qboolean underwaterView = ( ENGINE_GET_PARM( PARM_WATER_LEVEL ) >= 3 );
+	gl_water_program_t *prog;
+
+	if( underwaterView && gWaterShader.programUnderwater.program )
+		prog = &gWaterShader.programUnderwater;
+	else
+		prog = &gWaterShader.program;
 
 	pglUseProgramObjectARB( prog->program );
 
