@@ -1018,7 +1018,7 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 	if( r_water_refract.value > 0.5f )
 	{
 		GLint vp[4];
-		pglGetIntegerv( GL_VIEWPORT, vp );
+		pglGetIntegerv( 0x0BA2, vp ); // GL_VIEWPORT
 		int vpW = vp[2];
 		int vpH = vp[3];
 
