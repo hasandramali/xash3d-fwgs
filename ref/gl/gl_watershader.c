@@ -1184,7 +1184,7 @@ void R_WaterShader_UnderwaterWarp( void )
 
 	/* capture current viewport */
 	GLint vp[4];
-	pglGetIntegerv( GL_VIEWPORT, vp );
+	pglGetIntegerv( 0x0BA2, vp ); // GL_VIEWPORT
 	int vpW = vp[2];
 	int vpH = vp[3];
 	if( vpW < 1 || vpH < 1 ) return;
