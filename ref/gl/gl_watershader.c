@@ -14,7 +14,7 @@
 #include "gl_local.h"
 #include "gl_watershader.h"
 
-CVAR_DEFINE_AUTO( r_water_shader,           "0",     FCVAR_VIDRESTART, "enable HL2-style water shader" );
+CVAR_DEFINE_AUTO( r_water_shader,           "0",     FCVAR_GLCONFIG, "enable HL2-style water shader" );
 CVAR_DEFINE_AUTO( r_water_alpha,            "0.85",  FCVAR_GLCONFIG, "water opacity (0=transparent, 1=opaque)" );
 CVAR_DEFINE_AUTO( r_water_fresnel,          "4.0",   FCVAR_GLCONFIG, "Fresnel exponent (HL2 default ~4)" );
 CVAR_DEFINE_AUTO( r_water_fresnel_min,      "0.0",   FCVAR_GLCONFIG, "minimum Fresnel reflectivity (0..1)" );
@@ -838,6 +838,8 @@ void R_WaterShader_VidInit( void )
 			pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 			pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 			pglTexImage2D( GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL );
+			gWaterShader.warpWidth  = w;
+			gWaterShader.warpHeight = h;
 			gWaterShader.lastWarpCaptured = -1;
 		}
 	}
@@ -1011,23 +1013,41 @@ static void R_WaterShader_SetUniforms( gl_water_program_t *prog,
 		pglUniform1fARB( prog->u_wavefreq, r_water_wavefreq.value );
 
 	/* ------------------------------------------------------------------ */
-	/* Screen grab: copy current framebuffer to texture once per frame     */
+	/* Screen grab: copy current viewport to texture once per frame        */
 	/* ------------------------------------------------------------------ */
-	if( r_water_refract.value > 0.5f &&
-	    gWaterShader.screenGrabTexture &&
-	    gWaterShader.framebufferWidth > 0 && gWaterShader.framebufferHeight > 0 )
+	if( r_water_refract.value > 0.5f )
 	{
-		if( gWaterShader.lastFrameCaptured != tr.framecount )
+		GLint vp[4];
+		pglGetIntegerv( GL_VIEWPORT, vp );
+		int vpW = vp[2];
+		int vpH = vp[3];
+
+		if( vpW > 0 && vpH > 0 )
 		{
-			gWaterShader.lastFrameCaptured = tr.framecount;
-			pglBindTexture( GL_TEXTURE_2D, gWaterShader.screenGrabTexture );
-			pglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0,
-			                      0, 0,
-			                      gWaterShader.framebufferWidth,
-			                      gWaterShader.framebufferHeight );
+			/* recreate texture if viewport size changed */
+			if( gWaterShader.framebufferWidth != vpW || gWaterShader.framebufferHeight != vpH )
+			{
+				if( gWaterShader.screenGrabTexture )
+					pglDeleteTextures( 1, &gWaterShader.screenGrabTexture );
+				gWaterShader.screenGrabTexture = 0;
+				R_WaterShader_CreateScreenGrabTexture( vpW, vpH );
+			}
+
+			if( gWaterShader.lastFrameCaptured != tr.framecount )
+			{
+				gWaterShader.lastFrameCaptured = tr.framecount;
+				pglBindTexture( GL_TEXTURE_2D, gWaterShader.screenGrabTexture );
+				pglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0,
+				                      vp[0], vp[1], vpW, vpH );
+			}
+			if( prog->u_refractEnabled >= 0 )
+				pglUniform1fARB( prog->u_refractEnabled, 1.0f );
 		}
-		if( prog->u_refractEnabled >= 0 )
-			pglUniform1fARB( prog->u_refractEnabled, 1.0f );
+		else
+		{
+			if( prog->u_refractEnabled >= 0 )
+				pglUniform1fARB( prog->u_refractEnabled, 0.0f );
+		}
 	}
 	else
 	{
@@ -1051,14 +1071,6 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 		/* ensure textures are created (VidInit might have been skipped) */
 		if( !gWaterShader.screenGrabTexture )
 			R_WaterShader_VidInit();
-	}
-
-	/* Also recreate/resize textures if resolution changed */
-	if( gWaterShader.screenGrabTexture &&
-	    ( gWaterShader.framebufferWidth != gpGlobals->width ||
-	      gWaterShader.framebufferHeight != gpGlobals->height ) )
-	{
-		R_WaterShader_VidInit();
 	}
 
 	/* Use underwater program when the view is fully submerged */
@@ -1170,21 +1182,31 @@ void R_WaterShader_UnderwaterWarp( void )
 	if( !gWaterShader.warpScreenTexture )                 return;
 	if( ENGINE_GET_PARM( PARM_WATER_LEVEL ) < 3 )         return;
 
-	/* Also recreate/resize textures if resolution changed */
-	if( gWaterShader.screenGrabTexture &&
-	    ( gWaterShader.framebufferWidth != gpGlobals->width ||
-	      gWaterShader.framebufferHeight != gpGlobals->height ) )
+	/* capture current viewport */
+	GLint vp[4];
+	pglGetIntegerv( GL_VIEWPORT, vp );
+	int vpW = vp[2];
+	int vpH = vp[3];
+	if( vpW < 1 || vpH < 1 ) return;
+
+	/* recreate warp texture if viewport size changed */
+	if( gWaterShader.warpWidth != vpW || gWaterShader.warpHeight != vpH )
 	{
-		R_WaterShader_VidInit();
+		pglDeleteTextures( 1, &gWaterShader.warpScreenTexture );
+		pglGenTextures( 1, &gWaterShader.warpScreenTexture );
+		pglBindTexture( GL_TEXTURE_2D, gWaterShader.warpScreenTexture );
+		pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		pglTexImage2D( GL_TEXTURE_2D, 0, GL_RGB, vpW, vpH, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL );
+		gWaterShader.warpWidth  = vpW;
+		gWaterShader.warpHeight = vpH;
+		gWaterShader.lastWarpCaptured = -1;
 	}
 
-	int w = gpGlobals->width;
-	int h = gpGlobals->height;
-	if( w < 1 || h < 1 ) return;
-
-	/* capture current framebuffer */
 	pglBindTexture( GL_TEXTURE_2D, gWaterShader.warpScreenTexture );
-	pglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h );
+	pglCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, vp[0], vp[1], vpW, vpH );
 
 	gl_water_program_t *prog = &gWaterShader.warpProgram;
 	pglUseProgramObjectARB( prog->program );

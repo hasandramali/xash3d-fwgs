@@ -72,6 +72,8 @@ typedef struct
 	GLuint              screenGrabTexture;
 	GLuint              warpScreenTexture;    // post-process capture for warp
 	GLuint              warpNormalTexture;    // warp noise texture
+	int                 warpWidth;            // current warp texture width
+	int                 warpHeight;           // current warp texture height
 	int                 lastFrameCaptured;
 	int                 lastWarpCaptured;
 } gl_water_shader_state_t;
