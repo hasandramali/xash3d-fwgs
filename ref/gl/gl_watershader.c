@@ -14,7 +14,7 @@
 #include "gl_local.h"
 #include "gl_watershader.h"
 
-CVAR_DEFINE_AUTO( r_water_shader,           "0",     FCVAR_GLCONFIG, "enable HL2-style water shader" );
+CVAR_DEFINE_AUTO( r_water_shader,           "0",     FCVAR_VIDRESTART, "enable HL2-style water shader" );
 CVAR_DEFINE_AUTO( r_water_alpha,            "0.85",  FCVAR_GLCONFIG, "water opacity (0=transparent, 1=opaque)" );
 CVAR_DEFINE_AUTO( r_water_fresnel,          "4.0",   FCVAR_GLCONFIG, "Fresnel exponent (HL2 default ~4)" );
 CVAR_DEFINE_AUTO( r_water_fresnel_min,      "0.0",   FCVAR_GLCONFIG, "minimum Fresnel reflectivity (0..1)" );
@@ -224,10 +224,12 @@ static const char *water_frag_above_source =
 	"    ntc.t = v_texCoord.t + sin( v_texCoord.s + t * ws ) * 0.125;\n"
 	"\n"
 	"    /* two-layer scrolling normalmap with refraction speed control */\n"
-	"    vec3 n  = texture2D( u_normalMap, ntc * 1.0 + vec2( t * 0.10 * rs, 0.0 )).xyz;\n"
-	"    n      += texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, t * 0.097 * rs )).xyz;\n"
-	"    n      -= 1.0 - 4.0 / 256.0;\n"
-	"    n       = normalize( n );\n"
+	"    vec3 tex1 = texture2D( u_normalMap, ntc * 1.0 + vec2( t * 0.10 * rs, 0.0 )).xyz;\n"
+	"    vec3 tex2 = texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, t * 0.097 * rs )).xyz;\n"
+	"    vec3 n;\n"
+	"    n.xy = (tex1.xy - 0.5) + (tex2.xy - 0.5);\n"
+	"    n.z = 1.0;\n"
+	"    n = normalize( n );\n"
 	"\n"
 	"    /* Fresnel term with min/range from fteqw */\n"
 	"    float fres = pow( 1.0 - abs( dot( n, normalize( v_eye ))), u_fresnelExp )\n"
@@ -267,7 +269,7 @@ static const char *water_frag_above_source =
 	"        color = mix( color, u_fogColor, fogF * u_fogBlend );\n"
 	"    }\n"
 	"\n"
-	"    gl_FragColor = vec4( color, clamp( u_alpha, 0.0, 1.0 ));\n"
+	"    gl_FragColor = vec4( color, (u_refractEnabled > 0.5) ? 1.0 : clamp( u_alpha, 0.0, 1.0 ));\n"
 	"}\n";
 
 /* -----------------------------------------------------------------------
@@ -343,11 +345,13 @@ static const char *water_frag_under_source =
 	"    ntc.s = v_texCoord.s + sin( v_texCoord.t + t * ws ) * 0.125;\n"
 	"    ntc.t = v_texCoord.t + sin( v_texCoord.s + t * ws ) * 0.125;\n"
 	"\n"
-	"    /* two-layer scrolling normalmap */\n"
-	"    vec3 n  = texture2D( u_normalMap, ntc * 1.0 + vec2( t * 0.10 * rs, 0.0 )).xyz;\n"
-	"    n      += texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, t * 0.097 * rs )).xyz;\n"
-	"    n      -= 1.0 - 4.0 / 256.0;\n"
-	"    n       = normalize( n );\n"
+	"    /* two-layer scrolling normalmap with refraction speed control */\n"
+	"    vec3 tex1 = texture2D( u_normalMap, ntc * 1.0 + vec2( t * 0.10 * rs, 0.0 )).xyz;\n"
+	"    vec3 tex2 = texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, t * 0.097 * rs )).xyz;\n"
+	"    vec3 n;\n"
+	"    n.xy = (tex1.xy - 0.5) + (tex2.xy - 0.5);\n"
+	"    n.z = 1.0;\n"
+	"    n = normalize( n );\n"
 	"\n"
 	"    /* normal-based surface animation visible even when fog is heavy */\n"
 	"    float surfAnim = sin( ntc.s * 8.0 + t * 0.5 ) * cos( ntc.t * 6.0 - t * 0.7 ) * 0.5 + 0.5;\n"
@@ -377,8 +381,8 @@ static const char *water_frag_under_source =
 	"    /* Fresnel term: angle-dependent water colour blending (underwater) */\n"
 	"    float fres = pow( 1.0 - abs( dot( n, normalize( v_eye ))), u_fresnelExp )\n"
 	"                 * u_fresnelRange + u_fresnelMin;\n"
-	"    float wcBlend = max( depthF * 0.4, clamp( fres, 0.0, 0.95 ) * 0.4 );\n"
-	"    vec3 color = mix( refr, wc * 0.6, wcBlend );\n"
+	"    float wcBlend = clamp( fres, 0.0, 0.95 );\n"
+	"    vec3 color = mix( refr, wc, wcBlend );\n"
 	"\n"
 	"    /* apply caustic light with configurable color and intensity */\n"
 	"    float cStrength = u_causticIntensity * (1.0 - depthF * 0.5);\n"
@@ -402,7 +406,7 @@ static const char *water_frag_under_source =
 	"        color = mix( color, u_fogColor, fogF * u_fogBlend );\n"
 	"    }\n"
 	"\n"
-	"    gl_FragColor = vec4( color, clamp( u_alpha, 0.0, 1.0 ));\n"
+	"    gl_FragColor = vec4( color, (u_refractEnabled > 0.5) ? 1.0 : clamp( u_alpha, 0.0, 1.0 ));\n"
 	"}\n";
 
 /* -----------------------------------------------------------------------
@@ -444,13 +448,13 @@ static const char *water_warp_frag_source =
 	"\n"
 	"    /* sample normal map for distortion */\n"
 	"    vec2 ntc = uv * 2.0 + vec2( u_time * 0.05, u_time * 0.03 );\n"
-	"    vec3 n  = texture2D( u_normalMap, ntc ).xyz;\n"
-	"    n      += texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, u_time * 0.04 )).xyz;\n"
-	"    n      -= 1.0 - 4.0 / 256.0;\n"
+	"    vec3 tex1 = texture2D( u_normalMap, ntc ).xyz;\n"
+	"    vec3 tex2 = texture2D( u_normalMap, ntc * 0.5 - vec2( 0.0, u_time * 0.04 )).xyz;\n"
+	"    vec2 n = (tex1.xy - 0.5) + (tex2.xy - 0.5);\n"
 	"\n"
 	"    /* apply distortion with strength control */\n"
 	"    float strength = u_warpStrength * 0.025;\n"
-	"    uv += n.st * strength;\n"
+	"    uv += n * strength;\n"
 	"\n"
 	"    /* fallback sin/cos wobble when normal map is flat */\n"
 	"    uv.x += sin( uv.y * 40.0 + u_time * 1.5 ) * strength * 0.3;\n"
@@ -1049,6 +1053,14 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 			R_WaterShader_VidInit();
 	}
 
+	/* Also recreate/resize textures if resolution changed */
+	if( gWaterShader.screenGrabTexture &&
+	    ( gWaterShader.framebufferWidth != gpGlobals->width ||
+	      gWaterShader.framebufferHeight != gpGlobals->height ) )
+	{
+		R_WaterShader_VidInit();
+	}
+
 	/* Use underwater program when the view is fully submerged */
 	qboolean underwaterView = ( ENGINE_GET_PARM( PARM_WATER_LEVEL ) >= 3 );
 	gl_water_program_t *prog;
@@ -1064,9 +1076,12 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 
 	/* ---- bind textures ---- */
 
-	/* unit 0: normal map */
+	texture_t *wt = warp->texinfo ? warp->texinfo->texture : NULL;
+	GLuint wtNum = ( wt && wt->fb_texturenum ) ? wt->fb_texturenum : gWaterShader.normalTexture;
+
+	/* unit 0: normal map (using WAD texture wtNum instead of normalTexture) */
 	pglActiveTextureARB( GL_TEXTURE0_ARB );
-	pglBindTexture( GL_TEXTURE_2D, gWaterShader.normalTexture );
+	pglBindTexture( GL_TEXTURE_2D, wtNum );
 	if( prog->u_normalMap >= 0 )
 		pglUniform1iARB( prog->u_normalMap, 0 );
 
@@ -1074,8 +1089,6 @@ qboolean R_WaterShader_EmitPolys( msurface_t *warp )
 	if( prog->u_diffuseMap >= 0 )
 	{
 		pglActiveTextureARB( GL_TEXTURE1_ARB );
-		texture_t *wt = warp->texinfo ? warp->texinfo->texture : NULL;
-		GLuint wtNum = ( wt && wt->fb_texturenum ) ? wt->fb_texturenum : gWaterShader.normalTexture;
 		pglBindTexture( GL_TEXTURE_2D, wtNum );
 		pglUniform1iARB( prog->u_diffuseMap, 1 );
 	}
@@ -1156,6 +1169,14 @@ void R_WaterShader_UnderwaterWarp( void )
 	if( !gWaterShader.warpProgram.program )               return;
 	if( !gWaterShader.warpScreenTexture )                 return;
 	if( ENGINE_GET_PARM( PARM_WATER_LEVEL ) < 3 )         return;
+
+	/* Also recreate/resize textures if resolution changed */
+	if( gWaterShader.screenGrabTexture &&
+	    ( gWaterShader.framebufferWidth != gpGlobals->width ||
+	      gWaterShader.framebufferHeight != gpGlobals->height ) )
+	{
+		R_WaterShader_VidInit();
+	}
 
 	int w = gpGlobals->width;
 	int h = gpGlobals->height;
