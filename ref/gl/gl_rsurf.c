@@ -922,6 +922,11 @@ static void EmitWaterPolys( msurface_t *warp, qboolean reverse, qboolean ripples
 {
 	float	waveHeight;
 
+	// PrimeXT-style shader path: if the cvar is on and the GLSL pipeline
+	// drew this surface successfully, skip the legacy FFP warp emit.
+	if( R_WaterShader_EmitPolys( warp ))
+		return;
+
 	const qboolean useQuads = FBitSet( warp->flags, SURF_DRAWTURB_QUADS ) && glConfig.context == CONTEXT_TYPE_GL;
 
 	if( !warp->polys ) return;
