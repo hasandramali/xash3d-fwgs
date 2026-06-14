@@ -680,41 +680,6 @@ static qboolean Cmd_IsFiltered( const char *cmd )
 
 /*
 ============
-Cmd_ApplyFilterFlags
-
-Apply FCVAR_PROTECTED/FCVAR_PRIVILEGED flags to filtered cvars/commands
-so they are hidden from server queries.
-============
-*/
-static void Cmd_ApplyFilterFlags( void )
-{
-	int i;
-
-	for( i = 0; i < num_filtered_commands; i++ )
-	{
-		cmd_t		*cmd = NULL;
-		cmdalias_t	*alias = NULL;
-		convar_t	*cvar = NULL;
-
-		BaseCmd_FindAll( filtered_commands[i].name, &cmd, &alias, &cvar );
-
-		if( cvar )
-		{
-			SetBits( cvar->flags, FCVAR_PROTECTED );
-			if( filtered_commands[i].hidden )
-				SetBits( cvar->flags, FCVAR_PRIVILEGED );
-		}
-
-		if( cmd )
-		{
-			if( filtered_commands[i].hidden )
-				SetBits( cmd->flags, CMD_PRIVILEGED );
-		}
-	}
-}
-
-/*
-============
 Cmd_FilterCommands
 
 Filter commands from text buffer
@@ -877,6 +842,41 @@ struct cmd_s
 	int         flags;
 	char        desc[];
 };
+
+/*
+============
+Cmd_ApplyFilterFlags
+
+Apply FCVAR_PROTECTED/FCVAR_PRIVILEGED flags to filtered cvars/commands
+so they are hidden from server queries.
+============
+*/
+static void Cmd_ApplyFilterFlags( void )
+{
+	int i;
+
+	for( i = 0; i < num_filtered_commands; i++ )
+	{
+		cmd_t		*cmd = NULL;
+		cmdalias_t	*alias = NULL;
+		convar_t	*cvar = NULL;
+
+		BaseCmd_FindAll( filtered_commands[i].name, &cmd, &alias, &cvar );
+
+		if( cvar )
+		{
+			SetBits( cvar->flags, FCVAR_PROTECTED );
+			if( filtered_commands[i].hidden )
+				SetBits( cvar->flags, FCVAR_PRIVILEGED );
+		}
+
+		if( cmd )
+		{
+			if( filtered_commands[i].hidden )
+				SetBits( cmd->flags, CMD_PRIVILEGED );
+		}
+	}
+}
 
 int           cmd_argc;
 const char   *cmd_args = NULL;
