@@ -173,13 +173,13 @@ file(GLOB BT_SRC
     3rdparty/libbacktrace/libbacktrace/simple.c
     3rdparty/libbacktrace/libbacktrace/mmapio.c
     3rdparty/libbacktrace/libbacktrace/mmap.c
-    3rdparty/libbacktrace/libbacktrace/elf.c
     3rdparty/libbacktrace/libbacktrace/macho.c
 )
 add_library(backtrace_custom STATIC ${BT_SRC})
 target_include_directories(backtrace_custom PUBLIC
     3rdparty/libbacktrace
     3rdparty/libbacktrace/libbacktrace
+    ios/libbacktrace_config
 )
 target_compile_definitions(backtrace_custom PRIVATE HAVE_LIBBACKTRACE=1)
 
