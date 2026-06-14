@@ -35,6 +35,7 @@ set(ENGINE_INCS
     ${CMAKE_SOURCE_DIR}/public
     ${CMAKE_SOURCE_DIR}/pm_shared
     ${CMAKE_SOURCE_DIR}/filesystem
+    ${CMAKE_SOURCE_DIR}/common
 )
 
 # ---- iOS Frameworks ----
