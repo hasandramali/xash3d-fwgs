@@ -209,13 +209,61 @@ list(REMOVE_ITEM PUBLIC_SRC ${CMAKE_SOURCE_DIR}/public/build_vcs.c)
 # Exclude SDL_uikit_main.c (Xcode app provides its own main())
 list(REMOVE_ITEM ENGINE_IOS_C ${CMAKE_SOURCE_DIR}/engine/platform/ios/SDL_uikit_main.c)
 
+# Define include directories for the renderer components (excluding client/server)
+set(REF_INCS
+    ${CMAKE_SOURCE_DIR}/ref/common
+    ${CMAKE_SOURCE_DIR}/engine
+    ${CMAKE_SOURCE_DIR}/engine/common
+    ${CMAKE_SOURCE_DIR}/engine/common/imagelib
+    ${CMAKE_SOURCE_DIR}/engine/common/soundlib
+    ${CMAKE_SOURCE_DIR}/engine/platform
+    ${CMAKE_SOURCE_DIR}/engine/platform/ios
+    ${CMAKE_SOURCE_DIR}/public
+    ${CMAKE_SOURCE_DIR}/pm_shared
+    ${CMAKE_SOURCE_DIR}/filesystem
+    ${CMAKE_SOURCE_DIR}/common
+)
+
+# Compile renderer components as OBJECT libraries to isolate their include directories
+add_library(ref_common OBJECT ${REF_COMMON_SRC})
+target_include_directories(ref_common PRIVATE ${REF_INCS})
+target_compile_definitions(ref_common PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
+target_link_libraries(ref_common PRIVATE
+    backtrace_custom library_suffix
+    MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
+    GL mbedtls mbedcrypto mbedx509
+    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+)
+
+add_library(ref_gl OBJECT ${REF_GL_SRC})
+target_include_directories(ref_gl PRIVATE ${CMAKE_SOURCE_DIR}/ref/gl ${REF_INCS})
+target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
+target_link_libraries(ref_gl PRIVATE
+    backtrace_custom library_suffix
+    MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
+    GL mbedtls mbedcrypto mbedx509
+    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+)
+
+add_library(ref_soft OBJECT ${REF_SOFT_SRC})
+target_include_directories(ref_soft PRIVATE ${CMAKE_SOURCE_DIR}/ref/soft ${REF_INCS})
+target_compile_definitions(ref_soft PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
+target_link_libraries(ref_soft PRIVATE
+    backtrace_custom library_suffix
+    MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
+    GL mbedtls mbedcrypto mbedx509
+    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+)
+
 add_library(xash STATIC
     ${ENGINE_COMMON} ${ENGINE_IMAGELIB} ${ENGINE_SOUNDLIB}
     ${ENGINE_HTTP} ${ENGINE_SERVER} ${ENGINE_CLIENT}
     ${ENGINE_POSIX} ${ENGINE_IOS_C} ${ENGINE_IOS_M}
     ${PUBLIC_SRC} public/build_vcs.c
     ${FILESYSTEM_SRC}
-    ${REF_COMMON_SRC} ${REF_GL_SRC} ${REF_SOFT_SRC}
+    $<TARGET_OBJECTS:ref_common>
+    $<TARGET_OBJECTS:ref_gl>
+    $<TARGET_OBJECTS:ref_soft>
     ref/null/r_context.c
 )
 target_include_directories(xash PUBLIC ${ENGINE_INCS})
@@ -225,10 +273,8 @@ target_compile_definitions(xash PRIVATE
     XASH_GLES3COMPAT=1
 )
 set_source_files_properties(
-    ${REF_COMMON_SRC} ${REF_GL_SRC} ${REF_SOFT_SRC} ref/null/r_context.c
-    PROPERTIES
-        COMPILE_DEFINITIONS REF_DLL=1
-        INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/ref/common
+    ref/null/r_context.c
+    PROPERTIES COMPILE_DEFINITIONS REF_DLL=1
 )
 
 target_link_libraries(xash PUBLIC
