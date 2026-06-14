@@ -23,9 +23,6 @@ add_definitions(
 )
 
 option(XASH_GL4ES "Enable gl4es renderer" OFF)
-if(XASH_GL4ES)
-    add_definitions(-DXASH_GL4ES=1 -DXASH_GL_STATIC=1)
-endif()
 
 set(ENGINE_INCS
     ${CMAKE_SOURCE_DIR}/engine
@@ -242,7 +239,11 @@ target_link_libraries(ref_common PRIVATE
 
 add_library(ref_gl OBJECT ${REF_GL_SRC})
 target_include_directories(ref_gl PRIVATE ${CMAKE_SOURCE_DIR}/ref/gl ${REF_INCS})
-target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
+if(XASH_GL4ES)
+    target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1 XASH_GL4ES=1 XASH_GL_STATIC=1)
+else()
+    target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
+endif()
 target_link_libraries(ref_gl PRIVATE
     backtrace_custom library_suffix
     MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
