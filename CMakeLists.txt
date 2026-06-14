@@ -221,8 +221,12 @@ add_library(xash STATIC
 target_include_directories(xash PUBLIC ${ENGINE_INCS})
 target_include_directories(xash PRIVATE public filesystem ref/common ref/gl ref/soft)
 target_compile_definitions(xash PRIVATE
-    REF_DLL=1
+    ENGINE_DLL=1
     XASH_GLES3COMPAT=1
+)
+set_source_files_properties(
+    ${REF_COMMON_SRC} ${REF_GL_SRC} ${REF_SOFT_SRC} ref/null/r_context.c
+    PROPERTIES COMPILE_DEFINITIONS REF_DLL=1
 )
 
 target_link_libraries(xash PUBLIC
