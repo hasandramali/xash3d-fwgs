@@ -22,6 +22,11 @@ add_definitions(
     -DHAVE_STRLCPY -DHAVE_STRLCAT -D_XASH_SDLMAIN=1
 )
 
+option(XASH_GL4ES "Enable gl4es renderer" OFF)
+if(XASH_GL4ES)
+    add_definitions(-DXASH_GL4ES=1 -DXASH_GL_STATIC=1)
+endif()
+
 set(ENGINE_INCS
     ${CMAKE_SOURCE_DIR}/engine
     ${CMAKE_SOURCE_DIR}/engine/common
@@ -268,6 +273,24 @@ add_library(xash STATIC
 )
 target_include_directories(xash PUBLIC ${ENGINE_INCS})
 target_include_directories(xash PRIVATE public filesystem ref/common ref/gl ref/soft)
+
+# Find and include SDL framework headers on Apple platforms
+find_library(SDL2_FRAMEWORK SDL2 PATHS /Library/Frameworks)
+find_library(SDL3_FRAMEWORK SDL3 PATHS /Library/Frameworks)
+if(SDL3_FRAMEWORK)
+    message(STATUS "Found SDL3 framework at: ${SDL3_FRAMEWORK}")
+    target_include_directories(xash PUBLIC "${SDL3_FRAMEWORK}/Headers")
+elseif(SDL2_FRAMEWORK)
+    message(STATUS "Found SDL2 framework at: ${SDL2_FRAMEWORK}")
+    target_include_directories(xash PUBLIC "${SDL2_FRAMEWORK}/Headers")
+else()
+    message(WARNING "SDL framework not found via find_library, using fallback include path")
+    target_include_directories(xash PUBLIC
+        "/Library/Frameworks/SDL2.framework/Headers"
+        "/Library/Frameworks/SDL3.framework/Headers"
+    )
+endif()
+
 target_compile_definitions(xash PRIVATE
     ENGINE_DLL=1
     XASH_GLES3COMPAT=1
