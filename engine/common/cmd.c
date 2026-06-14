@@ -33,7 +33,12 @@ typedef struct
 	int  cursize;
 } cmdbuf_t;
 
-static char *filtered_commands[MAX_FILTERED_CMDS];
+typedef struct
+{
+	char *name;
+	qboolean hidden;
+} filteredcmd_t;
+static filteredcmd_t filtered_commands[MAX_FILTERED_CMDS];
 static int num_filtered_commands = 0;
 static qboolean cmd_filter_initialized = false;
 static int cmd_wait;
@@ -47,6 +52,7 @@ static poolhandle_t cmd_pool;
 static void Cmd_LoadFilterConfig( void );
 static qboolean Cmd_IsFiltered( const char *cmd );
 static void Cmd_FilterCommands( cmdbuf_t *buf );
+static void Cmd_ApplyFilterFlags( void );
 static void Cmd_ReloadFilter_f( void );
 static void Cmd_ExecuteStringWithPrivilegeCheck( const char *text, qboolean isPrivileged );
 
@@ -517,6 +523,24 @@ Cmd_LoadFilterConfig
 Load commands to filter from cmdfilter.ini
 ============
 */
+static void Cmd_CreateDefaultFilterConfig( const char *filename )
+{
+	file_t *f;
+	const char *default_content;
+
+	f = FS_Open( filename, "w", false );
+	if( !f ) return;
+
+	default_content =
+		"// Commands written in this file will be protected from servers (similar to cl_filterstuffcmd)\n"
+		"// Write the commands you want to protect, one per line (press Enter after each command)\n"
+		"// If you prefix a command with \"0/\", you will completely hide that command from the server.\n"
+		"// For example, \"0/name\" prevents the server from seeing the name command. This is risky and frequent use is not recommended.\n";
+	FS_Write( f, default_content, Q_strlen( default_content ));
+	FS_Close( f );
+	Con_Printf( "Created cmdfilter.ini\n" );
+}
+
 static void Cmd_LoadFilterConfig( void )
 {
 	char filename[256];
@@ -537,14 +561,13 @@ static void Cmd_LoadFilterConfig( void )
 	
 	if( !f )
 	{
-		static qboolean file_not_found_printed = false;
-		if( !file_not_found_printed )
+		Cmd_CreateDefaultFilterConfig( filename );
+		f = FS_Open( filename, "r", false );
+		if( !f )
 		{
-			Con_DPrintf( "Cmd_LoadFilterConfig: cmdfilter.ini not found\n" );
-			file_not_found_printed = true;
+			cmd_filter_initialized = true;
+			return;
 		}
-		cmd_filter_initialized = true;
-		return;
 	}
 	
 	len = FS_FileLength( f );
@@ -591,9 +614,23 @@ static void Cmd_LoadFilterConfig( void )
 		
 		if( line_len > 0 && num_filtered_commands < MAX_FILTERED_CMDS )
 		{
-			filtered_commands[num_filtered_commands] = copystringpool( cmd_pool, line );
-			num_filtered_commands++;
-			Con_DPrintf( "Cmd_LoadFilterConfig: added filter for '%s'\n", line );
+			qboolean hidden = false;
+			char *name = line;
+
+			if( line_len >= 2 && line[0] == '0' && line[1] == '/' )
+			{
+				hidden = true;
+				name = line + 2;
+				while( *name && (byte)*name <= ' ' ) name++;
+			}
+
+			if( *name )
+			{
+				filtered_commands[num_filtered_commands].name = copystringpool( cmd_pool, name );
+				filtered_commands[num_filtered_commands].hidden = hidden;
+				num_filtered_commands++;
+				Con_DPrintf( "Cmd_LoadFilterConfig: added filter for '%s' (hidden=%d)\n", name, hidden );
+			}
 		}
 		else if( num_filtered_commands >= MAX_FILTERED_CMDS )
 		{
@@ -611,6 +648,8 @@ static void Cmd_LoadFilterConfig( void )
 	{
 		Con_Printf( "Cmd_LoadFilterConfig: loaded %d filtered commands\n", num_filtered_commands );
 	}
+
+	Cmd_ApplyFilterFlags();
 }
 
 /*
@@ -632,11 +671,46 @@ static qboolean Cmd_IsFiltered( const char *cmd )
 	
 	for( i = 0; i < num_filtered_commands; i++ )
 	{
-		if( !Q_stricmp( cmd, filtered_commands[i] ) )
+		if( !Q_stricmp( cmd, filtered_commands[i].name ) )
 			return true;
 	}
 	
 	return false;
+}
+
+/*
+============
+Cmd_ApplyFilterFlags
+
+Apply FCVAR_PROTECTED/FCVAR_PRIVILEGED flags to filtered cvars/commands
+so they are hidden from server queries.
+============
+*/
+static void Cmd_ApplyFilterFlags( void )
+{
+	int i;
+
+	for( i = 0; i < num_filtered_commands; i++ )
+	{
+		cmd_t		*cmd = NULL;
+		cmdalias_t	*alias = NULL;
+		convar_t	*cvar = NULL;
+
+		BaseCmd_FindAll( filtered_commands[i].name, &cmd, &alias, &cvar );
+
+		if( cvar )
+		{
+			SetBits( cvar->flags, FCVAR_PROTECTED );
+			if( filtered_commands[i].hidden )
+				SetBits( cvar->flags, FCVAR_PRIVILEGED );
+		}
+
+		if( cmd )
+		{
+			if( filtered_commands[i].hidden )
+				SetBits( cmd->flags, CMD_PRIVILEGED );
+		}
+	}
 }
 
 /*
@@ -778,10 +852,11 @@ static void Cmd_ReloadFilter_f( void )
 	int i;
 	for( i = 0; i < num_filtered_commands; i++ )
 	{
-		if( filtered_commands[i] )
-			Mem_Free( filtered_commands[i] );
+		if( filtered_commands[i].name )
+			Mem_Free( filtered_commands[i].name );
 	}
 	num_filtered_commands = 0;
+	cmd_filter_initialized = false;
 
 	Cmd_LoadFilterConfig();
 	Con_Printf( "Command filter configuration reloaded\n" );
@@ -1735,8 +1810,8 @@ void Cmd_Shutdown( void )
 	int i;
 	for( i = 0; i < num_filtered_commands; i++ )
 	{
-		if( filtered_commands[i] )
-			Mem_Free( filtered_commands[i] );
+		if( filtered_commands[i].name )
+			Mem_Free( filtered_commands[i].name );
 	}
 	num_filtered_commands = 0;
 

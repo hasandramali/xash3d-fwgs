@@ -47,9 +47,8 @@ static const cvar_filter_quirks_t cvar_filter_quirks[] =
 #endif
 
 static const cvar_filter_quirks_t *cvar_active_filter_quirks = NULL;
-
 CVAR_DEFINE_AUTO( cl_filterstuffcmd, "1", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "filter commands coming from server" );
-
+CVAR_DEFINE_AUTO( cl_breakrules, "0", FCVAR_ARCHIVE | FCVAR_PRIVILEGED | FCVAR_PROTECTED, "bypass: 1=FCVAR_CHEAT, 2=FCVAR_CHEAT+FCVAR_READ_ONLY" );
 /*
 ============
 Cvar_GetList
@@ -557,13 +556,13 @@ void Cvar_RegisterVariable( convar_t *var )
 
 static qboolean Cvar_CanSet( const convar_t *cv )
 {
-	if( FBitSet( cv->flags, FCVAR_READ_ONLY ))
+	if( FBitSet( cv->flags, FCVAR_READ_ONLY ) && (int)cl_breakrules.value < 2 )
 	{
 		Con_Printf( "%s is read-only.\n", cv->name );
 		return false;
 	}
 
-	if( FBitSet( cv->flags, FCVAR_CHEAT ) && !host.allow_cheats )
+	if( FBitSet( cv->flags, FCVAR_CHEAT ) && !host.allow_cheats && (int)cl_breakrules.value < 1 )
 	{
 		Con_Printf( "%s is cheat protected.\n", cv->name );
 		return false;
@@ -1268,6 +1267,7 @@ void Cvar_Init( void )
 	Cvar_RegisterVariable( &cmd_scripting );
 	Cvar_RegisterVariable( &host_developer ); // early registering for dev
 	Cvar_RegisterVariable( &cl_filterstuffcmd );
+	Cvar_RegisterVariable( &cl_breakrules );
 	Cmd_AddRestrictedCommand( "toggle", Cvar_Toggle_f, "toggles a console variable's values (use for more info)" );
 	Cmd_AddRestrictedCommand( "reset", Cvar_Reset_f, "reset any type variable to initial value" );
 	Cmd_AddCommand( "set", Cvar_Set_f, "create or change the value of a console variable" );

@@ -145,7 +145,6 @@ void DBG_AssertFunction( qboolean fExpr, const char* szExpr, const char* szFile,
 #else
 #define Assert( f )
 #endif
-
 extern convar_t	gl_vsync;
 extern convar_t	scr_loading;
 extern convar_t	scr_download;
@@ -157,11 +156,17 @@ extern convar_t	host_maxfps;
 extern convar_t	fps_override;
 extern convar_t	sys_timescale;
 extern convar_t	cl_filterstuffcmd;
+extern convar_t	cl_breakrules;
 extern convar_t	rcon_password;
 extern convar_t	hpk_custom_file;
 extern convar_t	con_gamemaps;
 extern convar_t	sv_background;
 extern convar_t	cl_background;
+#if !XASH_DEDICATED
+extern convar_t	fps_max;
+extern convar_t	cl_fpsfilter;
+extern convar_t	fps_rate;
+#endif
 
 #define Mod_AllowMaterials() ( host_allow_materials.value != 0.0f && !FBitSet( host.features, ENGINE_DISABLE_HDTEXTURES ))
 

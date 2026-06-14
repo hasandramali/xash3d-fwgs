@@ -42,11 +42,13 @@ static CVAR_DEFINE_AUTO( cl_logoext, "bmp", FCVAR_ARCHIVE, "temporary cvar to te
 static CVAR_DEFINE( cl_logoupdate, "@cl_logoupdate", "0", 0, "set by menu to trigger clan logo update" );
 CVAR_DEFINE_AUTO( cl_logomaxdim, "96", FCVAR_ARCHIVE, "maximum decal dimension" );
 static CVAR_DEFINE_AUTO( cl_test_bandwidth, "1", FCVAR_ARCHIVE, "test network bandwith before connection" );
-CVAR_DEFINE_AUTO( fps_max, "99", 0, "use max_fps command instead of this" );
-CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_ARCHIVE, "render particles" );
-CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_ARCHIVE, "render tracers" );
-CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_ARCHIVE, "render beams" );
-CVAR_DEFINE_AUTO( cl_screenfade, "1", FCVAR_ARCHIVE|FCVAR_PROTECTED, "toggle screenfade" );
+CVAR_DEFINE_AUTO( fps_max, "61", 0, "fps limit" );
+CVAR_DEFINE_AUTO( cl_fpsfilter, "0", FCVAR_PROTECTED, "FPS filter mode: 0=use fps_max, 1=use max_fps, 2=use max_fps+fake msec" );
+CVAR_DEFINE_AUTO( fps_rate, "100", FCVAR_PROTECTED, "fake FPS rate when cl_fpsfilter is 2 (max 100)" );
+CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_CHEAT, "render particles" );
+CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_CHEAT, "render tracers" );
+CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_CHEAT, "render beams" );
+CVAR_DEFINE_AUTO( cl_screenfade, "1", FCVAR_CHEAT, "toggle screenfade" );
 static CVAR_DEFINE_AUTO( rcon_address, "", FCVAR_PRIVILEGED, "remote control address" );
 CVAR_DEFINE_AUTO( cl_timeout, "999999", 0, "connect timeout (in-seconds)" );
 CVAR_DEFINE_AUTO( cl_nopred, "0", FCVAR_USERINFO, "disable client movement prediction" );
@@ -73,7 +75,6 @@ CVAR_DEFINE( cl_interp, "ex_interp", "0.01", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "
 CVAR_DEFINE_AUTO( cl_nointerp, "0", 0, "disable interpolation of entities and players" );
 static CVAR_DEFINE_AUTO( cl_dlmax, "1024", FCVAR_USERINFO|FCVAR_ARCHIVE, "max allowed outcoming fragment size" );
 static CVAR_DEFINE_AUTO( cl_upmax, "512", FCVAR_ARCHIVE, "max allowed incoming fragment size" );
-
 CVAR_DEFINE_AUTO( cl_lw, "1", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapon predicting" );
 CVAR_DEFINE_AUTO( cl_charset, "utf-8", FCVAR_ARCHIVE, "1-byte charset to use (iconv style)" );
 CVAR_DEFINE_AUTO( cl_trace_consistency, "0", 0, "enable consistency info tracing (good for developers)" );
@@ -96,7 +97,6 @@ static CVAR_DEFINE_AUTO( model, "", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABL
 static CVAR_DEFINE_AUTO( topcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player top color" );
 static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player bottom color" );
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
-
 CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
@@ -763,6 +763,13 @@ static void CL_CreateCmd( void )
 
 	// fix rounding error and framerate depending player move
 	double    accurate_ms = host.frametime * 1000;
+
+	if( cl_fpsfilter.value >= 2.0f )
+	{
+		double fake_fps = bound( 1.0, fps_rate.value, 100.0 );
+		accurate_ms = 1000.0 / fake_fps;
+	}
+
 	ms = (int)accurate_ms;
 	cl.frametime_remainder += accurate_ms - ms; // accumulate rounding error each frame
 
@@ -3537,6 +3544,8 @@ static void CL_InitLocal( void )
 	Cvar_Get( "team", "", FCVAR_USERINFO, "player team" );
 	Cvar_Get( "skin", "", FCVAR_USERINFO, "player skin" );
 	Cvar_RegisterVariable( &fps_max );
+	Cvar_RegisterVariable( &cl_fpsfilter );
+	Cvar_RegisterVariable( &fps_rate );
 	Cvar_RegisterVariable( &cl_nosmooth );
 	Cvar_RegisterVariable( &cl_nointerp );
 	Cvar_RegisterVariable( &cl_smoothtime );
@@ -3571,7 +3580,6 @@ static void CL_InitLocal( void )
 	Cmd_AddRestrictedCommand ("kill", NULL, "die instantly" );
 	Cmd_AddCommand ("nod", NULL, "enable nodmode" );
 	Cmd_AddCommand ("fov", NULL, "set client field of view" );
-
 	Cmd_AddRestrictedCommand ("ent_list", NULL, "list entities on server" );
 	Cmd_AddRestrictedCommand ("ent_fire", NULL, "fire entity command (be careful)" );
 	Cmd_AddRestrictedCommand ("ent_info", NULL, "dump entity information" );
@@ -3586,7 +3594,6 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("cd", CL_PlayCDTrack_f, "Play cd-track (not real cd-player of course)" );
 	Cmd_AddCommand ("mp3", CL_PlayCDTrack_f, "Play mp3-track (based on virtual cd-player)" );
 	Cmd_AddCommand ("waveplaylen", CL_WavePlayLen_f, "Get approximate length of wave file");
-
 	Cmd_AddRestrictedCommand ("setinfo", CL_SetInfo_f, "examine or change the userinfo string (alias of userinfo)" );
 	Cmd_AddRestrictedCommand ("userinfo", CL_SetInfo_f, "examine or change the userinfo string (alias of setinfo)" );
 	Cmd_AddCommand ("physinfo", CL_Physinfo_f, "print current client physinfo" );

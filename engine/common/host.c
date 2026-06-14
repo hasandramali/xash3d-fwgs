@@ -508,7 +508,7 @@ static double Host_CalcFPS( void )
 	else if( Host_IsSinglePlayerGame( ))
 	{
 		if( !gl_vsync.value )
-			fps = host_maxfps.value;
+			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
 	}
 	else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
 	{
@@ -520,7 +520,7 @@ static double Host_CalcFPS( void )
 		{
 			double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
 
-			fps = host_maxfps.value;
+			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
 			if( fps == 0.0 ) fps = max_fps;
 			fps = bound( MIN_FPS, fps, max_fps );
 		}
