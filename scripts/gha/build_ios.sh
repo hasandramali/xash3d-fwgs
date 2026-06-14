@@ -15,7 +15,7 @@ cmake -G Xcode \
     -DXASH_GLES=1 \
     -DDEPLOYMENT_TARGET=13.0 \
     -B ios/cmake-build \
-    -S . || die_configure
+    -S . || die
 
 cmake --build ios/cmake-build --config Release || die
 
