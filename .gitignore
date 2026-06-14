@@ -322,6 +322,7 @@ build-*
 ios/cl_dlls/*
 ios/dlls/*
 ios/*.framework
+ios/cmake-build/
 scripts/ios/mod-build
 
 # Waf
