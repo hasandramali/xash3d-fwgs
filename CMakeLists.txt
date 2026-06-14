@@ -226,7 +226,9 @@ target_compile_definitions(xash PRIVATE
 )
 set_source_files_properties(
     ${REF_COMMON_SRC} ${REF_GL_SRC} ${REF_SOFT_SRC} ref/null/r_context.c
-    PROPERTIES COMPILE_DEFINITIONS REF_DLL=1
+    PROPERTIES
+        COMPILE_DEFINITIONS REF_DLL=1
+        INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/ref/common
 )
 
 target_link_libraries(xash PUBLIC
