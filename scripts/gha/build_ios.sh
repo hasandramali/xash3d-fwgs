@@ -4,6 +4,23 @@
 
 cd "$GITHUB_WORKSPACE" || die
 
+# Patch gl4es AliasDecl for Apple since Darwin doesn't support aliases
+python3 -c "
+filepath = '3rdparty/gl4es/gl4es/src/gl/directstate.c'
+with open(filepath, 'r') as f:
+    code = f.read()
+code = code.replace(
+    'AliasDecl(void,gl4es_glEnableClientStatei,(GLenum array, GLuint index),gl4es_glEnableClientStateIndexed);',
+    '#ifdef __APPLE__\nvoid APIENTRY_GL4ES gl4es_glEnableClientStatei(GLenum array, GLuint index) { gl4es_glEnableClientStateIndexed(array, index); }\n#else\nAliasDecl(void,gl4es_glEnableClientStatei,(GLenum array, GLuint index),gl4es_glEnableClientStateIndexed);\n#endif'
+)
+code = code.replace(
+    'AliasDecl(void,gl4es_glDisableClientStatei,(GLenum array, GLuint index),gl4es_glDisableClientStateIndexed);',
+    '#ifdef __APPLE__\nvoid APIENTRY_GL4ES gl4es_glDisableClientStatei(GLenum array, GLuint index) { gl4es_glDisableClientStateIndexed(array, index); }\n#else\nAliasDecl(void,gl4es_glDisableClientStatei,(GLenum array, GLuint index),gl4es_glDisableClientStateIndexed);\n#endif'
+)
+with open(filepath, 'w') as f:
+    f.write(code)
+"
+
 # Build engine and 3rdparty libs with cmake + ios-cmake toolchain
 # -B ios/cmake-build so the Xcode project finds the static libraries
 cmake -G Xcode \
