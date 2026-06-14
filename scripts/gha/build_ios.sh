@@ -9,6 +9,7 @@ cd "$GITHUB_WORKSPACE" || die
 cmake -G Xcode \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="${PWD}/3rdparty/ios-cmake/ios.toolchain.cmake" \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DPLATFORM=OS64 \
     -DXASH_STATIC_GAMELIB=1 \
     -DXASH_GL4ES=1 \
@@ -23,6 +24,7 @@ cmake --build ios/cmake-build --config Release || die
 pushd hlsdk || die
 mkdir -p ../ios/libs || die
 cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_INSTALL_PREFIX=$(realpath ../ios/libs) \
     -DCMAKE_BUILD_TYPE=Debug -B build -S .
 cmake --build build --target install || die

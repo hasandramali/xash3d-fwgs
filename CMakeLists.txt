@@ -74,9 +74,12 @@ if(TARGET mbedtls)
     add_library(ssl ALIAS mbedtls)
     set_target_properties(mbedtls PROPERTIES OUTPUT_NAME ssl)
 endif()
-if(TARGET mbedcrypto OR TARGET tfpsacrypto)
+if(TARGET mbedcrypto)
     add_library(crypto ALIAS mbedcrypto)
     set_target_properties(mbedcrypto PROPERTIES OUTPUT_NAME crypto)
+elseif(TARGET tfpsacrypto)
+    add_library(crypto ALIAS tfpsacrypto)
+    set_target_properties(tfpsacrypto PROPERTIES OUTPUT_NAME crypto)
 endif()
 
 # gl4es
