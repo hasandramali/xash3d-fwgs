@@ -267,21 +267,23 @@ add_library(xash STATIC
 target_include_directories(xash PUBLIC ${ENGINE_INCS})
 target_include_directories(xash PRIVATE public filesystem ref/common ref/gl ref/soft)
 
-# Find and include SDL framework headers on Apple platforms
+# Find and link SDL framework on Apple platforms
+# The SDL framework headers internally use #include <SDL2/...> prefix,
+# so both the Headers dir and its parent must be in the include path.
 find_library(SDL2_FRAMEWORK SDL2 PATHS /Library/Frameworks)
 find_library(SDL3_FRAMEWORK SDL3 PATHS /Library/Frameworks)
 if(SDL3_FRAMEWORK)
     message(STATUS "Found SDL3 framework at: ${SDL3_FRAMEWORK}")
-    target_include_directories(xash PUBLIC "${SDL3_FRAMEWORK}/Headers")
+    get_filename_component(SDL3_PARENT ${SDL3_FRAMEWORK} DIRECTORY)
+    target_include_directories(xash PUBLIC "${SDL3_FRAMEWORK}/Headers" ${SDL3_PARENT})
+    target_link_libraries(xash PUBLIC ${SDL3_FRAMEWORK})
 elseif(SDL2_FRAMEWORK)
     message(STATUS "Found SDL2 framework at: ${SDL2_FRAMEWORK}")
-    target_include_directories(xash PUBLIC "${SDL2_FRAMEWORK}/Headers")
+    get_filename_component(SDL2_PARENT ${SDL2_FRAMEWORK} DIRECTORY)
+    target_include_directories(xash PUBLIC "${SDL2_FRAMEWORK}/Headers" ${SDL2_PARENT})
+    target_link_libraries(xash PUBLIC ${SDL2_FRAMEWORK})
 else()
-    message(WARNING "SDL framework not found via find_library, using fallback include path")
-    target_include_directories(xash PUBLIC
-        "/Library/Frameworks/SDL2.framework/Headers"
-        "/Library/Frameworks/SDL3.framework/Headers"
-    )
+    message(FATAL_ERROR "SDL2 or SDL3 framework not found at /Library/Frameworks")
 endif()
 
 target_compile_definitions(xash PRIVATE
@@ -309,7 +311,7 @@ foreach(stub
     tier0 tier1 vstdlib vinterface server client mathlib
     vgui2 vgui2_support vgui_controls vgui_surfacelib vguimatsurface
     imgui imgui_ext dead_wrapper luash lua cqmiao cso_controls GameUI
-    SDL2 SDL2main freetype mpg123 png16
+    freetype mpg123 png16
     LinearMath Bullet2FileLoader Bullet3Collision Bullet3Common
     Bullet3Dynamics Bullet3Geometry Bullet3OpenCL_clew
     BulletCollision BulletDynamics BulletInverseDynamics BulletSoftBody
