@@ -1752,6 +1752,9 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/Resources",
 					"$(PROJECT_DIR)/cmake-build",
+					"$(BUILT_PRODUCTS_DIR)",
+					"$(CONFIGURATION_BUILD_DIR)",
+					"$(BUILD_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 					"$(PROJECT_DIR)/cmake-build/build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 					"$(PROJECT_DIR)/cmake-build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 				);
@@ -1823,6 +1826,9 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/Resources",
 					"$(PROJECT_DIR)/cmake-build",
+					"$(BUILT_PRODUCTS_DIR)",
+					"$(CONFIGURATION_BUILD_DIR)",
+					"$(BUILD_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 					"$(PROJECT_DIR)/cmake-build/build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 					"$(PROJECT_DIR)/cmake-build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 				);
