@@ -193,12 +193,12 @@ target_compile_definitions(backtrace_custom PRIVATE HAVE_LIBBACKTRACE=1)
 # ============================================================================
 # Main engine library (includes all engine + public + filesystem + ref sources)
 # ============================================================================
-file(GLOB ENGINE_COMMON   engine/common/*.c)
-file(GLOB ENGINE_IMAGELIB engine/common/imagelib/*.c)
-file(GLOB ENGINE_SOUNDLIB engine/common/soundlib/*.c)
-file(GLOB ENGINE_HTTP     engine/common/http/*.c)
-file(GLOB ENGINE_SERVER   engine/server/*.c)
-file(GLOB ENGINE_CLIENT   engine/client/*.c)
+file(GLOB_RECURSE ENGINE_COMMON   engine/common/*.c)
+file(GLOB_RECURSE ENGINE_IMAGELIB engine/common/imagelib/*.c)
+file(GLOB_RECURSE ENGINE_SOUNDLIB engine/common/soundlib/*.c)
+file(GLOB_RECURSE ENGINE_HTTP     engine/common/http/*.c)
+file(GLOB_RECURSE ENGINE_SERVER   engine/server/*.c)
+file(GLOB_RECURSE ENGINE_CLIENT   engine/client/*.c)
 file(GLOB ENGINE_POSIX    engine/platform/posix/*.c)
 file(GLOB ENGINE_IOS_C    engine/platform/ios/*.c)
 file(GLOB ENGINE_IOS_M    engine/platform/ios/*.m)
@@ -209,8 +209,35 @@ file(GLOB LAUNCHER_IOS_MM
 )
 file(GLOB PUBLIC_SRC      public/*.c)
 
+# Find and link SDL framework on Apple platforms
+find_library(SDL2_FRAMEWORK SDL2 PATHS /Library/Frameworks)
+find_library(SDL3_FRAMEWORK SDL3 PATHS /Library/Frameworks)
+if(SDL3_FRAMEWORK)
+    message(STATUS "Found SDL3 framework at: ${SDL3_FRAMEWORK}")
+    add_definitions(-DXASH_SDL=3)
+    file(GLOB ENGINE_SDL engine/platform/sdl3/*.c)
+    get_filename_component(SDL3_PARENT ${SDL3_FRAMEWORK} DIRECTORY)
+    set(SDL_INCS "${SDL3_FRAMEWORK}/Headers" ${SDL3_PARENT})
+    set(SDL_LIBS ${SDL3_FRAMEWORK})
+elseif(SDL2_FRAMEWORK)
+    message(STATUS "Found SDL2 framework at: ${SDL2_FRAMEWORK}")
+    add_definitions(-DXASH_SDL=2)
+    file(GLOB ENGINE_SDL engine/platform/sdl2/*.c)
+    get_filename_component(SDL2_PARENT ${SDL2_FRAMEWORK} DIRECTORY)
+    set(SDL_INCS "${SDL2_FRAMEWORK}/Headers" ${SDL2_PARENT})
+    set(SDL_LIBS ${SDL2_FRAMEWORK})
+else()
+    message(FATAL_ERROR "SDL2 or SDL3 framework not found at /Library/Frameworks")
+endif()
+
 # Exclude old launchdialog.m if using new launcher
 list(REMOVE_ITEM ENGINE_IOS_M ${CMAKE_SOURCE_DIR}/engine/platform/ios/launchdialog.m)
+
+# Exclude dedicated.c from common if not building dedicated
+list(REMOVE_ITEM ENGINE_COMMON ${CMAKE_SOURCE_DIR}/engine/common/dedicated.c)
+
+# Exclude SDL_uikit_main.c if we use launcher.c as main
+list(REMOVE_ITEM ENGINE_IOS_C ${CMAKE_SOURCE_DIR}/engine/platform/ios/SDL_uikit_main.c)
 
 file(GLOB FILESYSTEM_SRC  filesystem/*.c filesystem/*.cpp)
 file(GLOB REF_COMMON_SRC  ref/common/*.c)
@@ -288,7 +315,7 @@ target_compile_definitions(ref_common PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
 target_link_libraries(ref_common PRIVATE
     backtrace_custom library_suffix
     MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedcrypto mbedx509
+    GL mbedtls mbedx509 crypto
     ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
 )
 
@@ -298,7 +325,7 @@ target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
 target_link_libraries(ref_gl PRIVATE
     backtrace_custom library_suffix
     MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedcrypto mbedx509
+    GL mbedtls mbedx509 crypto
     ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
 )
 
@@ -308,14 +335,14 @@ target_compile_definitions(ref_soft PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
 target_link_libraries(ref_soft PRIVATE
     backtrace_custom library_suffix
     MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedcrypto mbedx509
+    GL mbedtls mbedx509 crypto
     ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
 )
 
 add_library(xash STATIC
     ${ENGINE_COMMON} ${ENGINE_IMAGELIB} ${ENGINE_SOUNDLIB}
     ${ENGINE_HTTP} ${ENGINE_SERVER} ${ENGINE_CLIENT}
-    ${ENGINE_POSIX} ${ENGINE_IOS_C} ${ENGINE_IOS_M}
+    ${ENGINE_POSIX} ${ENGINE_IOS_C} ${ENGINE_IOS_M} ${ENGINE_SDL}
     ${LAUNCHER_IOS_MM}
     ${PUBLIC_SRC} public/build_vcs.c
     ${FILESYSTEM_SRC}
@@ -324,27 +351,10 @@ add_library(xash STATIC
     $<TARGET_OBJECTS:ref_soft>
     ref/null/r_context.c
 )
-target_include_directories(xash PUBLIC ${ENGINE_INCS})
+target_include_directories(xash PUBLIC ${ENGINE_INCS} ${SDL_INCS})
 target_include_directories(xash PRIVATE public filesystem ref/common ref/gl ref/soft)
 
-# Find and link SDL framework on Apple platforms
-# The SDL framework headers internally use #include <SDL2/...> prefix,
-# so both the Headers dir and its parent must be in the include path.
-find_library(SDL2_FRAMEWORK SDL2 PATHS /Library/Frameworks)
-find_library(SDL3_FRAMEWORK SDL3 PATHS /Library/Frameworks)
-if(SDL3_FRAMEWORK)
-    message(STATUS "Found SDL3 framework at: ${SDL3_FRAMEWORK}")
-    get_filename_component(SDL3_PARENT ${SDL3_FRAMEWORK} DIRECTORY)
-    target_include_directories(xash PUBLIC "${SDL3_FRAMEWORK}/Headers" ${SDL3_PARENT})
-    target_link_libraries(xash PUBLIC ${SDL3_FRAMEWORK})
-elseif(SDL2_FRAMEWORK)
-    message(STATUS "Found SDL2 framework at: ${SDL2_FRAMEWORK}")
-    get_filename_component(SDL2_PARENT ${SDL2_FRAMEWORK} DIRECTORY)
-    target_include_directories(xash PUBLIC "${SDL2_FRAMEWORK}/Headers" ${SDL2_PARENT})
-    target_link_libraries(xash PUBLIC ${SDL2_FRAMEWORK})
-else()
-    message(FATAL_ERROR "SDL2 or SDL3 framework not found at /Library/Frameworks")
-endif()
+target_link_libraries(xash PUBLIC ${SDL_LIBS})
 
 target_compile_definitions(xash PRIVATE
     ENGINE_DLL=1
@@ -358,7 +368,7 @@ set_source_files_properties(
 target_link_libraries(xash PUBLIC
     backtrace_custom library_suffix
     MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedcrypto mbedx509
+    GL mbedtls mbedx509 crypto
     ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
 )
 
