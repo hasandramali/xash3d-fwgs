@@ -279,7 +279,7 @@ static NSString *kKeyDownloadTime = @"download_time";
     }
 
     mz_uint count = mz_zip_reader_get_num_files(&zip);
-    NSString *destCanon = [[NSURL fileURLWithPath:destDir].URLStandardizingURL path];
+    NSString *destCanon = [[NSURL fileURLWithPath:destDir].URLByStandardizingPath path];
     NSError *err = nil;
 
     for (mz_uint i = 0; i < count; i++) {
@@ -290,7 +290,7 @@ static NSString *kKeyDownloadTime = @"download_time";
         if (!name) continue;
 
         NSString *fullPath = [destDir stringByAppendingPathComponent:name];
-        NSString *fullCanon = [[NSURL fileURLWithPath:fullPath].URLStandardizingURL path];
+        NSString *fullCanon = [[NSURL fileURLWithPath:fullPath].URLByStandardizingPath path];
         if (![fullCanon hasPrefix:destCanon]) {
             err = [NSError errorWithDomain:@"GameLibDownloader" code:0 userInfo:@{NSLocalizedDescriptionKey: @"Zip path traversal detected"}];
             break;
