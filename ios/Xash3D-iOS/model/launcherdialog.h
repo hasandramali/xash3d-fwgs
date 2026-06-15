@@ -27,9 +27,17 @@ extern XashGameStatus_t g_iStartGameStatus;
 
 extern int g_iArgc;
 extern char **g_pszArgv;
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 const char *IOS_GetDocsDir();
 const char *IOS_GetBundleDir();
 void IOS_SetDefaultArgs();
 BOOL IOS_IsResourcesReady();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* launcherdialog_h */

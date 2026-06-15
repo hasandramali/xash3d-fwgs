@@ -44,15 +44,16 @@ extern "C" const char *IOS_GetDocsDir()
     return dir;
 }
 
-const char *IOS_GetBundleDir()
+extern "C" const char *IOS_GetBundleDir()
 {
     NSString *path = [[NSBundle mainBundle] bundlePath];
     static char c_path[256];
-    strcpy(c_path, [path UTF8String]);
+    strncpy(c_path, [path UTF8String], sizeof(c_path));
+    c_path[sizeof(c_path) - 1] = '\0';
     return c_path;
 }
 
-BOOL IOS_IsResourcesReady()
+extern "C" BOOL IOS_IsResourcesReady()
 {
     NSString *doc = [NSString stringWithUTF8String:IOS_GetDocsDir()];
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -71,7 +72,7 @@ void IOS_PrepareView()
     [window makeKeyAndVisible];
 }
 
-void IOS_SetDefaultArgs()
+extern "C" void IOS_SetDefaultArgs()
 {
     static char width_str[32] = "0";
     static char height_str[32] = "0";
@@ -84,8 +85,8 @@ void IOS_SetDefaultArgs()
     CGFloat scale_screen = [UIScreen mainScreen].scale;
     CGFloat width = size_screen.width * scale_screen;
     CGFloat height = size_screen.height * scale_screen;
-    sprintf(width_str, "%d", (int)width);
-    sprintf(height_str, "%d", (int)height);
+    snprintf(width_str, sizeof(width_str), "%d", (int)width);
+    snprintf(height_str, sizeof(height_str), "%d", (int)height);
     g_pszArgv = args;
     g_iArgc = 10;
 }
@@ -122,15 +123,15 @@ extern "C" void IOS_Log(const char *text)
     NSLog(@"Xash: %@", nstext);
 }
 
-void IOS_OpenURL(const char *url)
+extern "C" void IOS_OpenURL(const char *url)
 {
     [[UIApplication sharedApplication] openURL:[NSURL URLWithString:[[NSString alloc] initWithUTF8String:url]] options:@{} completionHandler:nil];
 }
 
-void IOS_GetSystemVersion(int *major, int *minor, int *patch)
+extern "C" void IOS_GetSystemVersion(int *major, int *minor, int *patch)
 {
     auto ver = [[NSProcessInfo processInfo] operatingSystemVersion];
-    if(major) *major = ver.majorVersion;
-    if(minor) *minor = ver.minorVersion;
-    if(patch) *patch = ver.patchVersion;
+    if(major) *major = (int)ver.majorVersion;
+    if(minor) *minor = (int)ver.minorVersion;
+    if(patch) *patch = (int)ver.patchVersion;
 }
