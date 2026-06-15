@@ -204,6 +204,43 @@ file(GLOB REF_SOFT_SRC    ref/soft/*.c)
 # Exclude build_vcs.c from public (built separately)
 list(REMOVE_ITEM PUBLIC_SRC ${CMAKE_SOURCE_DIR}/public/build_vcs.c)
 
+# Generate VCS build info for build_vcs.c
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+execute_process(
+    COMMAND git rev-parse --abbrev-ref HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_BRANCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+execute_process(
+    COMMAND git log -1 --format=%ct
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_COMMIT_DATE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT GIT_COMMIT)
+    set(GIT_COMMIT "unknown")
+endif()
+if(NOT GIT_BRANCH)
+    set(GIT_BRANCH "unknown")
+endif()
+if(NOT GIT_COMMIT_DATE)
+    set(GIT_COMMIT_DATE "0")
+endif()
+set_source_files_properties(
+    ${CMAKE_SOURCE_DIR}/public/build_vcs.c
+    PROPERTIES COMPILE_DEFINITIONS
+    "XASH_BUILD_COMMIT=\"${GIT_COMMIT}\";XASH_BUILD_BRANCH=\"${GIT_BRANCH}\";XASH_BUILD_COMMIT_DATE=\"${GIT_COMMIT_DATE}\""
+)
+
 # Exclude SDL_uikit_main.c (Xcode app provides its own main())
 list(REMOVE_ITEM ENGINE_IOS_C ${CMAKE_SOURCE_DIR}/engine/platform/ios/SDL_uikit_main.c)
 
