@@ -749,8 +749,6 @@
 				3DDBD7F32843DC1700C4D2C9 /* libopus.a in Frameworks */,
 				3DDBD7F52843DC1F00C4D2C9 /* libpng16.a in Frameworks */,
 				3DDBD7F72843DC2700C4D2C9 /* libz.a in Frameworks */,
-				3DF9829227F9AF820030D0B5 /* libSDL2.a in Frameworks */,
-				3DF9829327F9AF820030D0B5 /* libSDL2main.a in Frameworks */,
 				3DF9829427F9AF820030D0B5 /* libfreetype.a in Frameworks */,
 				3DF981BE27F9AE400030D0B5 /* libimgui_ext.a in Frameworks */,
 				3DF981BF27F9AE400030D0B5 /* libxash.a in Frameworks */,
@@ -1754,6 +1752,11 @@
 					"$(PROJECT_DIR)/Resources",
 					"$(PROJECT_DIR)/cmake-build",
 				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					SDL2,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.wav.xash3d;
 				PRODUCT_NAME = Xash3D;
 				PROVISIONING_PROFILE_SPECIFIER = xash3ddevelopment;
@@ -1806,6 +1809,11 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/Resources",
 					"$(PROJECT_DIR)/cmake-build",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					SDL2,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.wav.xash3d;
 				PRODUCT_NAME = Xash3D;
