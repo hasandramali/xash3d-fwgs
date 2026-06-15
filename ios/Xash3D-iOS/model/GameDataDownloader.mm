@@ -14,6 +14,7 @@
 #include <mbedtls/private/rsa.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/md.h>
+#include <psa/crypto.h>
 
 extern "C" {
 #include "../../../3rdparty/lzma/lzma.h"
@@ -170,17 +171,32 @@ static bytes decryptAES(const uint8_t *sk, const uint8_t *d, size_t l) {
 #pragma mark - RSA OAEP
 
 static NSData *rsaEncryptOAEP(const uint8_t *pk, size_t pl, const uint8_t *d, size_t dl) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ psa_crypto_init(); });
+
     mbedtls_pk_context ctx; mbedtls_pk_init(&ctx);
     int r = mbedtls_pk_parse_public_key(&ctx, pk, pl);
     if (r != 0) { mbedtls_pk_free(&ctx); return nil; }
-    mbedtls_rsa_context *rsa = (mbedtls_rsa_context *)ctx.pk_ctx;
-    if (!rsa) { mbedtls_pk_free(&ctx); return nil; }
-    size_t kl = mbedtls_rsa_get_len(rsa);
-    NSMutableData *res = [NSMutableData dataWithLength:kl];
-    r = mbedtls_rsa_rsaes_oaep_encrypt(rsa, mbedtls_rand, NULL, MBEDTLS_RSA_PUBLIC, NULL, 0, dl, d,
-                                         (uint8_t *)res.mutableBytes);
+
+    psa_key_attributes_t attributes = psa_key_attributes_init();
+    r = mbedtls_pk_get_psa_attributes(&ctx, PSA_KEY_USAGE_ENCRYPT, &attributes);
+    if (r != 0) { mbedtls_pk_free(&ctx); return nil; }
+
+    mbedtls_svc_key_id_t key_id = 0;
+    r = mbedtls_pk_import_into_psa(&ctx, &attributes, &key_id);
     mbedtls_pk_free(&ctx);
-    return r == 0 ? res : nil;
+    if (r != 0) return nil;
+
+    size_t kl = (psa_get_key_bits(&attributes) + 7) / 8;
+    NSMutableData *res = [NSMutableData dataWithLength:kl];
+    size_t olen = 0;
+    psa_status_t ps = psa_asymmetric_encrypt(key_id, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_1),
+                                              d, dl, NULL, 0,
+                                              (uint8_t *)res.mutableBytes, kl, &olen);
+    psa_destroy_key(key_id);
+    if (ps != PSA_SUCCESS) return nil;
+    res.length = olen;
+    return res;
 }
 
 #pragma mark - Chunk decrypt (depot key)
@@ -475,7 +491,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     if (!eb) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"RSA failed"}]; return NO; }
 
     NSMutableData *bc = [NSMutableData dataWithData:eb]; [bc appendBytes:challenge.data() length:challenge.size()];
-    uint32_t crc = crc32(0, (const uint8_t *)eb.bytes, (uInt)eb.length);
+    uint32_t crc = (uint32_t)crc32(0, (const uint8_t *)eb.bytes, (uInt)eb.length);
     bytes er; auto r1 = packFixed32(1304); er.insert(er.end(), r1.begin(), r1.end());
     auto r2 = packFixed64(-1); er.insert(er.end(), r2.begin(), r2.end());
     auto r3 = packFixed64(-1); er.insert(er.end(), r3.begin(), r3.end());
@@ -856,7 +872,9 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
 #pragma mark - GameDataDownloader
 
-@implementation GameDataDownloader
+@implementation GameDataDownloader {
+    NSString *_docsDir;
+}
 
 - (instancetype)initWithDocumentsDir:(NSString *)docsDir {
     if (self = [super init]) _docsDir = [docsDir copy];
@@ -874,7 +892,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         int appId = [info[@"appId"] intValue];
         NSArray *depotIds = info[@"depotIds"];
         NSString *displayName = info[@"displayName"];
-        NSString *targetDir = [self.docsDir stringByAppendingPathComponent:gameDir];
+        NSString *targetDir = [_docsDir stringByAppendingPathComponent:gameDir];
 
         SteamCMClient *client = [[SteamCMClient alloc] initWithOnStatus:^(NSString *m) { if (onProgress) onProgress(m, 0); }];
 
