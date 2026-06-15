@@ -1,4 +1,5 @@
 #import "GameDataDownloader.h"
+#define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #include <vector>
 #include <string>
 #include <mutex>
@@ -172,7 +173,7 @@ static NSData *rsaEncryptOAEP(const uint8_t *pk, size_t pl, const uint8_t *d, si
     mbedtls_pk_context ctx; mbedtls_pk_init(&ctx);
     int r = mbedtls_pk_parse_public_key(&ctx, pk, pl);
     if (r != 0) { mbedtls_pk_free(&ctx); return nil; }
-    mbedtls_rsa_context *rsa = mbedtls_pk_rsa(ctx);
+    mbedtls_rsa_context *rsa = (mbedtls_rsa_context *)ctx.pk_ctx;
     if (!rsa) { mbedtls_pk_free(&ctx); return nil; }
     size_t kl = mbedtls_rsa_get_len(rsa);
     NSMutableData *res = [NSMutableData dataWithLength:kl];
