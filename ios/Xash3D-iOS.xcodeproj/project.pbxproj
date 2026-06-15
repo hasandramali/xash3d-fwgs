@@ -1732,6 +1732,7 @@
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)",
+					/Library/Frameworks,
 				);
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1790,6 +1791,7 @@
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)",
+					/Library/Frameworks,
 				);
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
