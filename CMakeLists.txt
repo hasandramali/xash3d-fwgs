@@ -245,7 +245,7 @@ set_source_files_properties(
 )
 
 # Exclude SDL_uikit_main.c (Xcode app provides its own main())
-list(REMOVE_ITEM ENGINE_IOS_C ${CMAKE_SOURCE_DIR}/engine/platform/ios/SDL_uikit_main.c)
+# list(REMOVE_ITEM ENGINE_IOS_C ${CMAKE_SOURCE_DIR}/engine/platform/ios/SDL_uikit_main.c)
 
 # launchdialog.m uses manual retain/release; disable ARC for this file
 set_source_files_properties(
