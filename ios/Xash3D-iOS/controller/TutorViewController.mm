@@ -106,8 +106,7 @@
 	psv.contentOffset = CGPointMake(psv.frame.size.width * i, psv.contentOffset.y);
 	
 	{
-		//UIDeviceOrientation orientation = [[UIDevice currentDevice] orientation];
-		UIDeviceOrientation orientation = [UIApplication sharedApplication].statusBarOrientation;
+		UIDeviceOrientation orientation = [[UIDevice currentDevice] orientation];
 		
 		[self.PowerCableCenterXConstraint setActive:false];
 		[self.PowerCableCenterYConstraint setActive:false];
@@ -158,7 +157,7 @@
 
 - (IBAction)ResourceDownloadLinkButtonActivated:(UIButton *)sender
 {
-	[[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/FWGS/xash3d-fwgs"]];
+	[[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/FWGS/xash3d-fwgs"] options:@{} completionHandler:nil];
 }
 
 - (IBAction)OnResourcesReady:(id)sender
