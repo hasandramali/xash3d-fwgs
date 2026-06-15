@@ -27,6 +27,7 @@
 @end
 
 @interface TutorViewController()
+@property (retain, nonatomic) TutorScrollViewDelegate *ScrollDelegate;
 @property (retain, nonatomic) IBOutlet NSLayoutConstraint *PowerCableCenterXConstraint;
 @property (retain, nonatomic) IBOutlet NSLayoutConstraint *PowerCableCenterYConstraint;
 @property (retain, nonatomic) IBOutlet NSLayoutConstraint *PowerCablePortraitConstraint;
@@ -42,6 +43,16 @@
 
 @implementation TutorViewController
 
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations
+{
+	return UIInterfaceOrientationMaskPortrait;
+}
+
+- (BOOL)shouldAutorotate
+{
+	return YES;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     // Do any additional setup after loading the view.
@@ -53,6 +64,7 @@
 	[psv addSubview:ptc];
 	TutorScrollViewDelegate *tsvd = [[TutorScrollViewDelegate alloc] init];
 	tsvd.m_pTutorViewController = self;
+	self.ScrollDelegate = tsvd;
 	psv.delegate = tsvd;
 	psv.pagingEnabled = YES;
 	
@@ -82,9 +94,11 @@
 	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
 		// waiting for resources
 		while( !IOS_IsResourcesReady() ) {
-			[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
+			[NSThread sleepForTimeInterval:0.5];
 		}
-		[self OnResourcesReady:nil];
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[self OnResourcesReady:nil];
+		});
 	});
 }
 

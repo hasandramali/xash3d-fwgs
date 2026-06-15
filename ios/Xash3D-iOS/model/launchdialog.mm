@@ -7,11 +7,16 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "launcherdialog.h"
 
 char *g_szLibrarySuffix = NULL;
 float g_iOSVer;
+static UIWindow *g_launcherWindow = nil;
+static FILE *g_iosLogFile = NULL;
 
 extern int Q_buildnum( void );
 
@@ -52,6 +57,65 @@ extern "C" const char *IOS_GetBundleDir()
     return c_path;
 }
 
+static void IOS_WriteLogLine( const char *text )
+{
+    if( !text ) text = "";
+    if( !g_iosLogFile )
+    {
+        char path[1024];
+        snprintf( path, sizeof( path ), "%s/xash_ios.log", IOS_GetDocsDir() );
+        g_iosLogFile = fopen( path, "a" );
+    }
+
+    if( g_iosLogFile )
+    {
+        fprintf( g_iosLogFile, "%s\n", text );
+        fflush( g_iosLogFile );
+    }
+}
+
+static void IOS_SignalHandler( int sig )
+{
+    char msg[64];
+    int len = snprintf( msg, sizeof( msg ), "Xash: fatal signal %d\n", sig );
+    if( len > 0 )
+    {
+        char path[1024];
+        snprintf( path, sizeof( path ), "%s/xash_ios.log", IOS_GetDocsDir() );
+        int fd = open( path, O_WRONLY | O_CREAT | O_APPEND, 0644 );
+        if( fd >= 0 )
+        {
+            write( fd, msg, (size_t)len );
+            close( fd );
+        }
+    }
+    signal( sig, SIG_DFL );
+    raise( sig );
+}
+
+static void IOS_UncaughtExceptionHandler( NSException *exception )
+{
+    NSString *line = [NSString stringWithFormat:@"Xash: uncaught exception %@: %@\n%@",
+                      exception.name, exception.reason, exception.callStackSymbols];
+    IOS_WriteLogLine( [line UTF8String] );
+}
+
+static void IOS_InstallLogHandlers()
+{
+    static BOOL installed = NO;
+    if( installed ) return;
+    installed = YES;
+
+    NSSetUncaughtExceptionHandler( IOS_UncaughtExceptionHandler );
+    signal( SIGABRT, IOS_SignalHandler );
+    signal( SIGBUS, IOS_SignalHandler );
+    signal( SIGFPE, IOS_SignalHandler );
+    signal( SIGILL, IOS_SignalHandler );
+    signal( SIGSEGV, IOS_SignalHandler );
+
+    IOS_WriteLogLine( "Xash: iOS launcher starting" );
+}
+
 extern "C" BOOL IOS_IsResourcesReady()
 {
     NSString *doc = [NSString stringWithUTF8String:IOS_GetDocsDir()];
@@ -62,13 +126,14 @@ extern "C" BOOL IOS_IsResourcesReady()
 
 void IOS_PrepareView()
 {
-    UIWindow *window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     NSBundle *bundle = [NSBundle mainBundle];
     NSString *storyboardName = @"TutorStoryboard";
     UIStoryboard *storyboard = [UIStoryboard storyboardWithName:storyboardName bundle:bundle];
     UIViewController * controller = storyboard.instantiateInitialViewController;
-    [window setRootViewController:controller];
-    [window makeKeyAndVisible];
+    g_launcherWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+    [g_launcherWindow setRootViewController:controller];
+    [g_launcherWindow makeKeyAndVisible];
+    IOS_WriteLogLine( "Xash: launcher view prepared" );
 }
 
 extern "C" void IOS_SetDefaultArgs()
@@ -92,19 +157,25 @@ extern "C" void IOS_SetDefaultArgs()
 
 extern "C" void IOS_LaunchDialog( void )
 {
+    IOS_InstallLogHandlers();
+
     NSString *ver = [[UIDevice currentDevice] systemVersion];
     g_iOSVer = [ver floatValue];
 
-    if(!IOS_IsResourcesReady())
-    {
-        g_iStartGameStatus = XGS_WAITING;
-        IOS_PrepareView();
-    }
+    g_iStartGameStatus = XGS_WAITING;
+    IOS_PrepareView();
+
     @autoreleasepool {
         while( g_iStartGameStatus == XGS_WAITING ) {
             [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
         }
     }
+
+    IOS_WriteLogLine( "Xash: launcher finished, starting engine" );
+    [g_launcherWindow setHidden:YES];
+    [g_launcherWindow setRootViewController:nil];
+    g_launcherWindow = nil;
+
     IOS_SetDefaultArgs();
 }
 
@@ -120,6 +191,7 @@ extern "C" void IOS_Log(const char *text)
 {
     NSString *nstext =[NSString stringWithUTF8String:text];
     NSLog(@"Xash: %@", nstext);
+    IOS_WriteLogLine( text );
 }
 
 extern "C" void IOS_OpenURL(const char *url)
