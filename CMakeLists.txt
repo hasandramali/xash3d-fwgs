@@ -22,8 +22,6 @@ add_definitions(
     -DHAVE_STRLCPY -DHAVE_STRLCAT -D_XASH_SDLMAIN=1
 )
 
-option(XASH_GL4ES "Enable gl4es renderer" OFF)
-
 set(ENGINE_INCS
     ${CMAKE_SOURCE_DIR}/engine
     ${CMAKE_SOURCE_DIR}/engine/common
@@ -86,11 +84,9 @@ elseif(TARGET tfpsacrypto)
     set_target_properties(tfpsacrypto PROPERTIES OUTPUT_NAME crypto)
 endif()
 
-# gl4es
-add_subdirectory(3rdparty/gl4es/gl4es EXCLUDE_FROM_ALL)
-if(TARGET GL)
-    set_target_properties(GL PROPERTIES OUTPUT_NAME 3rdparty-gl4es)
-endif()
+# OpenGLES framework (replaces gl4es which doesn't compile on iOS)
+add_library(GL INTERFACE)
+target_link_libraries(GL INTERFACE ${OpenGLES_LIB})
 
 # opus audio codec
 set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "Build opus as static")
@@ -239,11 +235,7 @@ target_link_libraries(ref_common PRIVATE
 
 add_library(ref_gl OBJECT ${REF_GL_SRC})
 target_include_directories(ref_gl PRIVATE ${CMAKE_SOURCE_DIR}/ref/gl ${REF_INCS})
-if(XASH_GL4ES)
-    target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1 XASH_GL4ES=1 XASH_GL_STATIC=1)
-else()
-    target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
-endif()
+target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
 target_link_libraries(ref_gl PRIVATE
     backtrace_custom library_suffix
     MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
