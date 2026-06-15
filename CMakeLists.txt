@@ -207,6 +207,12 @@ list(REMOVE_ITEM PUBLIC_SRC ${CMAKE_SOURCE_DIR}/public/build_vcs.c)
 # Exclude SDL_uikit_main.c (Xcode app provides its own main())
 list(REMOVE_ITEM ENGINE_IOS_C ${CMAKE_SOURCE_DIR}/engine/platform/ios/SDL_uikit_main.c)
 
+# launchdialog.m uses manual retain/release; disable ARC for this file
+set_source_files_properties(
+    ${CMAKE_SOURCE_DIR}/engine/platform/ios/launchdialog.m
+    PROPERTIES COMPILE_FLAGS "-fno-objc-arc"
+)
+
 # Define include directories for the renderer components (excluding client/server)
 set(REF_INCS
     ${CMAKE_SOURCE_DIR}/ref/common
