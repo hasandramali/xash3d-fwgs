@@ -1694,7 +1694,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cmake -G \"Xcode\" -DCMAKE_BUILD_TYPE=$(CONFIGURATION) -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/../3rdparty/ios-cmake/ios.toolchain.cmake\" -DPLATFORM=OS64  -DXASH_STATIC_GAMELIB=1 -DXASH_GL4ES=1 -DXASH_GLES=1  -DDEPLOYMENT_TARGET=13.0 -S \"${SRCROOT}/../\" -B \"${SRCROOT}/cmake-build\"\n";
+			shellScript = "cmake -G \"Xcode\" -DCMAKE_BUILD_TYPE=$(CONFIGURATION) -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/../3rdparty/ios-cmake/ios.toolchain.cmake\" -DPLATFORM=OS64 -DXASH_STATIC_GAMELIB=1 -DXASH_GLES=1 -DDEPLOYMENT_TARGET=13.0 -S \"${SRCROOT}/../\" -B \"${SRCROOT}/cmake-build\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1752,9 +1752,21 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/Resources",
 					"$(PROJECT_DIR)/cmake-build",
+					"$(PROJECT_DIR)/cmake-build/build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
+					"$(PROJECT_DIR)/cmake-build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
+					"-lvorbisfile",
+					"-lvorbis",
+					"-lopusfile",
+					"-lopus",
+					"-logg",
+					"-lbacktrace_custom",
+					"-llibrary_suffix",
+					"-lMultiEmulator",
+					"-lbz2_static",
+					"-lmbedx509",
 					"-framework",
 					SDL2,
 				);
@@ -1811,9 +1823,21 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/Resources",
 					"$(PROJECT_DIR)/cmake-build",
+					"$(PROJECT_DIR)/cmake-build/build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
+					"$(PROJECT_DIR)/cmake-build/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
+					"-lvorbisfile",
+					"-lvorbis",
+					"-lopusfile",
+					"-lopus",
+					"-logg",
+					"-lbacktrace_custom",
+					"-llibrary_suffix",
+					"-lMultiEmulator",
+					"-lbz2_static",
+					"-lmbedx509",
 					"-framework",
 					SDL2,
 				);

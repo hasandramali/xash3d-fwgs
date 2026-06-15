@@ -118,6 +118,8 @@ target_link_libraries(opusfile PUBLIC ogg opus)
 # bzip2 compression
 set(ENABLE_APP OFF CACHE BOOL "Disable bzip2 app")
 set(ENABLE_TESTS OFF CACHE BOOL "Disable bzip2 tests")
+set(ENABLE_STATIC_LIB ON CACHE BOOL "Build static bzip2")
+set(ENABLE_SHARED_LIB OFF CACHE BOOL "Disable shared bzip2")
 add_subdirectory(3rdparty/bzip2/bzip2 EXCLUDE_FROM_ALL)
 
 # ============================================================================
@@ -154,6 +156,13 @@ target_link_libraries(vorbis PUBLIC ogg)
 add_library(vorbisfile STATIC 3rdparty/vorbis/vorbis-src/lib/vorbisfile.c)
 target_include_directories(vorbisfile PUBLIC 3rdparty/vorbis/vorbis-src/include)
 target_link_libraries(vorbisfile PUBLIC vorbis)
+
+set(XASH_IOS_ENGINE_LINK_LIBS
+    backtrace_custom library_suffix
+    MultiEmulator bz2_static opus opusfile ogg vorbisfile vorbis
+    GL mbedtls mbedx509 crypto
+    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+)
 
 # MultiEmulator (SHA/MD5 hashing)
 file(GLOB ME_SRC 3rdparty/MultiEmulator/src/*.c)
@@ -313,30 +322,21 @@ add_library(ref_common OBJECT ${REF_COMMON_SRC})
 target_include_directories(ref_common PRIVATE ${REF_INCS})
 target_compile_definitions(ref_common PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
 target_link_libraries(ref_common PRIVATE
-    backtrace_custom library_suffix
-    MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedx509 crypto
-    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+    ${XASH_IOS_ENGINE_LINK_LIBS}
 )
 
 add_library(ref_gl OBJECT ${REF_GL_SRC})
 target_include_directories(ref_gl PRIVATE ${CMAKE_SOURCE_DIR}/ref/gl ${REF_INCS})
 target_compile_definitions(ref_gl PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
 target_link_libraries(ref_gl PRIVATE
-    backtrace_custom library_suffix
-    MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedx509 crypto
-    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+    ${XASH_IOS_ENGINE_LINK_LIBS}
 )
 
 add_library(ref_soft OBJECT ${REF_SOFT_SRC})
 target_include_directories(ref_soft PRIVATE ${CMAKE_SOURCE_DIR}/ref/soft ${REF_INCS})
 target_compile_definitions(ref_soft PRIVATE REF_DLL=1 XASH_GLES3COMPAT=1)
 target_link_libraries(ref_soft PRIVATE
-    backtrace_custom library_suffix
-    MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedx509 crypto
-    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+    ${XASH_IOS_ENGINE_LINK_LIBS}
 )
 
 add_library(xash STATIC
@@ -366,10 +366,7 @@ set_source_files_properties(
 )
 
 target_link_libraries(xash PUBLIC
-    backtrace_custom library_suffix
-    MultiEmulator bzip2 opus opusfile ogg vorbis vorbisfile
-    GL mbedtls mbedx509 crypto
-    ${IOS_FRAMEWORKS} Threads::Threads ${Z_LIB}
+    ${XASH_IOS_ENGINE_LINK_LIBS}
 )
 
 # ============================================================================
