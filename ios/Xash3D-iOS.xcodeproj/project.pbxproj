@@ -113,7 +113,7 @@
 			containerPortal = 3DF981D827F9AE940030D0B5 /* xash3d.xcodeproj */;
 			proxyType = 2;
 			remoteGlobalIDString = FC6C00806FD443639641F078;
-			remoteInfo = libmpg123;
+			remoteInfo = mpg123;
 		};
 		3D691BD42843CF2600D5221C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
