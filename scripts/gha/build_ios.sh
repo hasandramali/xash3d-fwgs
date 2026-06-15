@@ -19,6 +19,13 @@ cmake -G Xcode \
 
 cmake --build ios/cmake-build --config Release || die
 
+# Flatten CMake-built static libraries for the hand-written launcher project.
+# Xcode's generated product path changes between generators/toolchains, so the
+# launcher links from this stable directory instead of guessing per-target paths.
+rm -rf ios/cmake-build/libs || die
+mkdir -p ios/cmake-build/libs || die
+find ios/cmake-build -path ios/cmake-build/libs -prune -o -name 'lib*.a' -exec cp -f {} ios/cmake-build/libs/ \; || die
+
 # Build hlsdk game libraries (bundled for reference, downloaded at runtime via GameLibDownloader)
 pushd hlsdk || die
 mkdir -p ../ios/libs || die
