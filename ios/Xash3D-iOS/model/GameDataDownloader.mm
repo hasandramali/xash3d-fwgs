@@ -9,8 +9,8 @@
 #include <zlib.h>
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 #include "miniz.h"
-#include <mbedtls/aes.h>
-#include <mbedtls/rsa.h>
+#include <mbedtls/private/aes.h>
+#include <mbedtls/private/rsa.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/md.h>
 
@@ -63,6 +63,14 @@ static NSData *steamPublicKey() {
 #pragma mark - Proto helpers
 
 typedef std::vector<uint8_t> bytes;
+
+struct SteamProto {
+    static uint64_t readVarint(const uint8_t *d, size_t &p, size_t l) {
+        uint64_t v = 0; int s = 0;
+        while (p < l) { uint8_t b = d[p++]; v |= (uint64_t)(b & 0x7F) << s; s += 7; if (!(b & 0x80)) return v; }
+        return v;
+    }
+};
 
 static bytes packVarint(int64_t val) {
     bytes buf; uint64_t v = (uint64_t)val;
@@ -244,6 +252,43 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     return result;
 }
 
+#pragma mark - GZIP decompression
+
+static NSData *gzipDecompress(NSData *data) {
+    if (!data || data.length == 0) return nil;
+    z_stream strm; memset(&strm, 0, sizeof(strm));
+    strm.next_in = (Bytef *)data.bytes;
+    strm.avail_in = (uInt)data.length;
+    if (inflateInit2(&strm, 15 + 16) != Z_OK) return nil;
+    NSMutableData *res = [NSMutableData dataWithLength:data.length * 4];
+    int ret;
+    do {
+        if (res.length < strm.total_out + 65536) res.length = strm.total_out + 65536;
+        strm.next_out = (Bytef *)res.mutableBytes + strm.total_out;
+        strm.avail_out = (uInt)(res.length - strm.total_out);
+        ret = inflate(&strm, Z_FINISH);
+    } while (ret == Z_OK);
+    inflateEnd(&strm);
+    if (ret != Z_STREAM_END) return nil;
+    res.length = strm.total_out;
+    return res;
+}
+
+#pragma mark - DNS resolution filter
+
+static NSArray *filterResolvableHosts(NSArray *hosts) {
+    NSMutableArray *res = [NSMutableArray array];
+    for (NSString *host in hosts) {
+        CFHostRef h = CFHostCreateWithName(NULL, (__bridge CFStringRef)host);
+        if (!h) continue;
+        Boolean ok = CFHostStartInfoResolution(h, kCFHostAddresses, NULL);
+        CFRelease(h);
+        if (ok) [res addObject:host];
+        else NSLog(@"[cdn] Skipping unresolvable host: %@", host);
+    }
+    return res;
+}
+
 #pragma mark - Steam CM Client
 
 @interface SteamCMClient : NSObject {
@@ -253,6 +298,9 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     int _currentSessionId;
     uint64_t _currentSteamId;
     void (^_onStatus)(NSString *);
+    NSThread *_heartbeatThread;
+    int _heartbeatSeconds;
+    BOOL _heartbeatRunning;
 }
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os;
 - (BOOL)connectWithError:(NSError **)error;
@@ -267,10 +315,10 @@ static NSData *unzipFirstEntry(NSData *zipData) {
 @implementation SteamCMClient
 
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os {
-    if (self = [super init]) { _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; }
+    if (self = [super init]) { _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; _heartbeatSeconds = 9; _heartbeatRunning = NO; }
     return self;
 }
-- (void)dealloc { [self disconnect]; }
+- (void)dealloc { [self stopHeartbeat]; [self disconnect]; }
 - (void)status:(NSString *)s { if (_onStatus) _onStatus(s); }
 
 - (BOOL)writeExact:(const uint8_t *)d length:(size_t)l {
@@ -297,7 +345,7 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     return NO;
 }
 
-- (void)disconnect { if (_sock >= 0) { close(_sock); _sock = -1; } }
+- (void)disconnect { [self stopHeartbeat]; if (_sock >= 0) { close(_sock); _sock = -1; } }
 
 - (void)sendRaw:(const bytes &)d {
     uint32_t len = (uint32_t)d.size(), magic = TCP_MAGIC;
@@ -311,6 +359,75 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     p.insert(p.end(), header.begin(), header.end()); p.insert(p.end(), body.begin(), body.end());
     bytes fp = _encrypted ? encryptAES(_sessionKey, p) : p;
     [self sendRaw:fp];
+}
+
+#pragma mark - Heartbeat
+
+- (void)startHeartbeat:(int)intervalSeconds {
+    [self stopHeartbeat];
+    _heartbeatSeconds = intervalSeconds;
+    _heartbeatRunning = YES;
+    __weak typeof(self) ws = self;
+    _heartbeatThread = [[NSThread alloc] initWithBlock:^{
+        while (![NSThread currentThread].isCancelled) {
+            [NSThread sleepForTimeInterval:_heartbeatSeconds];
+            if ([NSThread currentThread].isCancelled) break;
+            __strong typeof(ws) ss = ws;
+            if (!ss) break;
+            bytes body; auto f = packVarint((1<<3)|0); auto v = packVarint(1);
+            body.insert(body.end(),f.begin(),f.end()); body.insert(body.end(),v.begin(),v.end());
+            bytes hdr; auto h1 = packVarint((1<<3)|1); auto si = packFixed64(_currentSteamId);
+            hdr.insert(hdr.end(),h1.begin(),h1.end()); hdr.insert(hdr.end(),si.begin(),si.end());
+            auto h2 = packVarint((2<<3)|0); auto se = packFixed32(_currentSessionId);
+            hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
+            [ss sendProtobufMsg:1009 body:body header:hdr];
+        }
+    }];
+    _heartbeatThread.name = @"SteamCM-Heartbeat";
+    [_heartbeatThread start];
+}
+
+- (void)stopHeartbeat {
+    _heartbeatRunning = NO;
+    if (_heartbeatThread) {
+        [_heartbeatThread cancel];
+        _heartbeatThread = nil;
+    }
+}
+
+#pragma mark - Multi (emsg=1) message parsing
+
+- (NSArray<NSDictionary *> *)parseMultiMessage:(const bytes &)body {
+    size_t p = 0; uint64_t sizeUnzipped = 0; bytes msgBody;
+    while (p < body.size()) {
+        uint64_t tag = SteamProto::readVarint(body.data(), p, body.size());
+        int fn = (int)(tag>>3), wt = (int)(tag&7);
+        if (fn == 1 && wt == 0) sizeUnzipped = SteamProto::readVarint(body.data(), p, body.size());
+        else if (fn == 2 && wt == 2) { uint64_t l = SteamProto::readVarint(body.data(), p, body.size());
+            msgBody.assign(body.data()+p, body.data()+p+l); p += l; }
+        else { if (wt==0) SteamProto::readVarint(body.data(),p,body.size()); else if (wt==1) p+=8; else if (wt==2) { uint64_t l=SteamProto::readVarint(body.data(),p,body.size()); p+=l; } else if (wt==5) p+=4; else p++; }
+    }
+    NSData *subData = [NSData dataWithBytes:msgBody.data() length:msgBody.size()];
+    if (sizeUnzipped > 0) {
+        NSData *dec = gzipDecompress(subData);
+        if (dec) subData = dec;
+    }
+    NSMutableArray *msgs = [NSMutableArray array];
+    const uint8_t *dp = (const uint8_t *)subData.bytes;
+    size_t dl = subData.length, off = 0;
+    while (off + 4 <= dl) {
+        int subSize = readInt32LE(dp, off); off += 4;
+        if (subSize <= 0 || off + (size_t)subSize > dl) break;
+        int subEmsg = readInt32LE(dp, off) & 0x7FFFFFFF;
+        int hdrLen = readInt32LE(dp, off + 4);
+        size_t subOff = 8 + hdrLen;
+        if (subOff < (size_t)subSize) {
+            bytes subBody(dp + off + subOff, dp + off + subSize);
+            [msgs addObject:@{@"emsg":@(subEmsg), @"body":[NSData dataWithBytes:subBody.data() length:subBody.size()]}];
+        }
+        off += subSize;
+    }
+    return msgs;
 }
 
 - (BOOL)readMessageWithEmsg:(int*)oe body:(bytes*)ob isProto:(BOOL*)op error:(NSError**)err {
@@ -400,21 +517,16 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     for (int t = 0; t < 20 && !ok; t++) {
         if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto error:nil]) { usleep(100000); continue; }
         if (emsg == 1) {
-            size_t off = 0;
-            while (off < body.size()) {
-                int ss2 = readInt32LE(body.data(), off); off += 4;
-                if (ss2 <= 0 || off+(size_t)ss2 > body.size()) break;
-                bytes sm(body.begin()+off, body.begin()+off+ss2); off += ss2;
-                int se = readInt32LE(sm.data(),0) & 0x7FFFFFFF;
+            NSArray *subs = [self parseMultiMessage:body];
+            for (NSDictionary *sub in subs) {
+                int se = [sub[@"emsg"] intValue];
+                NSData *sd = sub[@"body"];
                 if (se == 751) {
-                    int hl = readInt32LE(sm.data(),4); size_t po = 8;
-                    if (hl > 0) po += hl;
-                    if (po < sm.size()) {
-                        bytes sb(sm.begin()+po, sm.end()); size_t sp = 0;
-                        SteamProto::readVarint(sb.data(), sp, sb.size());
-                        int lr = (int)SteamProto::readVarint(sb.data(), sp, sb.size());
-                        if (lr == 1) ok = YES;
-                    }
+                    const uint8_t *sp = (const uint8_t *)sd.bytes;
+                    size_t sl = sd.length, spp = 0;
+                    SteamProto::readVarint(sp, spp, sl);
+                    int lr = (int)SteamProto::readVarint(sp, spp, sl);
+                    if (lr == 1) ok = YES;
                 }
             }
         } else if (emsg == 751) {
@@ -425,6 +537,7 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     }
     if (!ok) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Login failed"}]; return NO; }
     [self status:@"Logged in to Steam"];
+    [self startHeartbeat:_heartbeatSeconds];
     return YES;
 }
 
@@ -439,9 +552,22 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
         if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
-        if (e == 5573) { size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size());
+        if (e == 1) {
+            NSArray *subs = [self parseMultiMessage:d];
+            for (NSDictionary *sub in subs) {
+                if ([sub[@"emsg"] intValue] == 5573) {
+                    NSData *sd = sub[@"body"];
+                    const uint8_t *sp = (const uint8_t *)sd.bytes; size_t sl = sd.length, spp = 0;
+                    SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl);
+                    int g=(int)SteamProto::readVarint(sp, spp, sl);
+                    if (g==appId) return YES;
+                }
+            }
+        } else if (e == 5573) {
+            size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size());
             SteamProto::readVarint(d.data(),sp,d.size()); SteamProto::readVarint(d.data(),sp,d.size());
-            int g=(int)SteamProto::readVarint(d.data(),sp,d.size()); if (g==appId) return YES; }
+            int g=(int)SteamProto::readVarint(d.data(),sp,d.size()); if (g==appId) return YES;
+        } else if (e == 757) return NO;
     }
     return NO;
 }
@@ -461,18 +587,18 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
         if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
-        if (e == 147) { [self parseServerList:d into:sv]; if (sv.count) return sv; }
+        if (e == 147) { [self parseServerList:d into:sv]; if (sv.count) return filterResolvableHosts(sv); }
         else if (e == 1) {
-            size_t off=0;
-            while (off<d.size()) {
-                int ss=readInt32LE(d.data(),off); off+=4;
-                if (ss<=0||off+(size_t)ss>d.size()) break;
-                bytes sm(d.begin()+off, d.begin()+off+ss); off+=ss;
-                int se2=readInt32LE(sm.data(),0)&0x7FFFFFFF;
-                if (se2==147) { int hl=readInt32LE(sm.data(),4); size_t bo=8+hl;
-                    if (bo<sm.size()) { bytes sb(sm.begin()+bo,sm.end()); [self parseServerList:sb into:sv]; if (sv.count) return sv; }}
+            NSArray *subs = [self parseMultiMessage:d];
+            for (NSDictionary *sub in subs) {
+                if ([sub[@"emsg"] intValue] == 147) {
+                    NSData *sd = sub[@"body"];
+                    bytes sb((const uint8_t *)sd.bytes, (const uint8_t *)sd.bytes + sd.length);
+                    [self parseServerList:sb into:sv];
+                }
             }
-        }
+            if (sv.count) return filterResolvableHosts(sv);
+        } else if (e == 757) break;
     }
     if (error) *error=[NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No CDN servers"}];
     return nil;
@@ -511,11 +637,23 @@ static NSData *unzipFirstEntry(NSData *zipData) {
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
         if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
-        if (e==5439) { size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size());
+        if (e==1) {
+            NSArray *subs = [self parseMultiMessage:d];
+            for (NSDictionary *sub in subs) {
+                if ([sub[@"emsg"] intValue] == 5439) {
+                    NSData *sd = sub[@"body"];
+                    const uint8_t *sp=(const uint8_t *)sd.bytes; size_t sl=sd.length, spp=0;
+                    SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl);
+                    int kl=(int)SteamProto::readVarint(sp, spp, sl);
+                    if (kl>0 && (size_t)kl<=sl-spp) return [NSData dataWithBytes:sp+spp length:kl];
+                }
+            }
+        } else if (e==5439) {
+            size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size());
             SteamProto::readVarint(d.data(),sp,d.size()); SteamProto::readVarint(d.data(),sp,d.size());
             int kl=(int)SteamProto::readVarint(d.data(),sp,d.size());
-            if (kl>0&&(size_t)kl<=d.size()-sp) return [NSData dataWithBytes:d.data()+sp length:kl]; }
-        else if (e==757) break;
+            if (kl>0&&(size_t)kl<=d.size()-sp) return [NSData dataWithBytes:d.data()+sp length:kl];
+        } else if (e==757) break;
     }
     if (error) *error=[NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No depot key"}];
     return nil;
@@ -541,15 +679,14 @@ static NSData *unzipFirstEntry(NSData *zipData) {
         if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
         if (e==147) { size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size()); return (int64_t)SteamProto::readVarint(d.data(),sp,d.size()); }
         else if (e==1) {
-            size_t off=0;
-            while (off<d.size()) {
-                int ss=readInt32LE(d.data(),off); off+=4;
-                if (ss<=0||off+(size_t)ss>d.size()) break;
-                bytes sm(d.begin()+off, d.begin()+off+ss); off+=ss;
-                int se2=readInt32LE(sm.data(),0)&0x7FFFFFFF;
-                if (se2==147) { int hl=readInt32LE(sm.data(),4); size_t bo=8+hl;
-                    if (bo<sm.size()) { bytes sb(sm.begin()+bo,sm.end()); size_t sp=0;
-                        SteamProto::readVarint(sb.data(),sp,sb.size()); return (int64_t)SteamProto::readVarint(sb.data(),sp,sb.size()); }}
+            NSArray *subs = [self parseMultiMessage:d];
+            for (NSDictionary *sub in subs) {
+                if ([sub[@"emsg"] intValue] == 147) {
+                    NSData *sd = sub[@"body"];
+                    const uint8_t *sp=(const uint8_t *)sd.bytes; size_t sl=sd.length, spp=0;
+                    SteamProto::readVarint(sp, spp, sl);
+                    return (int64_t)SteamProto::readVarint(sp, spp, sl);
+                }
             }
         } else if (e==757) break;
     }

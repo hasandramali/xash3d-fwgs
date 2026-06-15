@@ -41,6 +41,14 @@ static ISzAlloc g_Alloc = { SzAlloc, SzFree };
 #define ISzAlloc_Alloc(alloc, size) (alloc)->Alloc((alloc), (size))
 #define ISzAlloc_Free(alloc, address) (alloc)->Free((alloc), (address))
 
+#ifdef __cplusplus
+#define EXTERN_C_BEGIN extern "C" {
+#define EXTERN_C_END }
+#else
+#define EXTERN_C_BEGIN
+#define EXTERN_C_END
+#endif
+
 typedef int SRes;
 #define SZ_OK 0
 #define SZ_ERROR_DATA 1

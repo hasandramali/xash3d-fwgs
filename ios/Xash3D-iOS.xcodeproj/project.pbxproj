@@ -36,7 +36,7 @@
 		
 		3D4416DA231D1711001A0696 /* OpenGLES.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FDB96ED30DEFC9C700FAF19F /* OpenGLES.framework */; };
 		3D4416E4231D1893001A0696 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D525D7722252AAB00DD9932 /* Metal.framework */; };
-		3D5099E323CB0F7900F75CEA /* Xash3D-Full in Resources */ = {isa = PBXBuildFile; fileRef = 3D5099DA23CB0F7900F75CEA /* Xash3D-Full */; };
+
 		3D5E35DC227768B10073D791 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 3D5E35D6227768B10073D791 /* Icon.png */; };
 		3D5E35EC22776A8D0073D791 /* LaunchScreenStoryboard.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3D5E35EB22776A8D0073D791 /* LaunchScreenStoryboard.storyboard */; };
 		3D670D69227A30620030B7D1 /* Launch.png in Resources */ = {isa = PBXBuildFile; fileRef = 3D670D68227A30620030B7D1 /* Launch.png */; };
@@ -653,7 +653,7 @@
 		3D094FAF228F1D3B00F168C2 /* TutorViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TutorViewController.h; sourceTree = "<group>"; };
 		3D0FC1DB2278310100D9A961 /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		3D37322E229488AA00713C9C /* GLKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GLKit.framework; path = System/Library/Frameworks/GLKit.framework; sourceTree = SDKROOT; };
-		3D5099DA23CB0F7900F75CEA /* Xash3D-Full */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "Xash3D-Full"; path = "../Xash3D-Full"; sourceTree = "<group>"; };
+		
 		3D525D7722252AAB00DD9932 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		3D5E35D6227768B10073D791 /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Icon.png; path = Resources/Icon.png; sourceTree = "<group>"; };
 		3D5E35E922776A480073D791 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -838,7 +838,6 @@
 			isa = PBXGroup;
 			children = (
 				3DE829A7260F8F00009DABD0 /* Assets.xcassets */,
-				3D5099DA23CB0F7900F75CEA /* Xash3D-Full */,
 				3DC1E4A62289683100114D80 /* iTunes.png */,
 				3DC1E4A72289683100114D80 /* MacBook.png */,
 				3DC1E4B72289EA9E00114D80 /* GetXash3DResource.png */,
@@ -1689,7 +1688,6 @@
 				3DC1E4BD2289EA9E00114D80 /* GetXash3DResource.png in Resources */,
 				3DC1E4BF2289F18500114D80 /* Steam.png in Resources */,
 				3D5E35DC227768B10073D791 /* Icon.png in Resources */,
-				3D5099E323CB0F7900F75CEA /* Xash3D-Full in Resources */,
 				3D670D69227A30620030B7D1 /* Launch.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1757,6 +1755,8 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/include",
+					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/tf-psa-crypto/include",
+					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/include",
 					"$(SRCROOT)/../public",
 				);
 				INFOPLIST_FILE = Info.plist;
@@ -1808,6 +1808,8 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/include",
+					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/tf-psa-crypto/include",
+					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/include",
 					"$(SRCROOT)/../public",
 				);
 				INFOPLIST_FILE = Info.plist;

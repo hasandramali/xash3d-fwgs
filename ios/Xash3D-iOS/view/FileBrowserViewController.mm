@@ -312,8 +312,8 @@ static NSString *kCellID = @"FileCell";
 
 - (void)updatePasteButton
 {
-    if (self.toolbarItems.count >= 7) {
-        UIBarButtonItem *pasteBtn = self.toolbarItems[6];
+    if (self.toolbarItems.count >= 9) {
+        UIBarButtonItem *pasteBtn = self.toolbarItems[8];
         pasteBtn.enabled = (self.pasteboardPath != nil);
         if (self.isMoveOperation)
             pasteBtn.title = @"Move Here";
