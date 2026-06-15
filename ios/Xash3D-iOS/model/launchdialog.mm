@@ -15,11 +15,25 @@ float g_iOSVer;
 
 extern int Q_buildnum( void );
 
-enum XashGameStatus_e g_iStartGameStatus = XGS_SKIP;
+XashGameStatus_t g_iStartGameStatus = XGS_SKIP;
+
+int g_iArgc = 0;
+char **g_pszArgv = NULL;
+
+extern "C" int IOS_GetArgs( char ***out )
+{
+    *out = g_pszArgv;
+    return g_iArgc;
+}
+
+extern "C" const char *IOS_GetExecDir()
+{
+    return IOS_GetBundleDir();
+}
 
 void IOS_StartBackgroundTask() { /* */ }
 
-const char *IOS_GetDocsDir()
+extern "C" const char *IOS_GetDocsDir()
 {
     static const char *dir = nil;
     if( dir ) return dir;
@@ -76,7 +90,7 @@ void IOS_SetDefaultArgs()
     g_iArgc = 10;
 }
 
-void IOS_LaunchDialog( void )
+extern "C" void IOS_LaunchDialog( void )
 {
     NSString *ver = [[UIDevice currentDevice] systemVersion];
     g_iOSVer = [ver floatValue];
@@ -94,7 +108,7 @@ void IOS_LaunchDialog( void )
     IOS_SetDefaultArgs();
 }
 
-char *IOS_GetUDID( void )
+extern "C" char *IOS_GetUDID( void )
 {
     static char udid[256];
     NSString *id = [[[UIDevice currentDevice]identifierForVendor] UUIDString];
@@ -102,7 +116,7 @@ char *IOS_GetUDID( void )
     return udid;
 }
 
-void IOS_Log(const char *text)
+extern "C" void IOS_Log(const char *text)
 {
     NSString *nstext =[NSString stringWithUTF8String:text];
     NSLog(@"Xash: %@", nstext);

@@ -16,12 +16,14 @@
 #ifndef launcherdialog_h
 #define launcherdialog_h
 
-extern enum XashGameStatus_e
+typedef enum XashGameStatus_e
 {
 	XGS_WAITING = 0,
 	XGS_START,
 	XGS_SKIP
-} g_iStartGameStatus;
+} XashGameStatus_t;
+
+extern XashGameStatus_t g_iStartGameStatus;
 
 extern int g_iArgc;
 extern char **g_pszArgv;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(xash3d C CXX OBJC)
+project(xash3d C CXX OBJC OBJCXX)
 
 if(NOT IOS)
     message(FATAL_ERROR "This CMakeLists.txt is designed for iOS only. Use waf for other platforms.")
@@ -23,6 +23,7 @@ add_definitions(
     -DXASH_MBEDTLS=1 -DHAVE_STRCASECMP=1 -DHAVE_STRCASESTR=1
     -DHAVE_DIRENT_D_TYPE=1
     -DALLOCA_H=<alloca.h>
+    -DXASH_ENABLE_MAIN=1
 )
 
 set(ENGINE_INCS
@@ -39,6 +40,9 @@ set(ENGINE_INCS
     ${CMAKE_SOURCE_DIR}/pm_shared
     ${CMAKE_SOURCE_DIR}/filesystem
     ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/ios/Xash3D-iOS/model
+    ${CMAKE_SOURCE_DIR}/ios/Xash3D-iOS/controller
+    ${CMAKE_SOURCE_DIR}/ios/Xash3D-iOS/view
 )
 
 # ---- iOS Frameworks ----
@@ -198,7 +202,16 @@ file(GLOB ENGINE_CLIENT   engine/client/*.c)
 file(GLOB ENGINE_POSIX    engine/platform/posix/*.c)
 file(GLOB ENGINE_IOS_C    engine/platform/ios/*.c)
 file(GLOB ENGINE_IOS_M    engine/platform/ios/*.m)
+file(GLOB LAUNCHER_IOS_MM
+    ios/Xash3D-iOS/controller/*.mm
+    ios/Xash3D-iOS/model/*.mm
+    ios/Xash3D-iOS/view/*.mm
+)
 file(GLOB PUBLIC_SRC      public/*.c)
+
+# Exclude old launchdialog.m if using new launcher
+list(REMOVE_ITEM ENGINE_IOS_M ${CMAKE_SOURCE_DIR}/engine/platform/ios/launchdialog.m)
+
 file(GLOB FILESYSTEM_SRC  filesystem/*.c filesystem/*.cpp)
 file(GLOB REF_COMMON_SRC  ref/common/*.c)
 file(GLOB REF_GL_SRC      ref/gl/*.c ref/gl/gl2_shim/*.c)
@@ -303,6 +316,7 @@ add_library(xash STATIC
     ${ENGINE_COMMON} ${ENGINE_IMAGELIB} ${ENGINE_SOUNDLIB}
     ${ENGINE_HTTP} ${ENGINE_SERVER} ${ENGINE_CLIENT}
     ${ENGINE_POSIX} ${ENGINE_IOS_C} ${ENGINE_IOS_M}
+    ${LAUNCHER_IOS_MM}
     ${PUBLIC_SRC} public/build_vcs.c
     ${FILESYSTEM_SRC}
     $<TARGET_OBJECTS:ref_common>
