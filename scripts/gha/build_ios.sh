@@ -29,6 +29,20 @@ cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
 cmake --build build --target install || die
 popd || die
 
+# Ensure SDL2.framework is available for Xcode packaging and embedding.
+# Try system frameworks first, then repo root. Copy it to ./build so createipa.sh finds it.
+if [ -d "/Library/Frameworks/SDL2.framework" ]; then
+    mkdir -p build
+    cp -R "/Library/Frameworks/SDL2.framework" "build/SDL2.framework"
+elif [ -d "./SDL2.framework" ]; then
+    mkdir -p build
+    cp -R "./SDL2.framework" "build/SDL2.framework"
+else
+    echo "SDL2.framework not found in /Library/Frameworks or repo root."
+    echo "Place SDL2.framework in the runner's /Library/Frameworks or add it to the repository root as SDL2.framework."
+    exit 1
+fi
+
 # Build the iOS launcher Xcode project
 # The Xcode project references the cmake sub-project at ios/cmake-build/
 # and links all engine static libs into the final app
