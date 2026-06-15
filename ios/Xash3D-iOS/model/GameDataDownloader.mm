@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <zlib.h>
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 #include "miniz.h"
 #include <mbedtls/aes.h>
 #include <mbedtls/rsa.h>
