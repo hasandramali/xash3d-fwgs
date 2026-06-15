@@ -15,10 +15,9 @@ float g_iOSVer;
 
 extern int Q_buildnum( void );
 
-XashGameStatus_t g_iStartGameStatus = XGS_SKIP;
-
-int g_iArgc = 0;
-char **g_pszArgv = NULL;
+extern "C" XashGameStatus_t g_iStartGameStatus = XGS_SKIP;
+extern "C" int g_iArgc = 0;
+extern "C" char **g_pszArgv = NULL;
 
 extern "C" int IOS_GetArgs( char ***out )
 {

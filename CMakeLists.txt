@@ -236,8 +236,8 @@ list(REMOVE_ITEM ENGINE_IOS_M ${CMAKE_SOURCE_DIR}/engine/platform/ios/launchdial
 # Exclude dedicated.c from common if not building dedicated
 list(REMOVE_ITEM ENGINE_COMMON ${CMAKE_SOURCE_DIR}/engine/common/dedicated.c)
 
-# Exclude SDL_uikit_main.c if we use launcher.c as main
-list(REMOVE_ITEM ENGINE_IOS_C ${CMAKE_SOURCE_DIR}/engine/platform/ios/SDL_uikit_main.c)
+# On iOS, we need SDL_uikit_main.c to provide the system main()
+# launcher.c provides SDL_main() because XASH_SDLMAIN=1 is defined.
 
 file(GLOB FILESYSTEM_SRC  filesystem/*.c filesystem/*.cpp)
 file(GLOB REF_COMMON_SRC  ref/common/*.c)

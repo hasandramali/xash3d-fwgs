@@ -16,6 +16,10 @@
 #ifndef launcherdialog_h
 #define launcherdialog_h
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum XashGameStatus_e
 {
 	XGS_WAITING = 0,
@@ -27,14 +31,14 @@ extern XashGameStatus_t g_iStartGameStatus;
 
 extern int g_iArgc;
 extern char **g_pszArgv;
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 const char *IOS_GetDocsDir();
 const char *IOS_GetBundleDir();
 void IOS_SetDefaultArgs();
 BOOL IOS_IsResourcesReady();
+void IOS_LaunchDialog(void);
+char *IOS_GetUDID(void);
+void IOS_Log(const char *text);
 
 #ifdef __cplusplus
 }
