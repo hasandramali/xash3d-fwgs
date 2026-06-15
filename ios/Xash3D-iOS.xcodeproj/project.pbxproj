@@ -55,7 +55,6 @@
 		3DC1E4BF2289F18500114D80 /* Steam.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4BE2289F18500114D80 /* Steam.png */; };
 		3DC1E4C9228AE05000114D80 /* TutorStoryboard.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4C8228AE05000114D80 /* TutorStoryboard.storyboard */; };
 		3DC8946F260FAC5600F7A4A5 /* MainStoryboard.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3DC8946E260FAC5600F7A4A5 /* MainStoryboard.storyboard */; };
-		3DC98EEE295ADCB3008C9762 /* lib3rdparty-gl4es.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3DFDDBBB28C2279E00351ACE /* lib3rdparty-gl4es.a */; };
 		3DDBD7F12843DC0100C4D2C9 /* libboost_container.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3DF9822227F9AE940030D0B5 /* libboost_container.a */; };
 		3DDBD7F32843DC1700C4D2C9 /* libopus.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D691BD52843CF2600D5221C /* libopus.a */; };
 		3DDBD7F52843DC1F00C4D2C9 /* libpng16.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D691BDB2843CF2600D5221C /* libpng16.a */; };
@@ -634,13 +633,6 @@
 			remoteGlobalIDString = AB980332CB1C4FDD9D81D36C;
 			remoteInfo = xash;
 		};
-		3DFDDBBA28C2279E00351ACE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 3DF981D827F9AE940030D0B5 /* xash3d.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = 065FBDED999B461CB2FC1EA5;
-			remoteInfo = GL;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -745,7 +737,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				3DC98EEE295ADCB3008C9762 /* lib3rdparty-gl4es.a in Frameworks */,
 				3D006E9628AEA29D004C1F67 /* libLinearMath.a in Frameworks */,
 				3D006E9328AEA279004C1F67 /* libBullet3Collision.a in Frameworks */,
 				3D006E9428AEA27A004C1F67 /* libBullet3Dynamics.a in Frameworks */,
@@ -976,7 +967,6 @@
 		3DF981D927F9AE940030D0B5 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				3DFDDBBB28C2279E00351ACE /* lib3rdparty-gl4es.a */,
 				3DF9821E27F9AE940030D0B5 /* libboost_atomic.a */,
 				3DF9822027F9AE940030D0B5 /* libboost_chrono.a */,
 				3DF9822227F9AE940030D0B5 /* libboost_container.a */,
@@ -1657,13 +1647,6 @@
 			fileType = archive.ar;
 			path = libxash.a;
 			remoteRef = 3DF9828D27F9AE940030D0B5 /* PBXContainerItemProxy */;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-		3DFDDBBB28C2279E00351ACE /* lib3rdparty-gl4es.a */ = {
-			isa = PBXReferenceProxy;
-			fileType = archive.ar;
-			path = "lib3rdparty-gl4es.a";
-			remoteRef = 3DFDDBBA28C2279E00351ACE /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
 /* End PBXReferenceProxy section */
