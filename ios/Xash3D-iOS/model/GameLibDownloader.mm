@@ -1,6 +1,6 @@
 #import "GameLibDownloader.h"
 #import <CommonCrypto/CommonCrypto.h>
-#include <zip.h>  // minizip for extraction
+#include "miniz.h"
 
 static NSString *kManifestURL = @"https://github.com/FWGS/hlsdk-mega-build/releases/download/continuous/manifest.json";
 static NSString *kReleaseBase = @"https://github.com/FWGS/hlsdk-mega-build/releases/download/continuous";
@@ -272,20 +272,21 @@ static NSString *kKeyDownloadTime = @"download_time";
 
 - (NSError *)extractZip:(NSString *)zipPath toDir:(NSString *)destDir
 {
-    struct zip *za = zip_open([zipPath UTF8String], 0, NULL);
-    if (!za) {
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_file(&zip, [zipPath UTF8String], 0)) {
         return [NSError errorWithDomain:@"GameLibDownloader" code:0 userInfo:@{NSLocalizedDescriptionKey: @"Failed to open zip archive"}];
     }
 
-    zip_int64_t count = zip_get_num_entries(za, 0);
+    mz_uint count = mz_zip_reader_get_num_files(&zip);
     NSString *destCanon = [[NSURL fileURLWithPath:destDir].URLStandardizingURL path];
     NSError *err = nil;
 
-    for (zip_int64_t i = 0; i < count; i++) {
-        struct zip_stat zs;
-        zip_stat_init(&zs);
-        zip_stat_index(za, i, 0, &zs);
-        NSString *name = [NSString stringWithUTF8String:zs.name];
+    for (mz_uint i = 0; i < count; i++) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat)) continue;
+
+        NSString *name = [NSString stringWithUTF8String:stat.m_filename];
         if (!name) continue;
 
         NSString *fullPath = [destDir stringByAppendingPathComponent:name];
@@ -295,23 +296,20 @@ static NSString *kKeyDownloadTime = @"download_time";
             break;
         }
 
-        if (name.hasSuffix(@"/")) {
+        if (mz_zip_reader_is_file_a_directory(&zip, i)) {
             [[NSFileManager defaultManager] createDirectoryAtPath:fullPath withIntermediateDirectories:YES attributes:nil error:nil];
         } else {
             [[NSFileManager defaultManager] createDirectoryAtPath:[fullPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
-            struct zip_file *zf = zip_fopen_index(za, i, 0);
-            if (!zf) continue;
-            NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)zs.size];
-            zip_int64_t read = zip_fread(zf, [data mutableBytes], (zip_uint64_t)zs.size);
-            zip_fclose(zf);
-            if (read > 0) {
-                [data setLength:(NSUInteger)read];
-                [data writeToFile:fullPath atomically:YES];
+            size_t outSize = 0;
+            void *data = mz_zip_reader_extract_to_heap(&zip, i, &outSize, 0);
+            if (data) {
+                NSData *nsdata = [NSData dataWithBytesNoCopy:data length:outSize freeWhenDone:YES];
+                [nsdata writeToFile:fullPath atomically:YES];
             }
         }
     }
 
-    zip_close(za);
+    mz_zip_reader_end(&zip);
     return err;
 }
 

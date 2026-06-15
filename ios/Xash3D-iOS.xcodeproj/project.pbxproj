@@ -1757,6 +1757,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/include",
+					"$(SRCROOT)/../public",
 				);
 				INFOPLIST_FILE = Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 11.0;
@@ -1807,6 +1808,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../3rdparty/mbedtls/mbedtls/include",
+					"$(SRCROOT)/../public",
 				);
 				INFOPLIST_FILE = Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 11.0;
