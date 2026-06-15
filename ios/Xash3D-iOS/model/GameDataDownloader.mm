@@ -7,7 +7,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <zlib.h>
-#include <zip.h>
+#include "miniz.h"
 #include <mbedtls/aes.h>
 #include <mbedtls/rsa.h>
 #include <mbedtls/pk.h>
@@ -224,26 +224,22 @@ static NSString *decryptFilename(const uint8_t *e, size_t el, NSData *dk) {
 
 static NSData *unzipFirstEntry(NSData *zipData) {
     if (zipData.length < 22) return nil;
-    NSString *tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
-    if (![zipData writeToFile:tmpPath atomically:NO]) return nil;
-    struct zip *z = zip_open([tmpPath UTF8String], ZIP_RDONLY, NULL);
-    if (!z) { [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil]; return nil; }
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_reader_init_mem(&zip, zipData.bytes, zipData.length, 0)) return nil;
     NSData *result = nil;
-    zip_int64_t cnt = zip_get_num_entries(z, 0);
+    mz_uint cnt = mz_zip_reader_get_num_files(&zip);
     if (cnt > 0) {
-        struct zip_stat zs; zip_stat_init(&zs);
-        if (zip_stat_index(z, 0, 0, &zs) == 0 && zs.size > 0) {
-            struct zip_file *zf = zip_fopen_index(z, 0, 0);
-            if (zf) {
-                NSMutableData *d = [NSMutableData dataWithLength:(NSUInteger)zs.size];
-                zip_int64_t rd = zip_fread(zf, [d mutableBytes], (zip_uint64_t)zs.size);
-                if (rd == (zip_int64_t)zs.size) result = d;
-                zip_fclose(zf);
+        mz_zip_archive_file_stat stat;
+        if (mz_zip_reader_file_stat(&zip, 0, &stat) && stat.m_uncomp_size > 0) {
+            size_t outSize = 0;
+            void *data = mz_zip_reader_extract_to_heap(&zip, 0, &outSize, 0);
+            if (data) {
+                result = [NSData dataWithBytesNoCopy:data length:outSize freeWhenDone:YES];
             }
         }
     }
-    zip_close(z);
-    [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+    mz_zip_reader_end(&zip);
     return result;
 }
 

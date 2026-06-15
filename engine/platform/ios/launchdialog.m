@@ -140,6 +140,8 @@ void IOS_PrepareView(void)
 
 void IOS_LaunchDialog( void )
 {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 	NSLog(@"System Version is %@",[[UIDevice currentDevice] systemVersion]);
 	NSString *ver = [[UIDevice currentDevice] systemVersion];
 	g_iOSVer = [ver floatValue];
@@ -255,6 +257,7 @@ void IOS_LaunchDialog( void )
 	[suffixtitle release];
 
 	[alert release];
+#pragma clang diagnostic pop
 }
 
 char *IOS_GetUDID( void )

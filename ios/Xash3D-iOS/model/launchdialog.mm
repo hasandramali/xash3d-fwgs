@@ -61,7 +61,10 @@ void IOS_SetDefaultArgs()
 {
     static char width_str[32] = "0";
     static char height_str[32] = "0";
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wwritable-strings"
     static char *args[64] = { "xash", "-dev", "1", "-game", "valve", "-width", width_str, "-height", height_str };
+#pragma clang diagnostic pop
     CGRect rect_screen = [[UIScreen mainScreen]bounds];
     CGSize size_screen = rect_screen.size;
     CGFloat scale_screen = [UIScreen mainScreen].scale;
@@ -107,7 +110,7 @@ void IOS_Log(const char *text)
 
 void IOS_OpenURL(const char *url)
 {
-    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:[[NSString alloc] initWithUTF8String:url]]];
+    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:[[NSString alloc] initWithUTF8String:url]] options:@{} completionHandler:nil];
 }
 
 void IOS_GetSystemVersion(int *major, int *minor, int *patch)
