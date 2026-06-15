@@ -24,7 +24,7 @@
 		1D3623EC0D0F72F000981E51 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D3623EB0D0F72F000981E51 /* CoreGraphics.framework */; };
 		1D60589F0D05DD5A006BFB54 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D30AB110D05D00D00671497 /* Foundation.framework */; };
 		1DF5F4E00D08C38300B7A737 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DF5F4DF0D08C38300B7A737 /* UIKit.framework */; };
-		3D006E8D28AEA1BD004C1F67 /* libmpg123.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D006E7E28AEA1BD004C1F67 /* libmpg123.a */; };
+		3D006E8D28AEA1BD004C1F67 /* libmpg123.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D006E7E28AEA1BD004C1F67 /* libmpg123.a */; settings = {ATTRIBUTES = (Weak, ); }; };
 		3D006E8E28AEA205004C1F67 /* libBullet3Common.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3DC76FD228AA9DEA0021B4F6 /* libBullet3Common.a */; };
 		3D006E8F28AEA205004C1F67 /* libBulletCollision.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3DC76FDA28AA9DEA0021B4F6 /* libBulletCollision.a */; };
 		3D006E9028AEA205004C1F67 /* libBulletDynamics.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3DC76FDC28AA9DEA0021B4F6 /* libBulletDynamics.a */; };
