@@ -22,7 +22,7 @@ cmake --build ios/cmake-build --config Release || die
 # Build hlsdk game libraries (bundled for reference, downloaded at runtime via GameLibDownloader)
 pushd hlsdk || die
 mkdir -p ../ios/libs || die
-cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_INSTALL_PREFIX=$(realpath ../ios/libs) \
     -DCMAKE_BUILD_TYPE=Debug -B build -S .

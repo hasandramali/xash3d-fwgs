@@ -198,7 +198,7 @@ static NSString *kCellID = @"FileCell";
         [self renameItem:full];
     }]];
 
-    [actions addObject:[UIAction actionWithTitle:@"Delete" image:[UIImage systemImageNamed:@"trash"] identifier:nil attributes:UIMenuElementAttributesDestructive handler:^(UIAction *a) {
+    [actions addObject:[UIAction actionWithTitle:@"Delete" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a) {
         [self deleteItem:full];
     }]];
 
@@ -283,7 +283,7 @@ static NSString *kCellID = @"FileCell";
 
     if ([self.fm fileExistsAtPath:dest]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Overwrite?" message:[NSString stringWithFormat:@"\"%@\" already exists. Overwrite?", name] preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Skip" style:UIAlertActionStyleCancel handler:^{
+        [alert addAction:[UIAlertAction actionWithTitle:@"Skip" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
             self.pasteboardPath = nil;
             [self updatePasteButton];
         }]];
