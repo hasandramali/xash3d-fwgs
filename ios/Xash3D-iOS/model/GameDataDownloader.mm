@@ -78,7 +78,7 @@ static void ensureOsLog() {
 static void initLogPath(NSString *docsDir) {
     ensureOsLog();
     os_log(_gddLog, "GameDataDownloader initialized, docsDir=%{public}@", docsDir);
-    _logPath = [[docsDir stringByAppendingPathComponent:@"xash_ios.txt"] copy];
+    _logPath = [[docsDir stringByAppendingPathComponent:@"xash_ios.log"] copy];
     // Truncate on each launch
     [[NSFileManager defaultManager] createFileAtPath:_logPath contents:[NSData data] attributes:nil];
 }
@@ -1135,10 +1135,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             return;
         }
 
-        if (onProgress) onProgress(@"Requesting license...", 0);
-        logToFile(@"Requesting license for app %d...", appId);
-        [client requestLicense:appId error:nil];
-
+        // License already granted in login Multi (emsg 5501) — no separate request needed
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
         logToFile(@"Requesting CDN server list...");
         NSArray *cdnHosts = [client requestCDNServerListWithError:&err];

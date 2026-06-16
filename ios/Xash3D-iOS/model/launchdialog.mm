@@ -65,7 +65,7 @@ static void IOS_WriteLogLine( const char *text )
     {
         char path[1024];
         snprintf( path, sizeof( path ), "%s/xash_ios.log", IOS_GetDocsDir() );
-        g_iosLogFile = fopen( path, "a" );
+        g_iosLogFile = fopen( path, "w" );
     }
 
     if( g_iosLogFile )
@@ -152,7 +152,7 @@ extern "C" void IOS_SetDefaultArgs()
     snprintf(width_str, sizeof(width_str), "%d", (int)width);
     snprintf(height_str, sizeof(height_str), "%d", (int)height);
     g_pszArgv = args;
-    g_iArgc = 10;
+    g_iArgc = 9;
 }
 
 extern "C" void IOS_LaunchDialog( void )
@@ -161,6 +161,10 @@ extern "C" void IOS_LaunchDialog( void )
 
     NSString *ver = [[UIDevice currentDevice] systemVersion];
     g_iOSVer = [ver floatValue];
+
+    // Set working directory to documents so logs can be generated there
+    NSString *workingDir = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+    [[NSFileManager defaultManager] changeCurrentDirectoryPath:workingDir];
 
     g_iStartGameStatus = XGS_WAITING;
     IOS_PrepareView();
@@ -172,9 +176,9 @@ extern "C" void IOS_LaunchDialog( void )
     }
 
     IOS_WriteLogLine( "Xash: launcher finished, starting engine" );
-    [g_launcherWindow setHidden:YES];
-    [g_launcherWindow setRootViewController:nil];
-    g_launcherWindow = nil;
+    // [g_launcherWindow setHidden:YES];
+    // [g_launcherWindow setRootViewController:nil];
+    // g_launcherWindow = nil;
 
     // Force landscape orientation before engine starts
     if (@available(iOS 16.0, *)) {
