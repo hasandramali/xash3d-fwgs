@@ -149,9 +149,6 @@ static NSString *kCellID = @"FileCell";
 
     CGRect rect = [[UIScreen mainScreen] bounds];
     CGFloat scale = [UIScreen mainScreen].scale;
-    static char width_str[32], height_str[32];
-    snprintf(width_str, sizeof(width_str), "%d", (int)(rect.size.width * scale));
-    snprintf(height_str, sizeof(height_str), "%d", (int)(rect.size.height * scale));
 
     NSMutableArray *argArray = [NSMutableArray arrayWithObject:@"xash"];
     if (extraArgs.length > 0)
@@ -164,14 +161,6 @@ static NSString *kCellID = @"FileCell";
         [argArray addObject:@"-game"];
         [argArray addObject:gameDir];
     }
-
-    BOOL hasWidth = NO, hasHeight = NO;
-    for (NSString *a in argArray) {
-        if ([a isEqualToString:@"-width"]) hasWidth = YES;
-        if ([a isEqualToString:@"-height"]) hasHeight = YES;
-    }
-    if (!hasWidth)  { [argArray addObject:@"-width"];  [argArray addObject:[NSString stringWithUTF8String:width_str]]; }
-    if (!hasHeight) { [argArray addObject:@"-height"]; [argArray addObject:[NSString stringWithUTF8String:height_str]]; }
 
     // Build C-style argv
     int argc = (int)MIN(argArray.count, 63);
