@@ -437,7 +437,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
         struct sockaddr_in a; memset(&a,0,sizeof(a)); a.sin_family = AF_INET; a.sin_port = htons(CM_PORT);
         if (inet_pton(AF_INET, host.UTF8String, &a.sin_addr) != 1) continue;
         int s = socket(AF_INET, SOCK_STREAM, 0); if (s < 0) continue;
-        struct timeval tv; tv.tv_sec = 10; tv.tv_usec = 0;
+        struct timeval tv; tv.tv_sec = 5; tv.tv_usec = 0;
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
         if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) { _sock = s; [self status:[NSString stringWithFormat:@"Connected to %@", host]]; return YES; }
@@ -480,7 +480,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             body.insert(body.end(),f.begin(),f.end()); body.insert(body.end(),v.begin(),v.end());
             bytes hdr; auto h1 = packVarint((1<<3)|1); auto si = packFixed64(_currentSteamId);
             hdr.insert(hdr.end(),h1.begin(),h1.end()); hdr.insert(hdr.end(),si.begin(),si.end());
-            auto h2 = packVarint((2<<3)|0); auto se = packFixed32(_currentSessionId);
+            auto h2 = packVarint((2<<3)|0); auto se = packVarint(_currentSessionId);
             hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
             [ss sendProtobufMsg:1009 body:body header:hdr];
         }
@@ -629,8 +629,22 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     auto zf = packFixed32(0); er.insert(er.end(), zf.begin(), zf.end());
     [self sendRaw:er]; [self status:@"Sent encrypt response"];
 
-    if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:nil error:error]) return NO;
-    if (readInt32LE(body.data(),0) != 1) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Handshake failed"}]; return NO; }
+    if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:nil error:error]) {
+        logToFile(@"Failed to read ChannelEncryptResult");
+        return NO;
+    }
+    logToFile(@"ChannelEncryptResult: emsg=%d isProto=%d bodySize=%zu", emsg, isProto, body.size());
+    // Parse eresult — handle both proto (varint) and non-proto (LE int32) formats
+    int eresult = 0;
+    if (isProto && body.size() > 0) {
+        size_t ep = 0;
+        SteamProto::readVarint(body.data(), ep, body.size()); // skip field tag
+        eresult = (int)SteamProto::readVarint(body.data(), ep, body.size());
+    } else if (body.size() >= 4) {
+        eresult = readInt32LE(body.data(), 0);
+    }
+    logToFile(@"Encrypt result: %d", eresult);
+    if (eresult != 1) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Handshake failed: eresult=%d",eresult]}]; return NO; }
     _encrypted = YES; [self status:@"Connecting Steam..."];
 
     // ClientHello
@@ -653,14 +667,17 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
     bytes lh; auto lh1 = packVarint((1<<3)|1); auto sid = packFixed64(_currentSteamId);
     lh.insert(lh.end(),lh1.begin(),lh1.end()); lh.insert(lh.end(),sid.begin(),sid.end());
-    auto lh2 = packVarint((2<<3)|0); auto ss = packFixed32(0);
+    auto lh2 = packVarint((2<<3)|0); auto ss = packVarint(0);
     lh.insert(lh.end(),lh2.begin(),lh2.end()); lh.insert(lh.end(),ss.begin(),ss.end());
     [self sendProtobufMsg:5514 body:lb header:lh];
 
     BOOL ok = NO;
-    for (int t = 0; t < 20 && !ok; t++) {
+    for (int t = 0; t < 10 && !ok; t++) {
         bytes hdr;
-        if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:&hdr error:nil]) { usleep(100000); continue; }
+        if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:&hdr error:nil]) {
+            logToFile(@"Login response read failed (try %d)", t);
+            usleep(100000); continue;
+        }
         logToFile(@"Login response: emsg=%d isProto=%d bodySize=%zu (try %d)", emsg, isProto, body.size(), t);
         if (emsg == 1) {
             NSArray *subs = [self parseMultiMessage:body];
@@ -685,6 +702,11 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             int lr = (int)SteamProto::readVarint(body.data(), sp, body.size());
             logToFile(@"  Direct logon: eresult=%d sessionId=%d steamId=%llu", lr, _currentSessionId, (unsigned long long)_currentSteamId);
             if (lr == 1) ok = YES;
+        } else if (emsg == 757) {
+            logToFile(@"  ServiceMethodResponse (emsg 757) — login rejected");
+            break;
+        } else {
+            logToFile(@"  Unexpected emsg=%d in login loop", emsg);
         }
     }
     if (!ok) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Login failed"}]; return NO; }
@@ -703,8 +725,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
         if (fn == 1 && wt == 1 && p + 8 <= l) {
             _currentSteamId = (uint64_t)readInt64LE(b, p);
             p += 8;
-        } else if (fn == 2 && wt == 0) {
-            _currentSessionId = (int)SteamProto::readVarint(b, p, l);
+        } else if (fn == 2) {
+            if (wt == 0) _currentSessionId = (int)SteamProto::readVarint(b, p, l);
+            else if (wt == 5 && p + 4 <= l) { _currentSessionId = readInt32LE(b, p); p += 4; }
+            else { if (wt == 0) SteamProto::readVarint(b, p, l); else if (wt == 1) p += 8; else if (wt == 2) { uint64_t sl = SteamProto::readVarint(b, p, l); p += (size_t)sl; } else if (wt == 5) p += 4; else p++; }
         } else {
             if (wt == 0) SteamProto::readVarint(b, p, l);
             else if (wt == 1) p += 8;
@@ -720,7 +744,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f.begin(),f.end()); b.insert(b.end(),v.begin(),v.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packFixed32(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     [self sendProtobufMsg:5572 body:b header:h];
     for (int t=0;t<15;t++) {
@@ -751,7 +775,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     auto f2=packVarint((2<<3)|0); b.insert(b.end(),f2.begin(),f2.end()); auto v2=packVarint(5); b.insert(b.end(),v2.begin(),v2.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packFixed32(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     std::string jn="ContentServerDirectory.GetServersForSteamPipe#1";
     auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());
@@ -805,7 +829,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f2.begin(),f2.end()); b.insert(b.end(),v2.begin(),v2.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packFixed32(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     [self sendProtobufMsg:5438 body:b header:h];
     for (int t=0;t<15;t++) {
@@ -842,7 +866,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f3.begin(),f3.end()); b.insert(b.end(),v3.begin(),v3.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packFixed32(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     std::string jn="ContentServerDirectory.GetManifestRequestCode#1";
     auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());

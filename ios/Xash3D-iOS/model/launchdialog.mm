@@ -176,6 +176,22 @@ extern "C" void IOS_LaunchDialog( void )
     [g_launcherWindow setRootViewController:nil];
     g_launcherWindow = nil;
 
+    // Force landscape orientation before engine starts
+    if (@available(iOS 16.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] init];
+                prefs.interfaceOrientations = UIInterfaceOrientationMaskLandscape;
+                [ws requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+            }
+        }
+    } else {
+        [[UIDevice currentDevice] setValue:@(UIInterfaceOrientationLandscapeLeft) forKey:@"orientation"];
+    }
+    // Small delay for rotation to take effect
+    usleep(500000);
+
     if( !g_pszArgv )
         IOS_SetDefaultArgs();
 }

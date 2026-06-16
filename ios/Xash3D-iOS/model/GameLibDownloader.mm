@@ -235,19 +235,11 @@ static NSString *kKeyDownloadTime = @"download_time";
 
             // Extract zip — zip contains {gamedir}/client.dylib etc.
             // so extracting to docsDir puts libs in the right place:
-            //   {docsDir}/valve/client.dylib
+            //   {docsDir}/valve/cl_dlls/client.dylib
+            // Do NOT remove the existing game directory — zip only contains
+            // a few .dylib files, we merge with existing game content
             NSString *destDir = weakSelf.docsDir;
             [[NSFileManager defaultManager] createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
-
-            // Remove prior install
-            NSArray *existing = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:destDir error:nil];
-            for (NSString *name in existing) {
-                NSString *full = [destDir stringByAppendingPathComponent:name];
-                BOOL isDir = NO;
-                [[NSFileManager defaultManager] fileExistsAtPath:full isDirectory:&isDir];
-                if (isDir && [name caseInsensitiveCompare:entry.modKey] == NSOrderedSame)
-                    [[NSFileManager defaultManager] removeItemAtPath:full error:nil];
-            }
 
             NSError *extractErr = [weakSelf extractZip:tempPath toDir:destDir];
             if (extractErr) {

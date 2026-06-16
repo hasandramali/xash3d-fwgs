@@ -133,6 +133,20 @@ static NSString *kCellID = @"FileCell";
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
 {
+    // Force landscape orientation for game
+    if (@available(iOS 16.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] init];
+                prefs.interfaceOrientations = UIInterfaceOrientationMaskLandscape;
+                [ws requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+            }
+        }
+    } else {
+        [[UIDevice currentDevice] setValue:@(UIInterfaceOrientationLandscapeLeft) forKey:@"orientation"];
+    }
+
     CGRect rect = [[UIScreen mainScreen] bounds];
     CGFloat scale = [UIScreen mainScreen].scale;
     static char width_str[32], height_str[32];
@@ -652,6 +666,22 @@ static NSString *kCellID = @"FileCell";
 - (UIImage *)defaultFileImage
 {
     return [UIImage systemImageNamed:@"doc"];
+}
+
+@end
+
+#pragma mark - UINavigationController orientation override
+
+@implementation UINavigationController (OrientationLock)
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations
+{
+    return UIInterfaceOrientationMaskAll;
+}
+
+- (BOOL)shouldAutorotate
+{
+    return YES;
 }
 
 @end
