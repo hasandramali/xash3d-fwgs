@@ -42,11 +42,10 @@ static NSString *kCellID = @"FileCell";
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
     UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
     UIBarButtonItem *folderBtn = [[UIBarButtonItem alloc] initWithTitle:@"New Folder" style:UIBarButtonItemStylePlain target:self action:@selector(newFolderTapped)];
-    UIBarButtonItem *downloadBtn = [[UIBarButtonItem alloc] initWithTitle:@"Download" style:UIBarButtonItemStylePlain target:self action:@selector(downloadTapped)];
-    UIBarButtonItem *downloadDataBtn = [[UIBarButtonItem alloc] initWithTitle:@"Data" style:UIBarButtonItemStylePlain target:self action:@selector(downloadDataTapped)];
+    UIBarButtonItem *downloadDataBtn = [[UIBarButtonItem alloc] initWithTitle:@"Download" style:UIBarButtonItemStylePlain target:self action:@selector(downloadDataTapped)];
     UIBarButtonItem *pasteBtn = [[UIBarButtonItem alloc] initWithTitle:@"Paste" style:UIBarButtonItemStylePlain target:self action:@selector(pasteTapped)];
     pasteBtn.enabled = (self.pasteboardPath != nil);
-    self.toolbarItems = @[importBtn, flex, folderBtn, flex, downloadBtn, flex, downloadDataBtn, flex, pasteBtn];
+    self.toolbarItems = @[importBtn, flex, folderBtn, flex, downloadDataBtn, flex, pasteBtn];
     self.navigationController.toolbarHidden = NO;
 
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:kCellID];
@@ -147,6 +146,7 @@ static NSString *kCellID = @"FileCell";
     if (!hasWidth)  { [argArray addObject:@"-width"];  [argArray addObject:[NSString stringWithUTF8String:width_str]]; }
     if (!hasHeight) { [argArray addObject:@"-height"]; [argArray addObject:[NSString stringWithUTF8String:height_str]]; }
 
+    // Build C-style argv
     int argc = (int)MIN(argArray.count, 63);
     static char *c_args[64];
     static char c_storage[64][256];
@@ -158,7 +158,35 @@ static NSString *kCellID = @"FileCell";
     c_args[argc] = NULL;
     g_pszArgv = c_args;
     g_iArgc = argc;
-    g_iStartGameStatus = XGS_START;
+
+    // Auto-download game libs if needed
+    if (![self.downloader isDownloaded:gameDir]) {
+        UIAlertController *downloading = [UIAlertController alertControllerWithTitle:@"Downloading Game Libraries" message:[NSString stringWithFormat:@"Downloading libraries for %@...", gameDir] preferredStyle:UIAlertControllerStyleAlert];
+        UIProgressView *pv = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
+        pv.translatesAutoresizingMaskIntoConstraints = NO;
+        [downloading.view addSubview:pv];
+        [NSLayoutConstraint activateConstraints:@[
+            [pv.leadingAnchor constraintEqualToAnchor:downloading.view.leadingAnchor constant:16],
+            [pv.trailingAnchor constraintEqualToAnchor:downloading.view.trailingAnchor constant:-16],
+            [pv.bottomAnchor constraintEqualToAnchor:downloading.view.bottomAnchor constant:-48],
+        ]];
+        [downloading addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
+            g_iStartGameStatus = XGS_SKIP;
+        }]];
+        [self presentViewController:downloading animated:YES completion:nil];
+
+        [self.downloader download:gameDir onProgress:^(float progress) {
+            dispatch_async(dispatch_get_main_queue(), ^{ pv.progress = progress; });
+        } completion:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [downloading dismissViewControllerAnimated:YES completion:^{
+                    if (!error) g_iStartGameStatus = XGS_START;
+                }];
+            });
+        }];
+    } else {
+        g_iStartGameStatus = XGS_START;
+    }
 }
 
 #pragma mark - File listing

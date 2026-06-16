@@ -170,12 +170,50 @@ static bytes decryptAES(const uint8_t *sk, const uint8_t *d, size_t l) {
 
 #pragma mark - RSA OAEP
 
+// Build a DER-encoded PKCS#1 RSAPublicKey from raw modulus + exponent
+static NSData *derEncodeRSAPublicKey(const uint8_t *mod, size_t modLen, const uint8_t *exp, size_t expLen) {
+    // Each ASN.1 INTEGER: 02 len [bytes]  (add leading 0x00 if high bit set)
+    auto prependInt = [](bytes &buf, const uint8_t *val, size_t len) {
+        buf.insert(buf.begin(), val, val + len);
+        if (buf.size() > 0 && (buf[0] & 0x80)) buf.insert(buf.begin(), 0x00);
+        size_t ilen = buf.size();
+        if (ilen < 128) { buf.insert(buf.begin(), (uint8_t)ilen); }
+        else { bytes lb; size_t t = ilen; while (t) { lb.insert(lb.begin(), (uint8_t)(t & 0xFF)); t >>= 8; }
+            lb.insert(lb.begin(), (uint8_t)(0x80 | lb.size())); buf.insert(buf.begin(), lb.begin(), lb.end()); }
+        buf.insert(buf.begin(), 0x02);
+    };
+    bytes expDer, modDer;
+    prependInt(expDer, exp, expLen);
+    prependInt(modDer, mod, modLen);
+    bytes seq;
+    seq.insert(seq.end(), modDer.begin(), modDer.end());
+    seq.insert(seq.end(), expDer.begin(), expDer.end());
+    size_t slen = seq.size();
+    if (slen < 128) { seq.insert(seq.begin(), (uint8_t)slen); }
+    else { bytes lb; size_t t = slen; while (t) { lb.insert(lb.begin(), (uint8_t)(t & 0xFF)); t >>= 8; }
+        lb.insert(lb.begin(), (uint8_t)(0x80 | lb.size())); seq.insert(seq.begin(), lb.begin(), lb.end()); }
+    seq.insert(seq.begin(), 0x30);
+    return [NSData dataWithBytes:seq.data() length:seq.size()];
+}
+
 static NSData *rsaEncryptOAEP(const uint8_t *pk, size_t pl, const uint8_t *d, size_t dl) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{ psa_crypto_init(); });
 
     mbedtls_pk_context ctx; mbedtls_pk_init(&ctx);
     int r = mbedtls_pk_parse_public_key(&ctx, pk, pl);
+
+    // If DER parsing fails, try custom format: [1-byte expLen][exp][mod]
+    if (r != 0 && pl >= 3) {
+        size_t expLen = pk[0];
+        if (1 + expLen < pl) {
+            NSData *derKey = derEncodeRSAPublicKey(pk + 1 + expLen, pl - 1 - expLen, pk + 1, expLen);
+            if (derKey) {
+                mbedtls_pk_free(&ctx);
+                r = mbedtls_pk_parse_public_key(&ctx, (const uint8_t *)derKey.bytes, derKey.length);
+            }
+        }
+    }
     if (r != 0) { mbedtls_pk_free(&ctx); return nil; }
 
     psa_key_attributes_t attributes = psa_key_attributes_init();
@@ -486,11 +524,14 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
         size_t off = 8; if (off < body.size()) challenge = bytes(body.begin()+off, body.end());
     }
 
-    NSData *eb = rsaEncryptOAEP((const uint8_t *)pubKey.bytes, pubKey.length, _sessionKey, 32);
-    if (!eb) { pubKey = steamPublicKey(); eb = rsaEncryptOAEP((const uint8_t *)pubKey.bytes, pubKey.length, _sessionKey, 32); }
+    NSMutableData *blobToEncrypt = [NSMutableData dataWithBytes:_sessionKey length:32];
+    [blobToEncrypt appendBytes:challenge.data() length:challenge.size()];
+
+    NSData *eb = rsaEncryptOAEP((const uint8_t *)pubKey.bytes, pubKey.length, (const uint8_t *)blobToEncrypt.bytes, blobToEncrypt.length);
+    if (!eb) { pubKey = steamPublicKey(); eb = rsaEncryptOAEP((const uint8_t *)pubKey.bytes, pubKey.length, (const uint8_t *)blobToEncrypt.bytes, blobToEncrypt.length); }
     if (!eb) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"RSA failed"}]; return NO; }
 
-    NSMutableData *bc = [NSMutableData dataWithData:eb]; [bc appendBytes:challenge.data() length:challenge.size()];
+    NSData *bc = eb;
     uint32_t crc = (uint32_t)crc32(0, (const uint8_t *)eb.bytes, (uInt)eb.length);
     bytes er; auto r1 = packFixed32(1304); er.insert(er.end(), r1.begin(), r1.end());
     auto r2 = packFixed64(-1); er.insert(er.end(), r2.begin(), r2.end());

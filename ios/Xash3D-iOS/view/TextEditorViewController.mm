@@ -3,6 +3,7 @@
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) NSString *originalText;
 @property (nonatomic, assign) BOOL hasChanges;
+@property (nonatomic, strong) NSLayoutConstraint *bottomConstraint;
 @end
 
 static const NSInteger kMaxTextFileSize = 1024 * 1024;
@@ -75,14 +76,45 @@ static const NSInteger kMaxTextFileSize = 1024 * 1024;
     self.textView.spellCheckingType = UITextSpellCheckingTypeNo;
     [self.view addSubview:self.textView];
 
+    self.bottomConstraint = [self.textView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor];
     [NSLayoutConstraint activateConstraints:@[
         [self.textView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [self.textView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
+        self.bottomConstraint,
         [self.textView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.textView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
     ]];
 
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardWillShow:) name:UIKeyboardWillShowNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
+
     [self.textView becomeFirstResponder];
+}
+
+- (void)dealloc
+{
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (void)keyboardWillShow:(NSNotification *)n
+{
+    CGRect frame = [n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGFloat duration = [n.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = [n.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    CGFloat kbHeight = CGRectGetHeight(frame);
+    self.bottomConstraint.constant = -kbHeight;
+    [UIView animateWithDuration:duration delay:0 options:curve << 16 animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
+}
+
+- (void)keyboardWillHide:(NSNotification *)n
+{
+    CGFloat duration = [n.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = [n.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    self.bottomConstraint.constant = 0;
+    [UIView animateWithDuration:duration delay:0 options:curve << 16 animations:^{
+        [self.view layoutIfNeeded];
+    } completion:nil];
 }
 
 - (void)textViewDidChange:(UITextView *)textView
