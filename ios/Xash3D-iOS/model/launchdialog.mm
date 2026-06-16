@@ -138,21 +138,9 @@ void IOS_PrepareView()
 
 extern "C" void IOS_SetDefaultArgs()
 {
-    static char width_str[32] = "0";
-    static char height_str[32] = "0";
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wwritable-strings"
-    static char *args[64] = { "xash", "-dev", "1", "-game", "valve", "-width", width_str, "-height", height_str };
-#pragma clang diagnostic pop
-    CGRect rect_screen = [[UIScreen mainScreen]bounds];
-    CGSize size_screen = rect_screen.size;
-    CGFloat scale_screen = [UIScreen mainScreen].scale;
-    CGFloat width = size_screen.width * scale_screen;
-    CGFloat height = size_screen.height * scale_screen;
-    snprintf(width_str, sizeof(width_str), "%d", (int)width);
-    snprintf(height_str, sizeof(height_str), "%d", (int)height);
+    static char *args[64] = { "xash", "-dev", "1", "-game", "valve" };
     g_pszArgv = args;
-    g_iArgc = 9;
+    g_iArgc = 5;
 }
 
 extern "C" void IOS_LaunchDialog( void )
@@ -176,9 +164,9 @@ extern "C" void IOS_LaunchDialog( void )
     }
 
     IOS_WriteLogLine( "Xash: launcher finished, starting engine" );
-    // [g_launcherWindow setHidden:YES];
-    // [g_launcherWindow setRootViewController:nil];
-    // g_launcherWindow = nil;
+    [g_launcherWindow setHidden:YES];
+    [g_launcherWindow setRootViewController:nil];
+    g_launcherWindow = nil;
 
     // Force landscape orientation before engine starts
     if (@available(iOS 16.0, *)) {
