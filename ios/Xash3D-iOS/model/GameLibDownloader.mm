@@ -233,8 +233,10 @@ static NSString *kKeyDownloadTime = @"download_time";
                 return;
             }
 
-            // Extract zip
-            NSString *destDir = [weakSelf libsBaseDir];
+            // Extract zip — zip contains {gamedir}/client.dylib etc.
+            // so extracting to docsDir puts libs in the right place:
+            //   {docsDir}/valve/client.dylib
+            NSString *destDir = weakSelf.docsDir;
             [[NSFileManager defaultManager] createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
 
             // Remove prior install

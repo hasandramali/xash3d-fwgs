@@ -36,8 +36,16 @@ static NSString *kCellID = @"FileCell";
     if (self.title.length == 0 || [self.currentPath isEqualToString:NSHomeDirectory()])
         self.title = @"Xash3D";
 
+    // Back button (left) — only visible when not at root
+    NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+    if (![self.currentPath isEqualToString:docs]) {
+        UIBarButtonItem *backBtn = [[UIBarButtonItem alloc] initWithTitle:@"Back" style:UIBarButtonItemStylePlain target:self action:@selector(backTapped)];
+        self.navigationItem.leftBarButtonItem = backBtn;
+    }
+
+    // Launch button (right)
     UIBarButtonItem *launchBtn = [[UIBarButtonItem alloc] initWithTitle:@"Launch" style:UIBarButtonItemStyleDone target:self action:@selector(launchTapped)];
-    self.navigationItem.leftBarButtonItem = launchBtn;
+    self.navigationItem.rightBarButtonItem = launchBtn;
 
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
     UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
@@ -50,6 +58,11 @@ static NSString *kCellID = @"FileCell";
 
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:kCellID];
     [self reloadFiles];
+}
+
+- (void)backTapped
+{
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -94,7 +107,7 @@ static NSString *kCellID = @"FileCell";
     }
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
-        alert.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItem;
+        alert.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
     [self presentViewController:alert animated:YES completion:nil];
 }
 

@@ -6,7 +6,6 @@
 #include <condition_variable>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include <sys/sysctl.h>
 #include <netdb.h>
 #include <zlib.h>
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -63,32 +62,18 @@ static NSData *steamPublicKey() {
     return [NSData dataWithBytes:k length:sizeof(k)];
 }
 
-#pragma mark - JIT-only logging
-
-static BOOL _jitChecked = NO;
-static BOOL _jitEnabled = NO;
-
-static BOOL isJITEnabled(void) {
-    if (!_jitChecked) {
-        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
-        struct kinfo_proc info;
-        info.kp_proc.p_flag = 0;
-        size_t size = sizeof(info);
-        if (sysctl(mib, 4, &info, &size, NULL, 0) == 0)
-            _jitEnabled = (info.kp_proc.p_flag & P_TRACED) != 0;
-        _jitChecked = YES;
-    }
-    return _jitEnabled;
-}
+#pragma mark - Logging
 
 static NSString *_logPath = nil;
 
 static void initLogPath(NSString *docsDir) {
     _logPath = [[docsDir stringByAppendingPathComponent:@"xash_ios.txt"] copy];
+    // Truncate on each launch
+    [[NSFileManager defaultManager] createFileAtPath:_logPath contents:[NSData data] attributes:nil];
 }
 
 static void logToFile(NSString *format, ...) {
-    if (!isJITEnabled() || !_logPath) return;
+    if (!_logPath) return;
     va_list args;
     va_start(args, format);
     NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
@@ -276,6 +261,10 @@ static NSData *rsaEncryptOAEP(const uint8_t *pk, size_t pl, const uint8_t *d, si
     psa_key_attributes_t attributes = psa_key_attributes_init();
     r = mbedtls_pk_get_psa_attributes(&ctx, PSA_KEY_USAGE_ENCRYPT, &attributes);
     if (r != 0) { mbedtls_pk_free(&ctx); return nil; }
+    // mbedtls_pk_get_psa_attributes sets algorithm to PKCS1V15_SIGN;
+    // override for OAEP encryption
+    psa_set_key_algorithm(&attributes, PSA_ALG_RSA_OAEP(PSA_ALG_SHA_1));
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT);
 
     mbedtls_svc_key_id_t key_id = 0;
     r = mbedtls_pk_import_into_psa(&ctx, &attributes, &key_id);
@@ -599,12 +588,12 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             }
         }
         logToFile(@"  pubKey size=%lu pos=%zu", (unsigned long)pubKey.length, p);
-        // Remaining = challenge
+        // Field 4 = challenge (bytes). Match Android: read ALL remaining bytes
+        // (including protobuf tag + length framing) to match server expectations
         if (p < body.size()) {
-            skipProtoField(body.data(), p, body.size()); // skip the challenge bytes field header
             challenge.assign(body.begin()+p, body.end());
-            logToFile(@"  challenge size=%zu", challenge.size());
         }
+        logToFile(@"  challenge size=%zu", challenge.size());
     } else {
         pubKey = steamPublicKey();
         size_t off = 8; if (off < body.size()) challenge = bytes(body.begin()+off, body.end());

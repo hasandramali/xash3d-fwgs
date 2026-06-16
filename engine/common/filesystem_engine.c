@@ -227,6 +227,21 @@ static qboolean FS_LoadProgs( void )
 {
 	const char *name = FILESYSTEM_STDIO_DLL;
 
+#ifdef XASH_NO_LIBDL
+	fs_hInstance = (void *)(uintptr_t)~0;
+	{
+		extern int GetFSAPI( int, fs_api_t *, fs_globals_t **, fs_interface_t * );
+		if( GetFSAPI( FS_API_VERSION, &g_fsapi, &FI, (fs_interface_t *)&fs_memfuncs ) != FS_API_VERSION )
+		{
+			FS_UnloadProgs();
+			Sys_Error( "%s: can't initialize built-in filesystem\n", __func__ );
+			return false;
+		}
+	}
+	fs_pfnCreateInterface = NULL;
+	Con_DPrintf( "%s: filesystem_stdio built-in\n", __func__ );
+	return true;
+#else
 	fs_hInstance = COM_LoadLibrary( name, false, true );
 
 	if( !fs_hInstance )
@@ -259,6 +274,7 @@ static qboolean FS_LoadProgs( void )
 
 	Con_DPrintf( "%s: filesystem_stdio successfully loaded\n", __func__ );
 	return true;
+#endif
 }
 
 static qboolean FS_DetermineRootDirectory( char *out, size_t size )
