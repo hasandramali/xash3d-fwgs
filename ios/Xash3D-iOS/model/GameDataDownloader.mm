@@ -213,15 +213,20 @@ static bytes decryptAES(const uint8_t *sk, const uint8_t *d, size_t l) {
     uint8_t ci[16]; memcpy(ci, iv, 16);
     mbedtls_aes_crypt_cbc(&ac, MBEDTLS_AES_DECRYPT, bl, ci, d+16, pt.data());
     mbedtls_aes_free(&ac);
+    // PKCS7 unpad FIRST (matching Android Cipher.doFinal behavior)
+    size_t ps = bl;
+    if (bl > 0) { uint8_t pv = pt[bl-1];
+        if (pv > 0 && pv <= 16 && pv <= bl) { bool ok = true;
+            for (size_t i = bl - pv; i < bl; i++) if (pt[i] != pv) { ok=false; break; }
+            if (ok) ps = bl - pv; } }
+    // HMAC verification on UNPADDED data (matching Android)
     uint8_t r3[3]; memcpy(r3, iv+13, 3);
     NSData *hk = [NSData dataWithBytes:sk length:16];
     NSMutableData *hi = [NSMutableData dataWithBytes:r3 length:3];
-    [hi appendBytes:pt.data() length:pt.size()];
+    [hi appendBytes:pt.data() length:ps];
     NSData *h = hmacSha1((const uint8_t *)hk.bytes, 16, (const uint8_t *)hi.bytes, hi.length);
     if (memcmp((const uint8_t *)h.bytes, iv, 13) != 0) throw std::runtime_error("HMAC fail");
-    if (bl > 0) { uint8_t p = pt[bl-1]; if (p > 0 && p <= 16) { size_t ps = bl - p;
-        bool ok = true; for (size_t i = ps; i < bl; i++) if (pt[i] != p) { ok=false; break; }
-        if (ok) pt.resize(ps); } }
+    pt.resize(ps);
     return pt;
 }
 
