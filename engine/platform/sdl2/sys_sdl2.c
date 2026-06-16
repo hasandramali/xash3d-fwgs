@@ -153,14 +153,18 @@ void SDLash_Init( void )
 
 	SDL_StopTextInput();
 
+#if !XASH_MOBILE_PLATFORM
 	SDLash_InitCursors();
+#endif
 	SDLash_InitSensors();
 }
 
 void SDLash_Shutdown( void )
 {
 	SDLash_ShutdownSensors();
+#if !XASH_MOBILE_PLATFORM
 	SDLash_FreeCursors();
+#endif
 
 	SDL_Quit();
 }

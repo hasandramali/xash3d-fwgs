@@ -136,6 +136,7 @@ SDLash_InitCursors
 */
 void SDLash_InitCursors( void )
 {
+#if !XASH_MOBILE_PLATFORM
 	if( cursors.initialized )
 		SDLash_FreeCursors();
 
@@ -154,6 +155,7 @@ void SDLash_InitCursors( void )
 	cursors.cursors[dc_no] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NO);
 	cursors.cursors[dc_hand] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
 	cursors.initialized = true;
+#endif
 }
 
 /*
@@ -164,6 +166,7 @@ SDLash_FreeCursors
 */
 void SDLash_FreeCursors( void )
 {
+#if !XASH_MOBILE_PLATFORM
 	for( int i = 0; i < ARRAYSIZE( cursors.cursors ); i++ )
 	{
 		if( cursors.cursors[i] )
@@ -172,6 +175,7 @@ void SDLash_FreeCursors( void )
 	}
 
 	cursors.initialized = false;
+#endif
 }
 
 /*
@@ -182,6 +186,7 @@ Platform_SetCursorType
 */
 void Platform_SetCursorType( VGUI_DefaultCursor type )
 {
+#if !XASH_MOBILE_PLATFORM
 	qboolean visible;
 
 	switch( type )
@@ -228,6 +233,7 @@ void Platform_SetCursorType( VGUI_DefaultCursor type )
 
 		SDL_ShowCursor( false );
 	}
+#endif
 }
 
 /*
