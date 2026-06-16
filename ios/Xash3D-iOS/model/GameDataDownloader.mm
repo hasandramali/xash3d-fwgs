@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <netdb.h>
 #include <zlib.h>
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -62,6 +63,49 @@ static NSData *steamPublicKey() {
     return [NSData dataWithBytes:k length:sizeof(k)];
 }
 
+#pragma mark - JIT-only logging
+
+static BOOL _jitChecked = NO;
+static BOOL _jitEnabled = NO;
+
+static BOOL isJITEnabled(void) {
+    if (!_jitChecked) {
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+        struct kinfo_proc info;
+        info.kp_proc.p_flag = 0;
+        size_t size = sizeof(info);
+        if (sysctl(mib, 4, &info, &size, NULL, 0) == 0)
+            _jitEnabled = (info.kp_proc.p_flag & P_TRACED) != 0;
+        _jitChecked = YES;
+    }
+    return _jitEnabled;
+}
+
+static NSString *_logPath = nil;
+
+static void initLogPath(NSString *docsDir) {
+    _logPath = [[docsDir stringByAppendingPathComponent:@"xash_ios.txt"] copy];
+}
+
+static void logToFile(NSString *format, ...) {
+    if (!isJITEnabled() || !_logPath) return;
+    va_list args;
+    va_start(args, format);
+    NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:_logPath];
+    if (!fh) {
+        [[NSFileManager defaultManager] createFileAtPath:_logPath contents:nil attributes:nil];
+        fh = [NSFileHandle fileHandleForWritingAtPath:_logPath];
+    }
+    if (fh) {
+        [fh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:@"[%@] %@\n", [NSDateFormatter localizedStringFromDate:[NSDate date] dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterMediumStyle], msg];
+        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    }
+}
+
 #pragma mark - Proto helpers
 
 typedef std::vector<uint8_t> bytes;
@@ -73,6 +117,19 @@ struct SteamProto {
         return v;
     }
 };
+
+static void skipProtoField(const uint8_t *d, size_t &p, size_t l) {
+    if (p >= l) return;
+    uint64_t tag = SteamProto::readVarint(d, p, l);
+    int wt = (int)(tag & 7);
+    switch (wt) {
+        case 0: SteamProto::readVarint(d, p, l); break;
+        case 1: p += 8; break;
+        case 2: { uint64_t sl = SteamProto::readVarint(d, p, l); p += (size_t)sl; } break;
+        case 5: p += 4; break;
+        default: break;
+    }
+}
 
 static bytes packVarint(int64_t val) {
     bytes buf; uint64_t v = (uint64_t)val;
@@ -364,6 +421,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 - (NSArray *)requestCDNServerListWithError:(NSError **)error;
 - (NSData *)getDepotDecryptionKey:(int)appId depotId:(int)depotId error:(NSError **)error;
 - (int64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error;
+- (void)parseLogonResponseHeader:(NSData *)header;
 - (void)disconnect;
 @end
 
@@ -477,15 +535,16 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
         int hdrLen = readInt32LE(dp, off + 4);
         size_t subOff = 8 + hdrLen;
         if (subOff < (size_t)subSize) {
+            bytes subHeader(dp + off + 8, dp + off + 8 + hdrLen);
             bytes subBody(dp + off + subOff, dp + off + subSize);
-            [msgs addObject:@{@"emsg":@(subEmsg), @"body":[NSData dataWithBytes:subBody.data() length:subBody.size()]}];
+            [msgs addObject:@{@"emsg":@(subEmsg), @"header":[NSData dataWithBytes:subHeader.data() length:subHeader.size()], @"body":[NSData dataWithBytes:subBody.data() length:subBody.size()]}];
         }
         off += subSize;
     }
     return msgs;
 }
 
-- (BOOL)readMessageWithEmsg:(int*)oe body:(bytes*)ob isProto:(BOOL*)op error:(NSError**)err {
+- (BOOL)readMessageWithEmsg:(int*)oe body:(bytes*)ob isProto:(BOOL*)op header:(bytes*)oh error:(NSError**)err {
     uint8_t lb[4]; if (![self readExact:lb length:4]) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading len"}]; return NO; }
     int32_t pl = readInt32LE(lb, 0);
     uint8_t mb[4]; if (![self readExact:mb length:4]) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading magic"}]; return NO; }
@@ -498,7 +557,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     if (payload.size() < 8) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Payload too small"}]; return NO; }
     int re = readInt32LE(payload.data(), 0); BOOL ip = (re & PROTO_MASK) != 0;
     size_t off = 4;
-    if (ip) { int hl = readInt32LE(payload.data(), (size_t)off); off += 4; if (hl > 0) off += hl; } else off += 16;
+    if (ip) { int hl = readInt32LE(payload.data(), (size_t)off); off += 4; if (oh) oh->assign(payload.begin()+off, payload.begin()+off+hl); if (hl > 0) off += hl; } else off += 16;
     if (oe) *oe = re & 0x7FFFFFFF; if (op) *op = ip;
     if (ob) ob->assign(payload.begin()+off, payload.end());
     return YES;
@@ -507,29 +566,67 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 - (BOOL)anonymousLoginWithError:(NSError **)error {
     arc4random_buf(_sessionKey, 32); _encrypted = NO;
     [self status:@"Waiting for encrypt request..."];
+    logToFile(@"Waiting for ChannelEncryptRequest...");
     int emsg; bytes body; BOOL isProto;
-    if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto error:error]) return NO;
+    if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:nil error:error]) {
+        logToFile(@"Failed to read ChannelEncryptRequest");
+        return NO;
+    }
+    logToFile(@"Got msg: emsg=%d isProto=%d bodySize=%zu", emsg, isProto, body.size());
 
     NSData *pubKey; bytes challenge;
     if (isProto) {
-        size_t p = 0; SteamProto::readVarint(body.data(), p, body.size());
-        SteamProto::readVarint(body.data(), p, body.size());
-        SteamProto::readVarint(body.data(), p, body.size());
-        int kl = (int)SteamProto::readVarint(body.data(), p, body.size());
-        if (kl < 0 || (size_t)kl > body.size()-p) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Bad key len"}]; return NO; }
-        pubKey = [NSData dataWithBytes:body.data()+p length:kl]; p += kl;
-        if (p < body.size()) challenge = bytes(body.begin()+p, body.end());
+        size_t p = 0;
+        skipProtoField(body.data(), p, body.size()); // protocol_version
+        skipProtoField(body.data(), p, body.size()); // universe
+        uint64_t ftag = SteamProto::readVarint(body.data(), p, body.size());
+        int fn = (int)(ftag >> 3);
+        int wt = (int)(ftag & 7);
+        logToFile(@"Proto field 3: tag=0x%llx fn=%d wt=%d pos=%zu size=%zu", (unsigned long long)ftag, fn, wt, p, body.size());
+        if (wt == 2) {
+            uint64_t kl = SteamProto::readVarint(body.data(), p, body.size());
+            logToFile(@"  -> bytes field, keyLen=%llu", (unsigned long long)kl);
+            if (kl > 0 && p + kl <= body.size()) {
+                pubKey = [NSData dataWithBytes:body.data()+p length:(NSUInteger)kl];
+                p += (size_t)kl;
+            }
+        } else if (wt == 0) {
+            uint64_t kl = SteamProto::readVarint(body.data(), p, body.size());
+            logToFile(@"  -> varint field, value=%llu", (unsigned long long)kl);
+            if (kl > 0 && p + (size_t)kl <= body.size()) {
+                pubKey = [NSData dataWithBytes:body.data()+p length:(NSUInteger)kl];
+                p += (size_t)kl;
+            }
+        }
+        logToFile(@"  pubKey size=%lu pos=%zu", (unsigned long)pubKey.length, p);
+        // Remaining = challenge
+        if (p < body.size()) {
+            skipProtoField(body.data(), p, body.size()); // skip the challenge bytes field header
+            challenge.assign(body.begin()+p, body.end());
+            logToFile(@"  challenge size=%zu", challenge.size());
+        }
     } else {
         pubKey = steamPublicKey();
         size_t off = 8; if (off < body.size()) challenge = bytes(body.begin()+off, body.end());
+        logToFile(@"Legacy format: pubKey=%lu challenge=%zu", (unsigned long)pubKey.length, challenge.size());
     }
 
     NSMutableData *blobToEncrypt = [NSMutableData dataWithBytes:_sessionKey length:32];
     [blobToEncrypt appendBytes:challenge.data() length:challenge.size()];
+    logToFile(@"blobToEncrypt size=%lu", (unsigned long)blobToEncrypt.length);
 
     NSData *eb = rsaEncryptOAEP((const uint8_t *)pubKey.bytes, pubKey.length, (const uint8_t *)blobToEncrypt.bytes, blobToEncrypt.length);
-    if (!eb) { pubKey = steamPublicKey(); eb = rsaEncryptOAEP((const uint8_t *)pubKey.bytes, pubKey.length, (const uint8_t *)blobToEncrypt.bytes, blobToEncrypt.length); }
-    if (!eb) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"RSA failed"}]; return NO; }
+    if (!eb) {
+        logToFile(@"RSA encrypt failed with server key, trying hardcoded key");
+        pubKey = steamPublicKey();
+        eb = rsaEncryptOAEP((const uint8_t *)pubKey.bytes, pubKey.length, (const uint8_t *)blobToEncrypt.bytes, blobToEncrypt.length);
+    }
+    if (!eb) {
+        logToFile(@"RSA encrypt failed with hardcoded key too!");
+        if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"RSA failed"}];
+        return NO;
+    }
+    logToFile(@"RSA encrypt success, encrypted size=%lu", (unsigned long)eb.length);
 
     NSData *bc = eb;
     uint32_t crc = (uint32_t)crc32(0, (const uint8_t *)eb.bytes, (uInt)eb.length);
@@ -543,7 +640,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     auto zf = packFixed32(0); er.insert(er.end(), zf.begin(), zf.end());
     [self sendRaw:er]; [self status:@"Sent encrypt response"];
 
-    if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto error:error]) return NO;
+    if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:nil error:error]) return NO;
     if (readInt32LE(body.data(),0) != 1) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Handshake failed"}]; return NO; }
     _encrypted = YES; [self status:@"Connecting Steam..."];
 
@@ -573,13 +670,18 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
     BOOL ok = NO;
     for (int t = 0; t < 20 && !ok; t++) {
-        if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto error:nil]) { usleep(100000); continue; }
+        bytes hdr;
+        if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:&hdr error:nil]) { usleep(100000); continue; }
+        logToFile(@"Login response: emsg=%d isProto=%d bodySize=%zu (try %d)", emsg, isProto, body.size(), t);
         if (emsg == 1) {
             NSArray *subs = [self parseMultiMessage:body];
             for (NSDictionary *sub in subs) {
                 int se = [sub[@"emsg"] intValue];
                 NSData *sd = sub[@"body"];
+                NSData *sh = sub[@"header"];
+                logToFile(@"  Sub-msg: emsg=%d size=%lu", se, (unsigned long)sd.length);
                 if (se == 751) {
+                    if (sh) [self parseLogonResponseHeader:sh];
                     const uint8_t *sp = (const uint8_t *)sd.bytes;
                     size_t sl = sd.length, spp = 0;
                     SteamProto::readVarint(sp, spp, sl);
@@ -588,15 +690,40 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
                 }
             }
         } else if (emsg == 751) {
+            NSData *hdrData = [NSData dataWithBytes:hdr.data() length:hdr.size()];
+            [self parseLogonResponseHeader:hdrData];
             size_t sp = 0; SteamProto::readVarint(body.data(), sp, body.size());
             int lr = (int)SteamProto::readVarint(body.data(), sp, body.size());
+            logToFile(@"  Direct logon: eresult=%d sessionId=%d steamId=%llu", lr, _currentSessionId, (unsigned long long)_currentSteamId);
             if (lr == 1) ok = YES;
         }
     }
     if (!ok) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Login failed"}]; return NO; }
     [self status:@"Logged in to Steam"];
+    logToFile(@"Login success! sessionId=%d steamId=%llu", _currentSessionId, (unsigned long long)_currentSteamId);
     [self startHeartbeat:_heartbeatSeconds];
     return YES;
+}
+
+- (void)parseLogonResponseHeader:(NSData *)header {
+    const uint8_t *b = (const uint8_t *)header.bytes;
+    size_t l = header.length, p = 0;
+    while (p < l) {
+        uint64_t tag = SteamProto::readVarint(b, p, l);
+        int fn = (int)(tag >> 3), wt = (int)(tag & 7);
+        if (fn == 1 && wt == 1 && p + 8 <= l) {
+            _currentSteamId = (uint64_t)readInt64LE(b, p);
+            p += 8;
+        } else if (fn == 2 && wt == 0) {
+            _currentSessionId = (int)SteamProto::readVarint(b, p, l);
+        } else {
+            if (wt == 0) SteamProto::readVarint(b, p, l);
+            else if (wt == 1) p += 8;
+            else if (wt == 2) { uint64_t sl = SteamProto::readVarint(b, p, l); p += (size_t)sl; }
+            else if (wt == 5) p += 4;
+            else p++;
+        }
+    }
 }
 
 - (BOOL)requestLicense:(int)appId error:(NSError **)error {
@@ -609,7 +736,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     [self sendProtobufMsg:5572 body:b header:h];
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
+        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
         if (e == 1) {
             NSArray *subs = [self parseMultiMessage:d];
             for (NSDictionary *sub in subs) {
@@ -644,7 +771,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     NSMutableArray *sv = [NSMutableArray array];
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
+        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
         if (e == 147) { [self parseServerList:d into:sv]; if (sv.count) return filterResolvableHosts(sv); }
         else if (e == 1) {
             NSArray *subs = [self parseMultiMessage:d];
@@ -694,7 +821,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     [self sendProtobufMsg:5438 body:b header:h];
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
+        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
         if (e==1) {
             NSArray *subs = [self parseMultiMessage:d];
             for (NSDictionary *sub in subs) {
@@ -734,7 +861,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     [self sendProtobufMsg:151 body:b header:h];
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip error:nil]) continue;
+        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
         if (e==147) { size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size()); return (int64_t)SteamProto::readVarint(d.data(),sp,d.size()); }
         else if (e==1) {
             NSArray *subs = [self parseMultiMessage:d];
@@ -918,7 +1045,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 }
 
 - (instancetype)initWithDocumentsDir:(NSString *)docsDir {
-    if (self = [super init]) _docsDir = [docsDir copy];
+    if (self = [super init]) { _docsDir = [docsDir copy]; initLogPath(_docsDir); }
     return self;
 }
 
@@ -939,17 +1066,36 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
         NSError *err = nil;
         if (onProgress) onProgress(@"Connecting to Steam...", 0);
-        if (![client connectWithError:&err]) { dispatch_async(dispatch_get_main_queue(), ^{ completion(err); }); return; }
+        logToFile(@"Connecting to Steam CM...");
+        if (![client connectWithError:&err]) {
+            logToFile(@"Connect failed: %@", err.localizedDescription);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            return;
+        }
 
         if (onProgress) onProgress(@"Logging in anonymously...", 0);
-        if (![client anonymousLoginWithError:&err]) { [client disconnect]; dispatch_async(dispatch_get_main_queue(), ^{ completion(err); }); return; }
+        logToFile(@"Logging in anonymously for game %@ (appId=%d)", gameDir, appId);
+        if (![client anonymousLoginWithError:&err]) {
+            logToFile(@"Login failed: %@", err.localizedDescription);
+            [client disconnect];
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            return;
+        }
 
         if (onProgress) onProgress(@"Requesting license...", 0);
+        logToFile(@"Requesting license for app %d...", appId);
         [client requestLicense:appId error:nil];
 
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
+        logToFile(@"Requesting CDN server list...");
         NSArray *cdnHosts = [client requestCDNServerListWithError:&err];
-        if (!cdnHosts) { [client disconnect]; dispatch_async(dispatch_get_main_queue(), ^{ completion(err); }); return; }
+        if (!cdnHosts) {
+            logToFile(@"CDN servers failed: %@", err.localizedDescription);
+            [client disconnect];
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            return;
+        }
+        logToFile(@"Got %lu CDN hosts", (unsigned long)cdnHosts.count);
 
         NSMutableArray *depotSetups = [NSMutableArray array];
         for (NSNumber *did in depotIds) {
