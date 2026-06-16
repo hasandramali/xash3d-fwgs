@@ -1,4 +1,5 @@
 #import "GameDataDownloader.h"
+#import <os/log.h>
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #include <vector>
 #include <string>
@@ -65,8 +66,18 @@ static NSData *steamPublicKey() {
 #pragma mark - Logging
 
 static NSString *_logPath = nil;
+static os_log_t _gddLog = nil;
+
+static void ensureOsLog() {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        _gddLog = os_log_create("com.xash3d.gamedatadownloader", "SteamCDN");
+    });
+}
 
 static void initLogPath(NSString *docsDir) {
+    ensureOsLog();
+    os_log(_gddLog, "GameDataDownloader initialized, docsDir=%{public}@", docsDir);
     _logPath = [[docsDir stringByAppendingPathComponent:@"xash_ios.txt"] copy];
     // Truncate on each launch
     [[NSFileManager defaultManager] createFileAtPath:_logPath contents:[NSData data] attributes:nil];
@@ -78,6 +89,10 @@ static void logToFile(NSString *format, ...) {
     va_start(args, format);
     NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
+    // Also log to os_log for Console.app visibility
+    ensureOsLog();
+    os_log(_gddLog, "%{public}@", msg);
+    // Write to xash_ios.txt
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:_logPath];
     if (!fh) {
         [[NSFileManager defaultManager] createFileAtPath:_logPath contents:nil attributes:nil];
@@ -424,42 +439,48 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 - (void)status:(NSString *)s { if (_onStatus) _onStatus(s); }
 
 - (BOOL)writeExact:(const uint8_t *)d length:(size_t)l {
-    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n <= 0) return NO; o += n; }
+    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n <= 0) { logToFile(@"writeExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } o += n; }
     return YES;
 }
 - (BOOL)readExact:(uint8_t *)d length:(size_t)l {
-    size_t o = 0; while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n <= 0) return NO; o += n; }
+    size_t o = 0; while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n <= 0) { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } o += n; }
     return YES;
 }
 
 - (BOOL)connectWithError:(NSError **)error {
     for (NSString *host in CM_SERVERS()) {
         struct sockaddr_in a; memset(&a,0,sizeof(a)); a.sin_family = AF_INET; a.sin_port = htons(CM_PORT);
-        if (inet_pton(AF_INET, host.UTF8String, &a.sin_addr) != 1) continue;
-        int s = socket(AF_INET, SOCK_STREAM, 0); if (s < 0) continue;
+        if (inet_pton(AF_INET, host.UTF8String, &a.sin_addr) != 1) { logToFile(@"Cannot parse %@", host); continue; }
+        int s = socket(AF_INET, SOCK_STREAM, 0); if (s < 0) { logToFile(@"socket() failed for %@", host); continue; }
         struct timeval tv; tv.tv_sec = 5; tv.tv_usec = 0;
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) { _sock = s; [self status:[NSString stringWithFormat:@"Connected to %@", host]]; return YES; }
+        logToFile(@"Trying CM server %@...", host);
+        if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) { _sock = s; logToFile(@"Connected to %@", host); [self status:[NSString stringWithFormat:@"Connected to %@", host]]; return YES; }
+        logToFile(@"Connect to %@ failed (errno=%d)", host, errno);
         close(s);
     }
     if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No Steam CM server reachable"}];
     return NO;
 }
 
-- (void)disconnect { [self stopHeartbeat]; if (_sock >= 0) { close(_sock); _sock = -1; } }
+- (void)disconnect { [self stopHeartbeat]; if (_sock >= 0) { close(_sock); _sock = -1; logToFile(@"Disconnected"); } }
 
 - (void)sendRaw:(const bytes &)d {
     uint32_t len = (uint32_t)d.size(), magic = TCP_MAGIC;
     uint8_t h[8]; memcpy(h, &len, 4); memcpy(h+4, &magic, 4);
+    logToFile(@"sendRaw: len=%u magic=0x%08x", len, magic);
     [self writeExact:h length:8]; [self writeExact:d.data() length:d.size()];
 }
 
 - (void)sendProtobufMsg:(int)emsg body:(const bytes &)body header:(const bytes &)header {
+    logToFile(@"sendProtobufMsg: emsg=%d header=%zu body=%zu encrypted=%d", emsg, header.size(), body.size(), _encrypted);
     bytes p; auto ep = packFixed32(emsg|PROTO_MASK); p.insert(p.end(), ep.begin(), ep.end());
     auto hl = packFixed32((int32_t)header.size()); p.insert(p.end(), hl.begin(), hl.end());
     p.insert(p.end(), header.begin(), header.end()); p.insert(p.end(), body.begin(), body.end());
+    logToFile(@"  plain pdu size=%zu", p.size());
     bytes fp = _encrypted ? encryptAES(_sessionKey, p) : p;
+    logToFile(@"  wire size=%zu", fp.size());
     [self sendRaw:fp];
 }
 
@@ -482,6 +503,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             hdr.insert(hdr.end(),h1.begin(),h1.end()); hdr.insert(hdr.end(),si.begin(),si.end());
             auto h2 = packVarint((2<<3)|0); auto se = packVarint(_currentSessionId);
             hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
+            logToFile(@"Sending heartbeat (sessionId=%d steamId=%llu)", ss->_currentSessionId, (unsigned long long)ss->_currentSteamId);
             [ss sendProtobufMsg:1009 body:body header:hdr];
         }
     }];
@@ -534,21 +556,24 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 }
 
 - (BOOL)readMessageWithEmsg:(int*)oe body:(bytes*)ob isProto:(BOOL*)op header:(bytes*)oh error:(NSError**)err {
-    uint8_t lb[4]; if (![self readExact:lb length:4]) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading len"}]; return NO; }
+    uint8_t lb[4]; if (![self readExact:lb length:4]) { logToFile(@"readMessage: failed reading len"); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading len"}]; return NO; }
     int32_t pl = readInt32LE(lb, 0);
-    uint8_t mb[4]; if (![self readExact:mb length:4]) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading magic"}]; return NO; }
-    if (readInt32LE(mb,0) != TCP_MAGIC) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Bad magic"}]; return NO; }
-    if (pl < 4 || pl > 1000000) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Bad len %d",pl]}]; return NO; }
-    bytes ep((size_t)pl); if (![self readExact:ep.data() length:(size_t)pl]) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading payload"}]; return NO; }
+    logToFile(@"readMessage: packetLen=%d encrypted=%d", pl, _encrypted);
+    uint8_t mb[4]; if (![self readExact:mb length:4]) { logToFile(@"readMessage: failed reading magic after len=%d", pl); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading magic"}]; return NO; }
+    int32_t magic = readInt32LE(mb,0);
+    if (magic != TCP_MAGIC) { logToFile(@"readMessage: BAD MAGIC 0x%08x (expected 0x%08x)", magic, TCP_MAGIC); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Bad magic"}]; return NO; }
+    if (pl < 4 || pl > 1000000) { logToFile(@"readMessage: BAD LEN %d", pl); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Bad len %d",pl]}]; return NO; }
+    bytes ep((size_t)pl); if (![self readExact:ep.data() length:(size_t)pl]) { logToFile(@"readMessage: failed reading %d byte payload", pl); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Closed reading payload"}]; return NO; }
     bytes payload;
-    if (_encrypted) { try { payload = decryptAES(_sessionKey, ep.data(), ep.size()); } catch (...) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Decrypt failed"}]; return NO; } }
+    if (_encrypted) { try { logToFile(@"readMessage: decrypting %zu bytes...", ep.size()); payload = decryptAES(_sessionKey, ep.data(), ep.size()); logToFile(@"readMessage: decrypted to %zu bytes", payload.size()); } catch (...) { logToFile(@"readMessage: DECRYPT FAILED"); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Decrypt failed"}]; return NO; } }
     else payload = ep;
-    if (payload.size() < 8) { if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Payload too small"}]; return NO; }
+    if (payload.size() < 8) { logToFile(@"readMessage: payload too small %zu", payload.size()); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Payload too small"}]; return NO; }
     int re = readInt32LE(payload.data(), 0); BOOL ip = (re & PROTO_MASK) != 0;
     size_t off = 4;
-    if (ip) { int hl = readInt32LE(payload.data(), (size_t)off); off += 4; if (oh) oh->assign(payload.begin()+off, payload.begin()+off+hl); if (hl > 0) off += hl; } else off += 16;
+    if (ip) { int hl = readInt32LE(payload.data(), (size_t)off); off += 4; logToFile(@"readMessage: proto emsg=%d headerLen=%d", re & 0x7FFFFFFF, hl); if (oh) oh->assign(payload.begin()+off, payload.begin()+off+hl); if (hl > 0) off += hl; } else { logToFile(@"readMessage: legacy emsg=%d", re & 0x7FFFFFFF); off += 16; }
     if (oe) *oe = re & 0x7FFFFFFF; if (op) *op = ip;
     if (ob) ob->assign(payload.begin()+off, payload.end());
+    logToFile(@"readMessage: body=%zu", ob ? ob->size() : 0);
     return YES;
 }
 
@@ -646,14 +671,27 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     logToFile(@"Encrypt result: %d", eresult);
     if (eresult != 1) { if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Handshake failed: eresult=%d",eresult]}]; return NO; }
     _encrypted = YES; [self status:@"Connecting Steam..."];
+    logToFile(@"Encryption established, sending ClientHello...");
 
-    // ClientHello
+    // Build proto header helper
+    auto buildHeader = [&](uint64_t steamId, int sessionId) -> bytes {
+        bytes h;
+        auto t1 = packVarint((1<<3)|1); auto v1 = packFixed64(steamId);
+        h.insert(h.end(), t1.begin(), t1.end()); h.insert(h.end(), v1.begin(), v1.end());
+        auto t2 = packVarint((2<<3)|0); auto v2 = packVarint(sessionId);
+        h.insert(h.end(), t2.begin(), t2.end()); h.insert(h.end(), v2.begin(), v2.end());
+        return h;
+    };
+
+    // ClientHello (9805) — MUST include header with steamId like Android does
     bytes hb; auto hf = packVarint((1<<3)|0); hb.insert(hb.end(),hf.begin(),hf.end());
     auto hv = packVarint(65581); hb.insert(hb.end(),hv.begin(),hv.end());
-    [self sendProtobufMsg:9805 body:hb header:bytes()];
+    bytes helloHeader = buildHeader(_currentSteamId, 0);
+    logToFile(@"Sending ClientHello (emsg=9805) header=%zu body=%zu", helloHeader.size(), hb.size());
+    [self sendProtobufMsg:9805 body:hb header:helloHeader];
     usleep(100000);
 
-    // ClientLogon
+    // ClientLogon (5514)
     bytes lb; auto lf = packVarint((1<<3)|0); lb.insert(lb.end(),lf.begin(),lf.end());
     auto lv = packVarint(65581); lb.insert(lb.end(),lv.begin(),lv.end());
     auto lf6 = packVarint((6<<3)|2); bytes lang={'e','n','g','l','i','s','h'};
@@ -661,14 +699,11 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     lb.insert(lb.end(),ll.begin(),ll.end()); lb.insert(lb.end(),lang.begin(),lang.end());
     auto lf7 = packVarint((7<<3)|0); auto lv7 = packVarint((int64_t)-500);
     lb.insert(lb.end(),lf7.begin(),lf7.end()); lb.insert(lb.end(),lv7.begin(),lv7.end());
-    auto lf30 = packVarint((30<<3)|2); bytes mid={'O','b','j','C','S','t','e','a','m','-','S','e','r','i','a','l'};
+    auto lf30 = packVarint((30<<3)|2); bytes mid={'J','a','v','a','S','t','e','a','m','-','S','e','r','i','a','l','N','u','m','b','e','r'};
     auto ml = packVarint((int64_t)mid.size()); lb.insert(lb.end(),lf30.begin(),lf30.end());
     lb.insert(lb.end(),ml.begin(),ml.end()); lb.insert(lb.end(),mid.begin(),mid.end());
-
-    bytes lh; auto lh1 = packVarint((1<<3)|1); auto sid = packFixed64(_currentSteamId);
-    lh.insert(lh.end(),lh1.begin(),lh1.end()); lh.insert(lh.end(),sid.begin(),sid.end());
-    auto lh2 = packVarint((2<<3)|0); auto ss = packVarint(0);
-    lh.insert(lh.end(),lh2.begin(),lh2.end()); lh.insert(lh.end(),ss.begin(),ss.end());
+    bytes lh = buildHeader(_currentSteamId, 0);
+    logToFile(@"Sending ClientLogon (emsg=5514) header=%zu body=%zu", lh.size(), lb.size());
     [self sendProtobufMsg:5514 body:lb header:lh];
 
     BOOL ok = NO;
