@@ -98,8 +98,8 @@ static const NSInteger kMaxTextFileSize = 1024 * 1024;
 - (void)keyboardWillShow:(NSNotification *)n
 {
     CGRect frame = [n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-    CGFloat duration = [n.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
-    UIViewAnimationCurve curve = [n.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    NSTimeInterval duration = [n.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    NSInteger curve = [n.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
     CGFloat kbHeight = CGRectGetHeight(frame);
     self.bottomConstraint.constant = -kbHeight;
     [UIView animateWithDuration:duration delay:0 options:curve << 16 animations:^{
@@ -109,8 +109,8 @@ static const NSInteger kMaxTextFileSize = 1024 * 1024;
 
 - (void)keyboardWillHide:(NSNotification *)n
 {
-    CGFloat duration = [n.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
-    UIViewAnimationCurve curve = [n.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    NSTimeInterval duration = [n.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    NSInteger curve = [n.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
     self.bottomConstraint.constant = 0;
     [UIView animateWithDuration:duration delay:0 options:curve << 16 animations:^{
         [self.view layoutIfNeeded];
