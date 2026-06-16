@@ -2,6 +2,7 @@
 #import "TextEditorViewController.h"
 #import "GameLibDownloader.h"
 #import "GameDataDownloader.h"
+#include "launcherdialog.h"
 
 @interface FileBrowserViewController () <UIDocumentPickerDelegate, UIAlertViewDelegate>
 @property (nonatomic, strong) NSArray *directories;
@@ -35,8 +36,8 @@ static NSString *kCellID = @"FileCell";
     if (self.title.length == 0 || [self.currentPath isEqualToString:NSHomeDirectory()])
         self.title = @"Xash3D";
 
-    UIBarButtonItem *closeBtn = [[UIBarButtonItem alloc] initWithTitle:@"Close" style:UIBarButtonItemStyleDone target:self action:@selector(closeTapped)];
-    self.navigationItem.leftBarButtonItem = closeBtn;
+    UIBarButtonItem *launchBtn = [[UIBarButtonItem alloc] initWithTitle:@"Launch" style:UIBarButtonItemStyleDone target:self action:@selector(launchTapped)];
+    self.navigationItem.leftBarButtonItem = launchBtn;
 
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
     UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
@@ -59,9 +60,105 @@ static NSString *kCellID = @"FileCell";
     [self reloadFiles];
 }
 
-- (void)closeTapped
+- (void)launchTapped
 {
-    [self dismissViewControllerAnimated:YES completion:nil];
+    NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+    NSArray *contents = [self.fm contentsOfDirectoryAtPath:docs error:nil];
+    NSMutableArray *gameDirs = [NSMutableArray array];
+    for (NSString *name in contents) {
+        if ([name hasPrefix:@"."]) continue;
+        NSString *full = [docs stringByAppendingPathComponent:name];
+        BOOL isDir = NO;
+        [self.fm fileExistsAtPath:full isDirectory:&isDir];
+        if (!isDir) continue;
+        if ([self.fm fileExistsAtPath:[full stringByAppendingPathComponent:@"liblist.gam"]] ||
+            [self.fm fileExistsAtPath:[full stringByAppendingPathComponent:@"gameinfo.txt"]])
+            [gameDirs addObject:name];
+    }
+    if (gameDirs.count == 0) {
+        [gameDirs addObject:@"valve"];
+    }
+    if (gameDirs.count == 1) {
+        [self showLaunchDialogForGame:gameDirs[0]];
+    } else {
+        [self showGamePicker:gameDirs];
+    }
+}
+
+- (void)showGamePicker:(NSArray *)gameDirs
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Game" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *dir in gameDirs) {
+        [alert addAction:[UIAlertAction actionWithTitle:dir style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self showLaunchDialogForGame:dir];
+        }]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
+        alert.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItem;
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)showLaunchDialogForGame:(NSString *)gamedir
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Launch Game" message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.text = gamedir;
+        tf.placeholder = @"Game directory";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.text = @"-dev 1 -console -log";
+        tf.placeholder = @"Extra arguments";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self doLaunchWithGameDir:alert.textFields[0].text extraArgs:alert.textFields[1].text];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
+{
+    CGRect rect = [[UIScreen mainScreen] bounds];
+    CGFloat scale = [UIScreen mainScreen].scale;
+    static char width_str[32], height_str[32];
+    snprintf(width_str, sizeof(width_str), "%d", (int)(rect.size.width * scale));
+    snprintf(height_str, sizeof(height_str), "%d", (int)(rect.size.height * scale));
+
+    NSMutableArray *argArray = [NSMutableArray arrayWithObject:@"xash"];
+    if (extraArgs.length > 0)
+        [argArray addObjectsFromArray:[extraArgs componentsSeparatedByString:@" "]];
+
+    BOOL hasGame = NO;
+    for (NSString *a in argArray)
+        if ([a isEqualToString:@"-game"]) { hasGame = YES; break; }
+    if (!hasGame) {
+        [argArray addObject:@"-game"];
+        [argArray addObject:gameDir];
+    }
+
+    BOOL hasWidth = NO, hasHeight = NO;
+    for (NSString *a in argArray) {
+        if ([a isEqualToString:@"-width"]) hasWidth = YES;
+        if ([a isEqualToString:@"-height"]) hasHeight = YES;
+    }
+    if (!hasWidth)  { [argArray addObject:@"-width"];  [argArray addObject:[NSString stringWithUTF8String:width_str]]; }
+    if (!hasHeight) { [argArray addObject:@"-height"]; [argArray addObject:[NSString stringWithUTF8String:height_str]]; }
+
+    int argc = (int)MIN(argArray.count, 63);
+    static char *c_args[64];
+    static char c_storage[64][256];
+    for (int i = 0; i < argc; i++) {
+        strncpy(c_storage[i], [argArray[i] UTF8String], 255);
+        c_storage[i][255] = '\0';
+        c_args[i] = c_storage[i];
+    }
+    c_args[argc] = NULL;
+    g_pszArgv = c_args;
+    g_iArgc = argc;
+    g_iStartGameStatus = XGS_START;
 }
 
 #pragma mark - File listing

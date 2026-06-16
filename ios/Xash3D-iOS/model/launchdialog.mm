@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "launcherdialog.h"
+#include "FileBrowserViewController.h"
 
 char *g_szLibrarySuffix = NULL;
 float g_iOSVer;
@@ -126,12 +127,11 @@ extern "C" BOOL IOS_IsResourcesReady()
 
 void IOS_PrepareView()
 {
-    NSBundle *bundle = [NSBundle mainBundle];
-    NSString *storyboardName = @"TutorStoryboard";
-    UIStoryboard *storyboard = [UIStoryboard storyboardWithName:storyboardName bundle:bundle];
-    UIViewController * controller = storyboard.instantiateInitialViewController;
+    NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+    FileBrowserViewController *fbc = [[FileBrowserViewController alloc] initWithPath:docs];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:fbc];
     g_launcherWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
-    [g_launcherWindow setRootViewController:controller];
+    [g_launcherWindow setRootViewController:nav];
     [g_launcherWindow makeKeyAndVisible];
     IOS_WriteLogLine( "Xash: launcher view prepared" );
 }
@@ -176,7 +176,8 @@ extern "C" void IOS_LaunchDialog( void )
     [g_launcherWindow setRootViewController:nil];
     g_launcherWindow = nil;
 
-    IOS_SetDefaultArgs();
+    if( !g_pszArgv )
+        IOS_SetDefaultArgs();
 }
 
 extern "C" char *IOS_GetUDID( void )
