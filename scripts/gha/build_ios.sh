@@ -64,6 +64,17 @@ xcodebuild \
     CODE_SIGNING_ALLOWED=NO \
     build || die
 
+# Embed SDL2.framework into the app bundle (required for @rpath loading at runtime)
+APP_PATH="ios/build/Build/Products/Release-iphoneos/Xash3D.app"
+FRAMEWORKS_DIR="$APP_PATH/Frameworks"
+if [ -d "build/SDL2.framework" ]; then
+    mkdir -p "$FRAMEWORKS_DIR"
+    cp -Rf "build/SDL2.framework" "$FRAMEWORKS_DIR/"
+    # Re-sign the embedded framework (ad-hoc)
+    codesign --sign "-" --force "$FRAMEWORKS_DIR/SDL2.framework" 2>/dev/null || true
+    echo "Embedded SDL2.framework into $FRAMEWORKS_DIR"
+fi
+
 # Package into .ipa
 ./scripts/ios/createipa.sh
 
