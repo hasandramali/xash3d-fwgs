@@ -113,18 +113,13 @@ static NSString *kCellID = @"FileCell";
 {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Launch Game" message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = gamedir;
-        tf.placeholder = @"Game directory";
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    }];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.text = @"-dev 1 -console -log";
         tf.placeholder = @"Extra arguments";
         tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self doLaunchWithGameDir:alert.textFields[0].text extraArgs:alert.textFields[1].text];
+        [self doLaunchWithGameDir:gamedir extraArgs:alert.textFields[0].text];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
