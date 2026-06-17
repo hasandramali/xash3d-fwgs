@@ -8,8 +8,8 @@ cd "$GITHUB_WORKSPACE" || die
 
 cp -vr /Library/Frameworks/SDL2.framework ./build
 
+mkdir -p build/ios/libs
 LIBSDIR=$(realpath build/ios/libs)
-mkdir -p "$LIBSDIR"
 
 # Build valve from local hlsdk submodule
 pushd hlsdk || die
