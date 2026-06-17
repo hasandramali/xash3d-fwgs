@@ -30,7 +30,7 @@ typedef enum XashGameStatus_e
 extern XashGameStatus_t g_iStartGameStatus;
 
 extern int g_iArgc;
-extern char **g_pszArgv;
+extern const char **g_pszArgv;
 
 const char *IOS_GetDocsDir();
 const char *IOS_GetBundleDir();

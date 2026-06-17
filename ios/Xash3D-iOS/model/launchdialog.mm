@@ -23,7 +23,7 @@ extern int Q_buildnum( void );
 
 extern "C" XashGameStatus_t g_iStartGameStatus = XGS_SKIP;
 extern "C" int g_iArgc = 0;
-extern "C" char **g_pszArgv = NULL;
+extern "C" const char **g_pszArgv = NULL;
 
 extern "C" int IOS_GetArgs( char ***out )
 {
@@ -138,7 +138,7 @@ void IOS_PrepareView()
 
 extern "C" void IOS_SetDefaultArgs()
 {
-    static char *args[64] = { "xash", "-dev", "1", "-game", "valve" };
+    static const char *args[64] = { "xash", "-dev", "1", "-game", "valve" };
     g_pszArgv = args;
     g_iArgc = 5;
 }
