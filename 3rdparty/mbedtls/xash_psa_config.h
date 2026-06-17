@@ -24,8 +24,9 @@
 
 #undef PSA_WANT_ALG_CCM
 #undef PSA_WANT_ALG_CCM_STAR_NO_TAG
-#undef PSA_WANT_ALG_CBC_NO_PADDING
-#undef PSA_WANT_ALG_CBC_PKCS7
+// iOS uses mbedtls_aes_crypt_cbc() for Steam/GameData decryption
+//#undef PSA_WANT_ALG_CBC_NO_PADDING
+//#undef PSA_WANT_ALG_CBC_PKCS7
 #undef PSA_WANT_ALG_CFB
 #undef PSA_WANT_ALG_CMAC
 #undef PSA_WANT_ALG_CTR

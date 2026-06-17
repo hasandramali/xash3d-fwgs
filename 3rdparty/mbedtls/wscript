@@ -35,7 +35,6 @@ def build(bld):
 	defines = [
 		'MBEDTLS_USER_CONFIG_FILE="xash_mbedtls_config.h"',
 		'TF_PSA_CRYPTO_USER_CONFIG_FILE="xash_psa_config.h"',
-		'MBEDTLS_PSA_CRYPTO_C=1',
 	]
 
 	includes = [
