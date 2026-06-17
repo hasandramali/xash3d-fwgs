@@ -131,7 +131,7 @@ static NSString *kCellID = @"FileCell";
             [self showLaunchDialogForGame:name extraArgs:args];
         }]];
     }
-    [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^{
+    [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *act) {
         [self showLaunchDialogForGame:current extraArgs:args];
     }]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
