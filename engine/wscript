@@ -26,7 +26,7 @@ int main(int argc, char **argv)
 }
 '''
 
-frameworks = ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConfiguration', 'CFNetwork', 'AVFoundation', 'CoreGraphics']
+frameworks = ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConfiguration', 'CFNetwork', 'AVFoundation', 'CoreGraphics', 'Metal', 'OpenGLES', 'CoreAudio', 'AudioToolbox', 'CoreMotion', 'CoreBluetooth', 'CoreHaptics', 'Security']
 
 @TaskGen.extension('.m')
 def m_hook(self, node):
@@ -34,6 +34,7 @@ def m_hook(self, node):
 
 @TaskGen.extension('.mm')
 def mm_hook(self, node):
+	self.env.append_unique('CXXFLAGS', '-fobjc-arc')
 	return self.create_compiled_task('cxx', node)
 
 def options(opt):

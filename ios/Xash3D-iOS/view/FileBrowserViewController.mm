@@ -157,7 +157,7 @@ static NSString *kCellID = @"FileCell";
 
     // Build C-style argv
     int argc = (int)MIN(argArray.count, 63);
-    static char *c_args[64];
+    static const char *c_args[64];
     static char c_storage[64][256];
     for (int i = 0; i < argc; i++) {
         strncpy(c_storage[i], [argArray[i] UTF8String], 255);
