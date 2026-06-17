@@ -32,6 +32,10 @@ frameworks = ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConf
 def m_hook(self, node):
 	return self.create_compiled_task('c', node)
 
+@TaskGen.extension('.mm')
+def mm_hook(self, node):
+	return self.create_compiled_task('cxx', node)
+
 def options(opt):
 	grp = opt.add_option_group('Engine options')
 
@@ -180,7 +184,23 @@ def build(bld):
 	if bld.env.IOS:
 		source += bld.path.ant_glob('platform/ios/*.c')
 		source += bld.path.ant_glob('platform/ios/*.m')
+		source += bld.path.ant_glob('platform/ios/*.mm')
 		includes += bld.path.ant_glob('platform/ios')
+
+		ios_launcher = bld.path.parent.find_node('ios/Xash3D-iOS')
+		if ios_launcher:
+			source += ios_launcher.ant_glob('model/*.mm')
+			source += ios_launcher.ant_glob('view/*.mm')
+			source += ios_launcher.ant_glob('controller/*.mm')
+			includes.append(ios_launcher.make_node('model').abspath())
+			includes.append(ios_launcher.make_node('view').abspath())
+			includes.append(ios_launcher.make_node('controller').abspath())
+
+		root = bld.path.parent
+		lzma_node = root.find_node('3rdparty/lzma')
+		if lzma_node:
+			source += lzma_node.ant_glob('*.c')
+			includes.append(lzma_node.abspath())
 	
 	# include sources for optional features
 	if bld.get_define('XASH_CUSTOM_SWAP'):
