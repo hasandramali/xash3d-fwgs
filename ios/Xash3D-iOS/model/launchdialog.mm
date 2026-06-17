@@ -163,11 +163,19 @@ extern "C" void IOS_LaunchDialog( void )
         }
     }
 
+    IOS_WriteLogLine( "Xash: launcher run loop exited" );
+    {
+        char buf[128];
+        snprintf( buf, sizeof(buf), "Xash: g_iStartGameStatus=%d g_iArgc=%d",
+            (int)g_iStartGameStatus, g_iArgc );
+        IOS_WriteLogLine( buf );
+    }
     IOS_WriteLogLine( "Xash: launcher finished, starting engine" );
+    IOS_WriteLogLine( "Xash: hiding launcher window" );
     [g_launcherWindow setHidden:YES];
     [g_launcherWindow setRootViewController:nil];
     g_launcherWindow = nil;
-
+    IOS_WriteLogLine( "Xash: launcher window destroyed, engine will create SDL window" );
 
 
     if( !g_pszArgv )

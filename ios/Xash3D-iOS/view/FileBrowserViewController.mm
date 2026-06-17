@@ -133,6 +133,12 @@ static NSString *kCellID = @"FileCell";
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
 {
+    IOS_Log( "Xash: Launch button pressed" );
+    {
+        char buf[1024];
+        snprintf( buf, sizeof(buf), "Xash: gameDir=%s extraArgs=%s", [gameDir UTF8String], [extraArgs UTF8String] );
+        IOS_Log( buf );
+    }
 
     CGRect rect = [[UIScreen mainScreen] bounds];
     CGFloat scale = [UIScreen mainScreen].scale;
@@ -181,14 +187,22 @@ static NSString *kCellID = @"FileCell";
         [self.downloader download:gameDir onProgress:^(float progress) {
             dispatch_async(dispatch_get_main_queue(), ^{ pv.progress = progress; });
         } completion:^(NSError *error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [downloading dismissViewControllerAnimated:YES completion:^{
-                    if (!error) g_iStartGameStatus = XGS_START;
-                }];
-            });
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [downloading dismissViewControllerAnimated:YES completion:^{
+                        if (!error) {
+                            IOS_Log( "Xash: download complete, starting engine" );
+                            g_iStartGameStatus = XGS_START;
+                            IOS_Log( "Xash: g_iStartGameStatus set to XGS_START after download" );
+                        } else {
+                            IOS_Log( "Xash: download failed, not starting engine" );
+                        }
+                    }];
+                });
         }];
     } else {
+        IOS_Log( "Xash: game already downloaded, starting engine immediately" );
         g_iStartGameStatus = XGS_START;
+        IOS_Log( "Xash: g_iStartGameStatus set to XGS_START" );
     }
 }
 

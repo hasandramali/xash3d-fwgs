@@ -763,14 +763,17 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 
 	// by default we create window in windowed mode because we don't know
 	// if window creation failed because of invalid video mode or any other reason
+	Con_Printf( "VID_CreateWindow: calling SDL_CreateWindow(%dx%d, flags=0x%x)\n", rect.w, rect.h, flags );
 	host.hWnd = SDL_CreateWindow( GI->title, rect.x, rect.y, rect.w, rect.h, flags );
 
 	if( !host.hWnd )
 	{
+		Con_Printf( S_ERROR "VID_CreateWindow: SDL_CreateWindow failed: %s\n", SDL_GetError() );
 		err = glw_state.software ? rserr_unknown : rserr_invalid_context;
 		goto cleanup;
 	}
 
+	Con_Printf( "VID_CreateWindow: SDL_CreateWindow succeeded\n" );
 	SDL_SetWindowMinimumSize( host.hWnd, VID_MIN_WIDTH, VID_MIN_HEIGHT );
 
 	if( window_mode != WINDOW_MODE_WINDOWED )
@@ -781,8 +784,10 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 	}
 
 	VID_SetWindowIcon( host.hWnd );
+	Con_Printf( "VID_CreateWindow: showing window\n" );
 	SDL_ShowWindow( host.hWnd );
 	SDL_RaiseWindow( host.hWnd );
+	Con_Printf( "VID_CreateWindow: window shown and raised\n" );
 
 	if( glw_state.software )
 	{
@@ -808,6 +813,7 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 	}
 	else
 	{
+		Con_Printf( "VID_CreateWindow: creating OpenGL context\n" );
 		glw_state.context = SDL_GL_CreateContext( host.hWnd );
 
 		if( !glw_state.context )
@@ -816,6 +822,7 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 			err = rserr_invalid_context;
 			goto cleanup;
 		}
+		Con_Printf( "VID_CreateWindow: OpenGL context created\n" );
 
 		if( SDL_GL_MakeCurrent( host.hWnd, glw_state.context ) < 0 )
 		{
@@ -823,6 +830,7 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 			err = rserr_invalid_context;
 			goto cleanup;
 		}
+		Con_Printf( "VID_CreateWindow: OpenGL context made current\n" );
 	}
 
 	// update window size if it was resized

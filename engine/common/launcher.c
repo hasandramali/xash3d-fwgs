@@ -39,8 +39,19 @@ int main( int argc, char **argv )
 	// inject -dev -console into args if required
 	szArgc = PSVita_GetArgv( argc, argv, &szArgv );
 #elif XASH_IOS
+	extern void IOS_Log( const char * );
+	extern int IOS_GetArgs( char ***out );
 	IOS_LaunchDialog();
+	IOS_Log( "Xash: IOS_LaunchDialog returned, getting args" );
 	szArgc = IOS_GetArgs( &szArgv );
+	{
+		char buf[512];
+		int len = 0;
+		for( int i = 0; i < szArgc; i++ )
+			len += Q_snprintf( buf + len, sizeof(buf) - len, "%s ", szArgv[i] );
+		IOS_Log( buf );
+	}
+	IOS_Log( "Xash: calling Host_Main" );
 #else
 	szArgc = argc;
 	szArgv = argv;
