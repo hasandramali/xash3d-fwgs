@@ -27,7 +27,7 @@ extern "C" const char **g_pszArgv = NULL;
 
 extern "C" int IOS_GetArgs( char ***out )
 {
-    *out = g_pszArgv;
+    *out = (char **)g_pszArgv;
     return g_iArgc;
 }
 
