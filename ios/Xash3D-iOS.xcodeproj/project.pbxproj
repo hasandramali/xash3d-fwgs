@@ -1702,14 +1702,14 @@
 			);
 			inputPaths = (
 			);
-			name = "Build Game Libraries";
+			name = "Copy Game Libraries";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "bash \"${SRCROOT}/../scripts/ios/buildallmods.sh\" && bash \"${SRCROOT}/../scripts/ios/buildcs16.sh\" && mkdir -p \"${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}\" && cp -r \"${SRCROOT}/../build/ios/libs/\"* \"${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/\"\n";
+			shellScript = "bash \"${SRCROOT}/../scripts/ios/prepare_game_libs.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

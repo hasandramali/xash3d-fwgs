@@ -70,37 +70,48 @@ static NSString *kCellID = @"FileCell";
     [self reloadFiles];
 }
 
-- (void)launchTapped
+- (NSArray *)availableGameLibraries
 {
-    NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
-    NSArray *contents = [self.fm contentsOfDirectoryAtPath:docs error:nil];
-    NSMutableArray *gameDirs = [NSMutableArray array];
+    NSString *bundle = [[NSBundle mainBundle] bundlePath];
+    NSMutableArray *libs = [NSMutableArray array];
+    NSArray *contents = [self.fm contentsOfDirectoryAtPath:bundle error:nil];
     for (NSString *name in contents) {
         if ([name hasPrefix:@"."]) continue;
-        NSString *full = [docs stringByAppendingPathComponent:name];
+        NSString *clDlls = [bundle stringByAppendingPathComponent:name];
+        clDlls = [clDlls stringByAppendingPathComponent:@"cl_dlls"];
         BOOL isDir = NO;
-        [self.fm fileExistsAtPath:full isDirectory:&isDir];
-        if (!isDir) continue;
-        if ([self.fm fileExistsAtPath:[full stringByAppendingPathComponent:@"liblist.gam"]] ||
-            [self.fm fileExistsAtPath:[full stringByAppendingPathComponent:@"gameinfo.txt"]])
-            [gameDirs addObject:name];
+        if ([self.fm fileExistsAtPath:clDlls isDirectory:&isDir] && isDir) {
+            NSArray *files = [self.fm contentsOfDirectoryAtPath:clDlls error:nil];
+            for (NSString *f in files) {
+                if ([f hasSuffix:@".dylib"]) {
+                    [libs addObject:name];
+                    break;
+                }
+            }
+        }
     }
-    if (gameDirs.count == 0) {
-        [gameDirs addObject:@"valve"];
+    if (libs.count == 0) {
+        [libs addObject:@"valve"];
     }
-    if (gameDirs.count == 1) {
-        [self showLaunchDialogForGame:gameDirs[0]];
+    return libs;
+}
+
+- (void)launchTapped
+{
+    NSArray *gameLibs = [self availableGameLibraries];
+    if (gameLibs.count == 1) {
+        [self showLaunchDialogForGame:gameLibs[0]];
     } else {
-        [self showGamePicker:gameDirs];
+        [self showGameLibraryPicker:gameLibs];
     }
 }
 
-- (void)showGamePicker:(NSArray *)gameDirs
+- (void)showGameLibraryPicker:(NSArray *)gameLibs
 {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Game" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *dir in gameDirs) {
-        [alert addAction:[UIAlertAction actionWithTitle:dir style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self showLaunchDialogForGame:dir];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Game Library" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *name in gameLibs) {
+        [alert addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self showLaunchDialogForGame:name];
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -111,7 +122,8 @@ static NSString *kCellID = @"FileCell";
 
 - (void)showLaunchDialogForGame:(NSString *)gamedir
 {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Launch Game" message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
+    NSString *title = [NSString stringWithFormat:@"Launch %@", gamedir];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.text = @"-dev 1 -console -log";
         tf.placeholder = @"Extra arguments";
