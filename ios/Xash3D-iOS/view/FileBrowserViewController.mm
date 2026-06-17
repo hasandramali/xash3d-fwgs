@@ -73,7 +73,7 @@ static NSString *kCellID = @"FileCell";
 - (NSArray *)availableGameLibraries
 {
     NSString *bundle = [[NSBundle mainBundle] bundlePath];
-    NSMutableArray *libs = [NSMutableArray array];
+    NSMutableSet *libs = [NSMutableSet set];
     NSArray *contents = [self.fm contentsOfDirectoryAtPath:bundle error:nil];
     for (NSString *name in contents) {
         if ([name hasPrefix:@"."]) continue;
@@ -81,59 +81,62 @@ static NSString *kCellID = @"FileCell";
         clDlls = [clDlls stringByAppendingPathComponent:@"cl_dlls"];
         BOOL isDir = NO;
         if ([self.fm fileExistsAtPath:clDlls isDirectory:&isDir] && isDir) {
-            NSArray *files = [self.fm contentsOfDirectoryAtPath:clDlls error:nil];
-            for (NSString *f in files) {
-                if ([f hasSuffix:@".dylib"]) {
-                    [libs addObject:name];
-                    break;
-                }
-            }
+            [libs addObject:name];
         }
     }
-    if (libs.count == 0) {
-        [libs addObject:@"valve"];
-    }
-    return libs;
+    // Always include defaults so picker is never empty
+    [libs addObject:@"valve"];
+    [libs addObject:@"cstrike"];
+    return [[libs allObjects] sortedArrayUsingSelector:@selector(compare:)];
 }
 
 - (void)launchTapped
 {
-    NSArray *gameLibs = [self availableGameLibraries];
-    if (gameLibs.count == 1) {
-        [self showLaunchDialogForGame:gameLibs[0]];
-    } else {
-        [self showGameLibraryPicker:gameLibs];
-    }
-}
-
-- (void)showGameLibraryPicker:(NSArray *)gameLibs
-{
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Game Library" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *name in gameLibs) {
-        [alert addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self showLaunchDialogForGame:name];
-        }]];
-    }
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
-        alert.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
-    [self presentViewController:alert animated:YES completion:nil];
+    [self showLaunchDialogForGame:@"valve"];
 }
 
 - (void)showLaunchDialogForGame:(NSString *)gamedir
 {
-    NSString *title = [NSString stringWithFormat:@"Launch %@", gamedir];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
+    [self showLaunchDialogForGame:gamedir extraArgs:nil];
+}
+
+- (void)showLaunchDialogForGame:(NSString *)gamedir extraArgs:(NSString *)preservedArgs
+{
+    NSString *args = preservedArgs ?: @"-dev 1 -console -log";
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Launch %@", gamedir] message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = @"-dev 1 -console -log";
+        tf.text = args;
         tf.placeholder = @"Extra arguments";
         tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Select Library" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self showGameLibraryPickerWithCurrent:gamedir extraArgs:alert.textFields[0].text];
+    }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self doLaunchWithGameDir:gamedir extraArgs:alert.textFields[0].text];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)showGameLibraryPickerWithCurrent:(NSString *)current extraArgs:(NSString *)args
+{
+    NSArray *libs = [self availableGameLibraries];
+    UIAlertController *picker = [UIAlertController alertControllerWithTitle:@"Select Game Library" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *name in libs) {
+        NSString *title = name;
+        if ([name isEqualToString:current])
+            title = [NSString stringWithFormat:@"%@ (current)", name];
+        [picker addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self showLaunchDialogForGame:name extraArgs:args];
+        }]];
+    }
+    [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^{
+        [self showLaunchDialogForGame:current extraArgs:args];
+    }]];
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
+        picker.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
