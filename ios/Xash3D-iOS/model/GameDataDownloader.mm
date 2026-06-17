@@ -79,8 +79,6 @@ static void initLogPath(NSString *docsDir) {
     ensureOsLog();
     os_log(_gddLog, "GameDataDownloader initialized, docsDir=%{public}@", docsDir);
     _logPath = [[docsDir stringByAppendingPathComponent:@"xash_ios.log"] copy];
-    // Truncate on each launch
-    [[NSFileManager defaultManager] createFileAtPath:_logPath contents:[NSData data] attributes:nil];
 }
 
 static void logToFile(NSString *format, ...) {
