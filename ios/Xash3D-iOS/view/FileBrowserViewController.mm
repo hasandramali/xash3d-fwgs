@@ -1,6 +1,5 @@
 #import "FileBrowserViewController.h"
 #import "TextEditorViewController.h"
-#import "GameLibDownloader.h"
 #import "GameDataDownloader.h"
 #include "launcherdialog.h"
 
@@ -23,8 +22,7 @@ static NSString *kCellID = @"FileCell";
         _currentPath = [path copy];
         _fm = [NSFileManager defaultManager];
         NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    _downloader = [[GameLibDownloader alloc] initWithDocumentsDir:docsDir];
-    _dataDownloader = [[GameDataDownloader alloc] initWithDocumentsDir:docsDir];
+        _dataDownloader = [[GameDataDownloader alloc] initWithDocumentsDir:docsDir];
     }
     return self;
 }
@@ -50,7 +48,7 @@ static NSString *kCellID = @"FileCell";
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
     UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
     UIBarButtonItem *folderBtn = [[UIBarButtonItem alloc] initWithTitle:@"New Folder" style:UIBarButtonItemStylePlain target:self action:@selector(newFolderTapped)];
-    UIBarButtonItem *downloadDataBtn = [[UIBarButtonItem alloc] initWithTitle:@"Download" style:UIBarButtonItemStylePlain target:self action:@selector(downloadDataTapped)];
+    UIBarButtonItem *downloadDataBtn = [[UIBarButtonItem alloc] initWithTitle:@"Download Data" style:UIBarButtonItemStylePlain target:self action:@selector(downloadDataTapped)];
     UIBarButtonItem *pasteBtn = [[UIBarButtonItem alloc] initWithTitle:@"Paste" style:UIBarButtonItemStylePlain target:self action:@selector(pasteTapped)];
     pasteBtn.enabled = (self.pasteboardPath != nil);
     self.toolbarItems = @[importBtn, flex, folderBtn, flex, downloadDataBtn, flex, pasteBtn];
@@ -168,42 +166,11 @@ static NSString *kCellID = @"FileCell";
     g_pszArgv = c_args;
     g_iArgc = argc;
 
-    // Auto-download game libs if needed
-    if (![self.downloader isDownloaded:gameDir]) {
-        UIAlertController *downloading = [UIAlertController alertControllerWithTitle:@"Downloading Game Libraries" message:[NSString stringWithFormat:@"Downloading libraries for %@...", gameDir] preferredStyle:UIAlertControllerStyleAlert];
-        UIProgressView *pv = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-        pv.translatesAutoresizingMaskIntoConstraints = NO;
-        [downloading.view addSubview:pv];
-        [NSLayoutConstraint activateConstraints:@[
-            [pv.leadingAnchor constraintEqualToAnchor:downloading.view.leadingAnchor constant:16],
-            [pv.trailingAnchor constraintEqualToAnchor:downloading.view.trailingAnchor constant:-16],
-            [pv.bottomAnchor constraintEqualToAnchor:downloading.view.bottomAnchor constant:-48],
-        ]];
-        [downloading addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
-            g_iStartGameStatus = XGS_SKIP;
-        }]];
-        [self presentViewController:downloading animated:YES completion:nil];
-
-        [self.downloader download:gameDir onProgress:^(float progress) {
-            dispatch_async(dispatch_get_main_queue(), ^{ pv.progress = progress; });
-        } completion:^(NSError *error) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [downloading dismissViewControllerAnimated:YES completion:^{
-                        if (!error) {
-                            IOS_Log( "Xash: download complete, starting engine" );
-                            g_iStartGameStatus = XGS_START;
-                            IOS_Log( "Xash: g_iStartGameStatus set to XGS_START after download" );
-                        } else {
-                            IOS_Log( "Xash: download failed, not starting engine" );
-                        }
-                    }];
-                });
-        }];
-    } else {
-        IOS_Log( "Xash: game already downloaded, starting engine immediately" );
-        g_iStartGameStatus = XGS_START;
-        IOS_Log( "Xash: g_iStartGameStatus set to XGS_START" );
-    }
+    // Game libraries are pre-built and bundled in the app bundle
+    // The engine will find them in the app's game directory
+    IOS_Log( "Xash: starting engine with pre-built game libraries" );
+    g_iStartGameStatus = XGS_START;
+    IOS_Log( "Xash: g_iStartGameStatus set to XGS_START" );
 }
 
 #pragma mark - File listing
@@ -509,44 +476,7 @@ static NSString *kCellID = @"FileCell";
     [self reloadFiles];
 }
 
-#pragma mark - Download
-
-- (void)downloadTapped
-{
-    [self.downloader fetchManifestWithCompletion:^(NSDictionary *manifest, NSError *error) {
-        if (error || !manifest) {
-            [self showError:error ?: [NSError errorWithDomain:@"FileBrowser" code:0 userInfo:@{NSLocalizedDescriptionKey: @"Failed to fetch manifest"}]];
-            return;
-        }
-        [self showGameList:manifest];
-    }];
-}
-
-- (void)showGameList:(NSDictionary *)manifest
-{
-    NSDictionary *mods = manifest[@"mods"];
-    if (![mods isKindOfClass:[NSDictionary class]] || mods.count == 0) {
-        [self showError:[NSError errorWithDomain:@"FileBrowser" code:0 userInfo:@{NSLocalizedDescriptionKey: @"No games available"}]];
-        return;
-    }
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download Game" message:@"Select a game to download game libraries" preferredStyle:UIAlertControllerStyleActionSheet];
-
-    for (NSString *key in [[mods allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)]) {
-        NSString *dl = [self.downloader isDownloaded:key] ? @" (downloaded)" : @"";
-        NSString *title = [NSString stringWithFormat:@"%@%@", key, dl];
-        [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self startDownloadForGame:key];
-        }]];
-    }
-
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alert.popoverPresentationController.barButtonItem = self.toolbarItems[4];
-    }
-    [self presentViewController:alert animated:YES completion:nil];
-}
+#pragma mark - Download Game Data (Steam CDN)
 
 - (void)downloadDataTapped
 {
@@ -563,7 +493,7 @@ static NSString *kCellID = @"FileCell";
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
 
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alert.popoverPresentationController.barButtonItem = self.toolbarItems[6];
+        alert.popoverPresentationController.barButtonItem = self.toolbarItems[4];
     }
     [self presentViewController:alert animated:YES completion:nil];
 }
@@ -594,38 +524,6 @@ static NSString *kCellID = @"FileCell";
                 [weakSelf showError:error];
             } else {
                 UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Done" message:[NSString stringWithFormat:@"%@ game data downloaded successfully", gameDir] preferredStyle:UIAlertControllerStyleAlert];
-                [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [weakSelf presentViewController:done animated:YES completion:nil];
-            }
-            [weakSelf reloadFiles];
-        }];
-    }];
-}
-
-- (void)startDownloadForGame:(NSString *)gamedir
-{
-    UIAlertController *progressAlert = [UIAlertController alertControllerWithTitle:@"Downloading" message:[NSString stringWithFormat:@"Downloading %@...", gamedir] preferredStyle:UIAlertControllerStyleAlert];
-    UIProgressView *progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-    progressView.translatesAutoresizingMaskIntoConstraints = NO;
-    [progressAlert.view addSubview:progressView];
-    [NSLayoutConstraint activateConstraints:@[
-        [progressView.leadingAnchor constraintEqualToAnchor:progressAlert.view.leadingAnchor constant:16],
-        [progressView.trailingAnchor constraintEqualToAnchor:progressAlert.view.trailingAnchor constant:-16],
-        [progressView.bottomAnchor constraintEqualToAnchor:progressAlert.view.bottomAnchor constant:-48],
-    ]];
-    [progressAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:progressAlert animated:YES completion:nil];
-
-    __weak typeof(self) weakSelf = self;
-    [self.downloader download:gamedir onProgress:^(float progress) {
-        progressView.progress = progress;
-        progressAlert.message = [NSString stringWithFormat:@"Downloading %@... %.0f%%", gamedir, progress * 100];
-    } completion:^(NSError *error) {
-        [progressAlert dismissViewControllerAnimated:YES completion:^{
-            if (error) {
-                [weakSelf showError:error];
-            } else {
-                UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Done" message:[NSString stringWithFormat:@"%@ downloaded successfully", gamedir] preferredStyle:UIAlertControllerStyleAlert];
                 [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:done animated:YES completion:nil];
             }

@@ -26,6 +26,16 @@ else
 fi
 cmake --build build --target install
 
+# Rename dylibs to include arch suffix (engine expects _arm64)
+find "$LIBSDIR" -name "*.dylib" -type f | while read f; do
+    dir=$(dirname "$f")
+    base=$(basename "$f" .dylib)
+    # Only rename if no arch suffix already
+    if [[ "$base" != *_arm64 ]] && [[ "$base" != *_x86* ]] && [[ "$base" != *_i386 ]]; then
+        mv "$f" "$dir/${base}_arm64.dylib"
+    fi
+done
+
 if [ -d mod-build ]; then
     rm -rf mod-build/
 fi

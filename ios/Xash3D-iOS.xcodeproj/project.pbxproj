@@ -101,7 +101,6 @@
 		FDF0D7AC0E12D53800247964 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FDF0D7220E12D31800247964 /* AudioToolbox.framework */; };
 		3DFFF00528C2279E00351ACE /* FileBrowserViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DFFF00228C2279E00351ACE /* FileBrowserViewController.mm */; };
 		3DFFF00628C2279E00351ACE /* TextEditorViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DFFF00428C2279E00351ACE /* TextEditorViewController.mm */; };
-		3DFFF00928C2279E00351ACE /* GameLibDownloader.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DFFF00828C2279E00351ACE /* GameLibDownloader.mm */; };
 		3DFFF00C28C2279E00351ACE /* GameDataDownloader.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DFFF00B28C2279E00351ACE /* GameDataDownloader.mm */; };
 		3DFFF00E28C2279E00351ACE /* lzma.c in Sources */ = {isa = PBXBuildFile; fileRef = 3DFFF00D28C2279E00351ACE /* lzma.c */; };
 		3DFFF01028C2279E00351ACE /* LzmaDec.c in Sources */ = {isa = PBXBuildFile; fileRef = 3DFFF00F28C2279E00351ACE /* LzmaDec.c */; };
@@ -720,8 +719,6 @@
 		3DFFF00228C2279E00351ACE /* FileBrowserViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = FileBrowserViewController.mm; sourceTree = "<group>"; };
 		3DFFF00328C2279E00351ACE /* TextEditorViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TextEditorViewController.h; sourceTree = "<group>"; };
 		3DFFF00428C2279E00351ACE /* TextEditorViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = TextEditorViewController.mm; sourceTree = "<group>"; };
-		3DFFF00728C2279E00351ACE /* GameLibDownloader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GameLibDownloader.h; sourceTree = "<group>"; };
-		3DFFF00828C2279E00351ACE /* GameLibDownloader.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = GameLibDownloader.mm; sourceTree = "<group>"; };
 		3DFFF00A28C2279E00351ACE /* GameDataDownloader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GameDataDownloader.h; sourceTree = "<group>"; };
 		3DFFF00B28C2279E00351ACE /* GameDataDownloader.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = GameDataDownloader.mm; sourceTree = "<group>"; };
 		3DFFF00D28C2279E00351ACE /* lzma.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = lzma.c; sourceTree = "<group>"; };
@@ -924,8 +921,6 @@
 			children = (
 				3D99F5A2277215DC006EDB62 /* launchdialog.mm */,
 				3D670D78227D901F0030B7D1 /* launcherdialog.h */,
-				3DFFF00728C2279E00351ACE /* GameLibDownloader.h */,
-				3DFFF00828C2279E00351ACE /* GameLibDownloader.mm */,
 				3DFFF00A28C2279E00351ACE /* GameDataDownloader.h */,
 				3DFFF00B28C2279E00351ACE /* GameDataDownloader.mm */,
 			);
@@ -1063,6 +1058,7 @@
 			buildConfigurationList = 1D6058960D05DD3E006BFB54 /* Build configuration list for PBXNativeTarget "Xash3D-iOS" */;
 			buildPhases = (
 				1D60588F0D05DD3D006BFB54 /* Frameworks */,
+				3DC89471260FAC5800F7A4A6 /* Build Game Libraries */,
 				1D60588E0D05DD3D006BFB54 /* Sources */,
 				1D60588D0D05DD3D006BFB54 /* Resources */,
 			);
@@ -1695,6 +1691,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "cmake -G \"Xcode\" -DCMAKE_BUILD_TYPE=$(CONFIGURATION) -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/../3rdparty/ios-cmake/ios.toolchain.cmake\" -DPLATFORM=OS64 -DXASH_STATIC_GAMELIB=1 -DXASH_GLES=1 -DDEPLOYMENT_TARGET=13.0 -S \"${SRCROOT}/../\" -B \"${SRCROOT}/cmake-build\"\n";
+		};
+		3DC89471260FAC5800F7A4A6 /* Build Game Libraries */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Game Libraries";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bash \"${SRCROOT}/../scripts/ios/buildallmods.sh\" && bash \"${SRCROOT}/../scripts/ios/buildcs16.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
