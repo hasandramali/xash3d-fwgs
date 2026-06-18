@@ -45,6 +45,13 @@ int main( int argc, char **argv )
 	szArgc = argc;
 	szArgv = argv;
 #endif // XASH_PSVITA
-	return Host_Main( szArgc, szArgv, XASH_GAMEDIR, 0, Sys_ChangeGame );
+	int ret = Host_Main( szArgc, szArgv, XASH_GAMEDIR, 0, Sys_ChangeGame );
+
+#if XASH_IOS
+	// Engine has shut down, close the app
+	exit( 0 );
+#endif
+
+	return ret;
 }
 #endif // XASH_ENABLE_MAIN

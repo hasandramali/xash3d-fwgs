@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "math.h"
 #include "vgui_draw.h"
 #include "mobility_int.h"
+#include "keydefs.h"
 
 #if !XASH_NO_TOUCH
 
@@ -2088,6 +2089,27 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 		{
 			static float x1 = 0.0f;
 			x1 += dx;
+
+			// double-tap for TAB auto-complete in console mode (1 second window)
+			if( cls.key_dest == key_console )
+			{
+				static double lastTapTime = 0.0;
+
+				if( type == event_down )
+				{
+					if( lastTapTime > 0.0 && (realtime - lastTapTime) < 0.9 )
+					{
+						Key_Console( K_TAB );
+						lastTapTime = 0.0; // prevent triple-tap chain
+						return 0; // suppress K_MOUSE1
+					}
+					lastTapTime = 0.0; // timeout expired, reset
+				}
+				else if( type == event_up )
+				{
+					lastTapTime = realtime;
+				}
+			}
 
 			if( type == event_up ) // don't show keyboard on every tap
 			{

@@ -23,18 +23,18 @@ GNU General Public License for more details.
 #include "input.h"
 #include "utflib.h"
 
-static CVAR_DEFINE_AUTO( scr_conspeed, "700", FCVAR_ARCHIVE, "console moving speed" );
+static CVAR_DEFINE_AUTO( scr_conspeed, "800", FCVAR_ARCHIVE, "console moving speed" );
 static CVAR_DEFINE_AUTO( con_notifytime, "-1", FCVAR_ARCHIVE, "notify time to live" );
 CVAR_DEFINE_AUTO( con_fontsize, "1", FCVAR_ARCHIVE, "console font number (0, 1 or 2)" );
 static CVAR_DEFINE_AUTO( con_fontrender, "2", FCVAR_ARCHIVE, "console font render mode (0: additive, 1: holes, 2: trans)" );
 static CVAR_DEFINE_AUTO( con_charset, "cp1251", FCVAR_ARCHIVE, "console font charset (only cp1251 supported now)" );
-static CVAR_DEFINE_AUTO( con_fontscale, "1.0", FCVAR_ARCHIVE, "scale font texture" );
+static CVAR_DEFINE_AUTO( con_fontscale, "2.0", FCVAR_ARCHIVE, "scale font texture" );
 static CVAR_DEFINE_AUTO( con_fontnum, "-1", FCVAR_ARCHIVE, "console font number (0, 1 or 2), -1 for autoselect" );
 static CVAR_DEFINE_AUTO( con_color, "240 180 24", FCVAR_ARCHIVE, "set a custom console color" );
 static CVAR_DEFINE_AUTO( scr_drawversion, "1", FCVAR_ARCHIVE, "draw version in menu or screenshots, doesn't affect console" );
 static CVAR_DEFINE_AUTO( con_oldfont, "0", 0, "use legacy font from gfx.wad, might be missing or broken" );
 static CVAR_DEFINE_AUTO( con_fixfont, "0", 0, "force con_oldfont 0 and fix con_fontscale behavior" );
-static CVAR_DEFINE_AUTO( con_noresize, "0", 0, "prevent window resize and use half-screen console in game" );
+static CVAR_DEFINE_AUTO( con_noresize, "1", 0, "prevent window resize and use half-screen console in game" );
 static CVAR_DEFINE_AUTO( con_showcompletion, "1", FCVAR_ARCHIVE, "perform simplified autocompletion while typing" );
 
 static int g_codepage = 0;

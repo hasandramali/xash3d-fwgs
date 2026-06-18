@@ -70,73 +70,115 @@ static NSString *kCellID = @"FileCell";
     [self reloadFiles];
 }
 
-- (NSArray *)availableGameLibraries
+- (NSArray *)availableGameDirs
 {
-    NSString *bundle = [[NSBundle mainBundle] bundlePath];
-    NSMutableSet *libs = [NSMutableSet set];
-    NSArray *contents = [self.fm contentsOfDirectoryAtPath:bundle error:nil];
+    NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+    NSMutableArray *dirs = [NSMutableArray array];
+    NSArray *contents = [self.fm contentsOfDirectoryAtPath:docs error:nil];
     for (NSString *name in contents) {
         if ([name hasPrefix:@"."]) continue;
-        NSString *clDlls = [bundle stringByAppendingPathComponent:name];
-        clDlls = [clDlls stringByAppendingPathComponent:@"cl_dlls"];
+        NSString *full = [docs stringByAppendingPathComponent:name];
         BOOL isDir = NO;
-        if ([self.fm fileExistsAtPath:clDlls isDirectory:&isDir] && isDir) {
-            [libs addObject:name];
+        if ([self.fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+            NSString *liblist = [full stringByAppendingPathComponent:@"liblist.gam"];
+            if ([self.fm fileExistsAtPath:liblist]) {
+                [dirs addObject:name];
+            }
         }
     }
-    // Always include defaults so picker is never empty
-    [libs addObject:@"valve"];
-    [libs addObject:@"cstrike"];
-    return [[libs allObjects] sortedArrayUsingSelector:@selector(compare:)];
+    // Also include known dirs even if no liblist.gam found yet
+    NSArray *known = @[@"valve", @"cstrike", @"gearbox", @"tfc", @"czero", @"dod"];
+    for (NSString *name in known) {
+        if (![dirs containsObject:name]) {
+            NSString *full = [docs stringByAppendingPathComponent:name];
+            BOOL isDir = NO;
+            if ([self.fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+                [dirs addObject:name];
+            }
+        }
+    }
+    return [dirs sortedArrayUsingSelector:@selector(compare:)];
 }
 
 - (void)launchTapped
 {
-    [self showLaunchDialogForGame:@"valve"];
+    NSArray *gameDirs = [self availableGameDirs];
+    if (gameDirs.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Games Found" message:@"Download game data or transfer game folders to Documents directory." preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    UIAlertController *picker = [UIAlertController alertControllerWithTitle:@"Select Game" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *name in gameDirs) {
+        [picker addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self showLaunchDialogForGame:name];
+        }]];
+    }
+    [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
+        picker.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)showLaunchDialogForGame:(NSString *)gamedir
 {
-    [self showLaunchDialogForGame:gamedir extraArgs:nil];
+    NSString *savedArgs = [[NSUserDefaults standardUserDefaults] stringForKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
+    NSString *args = savedArgs ?: @"-dev 1 -console -log";
+    BOOL isValve = [gamedir isEqualToString:@"valve"];
+
+    if (!isValve) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Launch %@", gamedir] message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
+        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+            tf.text = args;
+            tf.placeholder = @"Extra arguments";
+            tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        }];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            NSString *text = alert.textFields[0].text ?: @"";
+            [[NSUserDefaults standardUserDefaults] setObject:text forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            [self doLaunchWithGameDir:gamedir extraArgs:text];
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    // valve: show bots toggle first, then args
+    UIAlertController *botsAlert = [UIAlertController alertControllerWithTitle:@"Bots" message:@"Enable bots for this game?" preferredStyle:UIAlertControllerStyleAlert];
+    [botsAlert addAction:[UIAlertAction actionWithTitle:@"No" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"bots_enabled"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self showArgsDialogForGame:gamedir args:args addBotsArg:NO];
+    }]];
+    [botsAlert addAction:[UIAlertAction actionWithTitle:@"Yes" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"bots_enabled"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self showArgsDialogForGame:gamedir args:args addBotsArg:YES];
+    }]];
+    [self presentViewController:botsAlert animated:YES completion:nil];
 }
 
-- (void)showLaunchDialogForGame:(NSString *)gamedir extraArgs:(NSString *)preservedArgs
+- (void)showArgsDialogForGame:(NSString *)gamedir args:(NSString *)defaultArgs addBotsArg:(BOOL)addBots
 {
-    NSString *args = preservedArgs ?: @"-dev 1 -console -log";
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Launch %@", gamedir] message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = args;
+        tf.text = defaultArgs;
         tf.placeholder = @"Extra arguments";
         tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Select Library" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self showGameLibraryPickerWithCurrent:gamedir extraArgs:alert.textFields[0].text];
-    }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self doLaunchWithGameDir:gamedir extraArgs:alert.textFields[0].text];
+        NSString *text = alert.textFields[0].text ?: @"";
+        if (addBots) {
+            text = [text stringByAppendingString:@" -dll dlls/bot_arm64.dylib"];
+        }
+        [[NSUserDefaults standardUserDefaults] setObject:alert.textFields[0].text ?: @"" forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self doLaunchWithGameDir:gamedir extraArgs:text];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)showGameLibraryPickerWithCurrent:(NSString *)current extraArgs:(NSString *)args
-{
-    NSArray *libs = [self availableGameLibraries];
-    UIAlertController *picker = [UIAlertController alertControllerWithTitle:@"Select Game Library" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *name in libs) {
-        NSString *title = name;
-        if ([name isEqualToString:current])
-            title = [NSString stringWithFormat:@"%@ (current)", name];
-        [picker addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self showLaunchDialogForGame:name extraArgs:args];
-        }]];
-    }
-    [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *act) {
-        [self showLaunchDialogForGame:current extraArgs:args];
-    }]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
-        picker.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
-    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
@@ -147,6 +189,9 @@ static NSString *kCellID = @"FileCell";
         snprintf( buf, sizeof(buf), "Xash: gameDir=%s extraArgs=%s", [gameDir UTF8String], [extraArgs UTF8String] );
         IOS_Log( buf );
     }
+
+    // Force landscape orientation before launching the engine
+    [self forceLandscapeOrientation];
 
     CGRect rect = [[UIScreen mainScreen] bounds];
     CGFloat scale = [UIScreen mainScreen].scale;
@@ -181,6 +226,20 @@ static NSString *kCellID = @"FileCell";
     IOS_Log( "Xash: starting engine with pre-built game libraries" );
     g_iStartGameStatus = XGS_START;
     IOS_Log( "Xash: g_iStartGameStatus set to XGS_START" );
+}
+
+- (void)forceLandscapeOrientation
+{
+    if (@available(iOS 16.0, *)) {
+        UIWindowScene *scene = (UIWindowScene *)[[[UIApplication sharedApplication] connectedScenes] anyObject];
+        if ([scene respondsToSelector:@selector(requestGeometryUpdateWithPreferences:errorHandler:)]) {
+            UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] init];
+            prefs.interfaceOrientations = UIInterfaceOrientationMaskLandscape;
+            [scene requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+        }
+    } else {
+        [[UIDevice currentDevice] setValue:@(UIInterfaceOrientationLandscapeLeft) forKey:@"orientation"];
+    }
 }
 
 #pragma mark - File listing
@@ -574,7 +633,7 @@ static NSString *kCellID = @"FileCell";
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations
 {
-    return UIInterfaceOrientationMaskAll;
+    return UIInterfaceOrientationMaskPortrait;
 }
 
 - (BOOL)shouldAutorotate

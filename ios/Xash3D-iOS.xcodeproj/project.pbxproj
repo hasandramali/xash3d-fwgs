@@ -37,23 +37,9 @@
 		3D4416DA231D1711001A0696 /* OpenGLES.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FDB96ED30DEFC9C700FAF19F /* OpenGLES.framework */; };
 		3D4416E4231D1893001A0696 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D525D7722252AAB00DD9932 /* Metal.framework */; };
 
-		3D5E35DC227768B10073D791 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 3D5E35D6227768B10073D791 /* Icon.png */; };
 		3D5E35EC22776A8D0073D791 /* LaunchScreenStoryboard.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3D5E35EB22776A8D0073D791 /* LaunchScreenStoryboard.storyboard */; };
-		3D670D69227A30620030B7D1 /* Launch.png in Resources */ = {isa = PBXBuildFile; fileRef = 3D670D68227A30620030B7D1 /* Launch.png */; };
 		3D99F5A3277215DC006EDB62 /* launchdialog.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3D99F5A2277215DC006EDB62 /* launchdialog.mm */; };
-		3D99F5A527721613006EDB62 /* TutorViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3D99F5A427721613006EDB62 /* TutorViewController.mm */; };
 		3DA767ED27EDE1AD00824693 /* libbz2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 3DA767EC27EDE1AD00824693 /* libbz2.tbd */; };
-		3DC1E4A82289683200114D80 /* PowerCable.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4A12289683000114D80 /* PowerCable.png */; };
-		3DC1E4AA2289683200114D80 /* page1_en.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4A32289683100114D80 /* page1_en.png */; };
-		3DC1E4AB2289683200114D80 /* MacBookiTunes.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4A42289683100114D80 /* MacBookiTunes.png */; };
-		3DC1E4AC2289683200114D80 /* page2_en.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4A52289683100114D80 /* page2_en.png */; };
-		3DC1E4AD2289683200114D80 /* iTunes.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4A62289683100114D80 /* iTunes.png */; };
-		3DC1E4AE2289683200114D80 /* MacBook.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4A72289683100114D80 /* MacBook.png */; };
-		3DC1E4B32289743100114D80 /* iTunesWindow.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4B22289743100114D80 /* iTunesWindow.png */; };
-		3DC1E4B52289B93000114D80 /* PowerCable2.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4B42289B93000114D80 /* PowerCable2.png */; };
-		3DC1E4BD2289EA9E00114D80 /* GetXash3DResource.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4B72289EA9E00114D80 /* GetXash3DResource.png */; };
-		3DC1E4BF2289F18500114D80 /* Steam.png in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4BE2289F18500114D80 /* Steam.png */; };
-		3DC1E4C9228AE05000114D80 /* TutorStoryboard.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3DC1E4C8228AE05000114D80 /* TutorStoryboard.storyboard */; };
 		3DC8946F260FAC5600F7A4A5 /* MainStoryboard.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 3DC8946E260FAC5600F7A4A5 /* MainStoryboard.storyboard */; };
 		3DDBD7F12843DC0100C4D2C9 /* libboost_container.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3DF9822227F9AE940030D0B5 /* libboost_container.a */; };
 		3DDBD7F32843DC1700C4D2C9 /* libopus.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D691BD52843CF2600D5221C /* libopus.a */; };
@@ -641,30 +627,15 @@
 		1DF5F4DF0D08C38300B7A737 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		3D0090BF2788B2D200E68FC3 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		3D0090EA2788B84500E68FC3 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
-		3D094FAF228F1D3B00F168C2 /* TutorViewController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TutorViewController.h; sourceTree = "<group>"; };
 		3D0FC1DB2278310100D9A961 /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		3D37322E229488AA00713C9C /* GLKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GLKit.framework; path = System/Library/Frameworks/GLKit.framework; sourceTree = SDKROOT; };
 		
 		3D525D7722252AAB00DD9932 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		3D5E35D6227768B10073D791 /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Icon.png; path = Resources/Icon.png; sourceTree = "<group>"; };
 		3D5E35E922776A480073D791 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3D5E35EB22776A8D0073D791 /* LaunchScreenStoryboard.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; path = LaunchScreenStoryboard.storyboard; sourceTree = "<group>"; };
-		3D670D68227A30620030B7D1 /* Launch.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Launch.png; path = Resources/Launch.png; sourceTree = "<group>"; };
 		3D670D78227D901F0030B7D1 /* launcherdialog.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = launcherdialog.h; sourceTree = "<group>"; };
 		3D99F5A2277215DC006EDB62 /* launchdialog.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = launchdialog.mm; sourceTree = "<group>"; };
-		3D99F5A427721613006EDB62 /* TutorViewController.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TutorViewController.mm; sourceTree = "<group>"; };
 		3DA767EC27EDE1AD00824693 /* libbz2.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libbz2.tbd; path = usr/lib/libbz2.tbd; sourceTree = SDKROOT; };
-		3DC1E4A12289683000114D80 /* PowerCable.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = PowerCable.png; path = Resources/PowerCable.png; sourceTree = "<group>"; };
-		3DC1E4A32289683100114D80 /* page1_en.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = page1_en.png; path = Resources/page1_en.png; sourceTree = "<group>"; };
-		3DC1E4A42289683100114D80 /* MacBookiTunes.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = MacBookiTunes.png; path = Resources/MacBookiTunes.png; sourceTree = "<group>"; };
-		3DC1E4A52289683100114D80 /* page2_en.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = page2_en.png; path = Resources/page2_en.png; sourceTree = "<group>"; };
-		3DC1E4A62289683100114D80 /* iTunes.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = iTunes.png; path = Resources/iTunes.png; sourceTree = "<group>"; };
-		3DC1E4A72289683100114D80 /* MacBook.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = MacBook.png; path = Resources/MacBook.png; sourceTree = "<group>"; };
-		3DC1E4B22289743100114D80 /* iTunesWindow.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = iTunesWindow.png; path = Resources/iTunesWindow.png; sourceTree = "<group>"; };
-		3DC1E4B42289B93000114D80 /* PowerCable2.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = PowerCable2.png; path = Resources/PowerCable2.png; sourceTree = "<group>"; };
-		3DC1E4B72289EA9E00114D80 /* GetXash3DResource.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = GetXash3DResource.png; path = Resources/GetXash3DResource.png; sourceTree = "<group>"; };
-		3DC1E4BE2289F18500114D80 /* Steam.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Steam.png; path = Resources/Steam.png; sourceTree = "<group>"; };
-		3DC1E4C8228AE05000114D80 /* TutorStoryboard.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = TutorStoryboard.storyboard; sourceTree = "<group>"; };
 		3DC8946E260FAC5600F7A4A5 /* MainStoryboard.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; path = MainStoryboard.storyboard; sourceTree = "<group>"; };
 		3DDBD7F02843DC0100C4D2C9 /* libboost_container.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libboost_container.a; path = "../../../Library/Developer/Xcode/DerivedData/Xash3D-iOS-dvppqskxifhvkmglxeaundyzmyhs/Build/Products/Debug-iphoneos/libboost_container.a"; sourceTree = "<group>"; };
 		3DDBD7F22843DC1700C4D2C9 /* libopus.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libopus.a; path = "../../../Library/Developer/Xcode/DerivedData/Xash3D-iOS-dvppqskxifhvkmglxeaundyzmyhs/Build/Products/Debug-iphoneos/libopus.a"; sourceTree = "<group>"; };
@@ -824,18 +795,6 @@
 			isa = PBXGroup;
 			children = (
 				3DE829A7260F8F00009DABD0 /* Assets.xcassets */,
-				3DC1E4A62289683100114D80 /* iTunes.png */,
-				3DC1E4A72289683100114D80 /* MacBook.png */,
-				3DC1E4B72289EA9E00114D80 /* GetXash3DResource.png */,
-				3DC1E4A42289683100114D80 /* MacBookiTunes.png */,
-				3DC1E4B42289B93000114D80 /* PowerCable2.png */,
-				3DC1E4A32289683100114D80 /* page1_en.png */,
-				3DC1E4A52289683100114D80 /* page2_en.png */,
-				3DC1E4B22289743100114D80 /* iTunesWindow.png */,
-				3DC1E4BE2289F18500114D80 /* Steam.png */,
-				3DC1E4A12289683000114D80 /* PowerCable.png */,
-				3D670D68227A30620030B7D1 /* Launch.png */,
-				3D5E35D6227768B10073D791 /* Icon.png */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -907,7 +866,6 @@
 			children = (
 				3D5E35EB22776A8D0073D791 /* LaunchScreenStoryboard.storyboard */,
 				3DC8946E260FAC5600F7A4A5 /* MainStoryboard.storyboard */,
-				3DC1E4C8228AE05000114D80 /* TutorStoryboard.storyboard */,
 				3DFFF00128C2279E00351ACE /* FileBrowserViewController.h */,
 				3DFFF00228C2279E00351ACE /* FileBrowserViewController.mm */,
 				3DFFF00328C2279E00351ACE /* TextEditorViewController.h */,
@@ -930,8 +888,6 @@
 		3D3EE8A9228F1C6300A695FE /* controller */ = {
 			isa = PBXGroup;
 			children = (
-				3D094FAF228F1D3B00F168C2 /* TutorViewController.h */,
-				3D99F5A427721613006EDB62 /* TutorViewController.mm */,
 			);
 			path = controller;
 			sourceTree = "<group>";
@@ -1650,22 +1606,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				3DC1E4AB2289683200114D80 /* MacBookiTunes.png in Resources */,
-				3DC1E4B32289743100114D80 /* iTunesWindow.png in Resources */,
 				3DE829B5260F8F00009DABD0 /* Assets.xcassets in Resources */,
-				3DC1E4AA2289683200114D80 /* page1_en.png in Resources */,
-				3DC1E4AC2289683200114D80 /* page2_en.png in Resources */,
 				3DC8946F260FAC5600F7A4A5 /* MainStoryboard.storyboard in Resources */,
-				3DC1E4A82289683200114D80 /* PowerCable.png in Resources */,
 				3D5E35EC22776A8D0073D791 /* LaunchScreenStoryboard.storyboard in Resources */,
-				3DC1E4B52289B93000114D80 /* PowerCable2.png in Resources */,
-				3DC1E4AD2289683200114D80 /* iTunes.png in Resources */,
-				3DC1E4AE2289683200114D80 /* MacBook.png in Resources */,
-				3DC1E4C9228AE05000114D80 /* TutorStoryboard.storyboard in Resources */,
-				3DC1E4BD2289EA9E00114D80 /* GetXash3DResource.png in Resources */,
-				3DC1E4BF2289F18500114D80 /* Steam.png in Resources */,
-				3D5E35DC227768B10073D791 /* Icon.png in Resources */,
-				3D670D69227A30620030B7D1 /* Launch.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1719,7 +1662,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				3D99F5A3277215DC006EDB62 /* launchdialog.mm in Sources */,
-				3D99F5A527721613006EDB62 /* TutorViewController.mm in Sources */,
 				3DFFF00528C2279E00351ACE /* FileBrowserViewController.mm in Sources */,
 				3DFFF00628C2279E00351ACE /* TextEditorViewController.mm in Sources */,
 				3DFFF00928C2279E00351ACE /* GameLibDownloader.mm in Sources */,
