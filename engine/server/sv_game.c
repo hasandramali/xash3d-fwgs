@@ -1318,6 +1318,22 @@ static int GAME_EXPORT pfnModelIndex( const char *m )
 			return i;
 	}
 
+#if XASH_IOS
+	{
+		qboolean valid = true;
+		for( int i = 0; name[i]; i++ )
+		{
+			if( name[i] < ' ' || name[i] > '~' )
+			{
+				valid = false;
+				break;
+			}
+		}
+		if( !valid )
+			return 0;
+	}
+#endif
+
 	Con_Printf( S_ERROR "Cannot get index for model %s: not precached\n", name );
 	return 0;
 }
