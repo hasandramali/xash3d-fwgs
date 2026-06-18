@@ -12,6 +12,12 @@ echo "=== Building all game libraries (mods) ==="
 echo "=== Building CS16 (last) ==="
 ./buildcs16.sh || exit 1
 
+echo "=== Building bot10 ==="
+./buildhlsdk.sh bot10 valve || exit 1
+
+echo "=== Building opfor ==="
+./buildhlsdk.sh opfor gearbox || exit 1
+
 echo "=== Creating IPA ==="
 ./createipa.sh || exit 1
 

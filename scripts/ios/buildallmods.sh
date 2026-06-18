@@ -18,7 +18,7 @@ cd "$SCRIPTDIR" || exit 1
 ./buildhlsdk.sh decay-pc
 ./buildhlsdk.sh echoes
 ./buildhlsdk.sh gravgun
-./buildhlsdk.sh opfor
+
 ./buildhlsdk.sh sci
 ./buildhlsdk.sh topdown
 ./buildhlsdk.sh half-screwed
