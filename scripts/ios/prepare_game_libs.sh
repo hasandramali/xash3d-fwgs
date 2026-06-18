@@ -45,6 +45,18 @@ else
     echo "prepare_game_libs: cs16 dylibs already exist, skipping build"
 fi
 
+# --- Build bot10 (always, goes to valve/dlls, may overwrite valve) ---
+echo "prepare_game_libs: Building bot10..."
+cd "$SCRIPTDIR"
+bash buildhlsdk.sh bot10 valve || echo "Warning: bot10 build failed"
+echo "prepare_game_libs: bot10 build done"
+
+# --- Build opfor (always, goes to gearbox) ---
+echo "prepare_game_libs: Building opfor (gearbox)..."
+cd "$SCRIPTDIR"
+bash buildhlsdk.sh opfor gearbox || echo "Warning: opfor build failed"
+echo "prepare_game_libs: opfor build done"
+
 # --- Rename dylibs to arch-suffixed names ---
 echo "prepare_game_libs: Renaming dylibs to _arm64 suffix..."
 find "$LIBSDIR" -name "*.dylib" -type f | while read f; do

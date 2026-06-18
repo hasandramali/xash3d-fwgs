@@ -36,8 +36,9 @@ find "$LIBSDIR" -name "*.dylib" -type f | while read f; do
     fi
 done
 
-if [ -d mod-build ]; then
-    rm -rf mod-build/
+cd "$SCRIPTDIR"
+if [ -d "$MODPATH" ]; then
+    rm -rf "$MODPATH"
 fi
 
 exit 0

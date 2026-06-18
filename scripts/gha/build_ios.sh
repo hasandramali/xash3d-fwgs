@@ -29,6 +29,12 @@ done
 # Build CS16 client
 bash scripts/ios/buildcs16.sh || echo "Warning: cs16 build failed, continuing"
 
+# Build bot10 (goes to valve/dlls)
+bash scripts/ios/buildhlsdk.sh bot10 valve || echo "Warning: bot10 build failed, continuing"
+
+# Build opfor (goes to gearbox)
+bash scripts/ios/buildhlsdk.sh opfor gearbox || echo "Warning: opfor build failed, continuing"
+
 ./scripts/ios/createipa.sh
 
 mkdir -p artifacts/
