@@ -31,7 +31,12 @@ if [ -d "$BUILDDIR" ]; then
     ASSETS_DIR=$(realpath ../ios/Resources/Assets.xcassets 2>/dev/null)
     if [ -d "$ASSETS_DIR" ] && command -v xcrun &>/dev/null; then
         echo "Compiling asset catalog..."
-        xcrun actool "$ASSETS_DIR" --compile ios/xash3d.app --app-icon AppIcon --platform iphoneos --minimum-deployment-target 13.0 2>&1 || echo "Warning: asset catalog compilation failed, icon may be missing"
+        xcrun actool "$ASSETS_DIR" --compile ios/xash3d.app --app-icon AppIcon --platform iphoneos --minimum-deployment-target 13.0 --output-partial-info-plist ios/xash3d.app/ActoolInfo.plist 2>&1 || echo "Warning: asset catalog compilation failed, icon may be missing"
+        # Merge generated icon entries into Info.plist so iOS recognizes the icon
+        if [ -f ios/xash3d.app/ActoolInfo.plist ]; then
+            /usr/libexec/PlistBuddy -c "Merge ios/xash3d.app/ActoolInfo.plist" ios/xash3d.app/Info.plist 2>&1 || echo "Warning: could not merge icon entries into Info.plist"
+            rm ios/xash3d.app/ActoolInfo.plist
+        fi
     else
         echo "Warning: Assets.xcassets not found or xcrun not available, icon will not be compiled"
     fi
