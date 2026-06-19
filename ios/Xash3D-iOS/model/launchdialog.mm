@@ -125,6 +125,24 @@ extern "C" BOOL IOS_IsResourcesReady()
             [fileManager fileExistsAtPath:[doc stringByAppendingPathComponent:@"cstrike"]]);
 }
 
+static void IOS_ForceOrientation( UIInterfaceOrientationMask mask, UIInterfaceOrientation orientation )
+{
+    if( @available( iOS 16.0, * ))
+    {
+        UIWindowScene *scene = (UIWindowScene *)[[[UIApplication sharedApplication] connectedScenes] anyObject];
+        if( [scene respondsToSelector:@selector( requestGeometryUpdateWithPreferences:errorHandler: )] )
+        {
+            UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] init];
+            prefs.interfaceOrientations = mask;
+            [scene requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+        }
+    }
+    else
+    {
+        [[UIDevice currentDevice] setValue:@(orientation) forKey:@"orientation"];
+    }
+}
+
 void IOS_PrepareView()
 {
     NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
@@ -133,6 +151,10 @@ void IOS_PrepareView()
     g_launcherWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     [g_launcherWindow setRootViewController:nav];
     [g_launcherWindow makeKeyAndVisible];
+
+    // force portrait for launcher
+    IOS_ForceOrientation( UIInterfaceOrientationMaskPortrait, UIInterfaceOrientationPortrait );
+
     IOS_WriteLogLine( "Xash: launcher view prepared" );
 }
 

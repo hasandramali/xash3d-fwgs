@@ -9,6 +9,7 @@
 @property (nonatomic, strong) NSFileManager *fm;
 @property (nonatomic, strong) NSString *pasteboardPath;
 @property (nonatomic, assign) BOOL isMoveOperation;
+@property (nonatomic, assign) BOOL forceLandscape;
 @end
 
 static NSString *kCellID = @"FileCell";
@@ -190,7 +191,9 @@ static NSString *kCellID = @"FileCell";
         IOS_Log( buf );
     }
 
-    // Force landscape orientation before launching the engine
+    // Allow landscape, then force orientation before launching the engine
+    self.forceLandscape = YES;
+    [UIViewController attemptRotationToDeviceOrientation];
     [self forceLandscapeOrientation];
 
     CGRect rect = [[UIScreen mainScreen] bounds];
@@ -625,20 +628,11 @@ static NSString *kCellID = @"FileCell";
     return [UIImage systemImageNamed:@"doc"];
 }
 
-@end
-
-#pragma mark - UINavigationController orientation override
-
-@implementation UINavigationController (OrientationLock)
+#pragma mark - Orientation
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations
 {
-    return UIInterfaceOrientationMaskPortrait;
-}
-
-- (BOOL)shouldAutorotate
-{
-    return YES;
+    return self.forceLandscape ? UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskPortrait;
 }
 
 @end
