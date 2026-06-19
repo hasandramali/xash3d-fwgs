@@ -12,7 +12,7 @@ git clone --recursive https://github.com/hasandramali/cs16-client mod-build/cs16
 sed -i '' 's/#ifndef CSTRIKE/#if !defined(CSTRIKE) \&\& !(defined(__APPLE__) \&\& defined(__arm64__))/' mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp
 
 # Skip yapb build on iOS (not needed)
-sed -i '' 's/add_subdirectory(3rdparty\/yapb)/# add_subdirectory(3rdparty\/yapb)/' mod-build/cs16-client/CMakeLists.txt
+sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
 
 mkdir -p ../../build/ios/libs
 LIBSDIR=$(realpath ../../build/ios/libs)
