@@ -68,10 +68,19 @@ static void Sys_Crash( int signal, siginfo_t *si, void *context )
 	(void)unused;
 
 #if HAVE_LIBBACKTRACE
+#if XASH_APPLE
+	// libbacktrace depends on libunwind (arm64e on iOS 17+), which uses
+	// pointer authentication (PAC). When called from an arm64 signal handler,
+	// unwinding through the stack triggers recursive PAC IB traps.
+	// Use Apple's frame-pointer backtrace() fallback instead (below).
+	(void)have_libbacktrace;
+	(void)logfd;
+#else
 	if( have_libbacktrace )
 	{
 		len = Sys_CrashDetailsLibbacktrace( logfd, crash_message, len, sizeof( crash_message ));
 	}
+#endif
 #endif // HAVE_LIBBACKTRACE
 
 #if XASH_APPLE

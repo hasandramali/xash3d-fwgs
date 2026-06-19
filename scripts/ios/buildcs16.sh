@@ -7,31 +7,34 @@ cd $SCRIPTDIR
 MODPATH=mod-build/cs16-client
 git clone --recursive https://github.com/hasandramali/cs16-client mod-build/cs16-client
 
-# Re-enable bots on iOS: remove CSTRIKE guard so InstallBotControl() is called
-# on CS16 builds. This allows CCSBotManager to be instantiated, creating
-# TheBotPhrases and TheBots. If PAC crash occurs on arm64e A14+,
-# the enhanced crash handler will capture the backtrace in xash_ios.log.
+# Skip yapb build on iOS (not needed)
+sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
+
+# Make TheBotPhrases a global static object instead of a nullptr pointer.
+# CCSBotManager (which sets TheBotPhrases) uses C++ operator new and virtual
+# functions that trigger PAC IB trap on arm64e (A14+). By pre-allocating
+# TheBotPhrases as a static global, the location code (GetPlaceList) works
+# without needing to instantiate CCSBotManager.
 python3 -c "
 import sys
-fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp'
+fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/bot/cs_bot_chatter.cpp'
 with open(fn, 'rb') as f:
     data = f.read()
-# Detect line endings
 eol = b'\r\n' if b'\r\n' in data else b'\n'
-old = b'#ifndef CSTRIKE' + eol + b'\tInstallBotControl();' + eol + b'#endif' + eol
-new = b'\tInstallBotControl();' + eol
+old = b'BotPhraseManager *TheBotPhrases = nullptr;' + eol
+new = (
+    b'static BotPhraseManager s_BotPhraseManager;' + eol +
+    b'BotPhraseManager *TheBotPhrases = &s_BotPhraseManager;' + eol
+)
 if old in data:
     data = data.replace(old, new, 1)
     with open(fn, 'wb') as f:
         f.write(data)
-    print('PATCHED: InstallBotControl guard removed')
+    print('PATCHED: TheBotPhrases is now a global static object')
 else:
-    print('WARNING: InstallBotControl guard pattern not found')
+    print('WARNING: pattern not found in cs_bot_chatter.cpp')
     sys.exit(0)
 "
-
-# Skip yapb build on iOS (not needed)
-sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
 
 # Fix crash in CBasePlayer::UpdateLocation: TheBotPhrases can be NULL
 # TheBotPhrases->GetPlaceList() returns &m_placeList at NULL+offset=0x20
