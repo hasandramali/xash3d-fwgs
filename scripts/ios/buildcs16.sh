@@ -14,6 +14,44 @@ sed -i '' 's/#ifndef CSTRIKE/#if !defined(CSTRIKE) \&\& !(defined(__APPLE__) \&\
 # Skip yapb build on iOS (not needed)
 sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
 
+# Fix crash in UpdateLocation: TheBotPhrases can be NULL on iOS (bots disabled)
+# TheBotPhrases->GetPlaceList() returns &m_placeList at NULL+offset=0x20 when ptr is NULL
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/player.cpp'
+with open(fn, 'r') as f:
+    c = f.read()
+old = '''\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();
+\t\tfor (auto phrase : *placeList)
+\t\t{
+\t\t\tif (phrase->GetID() == playerPlace)
+\t\t\t{
+\t\t\t\tplaceName = phrase->GetName();
+\t\t\t\tbreak;
+\t\t\t}
+\t\t}'''
+new = '''\t\tif (TheBotPhrases)
+\t\t{
+\t\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();
+\t\t\tfor (auto phrase : *placeList)
+\t\t\t{
+\t\t\t\tif (phrase->GetID() == playerPlace)
+\t\t\t\t{
+\t\t\t\t\tplaceName = phrase->GetName();
+\t\t\t\t\tbreak;
+\t\t\t\t}
+\t\t\t}
+\t\t}'''
+if old in c:
+    c = c.replace(old, new, 1)
+    with open(fn, 'w') as f:
+        f.write(c)
+    print('PATCHED: TheBotPhrases null guard in UpdateLocation')
+else:
+    print('WARNING: pattern not found in player.cpp')
+    sys.exit(0)
+"
+
 mkdir -p ../../build/ios/libs
 LIBSDIR=$(realpath ../../build/ios/libs)
 cd $MODPATH
