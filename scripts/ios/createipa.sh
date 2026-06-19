@@ -27,6 +27,15 @@ if [ -d "$BUILDDIR" ]; then
 
     cd "$BUILDDIR" || exit 1
 
+    # Compile asset catalog for app icon
+    ASSETS_DIR=$(realpath ../ios/Resources/Assets.xcassets 2>/dev/null)
+    if [ -d "$ASSETS_DIR" ] && command -v xcrun &>/dev/null; then
+        echo "Compiling asset catalog..."
+        xcrun actool "$ASSETS_DIR" --compile ios/xash3d.app --app-icon AppIcon --platform iphoneos --minimum-deployment-target 13.0 2>&1 || echo "Warning: asset catalog compilation failed, icon may be missing"
+    else
+        echo "Warning: Assets.xcassets not found or xcrun not available, icon will not be compiled"
+    fi
+
     rm -r "$BUILDDIR/ios/Payload/"
     mkdir "$BUILDDIR/ios/Payload"
 

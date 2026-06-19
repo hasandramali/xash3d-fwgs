@@ -125,6 +125,20 @@ extern "C" BOOL IOS_IsResourcesReady()
             [fileManager fileExistsAtPath:[doc stringByAppendingPathComponent:@"cstrike"]]);
 }
 
+// UINavigationController subclass that locks to portrait for the launcher
+@interface LauncherNavigationController : UINavigationController
+@end
+@implementation LauncherNavigationController
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations
+{
+    // Delegate to topViewController so game launch can override to landscape
+    UIViewController *top = self.topViewController;
+    if (top)
+        return [top supportedInterfaceOrientations];
+    return UIInterfaceOrientationMaskPortrait;
+}
+@end
+
 static void IOS_ForceOrientation( UIInterfaceOrientationMask mask, UIInterfaceOrientation orientation )
 {
     if( @available( iOS 16.0, * ))
@@ -147,7 +161,7 @@ void IOS_PrepareView()
 {
     NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
     FileBrowserViewController *fbc = [[FileBrowserViewController alloc] initWithPath:docs];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:fbc];
+    LauncherNavigationController *nav = [[LauncherNavigationController alloc] initWithRootViewController:fbc];
     g_launcherWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     [g_launcherWindow setRootViewController:nav];
     [g_launcherWindow makeKeyAndVisible];
