@@ -2090,14 +2090,14 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 			static float x1 = 0.0f;
 			x1 += dx;
 
-			// double-tap for TAB auto-complete in console mode (1 second window)
+			// double-tap for TAB auto-complete in console mode
 			if( cls.key_dest == key_console )
 			{
 				static double lastTapTime = 0.0;
 
 				if( type == event_down )
 				{
-					if( lastTapTime > 0.0 && (host.realtime - lastTapTime) < 1.0 )
+					if( lastTapTime > 0.0 && (host.realtime - lastTapTime) < 0.9 )
 					{
 						Key_Console( K_TAB );
 						lastTapTime = 0.0; // prevent triple-tap chain

@@ -124,8 +124,6 @@ static NSString *kCellID = @"FileCell";
 
 - (NSString *)botDllForGame:(NSString *)gamedir
 {
-    if ([gamedir isEqualToString:@"cstrike"])
-        return @"dlls/yapb_arm64.dylib";
     if ([gamedir isEqualToString:@"valve"])
         return @"dlls/bot_arm64.dylib";
     return nil;

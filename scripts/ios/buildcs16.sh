@@ -7,8 +7,9 @@ cd $SCRIPTDIR
 MODPATH=mod-build/cs16-client
 git clone --recursive https://github.com/hasandramali/cs16-client mod-build/cs16-client
 
-# Disable built-in bots on iOS/arm64 (PAC crash on A14+ devices)
-sed -i '' 's/#ifndef CSTRIKE/#if !defined(CSTRIKE) \&\& !(defined(__APPLE__) \&\& defined(__arm64__))/' mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp
+# Fix PAC crash on arm64e (A14+): -fno-strict-vtable-pointers disables vtable
+# authentication that arm64e HW enforces, causing pointer authentication trap IB.
+sed -i '' 's/-fno-strict-vtable-pointers/-fstrict-vtable-pointers/' mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/CMakeLists.txt
 
 mkdir -p ../../build/ios/libs
 LIBSDIR=$(realpath ../../build/ios/libs)
