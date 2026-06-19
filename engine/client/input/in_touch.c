@@ -2097,7 +2097,7 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 
 				if( type == event_down )
 				{
-					if( lastTapTime > 0.0 && (realtime - lastTapTime) < 0.9 )
+					if( lastTapTime > 0.0 && (host.realtime - lastTapTime) < 1.0 )
 					{
 						Key_Console( K_TAB );
 						lastTapTime = 0.0; // prevent triple-tap chain
@@ -2107,7 +2107,7 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 				}
 				else if( type == event_up )
 				{
-					lastTapTime = realtime;
+					lastTapTime = host.realtime;
 				}
 			}
 
