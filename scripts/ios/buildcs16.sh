@@ -7,16 +7,16 @@ cd $SCRIPTDIR
 MODPATH=mod-build/cs16-client
 git clone --recursive https://github.com/hasandramali/cs16-client mod-build/cs16-client
 
-# Fix PAC crash on arm64e (A14+): -fno-strict-vtable-pointers disables vtable
-# authentication that arm64e HW enforces, causing pointer authentication trap IB.
-sed -i '' 's/-fno-strict-vtable-pointers/-fstrict-vtable-pointers/' mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/CMakeLists.txt
+# PAC crash on arm64e (A14+): CCSBotManager uses C++ vtables that trigger
+# pointer authentication trap IB on arm64e HW. Disable built-in bots on iOS.
+sed -i '' 's/#ifndef CSTRIKE/#if !defined(CSTRIKE) \&\& !(defined(__APPLE__) \&\& defined(__arm64__))/' mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp
 
 mkdir -p ../../build/ios/libs
 LIBSDIR=$(realpath ../../build/ios/libs)
 cd $MODPATH
 
 XCODE_DEV=$(xcode-select -p 2>/dev/null || echo "/Applications/Xcode.app/Contents/Developer")
-cmake -DCMAKE_OSX_SYSROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk" -DCMAKE_DEVELOPER_ROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DMAC=0 -DDEBUG=1 -DXASH_COMPAT=1 -DMAINUI_USE_STB=1 -DCMAKE_BUILD_TYPE=Debug -B build -S .
+cmake -DCMAKE_OSX_SYSROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk" -DCMAKE_DEVELOPER_ROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DMAC=0 -DDEBUG=1 -DXASH_COMPAT=1 -DMAINUI_USE_STB=1 -DCMAKE_CXX_FLAGS="-mbranch-protection=standard -fptrauth-calls -fptrauth-returns" -DCMAKE_BUILD_TYPE=Debug -B build -S .
 cmake --build build --config Debug
 cmake --install build --prefix $LIBSDIR
 
