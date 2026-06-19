@@ -122,13 +122,22 @@ static NSString *kCellID = @"FileCell";
     [self presentViewController:picker animated:YES completion:nil];
 }
 
+- (NSString *)botDllForGame:(NSString *)gamedir
+{
+    if ([gamedir isEqualToString:@"cstrike"])
+        return @"dlls/yapb_arm64.dylib";
+    if ([gamedir isEqualToString:@"valve"])
+        return @"dlls/bot_arm64.dylib";
+    return nil;
+}
+
 - (void)showLaunchDialogForGame:(NSString *)gamedir
 {
     NSString *savedArgs = [[NSUserDefaults standardUserDefaults] stringForKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
     NSString *args = savedArgs ?: @"-dev 1 -console -log";
-    BOOL isValve = [gamedir isEqualToString:@"valve"];
+    NSString *botDll = [self botDllForGame:gamedir];
 
-    if (!isValve) {
+    if (!botDll) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Launch %@", gamedir] message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
             tf.text = args;
@@ -146,22 +155,23 @@ static NSString *kCellID = @"FileCell";
         return;
     }
 
-    // valve: show bots toggle first, then args
+    // show bots toggle first, then args
+    NSString *botsKey = [NSString stringWithFormat:@"bots_enabled_%@", gamedir];
     UIAlertController *botsAlert = [UIAlertController alertControllerWithTitle:@"Bots" message:@"Enable bots for this game?" preferredStyle:UIAlertControllerStyleAlert];
     [botsAlert addAction:[UIAlertAction actionWithTitle:@"No" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"bots_enabled"];
+        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:botsKey];
         [[NSUserDefaults standardUserDefaults] synchronize];
-        [self showArgsDialogForGame:gamedir args:args addBotsArg:NO];
+        [self showArgsDialogForGame:gamedir args:args botDll:nil];
     }]];
     [botsAlert addAction:[UIAlertAction actionWithTitle:@"Yes" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"bots_enabled"];
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:botsKey];
         [[NSUserDefaults standardUserDefaults] synchronize];
-        [self showArgsDialogForGame:gamedir args:args addBotsArg:YES];
+        [self showArgsDialogForGame:gamedir args:args botDll:botDll];
     }]];
     [self presentViewController:botsAlert animated:YES completion:nil];
 }
 
-- (void)showArgsDialogForGame:(NSString *)gamedir args:(NSString *)defaultArgs addBotsArg:(BOOL)addBots
+- (void)showArgsDialogForGame:(NSString *)gamedir args:(NSString *)defaultArgs botDll:(NSString *)botDll
 {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Launch %@", gamedir] message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
@@ -172,8 +182,8 @@ static NSString *kCellID = @"FileCell";
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         NSString *text = alert.textFields[0].text ?: @"";
-        if (addBots) {
-            text = [text stringByAppendingString:@" -dll dlls/bot_arm64.dylib"];
+        if (botDll) {
+            text = [text stringByAppendingFormat:@" -dll %@", botDll];
         }
         [[NSUserDefaults standardUserDefaults] setObject:alert.textFields[0].text ?: @"" forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
         [[NSUserDefaults standardUserDefaults] synchronize];
