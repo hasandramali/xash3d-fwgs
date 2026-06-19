@@ -10,6 +10,26 @@ git clone --recursive https://github.com/hasandramali/cs16-client mod-build/cs16
 # Skip yapb build on iOS (not needed)
 sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
 
+# Disable InstallBotControl on iOS (PAC crash / SIGSEGV in BotPhraseManager::Initialize
+# on arm64e A14+). CSTRIKE is not defined in this build, so #ifndef CSTRIKE guard fails.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = b'#ifndef CSTRIKE' + eol + b'\tInstallBotControl();' + eol + b'#endif' + eol
+new = b'#if 0' + eol + b'\tInstallBotControl();' + eol + b'#endif' + eol
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: InstallBotControl disabled (#if 0)')
+else:
+    print('WARNING: pattern not found in multiplay_gamerules.cpp')
+    sys.exit(0)
+"
+
 # Make TheBotPhrases a global static object instead of a nullptr pointer.
 # CCSBotManager (which sets TheBotPhrases) uses C++ operator new and virtual
 # functions that trigger PAC IB trap on arm64e (A14+). By pre-allocating
@@ -128,7 +148,7 @@ LIBSDIR=$(realpath ../../build/ios/libs)
 cd $MODPATH
 
 XCODE_DEV=$(xcode-select -p 2>/dev/null || echo "/Applications/Xcode.app/Contents/Developer")
-cmake -DCMAKE_OSX_SYSROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk" -DCMAKE_DEVELOPER_ROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DMAC=0 -DDEBUG=1 -DCSTRIKE=1 -DXASH_COMPAT=1 -DMAINUI_USE_STB=1 -DCMAKE_BUILD_TYPE=Debug -B build -S .
+cmake -DCMAKE_OSX_SYSROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk" -DCMAKE_DEVELOPER_ROOT="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DMAC=0 -DDEBUG=1 -DXASH_COMPAT=1 -DMAINUI_USE_STB=1 -DCMAKE_BUILD_TYPE=Debug -B build -S .
 cmake --build build --config Debug
 cmake --install build --prefix $LIBSDIR
 
