@@ -7,48 +7,116 @@ cd $SCRIPTDIR
 MODPATH=mod-build/cs16-client
 git clone --recursive https://github.com/hasandramali/cs16-client mod-build/cs16-client
 
-# PAC crash on arm64e (A14+): CCSBotManager C++ vtables trigger
-# pointer authentication trap IB on arm64e HW. Disable built-in bots on iOS.
-sed -i '' 's/#ifndef CSTRIKE/#if !defined(CSTRIKE) \&\& !(defined(__APPLE__) \&\& defined(__arm64__))/' mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp
+# Re-enable bots on iOS: remove CSTRIKE guard so InstallBotControl() is called
+# on CS16 builds. This allows CCSBotManager to be instantiated, creating
+# TheBotPhrases and TheBots. If PAC crash occurs on arm64e A14+,
+# the enhanced crash handler will capture the backtrace in xash_ios.log.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+# Detect line endings
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = b'#ifndef CSTRIKE' + eol + b'\tInstallBotControl();' + eol + b'#endif' + eol
+new = b'\tInstallBotControl();' + eol
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: InstallBotControl guard removed')
+else:
+    print('WARNING: InstallBotControl guard pattern not found')
+    sys.exit(0)
+"
 
 # Skip yapb build on iOS (not needed)
 sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
 
-# Fix crash in UpdateLocation: TheBotPhrases can be NULL on iOS (bots disabled)
-# TheBotPhrases->GetPlaceList() returns &m_placeList at NULL+offset=0x20 when ptr is NULL
+# Fix crash in CBasePlayer::UpdateLocation: TheBotPhrases can be NULL
+# TheBotPhrases->GetPlaceList() returns &m_placeList at NULL+offset=0x20
 python3 -c "
 import sys
 fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/player.cpp'
-with open(fn, 'r') as f:
-    c = f.read()
-old = '''\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();
-\t\tfor (auto phrase : *placeList)
-\t\t{
-\t\t\tif (phrase->GetID() == playerPlace)
-\t\t\t{
-\t\t\t\tplaceName = phrase->GetName();
-\t\t\t\tbreak;
-\t\t\t}
-\t\t}'''
-new = '''\t\tif (TheBotPhrases)
-\t\t{
-\t\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();
-\t\t\tfor (auto phrase : *placeList)
-\t\t\t{
-\t\t\t\tif (phrase->GetID() == playerPlace)
-\t\t\t\t{
-\t\t\t\t\tplaceName = phrase->GetName();
-\t\t\t\t\tbreak;
-\t\t\t\t}
-\t\t\t}
-\t\t}'''
-if old in c:
-    c = c.replace(old, new, 1)
-    with open(fn, 'w') as f:
-        f.write(c)
-    print('PATCHED: TheBotPhrases null guard in UpdateLocation')
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = (
+    b'\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();' + eol +
+    b'\t\tfor (auto phrase : *placeList)' + eol +
+    b'\t\t{' + eol +
+    b'\t\t\tif (phrase->GetID() == playerPlace)' + eol +
+    b'\t\t\t{' + eol +
+    b'\t\t\t\tplaceName = phrase->GetName();' + eol +
+    b'\t\t\t\tbreak;' + eol +
+    b'\t\t\t}' + eol +
+    b'\t\t}' + eol
+)
+new = (
+    b'\t\tif (TheBotPhrases)' + eol +
+    b'\t\t{' + eol +
+    b'\t\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();' + eol +
+    b'\t\t\tfor (auto phrase : *placeList)' + eol +
+    b'\t\t\t{' + eol +
+    b'\t\t\t\tif (phrase->GetID() == playerPlace)' + eol +
+    b'\t\t\t\t{' + eol +
+    b'\t\t\t\t\tplaceName = phrase->GetName();' + eol +
+    b'\t\t\t\t\tbreak;' + eol +
+    b'\t\t\t\t}' + eol +
+    b'\t\t\t}' + eol +
+    b'\t\t}' + eol
+)
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: TheBotPhrases null guard in UpdateLocation (player.cpp)')
 else:
     print('WARNING: pattern not found in player.cpp')
+    sys.exit(0)
+"
+
+# Fix similar crash in client.cpp (same TheBotPhrases->GetPlaceList() call)
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/client.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = (
+    b'\t\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();' + eol +
+    eol +
+    b'\t\t\tfor (auto phrase : *placeList)' + eol +
+    b'\t\t\t{' + eol +
+    b'\t\t\t\tif (phrase->GetID() == playerPlace)' + eol +
+    b'\t\t\t\t{' + eol +
+    b'\t\t\t\t\tplaceName = phrase->GetName();' + eol +
+    b'\t\t\t\t\tbreak;' + eol +
+    b'\t\t\t\t}' + eol +
+    b'\t\t\t}' + eol
+)
+new = (
+    b'\t\t\tif (TheBotPhrases)' + eol +
+    b'\t\t\t{' + eol +
+    b'\t\t\t\tconst BotPhraseList *placeList = TheBotPhrases->GetPlaceList();' + eol +
+    eol +
+    b'\t\t\t\tfor (auto phrase : *placeList)' + eol +
+    b'\t\t\t\t{' + eol +
+    b'\t\t\t\t\tif (phrase->GetID() == playerPlace)' + eol +
+    b'\t\t\t\t\t{' + eol +
+    b'\t\t\t\t\t\tplaceName = phrase->GetName();' + eol +
+    b'\t\t\t\t\t\tbreak;' + eol +
+    b'\t\t\t\t\t}' + eol +
+    b'\t\t\t\t}' + eol +
+    b'\t\t\t}' + eol
+)
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: TheBotPhrases null guard in client.cpp')
+else:
+    print('WARNING: pattern not found in client.cpp')
     sys.exit(0)
 "
 
