@@ -1138,7 +1138,10 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             return;
         }
 
-        // License already granted in login Multi (emsg 5501) — no separate request needed
+        if (onProgress) onProgress(@"Requesting license...", 0);
+        logToFile(@"Requesting license for app %d...", appId);
+        [client requestLicense:appId error:nil];
+
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
         logToFile(@"Requesting CDN server list...");
         NSArray *cdnHosts = [client requestCDNServerListWithError:&err];

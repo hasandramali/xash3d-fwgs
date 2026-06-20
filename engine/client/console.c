@@ -2172,9 +2172,9 @@ void Con_RunConsole( void )
 	// decide on the destination height of the console
 	if( host.allow_console && cls.key_dest == key_console )
 	{
-#if XASH_MOBILE_PLATFORM
-		if( con_noresize.value && cls.state >= ca_active && !cl.background )
-			con.showlines = (refState.height >> 1);	// half screen
+	#if XASH_MOBILE_PLATFORM
+		if( con_noresize.value && !cl.background )
+			con.showlines = (refState.height >> 1) + 2;	// half screen + 2px
 		else con.showlines = refState.height; // always full screen on mobile devices
 #else
 		if( cls.state < ca_active || cl.first_frame )

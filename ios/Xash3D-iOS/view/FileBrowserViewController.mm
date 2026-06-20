@@ -16,10 +16,11 @@
 @property (nonatomic, strong) NSArray *directories;
 @property (nonatomic, strong) NSArray *files;
 @property (nonatomic, strong) NSFileManager *fm;
-@property (nonatomic, strong) NSString *pasteboardPath;
-@property (nonatomic, assign) BOOL isMoveOperation;
 @property (nonatomic, assign) BOOL forceLandscape;
 @end
+
+static NSString *_pasteboardPath = nil;
+static BOOL _isMoveOperation = NO;
 
 static NSString *kCellID = @"FileCell";
 
@@ -60,7 +61,7 @@ static NSString *kCellID = @"FileCell";
     UIBarButtonItem *folderBtn = [[UIBarButtonItem alloc] initWithTitle:@"New Folder" style:UIBarButtonItemStylePlain target:self action:@selector(newFolderTapped)];
     UIBarButtonItem *downloadDataBtn = [[UIBarButtonItem alloc] initWithTitle:@"Download Data" style:UIBarButtonItemStylePlain target:self action:@selector(downloadDataTapped)];
     UIBarButtonItem *pasteBtn = [[UIBarButtonItem alloc] initWithTitle:@"Paste" style:UIBarButtonItemStylePlain target:self action:@selector(pasteTapped)];
-    pasteBtn.enabled = (self.pasteboardPath != nil);
+    pasteBtn.enabled = (_pasteboardPath != nil);
     self.toolbarItems = @[importBtn, flex, folderBtn, flex, downloadDataBtn, flex, pasteBtn];
     self.navigationController.toolbarHidden = NO;
 
@@ -78,6 +79,7 @@ static NSString *kCellID = @"FileCell";
     [super viewWillAppear:animated];
     self.navigationController.toolbarHidden = NO;
     [self reloadFiles];
+    [self updatePasteButton];
 }
 
 - (NSArray *)availableGameDirs
@@ -186,7 +188,7 @@ static NSString *kCellID = @"FileCell";
 
     // Immersive Mode switch
     UISwitch *imSwitch = [[UISwitch alloc] init];
-    imSwitch.on = YES;
+    imSwitch.on = NO;
     NSString *imKey = [NSString stringWithFormat:@"immersive_mode_%@", gamedir];
     id saved = [[NSUserDefaults standardUserDefaults] objectForKey:imKey];
     if (saved) imSwitch.on = [saved boolValue];
@@ -648,21 +650,21 @@ static NSString *kCellID = @"FileCell";
 
 - (void)copyItem:(NSString *)path
 {
-    self.pasteboardPath = path;
-    self.isMoveOperation = NO;
+    _pasteboardPath = [path copy];
+    _isMoveOperation = NO;
     [self updatePasteButton];
 }
 
 - (void)pasteTapped
 {
-    if (!self.pasteboardPath) return;
-    NSString *name = [self.pasteboardPath lastPathComponent];
+    if (!_pasteboardPath) return;
+    NSString *name = [_pasteboardPath lastPathComponent];
     NSString *dest = [self.currentPath stringByAppendingPathComponent:name];
 
     if ([self.fm fileExistsAtPath:dest]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Overwrite?" message:[NSString stringWithFormat:@"\"%@\" already exists. Overwrite?", name] preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"Skip" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
-            self.pasteboardPath = nil;
+            _pasteboardPath = nil;
             [self updatePasteButton];
         }]];
         [alert addAction:[UIAlertAction actionWithTitle:@"Overwrite" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
@@ -678,11 +680,11 @@ static NSString *kCellID = @"FileCell";
 - (void)doPaste:(NSString *)dest
 {
     NSError *err = nil;
-    if (self.isMoveOperation)
-        [self.fm moveItemAtPath:self.pasteboardPath toPath:dest error:&err];
+    if (_isMoveOperation)
+        [self.fm moveItemAtPath:_pasteboardPath toPath:dest error:&err];
     else
-        [self.fm copyItemAtPath:self.pasteboardPath toPath:dest error:&err];
-    self.pasteboardPath = nil;
+        [self.fm copyItemAtPath:_pasteboardPath toPath:dest error:&err];
+    _pasteboardPath = nil;
     [self updatePasteButton];
     if (err) [self showError:err];
     [self reloadFiles];
@@ -692,14 +694,15 @@ static NSString *kCellID = @"FileCell";
 {
     if (self.toolbarItems.count >= 9) {
         UIBarButtonItem *pasteBtn = self.toolbarItems[8];
-        pasteBtn.enabled = (self.pasteboardPath != nil);
-        if (self.isMoveOperation)
+        pasteBtn.enabled = (_pasteboardPath != nil);
+        if (_isMoveOperation)
             pasteBtn.title = @"Move Here";
-        else if (self.pasteboardPath)
+        else if (_pasteboardPath)
             pasteBtn.title = @"Paste";
         else
             pasteBtn.title = @"Paste";
     }
+}
 }
 
 - (void)newFolderTapped

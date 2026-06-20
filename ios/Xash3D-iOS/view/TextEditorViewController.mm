@@ -4,6 +4,8 @@
 - (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
     if (action == @selector(selectAll:))
         return self.text.length > 0;
+    if (action == @selector(paste:))
+        return [UIPasteboard generalPasteboard].hasStrings || [UIPasteboard generalPasteboard].hasURLs || [UIPasteboard generalPasteboard].hasImages;
     return [super canPerformAction:action withSender:sender];
 }
 @end
