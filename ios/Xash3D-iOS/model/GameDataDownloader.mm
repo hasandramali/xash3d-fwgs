@@ -454,7 +454,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 }
 - (BOOL)readExact:(uint8_t *)d length:(size_t)l {
     size_t o = 0; int againRetries = 0;
-    while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n > 0) { o += n; againRetries = 0; } else if (n == 0) return NO; else if (errno == EINTR) continue; else if (errno == EAGAIN) { if (++againRetries > 10) { logToFile(@"readExact: too many EAGAIN retries at %zu/%zu", o, l); return NO; } continue; } else { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
+    while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n > 0) { o += n; againRetries = 0; } else if (n == 0) return NO; else if (errno == EINTR) continue; else if (errno == EAGAIN) { if (++againRetries > 3) { logToFile(@"readExact: too many EAGAIN retries at %zu/%zu", o, l); return NO; } continue; } else { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
     return YES;
 }
 
@@ -1148,10 +1148,6 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
             return;
         }
-
-        if (onProgress) onProgress(@"Requesting license...", 0);
-        logToFile(@"Requesting license for app %d...", appId);
-        [client requestLicense:appId error:nil];
 
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
         logToFile(@"Requesting CDN server list...");
