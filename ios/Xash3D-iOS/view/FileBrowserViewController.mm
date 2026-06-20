@@ -703,7 +703,6 @@ static NSString *kCellID = @"FileCell";
             pasteBtn.title = @"Paste";
     }
 }
-}
 
 - (void)newFolderTapped
 {
