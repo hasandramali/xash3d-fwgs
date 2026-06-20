@@ -7,6 +7,7 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
