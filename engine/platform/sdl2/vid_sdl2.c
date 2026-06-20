@@ -834,7 +834,7 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 	VID_SaveWindowSize( rect.w, rect.h );
 
 #if XASH_IOS
-	if( Sys_GetParmFromCmdLine( "-noimmersive" ))
+	if( Sys_CheckParm( "-noimmersive" ))
 	{
 		Con_Reportf( "iOS: constraining game view to safe area\n" );
 		IOS_ConstrainGameViewToSafeArea();
