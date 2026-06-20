@@ -26,6 +26,10 @@ GNU General Public License for more details.
 #include <vrtld.h>
 #endif // XASH_PSVITA
 
+#if XASH_IOS
+void IOS_ConstrainGameViewToSafeArea(void);
+#endif
+
 static vidmode_t *vidmodes = NULL;
 static int num_vidmodes = 0;
 static void GL_SetupAttributes( void );
@@ -828,6 +832,14 @@ static rserr_t VID_CreateWindow( const int input_width, const int input_height, 
 	// update window size if it was resized
 	SDL_GetWindowSize( host.hWnd, &rect.w, &rect.h );
 	VID_SaveWindowSize( rect.w, rect.h );
+
+#if XASH_IOS
+	if( Sys_GetParmFromCmdLine( "-noimmersive" ))
+	{
+		Con_Reportf( "iOS: constraining game view to safe area\n" );
+		IOS_ConstrainGameViewToSafeArea();
+	}
+#endif
 
 	VID_Info_f();
 

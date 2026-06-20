@@ -2419,6 +2419,11 @@ void Con_DefaultColor( int r, int g, int b, qboolean gameui )
 	MakeRGBA( g_color_table[7], r, g, b, 255 );
 }
 
+qboolean Con_InputIsEmpty( void )
+{
+	return con.input.buffer[0] == '\0';
+}
+
 #if XASH_ENGINE_TESTS
 #include "tests.h"
 

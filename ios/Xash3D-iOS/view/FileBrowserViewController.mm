@@ -2,6 +2,15 @@
 #import "TextEditorViewController.h"
 #import "GameDataDownloader.h"
 #include "launcherdialog.h"
+#import <objc/runtime.h>
+
+@interface _BlockAction : NSObject
+@property (nonatomic, copy) void (^block)(void);
+- (void)handleTap;
+@end
+@implementation _BlockAction
+- (void)handleTap { if (self.block) self.block(); }
+@end
 
 @interface FileBrowserViewController () <UIDocumentPickerDelegate, UIAlertViewDelegate>
 @property (nonatomic, strong) NSArray *directories;
@@ -124,6 +133,8 @@ static NSString *kCellID = @"FileCell";
 
 - (NSString *)botDllForGame:(NSString *)gamedir
 {
+    if ([gamedir isEqualToString:@"cstrike"])
+        return @"dlls/yapb_arm64.dylib";
     if ([gamedir isEqualToString:@"valve"])
         return @"dlls/bot_arm64.dylib";
     return nil;
@@ -136,20 +147,7 @@ static NSString *kCellID = @"FileCell";
     NSString *botDll = [self botDllForGame:gamedir];
 
     if (!botDll) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Launch %@", gamedir] message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-            tf.text = args;
-            tf.placeholder = @"Extra arguments";
-            tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        }];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            NSString *text = alert.textFields[0].text ?: @"";
-            [[NSUserDefaults standardUserDefaults] setObject:text forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
-            [[NSUserDefaults standardUserDefaults] synchronize];
-            [self doLaunchWithGameDir:gamedir extraArgs:text];
-        }]];
-        [self presentViewController:alert animated:YES completion:nil];
+        [self showArgsDialogForGame:gamedir args:args botDll:nil];
         return;
     }
 
@@ -171,23 +169,133 @@ static NSString *kCellID = @"FileCell";
 
 - (void)showArgsDialogForGame:(NSString *)gamedir args:(NSString *)defaultArgs botDll:(NSString *)botDll
 {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Launch %@", gamedir] message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = defaultArgs;
-        tf.placeholder = @"Extra arguments";
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        NSString *text = alert.textFields[0].text ?: @"";
-        if (botDll) {
-            text = [text stringByAppendingFormat:@" -dll %@", botDll];
-        }
-        [[NSUserDefaults standardUserDefaults] setObject:alert.textFields[0].text ?: @"" forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
+    UIViewController *vc = [[UIViewController alloc] init];
+    vc.modalPresentationStyle = UIModalPresentationPageSheet;
+    vc.preferredContentSize = CGSizeMake(320, 240);
+
+    UIView *root = vc.view;
+    root.backgroundColor = [UIColor systemBackgroundColor];
+
+    // Title
+    UILabel *titleLbl = [[UILabel alloc] init];
+    titleLbl.text = [NSString stringWithFormat:@"Launch %@", gamedir];
+    titleLbl.font = [UIFont boldSystemFontOfSize:17];
+    titleLbl.textAlignment = NSTextAlignmentCenter;
+    titleLbl.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:titleLbl];
+
+    // Immersive Mode label
+    UILabel *imLbl = [[UILabel alloc] init];
+    imLbl.text = @"Immersive Mode";
+    imLbl.font = [UIFont systemFontOfSize:15];
+    imLbl.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:imLbl];
+
+    // Immersive Mode switch
+    UISwitch *imSwitch = [[UISwitch alloc] init];
+    imSwitch.on = YES;
+    NSString *imKey = [NSString stringWithFormat:@"immersive_mode_%@", gamedir];
+    id saved = [[NSUserDefaults standardUserDefaults] objectForKey:imKey];
+    if (saved) imSwitch.on = [saved boolValue];
+    imSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:imSwitch];
+
+    // Args text field
+    UITextField *argField = [[UITextField alloc] init];
+    argField.text = defaultArgs;
+    argField.placeholder = @"Extra arguments";
+    argField.borderStyle = UITextBorderStyleRoundedRect;
+    argField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    argField.font = [UIFont systemFontOfSize:14];
+    argField.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:argField];
+
+    // Cancel button
+    UIButton *cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [cancelBtn setTitle:@"Cancel" forState:UIControlStateNormal];
+    cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:cancelBtn];
+
+    // Launch button
+    UIButton *launchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [launchBtn setTitle:@"Launch" forState:UIControlStateNormal];
+    launchBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+    launchBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:launchBtn];
+
+    // Separator line
+    UIView *sep = [[UIView alloc] init];
+    sep.backgroundColor = [UIColor separatorColor];
+    sep.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:sep];
+
+    // Vertical divider between buttons
+    UIView *div = [[UIView alloc] init];
+    div.backgroundColor = [UIColor separatorColor];
+    div.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:div];
+
+    // Layout
+    [NSLayoutConstraint activateConstraints:@[
+        [titleLbl.topAnchor constraintEqualToAnchor:root.topAnchor constant:16],
+        [titleLbl.centerXAnchor constraintEqualToAnchor:root.centerXAnchor],
+        [titleLbl.leadingAnchor constraintGreaterThanOrEqualToAnchor:root.leadingAnchor constant:16],
+        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:root.trailingAnchor constant:-16],
+        [imLbl.topAnchor constraintEqualToAnchor:titleLbl.bottomAnchor constant:24],
+        [imLbl.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:20],
+        [imLbl.centerYAnchor constraintEqualToAnchor:imSwitch.centerYAnchor],
+        [imSwitch.topAnchor constraintEqualToAnchor:imLbl.topAnchor],
+        [imSwitch.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-20],
+        [argField.topAnchor constraintEqualToAnchor:imSwitch.bottomAnchor constant:16],
+        [argField.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:20],
+        [argField.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-20],
+        [argField.heightAnchor constraintEqualToConstant:34],
+        [sep.topAnchor constraintEqualToAnchor:argField.bottomAnchor constant:20],
+        [sep.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+        [sep.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+        [sep.heightAnchor constraintEqualToConstant:1 / [UIScreen mainScreen].scale],
+        [cancelBtn.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
+        [cancelBtn.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+        [cancelBtn.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+        [cancelBtn.trailingAnchor constraintEqualToAnchor:div.leadingAnchor],
+        [cancelBtn.heightAnchor constraintEqualToConstant:44],
+        [div.centerXAnchor constraintEqualToAnchor:root.centerXAnchor],
+        [div.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
+        [div.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+        [div.widthAnchor constraintEqualToConstant:1 / [UIScreen mainScreen].scale],
+        [launchBtn.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
+        [launchBtn.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+        [launchBtn.leadingAnchor constraintEqualToAnchor:div.trailingAnchor],
+        [launchBtn.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+    ]];
+
+    // Cancel: dismiss using block-based action
+    __weak UIViewController *weakVC = vc;
+    _BlockAction *cancelAction = [[_BlockAction alloc] init];
+    cancelAction.block = ^{ [weakVC dismissViewControllerAnimated:YES completion:nil]; };
+    [cancelBtn addTarget:cancelAction action:@selector(handleTap) forControlEvents:UIControlEventTouchUpInside];
+    objc_setAssociatedObject(cancelBtn, "cancelAction", cancelAction, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    // Launch: dismiss and start game
+    __weak FileBrowserViewController *weakSelf = self;
+    _BlockAction *launchAction = [[_BlockAction alloc] init];
+    launchAction.block = ^{
+        NSString *text = argField.text ?: @"";
+        [[NSUserDefaults standardUserDefaults] setBool:imSwitch.on forKey:imKey];
+        [[NSUserDefaults standardUserDefaults] setObject:text forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
         [[NSUserDefaults standardUserDefaults] synchronize];
-        [self doLaunchWithGameDir:gamedir extraArgs:text];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+        if (!imSwitch.on)
+            text = [text stringByAppendingString:@" -noimmersive"];
+        if (botDll.length > 0)
+            text = [text stringByAppendingFormat:@" -dll %@", botDll];
+        [vc dismissViewControllerAnimated:YES completion:^{
+            [weakSelf doLaunchWithGameDir:gamedir extraArgs:text];
+        }];
+    };
+    [launchBtn addTarget:launchAction action:@selector(handleTap) forControlEvents:UIControlEventTouchUpInside];
+    objc_setAssociatedObject(launchBtn, "launchAction", launchAction, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    [self presentViewController:vc animated:YES completion:nil];
 }
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs

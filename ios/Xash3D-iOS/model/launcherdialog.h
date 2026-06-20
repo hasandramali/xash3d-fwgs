@@ -40,6 +40,9 @@ void IOS_LaunchDialog(void);
 char *IOS_GetUDID(void);
 void IOS_Log(const char *text);
 
+// Immersive mode / safe area helpers
+void IOS_ConstrainGameViewToSafeArea(void);
+
 #ifdef __cplusplus
 }
 #endif

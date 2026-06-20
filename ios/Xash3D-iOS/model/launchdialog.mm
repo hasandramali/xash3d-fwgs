@@ -245,3 +245,45 @@ extern "C" void IOS_GetSystemVersion(int *major, int *minor, int *patch)
     if(minor) *minor = (int)ver.minorVersion;
     if(patch) *patch = (int)ver.patchVersion;
 }
+
+extern "C" void IOS_ConstrainGameViewToSafeArea(void)
+{
+    // Find the key window (SDL's window)
+    UIWindow *window = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                for (UIWindow *w in ws.windows) {
+                    if (w.isKeyWindow) { window = w; break; }
+                }
+                if (window) break;
+            }
+        }
+    }
+    if (!window)
+        window = [UIApplication sharedApplication].keyWindow;
+    if (!window) return;
+
+    UIEdgeInsets insets = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *))
+        insets = window.safeAreaInsets;
+
+    // If insets are zero, nothing to constrain
+    if (insets.left < 1 && insets.right < 1 && insets.top < 1 && insets.bottom < 1)
+        return;
+
+    // Create a black background view that fills the entire screen
+    UIView *bgView = [[UIView alloc] initWithFrame:window.bounds];
+    bgView.backgroundColor = [UIColor blackColor];
+    bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [window insertSubview:bgView atIndex:0];
+
+    // Resize the game view to fit within safe area
+    UIView *gameView = window.rootViewController.view;
+    if (gameView) {
+        CGRect safeFrame = UIEdgeInsetsInsetRect(window.bounds, insets);
+        gameView.frame = safeFrame;
+        gameView.clipsToBounds = YES;
+    }
+}
