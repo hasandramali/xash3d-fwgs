@@ -247,6 +247,20 @@ extern "C" void IOS_GetSystemVersion(int *major, int *minor, int *patch)
     if(patch) *patch = (int)ver.patchVersion;
 }
 
+static char kReapplyKey;
+
+static void IOS_ReapplySafeArea(UIWindow *window, CGFloat leftPad)
+{
+    UIView *gameView = window.rootViewController.view;
+    if (!gameView) return;
+    [UIView performWithoutAnimation:^{
+        CGRect f = gameView.frame;
+        f.origin.x = leftPad;
+        f.size.width = window.bounds.size.width - leftPad;
+        gameView.frame = f;
+    }];
+}
+
 extern "C" void IOS_ConstrainGameViewToSafeArea(void)
 {
     // Find the key window (SDL's window)
@@ -274,21 +288,36 @@ extern "C" void IOS_ConstrainGameViewToSafeArea(void)
     CGFloat leftPad = insets.left * 0.65f;
     if (leftPad < 1) return;
 
-    // Remove previously added overlay if any (e.g. video re-init)
-    static char kOverlayKey;
-    UIView *oldOverlay = (UIView *)objc_getAssociatedObject(window, &kOverlayKey);
-    [oldOverlay removeFromSuperview];
-    objc_setAssociatedObject(window, &kOverlayKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // Remove old observers if re-init
+    id oldObservers = objc_getAssociatedObject(window, &kReapplyKey);
+    if (oldObservers) {
+        for (id obs in (NSArray *)oldObservers)
+            [[NSNotificationCenter defaultCenter] removeObserver:obs];
+        objc_setAssociatedObject(window, &kReapplyKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
 
-    // Add a black overlay on the left to cover the notch.
-    // This sits ON TOP of the game view so SDL can't remove or override it.
-    // userInteractionEnabled=NO lets touches pass through to the game.
-    UIView *notchCover = [[UIView alloc] initWithFrame:CGRectMake(0, 0, leftPad, window.bounds.size.height)];
-    notchCover.backgroundColor = [UIColor blackColor];
-    notchCover.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleRightMargin;
-    notchCover.userInteractionEnabled = NO;
-    [window addSubview:notchCover];
-    [window bringSubviewToFront:notchCover];
+    // Create a black background view that fills the entire screen
+    UIView *bgView = [[UIView alloc] initWithFrame:window.bounds];
+    bgView.backgroundColor = [UIColor blackColor];
+    bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [window insertSubview:bgView atIndex:0];
 
-    objc_setAssociatedObject(window, &kOverlayKey, notchCover, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // Apply initial constraint: resize game view so content avoids notch
+    IOS_ReapplySafeArea(window, leftPad);
+
+    // Re-apply on any event that may reset the game view frame
+    __weak UIWindow *weakWindow = window;
+    void (^block)(NSNotification *) = ^(NSNotification *note) {
+        UIWindow *w = weakWindow;
+        if (!w) return;
+        IOS_ReapplySafeArea(w, leftPad);
+    };
+
+    id obs1 = [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardDidShowNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs2 = [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardDidHideNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs3 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs4 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs5 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+
+    objc_setAssociatedObject(window, &kReapplyKey, @[obs1, obs2, obs3, obs4, obs5], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
