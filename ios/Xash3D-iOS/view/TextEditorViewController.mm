@@ -1,4 +1,13 @@
 #import "TextEditorViewController.h"
+@interface _SelectAllTextView : UITextView @end
+@implementation _SelectAllTextView
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
+    if (action == @selector(selectAll:))
+        return self.text.length > 0;
+    return [super canPerformAction:action withSender:sender];
+}
+@end
+
 @interface TextEditorViewController () <UITextViewDelegate>
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) NSString *originalText;
@@ -66,7 +75,7 @@ static const NSInteger kMaxTextFileSize = 1024 * 1024;
     }
 
     self.originalText = [content copy];
-    self.textView = [[UITextView alloc] init];
+    self.textView = [[_SelectAllTextView alloc] init];
     self.textView.text = content;
     self.textView.font = [UIFont fontWithName:@"Menlo" size:13] ?: [UIFont systemFontOfSize:13];
     self.textView.delegate = self;

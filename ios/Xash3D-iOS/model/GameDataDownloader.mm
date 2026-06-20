@@ -420,6 +420,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     NSThread *_heartbeatThread;
     int _heartbeatSeconds;
     BOOL _heartbeatRunning;
+    int64_t _nextJobId;
 }
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os;
 - (BOOL)connectWithError:(NSError **)error;
@@ -435,18 +436,18 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 @implementation SteamCMClient
 
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os {
-    if (self = [super init]) { _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; _heartbeatSeconds = 9; _heartbeatRunning = NO; }
+    if (self = [super init]) { _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; _heartbeatSeconds = 9; _heartbeatRunning = NO; _nextJobId = 1; }
     return self;
 }
 - (void)dealloc { [self stopHeartbeat]; [self disconnect]; }
 - (void)status:(NSString *)s { if (_onStatus) _onStatus(s); }
 
 - (BOOL)writeExact:(const uint8_t *)d length:(size_t)l {
-    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n <= 0) { logToFile(@"writeExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } o += n; }
+    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n > 0) o += n; else if (n == 0) return NO; else if (errno == EAGAIN || errno == EINTR) continue; else { logToFile(@"writeExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
     return YES;
 }
 - (BOOL)readExact:(uint8_t *)d length:(size_t)l {
-    size_t o = 0; while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n <= 0) { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } o += n; }
+    size_t o = 0; while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n > 0) o += n; else if (n == 0) return NO; else if (errno == EAGAIN || errno == EINTR) continue; else { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
     return YES;
 }
 
@@ -815,6 +816,8 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
     auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
+    auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
+    h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
     std::string jn="ContentServerDirectory.GetServersForSteamPipe#1";
     auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());
     h.insert(h.end(),h12.begin(),h12.end()); h.insert(h.end(),jl.begin(),jl.end()); h.insert(h.end(),jn.begin(),jn.end());
@@ -906,6 +909,8 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
     auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
+    auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
+    h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
     std::string jn="ContentServerDirectory.GetManifestRequestCode#1";
     auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());
     h.insert(h.end(),h12.begin(),h12.end()); h.insert(h.end(),jl.begin(),jl.end()); h.insert(h.end(),jn.begin(),jn.end());
