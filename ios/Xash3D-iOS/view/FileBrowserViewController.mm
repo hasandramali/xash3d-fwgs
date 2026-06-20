@@ -145,36 +145,29 @@ static NSString *kCellID = @"FileCell";
     NSString *savedArgs = [[NSUserDefaults standardUserDefaults] stringForKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
     NSString *args = savedArgs ?: @"-dev 1 -console -log";
     NSString *botDll = [self botDllForGame:gamedir];
-
-    if (!botDll) {
-        [self showArgsDialogForGame:gamedir args:args botDll:nil];
-        return;
-    }
-
-    // show bots toggle first, then args
-    NSString *botsKey = [NSString stringWithFormat:@"bots_enabled_%@", gamedir];
-    UIAlertController *botsAlert = [UIAlertController alertControllerWithTitle:@"Bots" message:@"Enable bots for this game?" preferredStyle:UIAlertControllerStyleAlert];
-    [botsAlert addAction:[UIAlertAction actionWithTitle:@"No" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:botsKey];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        [self showArgsDialogForGame:gamedir args:args botDll:nil];
-    }]];
-    [botsAlert addAction:[UIAlertAction actionWithTitle:@"Yes" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:botsKey];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        [self showArgsDialogForGame:gamedir args:args botDll:botDll];
-    }]];
-    [self presentViewController:botsAlert animated:YES completion:nil];
+    [self showArgsDialogForGame:gamedir args:args botDll:botDll];
 }
 
 - (void)showArgsDialogForGame:(NSString *)gamedir args:(NSString *)defaultArgs botDll:(NSString *)botDll
 {
     UIViewController *vc = [[UIViewController alloc] init];
     vc.modalPresentationStyle = UIModalPresentationPageSheet;
-    vc.preferredContentSize = CGSizeMake(320, 240);
+    vc.preferredContentSize = CGSizeMake(320, 340);
 
     UIView *root = vc.view;
     root.backgroundColor = [UIColor systemBackgroundColor];
+
+    // Scroll view for keyboard avoidance
+    UIScrollView *scrollView = [[UIScrollView alloc] init];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+    [root addSubview:scrollView];
+
+    // Content view inside scroll view
+    UIView *contentView = [[UIView alloc] init];
+    contentView.translatesAutoresizingMaskIntoConstraints = NO;
+    contentView.backgroundColor = [UIColor clearColor];
+    [scrollView addSubview:contentView];
 
     // Title
     UILabel *titleLbl = [[UILabel alloc] init];
@@ -182,14 +175,14 @@ static NSString *kCellID = @"FileCell";
     titleLbl.font = [UIFont boldSystemFontOfSize:17];
     titleLbl.textAlignment = NSTextAlignmentCenter;
     titleLbl.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:titleLbl];
+    [contentView addSubview:titleLbl];
 
     // Immersive Mode label
     UILabel *imLbl = [[UILabel alloc] init];
     imLbl.text = @"Immersive Mode";
     imLbl.font = [UIFont systemFontOfSize:15];
     imLbl.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:imLbl];
+    [contentView addSubview:imLbl];
 
     // Immersive Mode switch
     UISwitch *imSwitch = [[UISwitch alloc] init];
@@ -198,7 +191,24 @@ static NSString *kCellID = @"FileCell";
     id saved = [[NSUserDefaults standardUserDefaults] objectForKey:imKey];
     if (saved) imSwitch.on = [saved boolValue];
     imSwitch.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:imSwitch];
+    [contentView addSubview:imSwitch];
+
+    // Enable Bots switch (only if botDll available)
+    UISwitch *botSwitch = nil;
+    UILabel *botLbl = nil;
+    NSString *botsKey = [NSString stringWithFormat:@"bots_enabled_%@", gamedir];
+    if (botDll.length > 0) {
+        botLbl = [[UILabel alloc] init];
+        botLbl.text = @"Enable Bots";
+        botLbl.font = [UIFont systemFontOfSize:15];
+        botLbl.translatesAutoresizingMaskIntoConstraints = NO;
+        [contentView addSubview:botLbl];
+
+        botSwitch = [[UISwitch alloc] init];
+        botSwitch.on = [[NSUserDefaults standardUserDefaults] boolForKey:botsKey];
+        botSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+        [contentView addSubview:botSwitch];
+    }
 
     // Args text field
     UITextField *argField = [[UITextField alloc] init];
@@ -208,66 +218,129 @@ static NSString *kCellID = @"FileCell";
     argField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     argField.font = [UIFont systemFontOfSize:14];
     argField.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:argField];
+    [contentView addSubview:argField];
 
     // Cancel button
     UIButton *cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     [cancelBtn setTitle:@"Cancel" forState:UIControlStateNormal];
     cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:cancelBtn];
+    [contentView addSubview:cancelBtn];
 
     // Launch button
     UIButton *launchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     [launchBtn setTitle:@"Launch" forState:UIControlStateNormal];
     launchBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
     launchBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:launchBtn];
+    [contentView addSubview:launchBtn];
 
     // Separator line
     UIView *sep = [[UIView alloc] init];
     sep.backgroundColor = [UIColor separatorColor];
     sep.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:sep];
+    [contentView addSubview:sep];
 
     // Vertical divider between buttons
     UIView *div = [[UIView alloc] init];
     div.backgroundColor = [UIColor separatorColor];
     div.translatesAutoresizingMaskIntoConstraints = NO;
-    [root addSubview:div];
+    [contentView addSubview:div];
 
-    // Layout
+    // Scroll view fills root
     [NSLayoutConstraint activateConstraints:@[
-        [titleLbl.topAnchor constraintEqualToAnchor:root.topAnchor constant:16],
-        [titleLbl.centerXAnchor constraintEqualToAnchor:root.centerXAnchor],
-        [titleLbl.leadingAnchor constraintGreaterThanOrEqualToAnchor:root.leadingAnchor constant:16],
-        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:root.trailingAnchor constant:-16],
-        [imLbl.topAnchor constraintEqualToAnchor:titleLbl.bottomAnchor constant:24],
-        [imLbl.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:20],
+        [scrollView.topAnchor constraintEqualToAnchor:root.topAnchor],
+        [scrollView.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+        [scrollView.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+        [scrollView.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+    ]];
+
+    // Content view fills scroll view width, determines height
+    [NSLayoutConstraint activateConstraints:@[
+        [contentView.topAnchor constraintEqualToAnchor:scrollView.topAnchor],
+        [contentView.leadingAnchor constraintEqualToAnchor:scrollView.leadingAnchor],
+        [contentView.trailingAnchor constraintEqualToAnchor:scrollView.trailingAnchor],
+        [contentView.bottomAnchor constraintEqualToAnchor:scrollView.bottomAnchor],
+        [contentView.widthAnchor constraintEqualToAnchor:scrollView.widthAnchor],
+    ]];
+
+    // Accumulator for vertical chain
+    UIView *prevView;
+
+    // Title at top of content view
+    [NSLayoutConstraint activateConstraints:@[
+        [titleLbl.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:16],
+        [titleLbl.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
+        [titleLbl.leadingAnchor constraintGreaterThanOrEqualToAnchor:contentView.leadingAnchor constant:16],
+        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:contentView.trailingAnchor constant:-16],
+    ]];
+    prevView = titleLbl;
+
+    // Immersive Mode row
+    [NSLayoutConstraint activateConstraints:@[
+        [imLbl.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:24],
+        [imLbl.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [imLbl.centerYAnchor constraintEqualToAnchor:imSwitch.centerYAnchor],
         [imSwitch.topAnchor constraintEqualToAnchor:imLbl.topAnchor],
-        [imSwitch.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-20],
-        [argField.topAnchor constraintEqualToAnchor:imSwitch.bottomAnchor constant:16],
-        [argField.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:20],
-        [argField.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-20],
+        [imSwitch.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+    ]];
+    prevView = imSwitch;
+
+    // Bots row (if applicable)
+    if (botDll.length > 0 && botLbl && botSwitch) {
+        [NSLayoutConstraint activateConstraints:@[
+            [botLbl.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:16],
+            [botLbl.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+            [botLbl.centerYAnchor constraintEqualToAnchor:botSwitch.centerYAnchor],
+            [botSwitch.topAnchor constraintEqualToAnchor:botLbl.topAnchor],
+            [botSwitch.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        ]];
+        prevView = botSwitch;
+    }
+
+    // Args text field
+    [NSLayoutConstraint activateConstraints:@[
+        [argField.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:16],
+        [argField.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [argField.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [argField.heightAnchor constraintEqualToConstant:34],
-        [sep.topAnchor constraintEqualToAnchor:argField.bottomAnchor constant:20],
-        [sep.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
-        [sep.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+    ]];
+    prevView = argField;
+
+    // Separator
+    [NSLayoutConstraint activateConstraints:@[
+        [sep.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:20],
+        [sep.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
+        [sep.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
         [sep.heightAnchor constraintEqualToConstant:1 / [UIScreen mainScreen].scale],
-        [cancelBtn.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
-        [cancelBtn.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
-        [cancelBtn.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+    ]];
+    prevView = sep;
+
+    // Bottom buttons row
+    [NSLayoutConstraint activateConstraints:@[
+        [cancelBtn.topAnchor constraintEqualToAnchor:prevView.bottomAnchor],
+        [cancelBtn.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [cancelBtn.trailingAnchor constraintEqualToAnchor:div.leadingAnchor],
         [cancelBtn.heightAnchor constraintEqualToConstant:44],
-        [div.centerXAnchor constraintEqualToAnchor:root.centerXAnchor],
-        [div.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
-        [div.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+
+        [div.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
+        [div.topAnchor constraintEqualToAnchor:prevView.bottomAnchor],
+        [div.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor],
         [div.widthAnchor constraintEqualToConstant:1 / [UIScreen mainScreen].scale],
-        [launchBtn.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
-        [launchBtn.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+
+        [launchBtn.topAnchor constraintEqualToAnchor:prevView.bottomAnchor],
+        [launchBtn.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
         [launchBtn.leadingAnchor constraintEqualToAnchor:div.trailingAnchor],
-        [launchBtn.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+        [launchBtn.heightAnchor constraintEqualToConstant:44],
     ]];
+
+    // Ensure cancelBtn/launchBtn bottom connects to contentView bottom
+    [NSLayoutConstraint activateConstraints:@[
+        [cancelBtn.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor],
+        [launchBtn.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor],
+    ]];
+
+    // Tap to dismiss keyboard
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
+    [vc.view addGestureRecognizer:tap];
 
     // Cancel: dismiss using block-based action
     __weak UIViewController *weakVC = vc;
@@ -283,10 +356,13 @@ static NSString *kCellID = @"FileCell";
         NSString *text = argField.text ?: @"";
         [[NSUserDefaults standardUserDefaults] setBool:imSwitch.on forKey:imKey];
         [[NSUserDefaults standardUserDefaults] setObject:text forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
+        if (botSwitch) {
+            [[NSUserDefaults standardUserDefaults] setBool:botSwitch.on forKey:botsKey];
+        }
         [[NSUserDefaults standardUserDefaults] synchronize];
         if (!imSwitch.on)
             text = [text stringByAppendingString:@" -noimmersive"];
-        if (botDll.length > 0)
+        if (botSwitch && botSwitch.on && botDll.length > 0)
             text = [text stringByAppendingFormat:@" -dll %@", botDll];
         [vc dismissViewControllerAnimated:YES completion:^{
             [weakSelf doLaunchWithGameDir:gamedir extraArgs:text];
@@ -296,6 +372,11 @@ static NSString *kCellID = @"FileCell";
     objc_setAssociatedObject(launchBtn, "launchAction", launchAction, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     [self presentViewController:vc animated:YES completion:nil];
+}
+
+- (void)dismissKeyboard
+{
+    [self.view endEditing:YES];
 }
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs

@@ -269,9 +269,9 @@ extern "C" void IOS_ConstrainGameViewToSafeArea(void)
     if (@available(iOS 11.0, *))
         insets = window.safeAreaInsets;
 
-    // If insets are zero, nothing to constrain
-    if (insets.left < 1 && insets.right < 1 && insets.top < 1 && insets.bottom < 1)
-        return;
+    // Only constrain left side (notch area), with reduced padding
+    CGFloat leftPad = insets.left * 0.65f;
+    if (leftPad < 1) return;
 
     // Create a black background view that fills the entire screen
     UIView *bgView = [[UIView alloc] initWithFrame:window.bounds];
@@ -279,11 +279,13 @@ extern "C" void IOS_ConstrainGameViewToSafeArea(void)
     bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [window insertSubview:bgView atIndex:0];
 
-    // Resize the game view to fit within safe area
+    // Resize the game view: shrink only left side to avoid notch
     UIView *gameView = window.rootViewController.view;
     if (gameView) {
-        CGRect safeFrame = UIEdgeInsetsInsetRect(window.bounds, insets);
-        gameView.frame = safeFrame;
+        CGRect frame = gameView.frame;
+        frame.origin.x = leftPad;
+        frame.size.width = window.bounds.size.width - leftPad;
+        gameView.frame = frame;
         gameView.clipsToBounds = YES;
     }
 }
