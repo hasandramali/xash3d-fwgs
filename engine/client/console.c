@@ -34,7 +34,7 @@ static CVAR_DEFINE_AUTO( con_color, "240 180 24", FCVAR_ARCHIVE, "set a custom c
 static CVAR_DEFINE_AUTO( scr_drawversion, "1", FCVAR_ARCHIVE, "draw version in menu or screenshots, doesn't affect console" );
 static CVAR_DEFINE_AUTO( con_oldfont, "0", 0, "use legacy font from gfx.wad, might be missing or broken" );
 static CVAR_DEFINE_AUTO( con_fixfont, "0", 0, "force con_oldfont 0 and fix con_fontscale behavior" );
-static CVAR_DEFINE_AUTO( con_noresize, "1", 0, "prevent window resize and use half-screen console in game" );
+static CVAR_DEFINE_AUTO( con_noresize, "1", FCVAR_ARCHIVE, "extra console offset from half-screen" );
 static CVAR_DEFINE_AUTO( con_showcompletion, "1", FCVAR_ARCHIVE, "perform simplified autocompletion while typing" );
 
 static int g_codepage = 0;
@@ -801,6 +801,9 @@ void Con_Init( void )
 
 	if( Sys_CheckParm( "-noresize" ))
 		Cvar_DirectSet( &con_noresize, "1" );
+
+	if( con_noresize.value > 40 )
+		Cvar_DirectSet( &con_noresize, "40" );
 
 	// init the console buffer
 	con.bufsize = CON_TEXTSIZE;
@@ -2173,8 +2176,8 @@ void Con_RunConsole( void )
 	if( host.allow_console && cls.key_dest == key_console )
 	{
 	#if XASH_MOBILE_PLATFORM
-		if( con_noresize.value && !cl.background )
-			con.showlines = (refState.height >> 1) + 2;	// half screen + 2px
+		if( con_noresize.value )
+			con.showlines = (refState.height >> 1) + bound( 0, con_noresize.value, 40 );
 		else con.showlines = refState.height; // always full screen on mobile devices
 #else
 		if( cls.state < ca_active || cl.first_frame )
