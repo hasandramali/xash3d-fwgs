@@ -135,6 +135,12 @@ static bytes packVarint(int64_t val) {
     buf.push_back((uint8_t)(v & 0x7F));
     return buf;
 }
+static bytes packVarint32(int32_t val) {
+    bytes buf; uint32_t v = (uint32_t)val;
+    while (v >= 0x80u) { buf.push_back((uint8_t)(v & 0x7F) | 0x80); v >>= 7; }
+    buf.push_back((uint8_t)(v & 0x7F));
+    return buf;
+}
 static bytes packVarint64(uint64_t val) {
     bytes buf;
     while (val >= 0x80) { buf.push_back((uint8_t)(val & 0x7F) | 0x80); val >>= 7; }
@@ -506,7 +512,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             body.insert(body.end(),f.begin(),f.end()); body.insert(body.end(),v.begin(),v.end());
             bytes hdr; auto h1 = packVarint((1<<3)|1); auto si = packFixed64(_currentSteamId);
             hdr.insert(hdr.end(),h1.begin(),h1.end()); hdr.insert(hdr.end(),si.begin(),si.end());
-            auto h2 = packVarint((2<<3)|0); auto se = packVarint(_currentSessionId);
+            auto h2 = packVarint((2<<3)|0); auto se = packVarint32(_currentSessionId);
             hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
             logToFile(@"Sending heartbeat (sessionId=%d steamId=%llu)", ss->_currentSessionId, (unsigned long long)ss->_currentSteamId);
             [ss sendProtobufMsg:1009 body:body header:hdr];
@@ -784,10 +790,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f.begin(),f.end()); b.insert(b.end(),v.begin(),v.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     [self sendProtobufMsg:5572 body:b header:h];
-    for (int t=0;t<15;t++) {
+    for (int t=0;t<3;t++) {
         int e; bytes d; BOOL ip;
         if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
         if (e == 1) {
@@ -815,7 +821,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     auto f2=packVarint((2<<3)|0); b.insert(b.end(),f2.begin(),f2.end()); auto v2=packVarint(5); b.insert(b.end(),v2.begin(),v2.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
     h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
@@ -871,7 +877,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f2.begin(),f2.end()); b.insert(b.end(),v2.begin(),v2.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     [self sendProtobufMsg:5438 body:b header:h];
     for (int t=0;t<15;t++) {
@@ -912,7 +918,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f3.begin(),f3.end()); b.insert(b.end(),v3.begin(),v3.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
     h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
@@ -1142,6 +1148,10 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
             return;
         }
+
+        if (onProgress) onProgress(@"Requesting license...", 0);
+        logToFile(@"Requesting license for app %d...", appId);
+        [client requestLicense:appId error:nil];
 
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
         logToFile(@"Requesting CDN server list...");
