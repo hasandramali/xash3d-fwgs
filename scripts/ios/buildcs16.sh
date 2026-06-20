@@ -30,6 +30,43 @@ else:
     sys.exit(0)
 "
 
+# Fix SIGSEGV at address 0x10 in GetRarityOfKill when a yapb bot kills another bot.
+# pVictim->pev can be NULL (probably due to yapb's bot entity state), causing
+# &pVictim->pev->origin to compute to 0x10, which crashes when IsLineBlockedBySmoke
+# dereferences it. Add a defensive null check for pVictim.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = (
+    b'int CHalfLifeMultiplay::GetRarityOfKill(CBaseEntity *pKiller, CBasePlayer *pVictim, CBasePlayer *pAssister, const char *killerWeaponName, bool bFlashAssist)' + eol +
+    b'{' + eol +
+    b'\tint iRarity = 0;' + eol
+)
+new = (
+    b'int CHalfLifeMultiplay::GetRarityOfKill(CBaseEntity *pKiller, CBasePlayer *pVictim, CBasePlayer *pAssister, const char *killerWeaponName, bool bFlashAssist)' + eol +
+    b'{' + eol +
+    b'\tint iRarity = 0;' + eol +
+    eol +
+    b'\tif (!pVictim)' + eol +
+    b'\t\treturn iRarity;' + eol
+)
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: pVictim null check in GetRarityOfKill')
+    sys.exit(0)
+elif new in data:
+    print('SKIP: already patched')
+    sys.exit(0)
+else:
+    print('WARNING: pattern not found in multiplay_gamerules.cpp')
+    sys.exit(0)
+"
+
 # Make TheBotPhrases a global static object instead of a nullptr pointer.
 # CCSBotManager (which sets TheBotPhrases) uses C++ operator new and virtual
 # functions that trigger PAC IB trap on arm64e (A14+). By pre-allocating
