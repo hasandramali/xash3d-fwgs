@@ -48,7 +48,7 @@
 #undef PSA_WANT_ALG_SHAKE128
 #undef PSA_WANT_ALG_SHAKE256
 #undef PSA_WANT_ALG_SHA_224
-#undef PSA_WANT_ALG_SHA_1
+//#undef PSA_WANT_ALG_SHA_1  // needed by GameDataDownloader (Steam CDN RSA-OAEP)
 #undef PSA_WANT_ALG_MD5
 #undef PSA_WANT_ALG_RIPEMD160
 #undef PSA_WANT_KEY_TYPE_ARIA
