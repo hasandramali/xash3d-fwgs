@@ -246,6 +246,20 @@ extern "C" void IOS_GetSystemVersion(int *major, int *minor, int *patch)
     if(patch) *patch = (int)ver.patchVersion;
 }
 
+static char kSafeAreaObserversKey;
+
+static void IOS_ReapplySafeArea(UIWindow *window, CGFloat leftPad)
+{
+    UIView *gameView = window.rootViewController.view;
+    if (!gameView) return;
+    [UIView performWithoutAnimation:^{
+        CGRect f = gameView.frame;
+        f.origin.x = leftPad;
+        f.size.width = window.bounds.size.width - leftPad;
+        gameView.frame = f;
+    }];
+}
+
 extern "C" void IOS_ConstrainGameViewToSafeArea(void)
 {
     // Find the key window (SDL's window)
@@ -279,13 +293,29 @@ extern "C" void IOS_ConstrainGameViewToSafeArea(void)
     bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [window insertSubview:bgView atIndex:0];
 
-    // Resize the game view: shrink only left side to avoid notch
-    UIView *gameView = window.rootViewController.view;
-    if (gameView) {
-        CGRect frame = gameView.frame;
-        frame.origin.x = leftPad;
-        frame.size.width = window.bounds.size.width - leftPad;
-        gameView.frame = frame;
-        gameView.clipsToBounds = YES;
+    // Apply initial constraint
+    IOS_ReapplySafeArea(window, leftPad);
+
+    // Remove old observers if this runs again (e.g. video re-init)
+    id existing = objc_getAssociatedObject(window, &kSafeAreaObserversKey);
+    if (existing) {
+        for (id obs in (NSArray *)existing)
+            [[NSNotificationCenter defaultCenter] removeObserver:obs];
+        objc_setAssociatedObject(window, &kSafeAreaObserversKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+
+    // Re-apply constraint whenever SDL resets the frame
+    __weak UIWindow *weakWindow = window;
+    void (^reapplyBlock)(NSNotification *) = ^(NSNotification *note) {
+        UIWindow *w = weakWindow;
+        if (!w) return;
+        IOS_ReapplySafeArea(w, leftPad);
+    };
+
+    id obs1 = [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardDidShowNotification object:nil queue:nil usingBlock:reapplyBlock];
+    id obs2 = [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardDidHideNotification object:nil queue:nil usingBlock:reapplyBlock];
+    id obs3 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:reapplyBlock];
+    id obs4 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:nil usingBlock:reapplyBlock];
+
+    objc_setAssociatedObject(window, &kSafeAreaObserversKey, @[obs1, obs2, obs3, obs4], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
