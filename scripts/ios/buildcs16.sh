@@ -7,8 +7,8 @@ cd $SCRIPTDIR
 MODPATH=mod-build/cs16-client
 git clone --recursive https://github.com/hasandramali/cs16-client mod-build/cs16-client
 
-# Skip yapb build on iOS (not needed)
-sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
+# disable yapb build (use if crashes)
+#sed -i '' '/add_subdirectory(3rdparty\/yapb)/d; s/set_target_postfix(yapb)/# set_target_postfix(yapb)/' mod-build/cs16-client/CMakeLists.txt
 
 # Disable InstallBotControl on iOS (PAC crash / SIGSEGV in BotPhraseManager::Initialize
 # on arm64e A14+). CSTRIKE is not defined in this build, so #ifndef CSTRIKE guard fails.
@@ -140,6 +140,59 @@ if old in data:
     print('PATCHED: TheBotPhrases null guard in client.cpp')
 else:
     print('WARNING: pattern not found in client.cpp')
+    sys.exit(0)
+"
+
+# Fix yapb loadCSBinary() on iOS: the relative path "cstrike/dlls/cs_arm64.dylib" doesn't
+# resolve from the iOS Documents working directory. Fall back to the yapb library's own
+# directory (absolute bundle path) when the relative lookup fails.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/3rdparty/yapb/src/engine.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\n'
+old = (
+    b'      if (path.empty ()) {' + eol +
+    b'         path = strings.joinPath (modname, \"dlls\", lib) + kLibrarySuffix;' + eol +
+    eol +
+    b'         // if we can\\'t read file, skip it' + eol +
+    b'         if (!plat.fileExists (path.chars ())) {' + eol +
+    b'            continue;' + eol +
+    b'         }' + eol +
+    b'      }'
+)
+new = (
+    b'      if (path.empty ()) {' + eol +
+    b'         path = strings.joinPath (modname, \"dlls\", lib) + kLibrarySuffix;' + eol +
+    eol +
+    b'         // if we can\\'t read file, skip it' + eol +
+    b'         if (!plat.fileExists (path.chars ())) {' + eol +
+    b'            // fallback: try the bot library directory (iOS bundle)' + eol +
+    b'            auto libpath = SharedLibrary::path (&bstor);' + eol +
+    eol +
+    b'            if (!libpath.empty ()) {' + eol +
+    b'               auto dir = libpath.substr (0, libpath.rfind (kPathSeparator));' + eol +
+    b'               path = strings.joinPath (dir, lib) + kLibrarySuffix;' + eol +
+    b'            }' + eol +
+    eol +
+    b'            if (!plat.fileExists (path.chars ())) {' + eol +
+    b'               continue;' + eol +
+    b'            }' + eol +
+    b'         }' + eol +
+    b'      }'
+)
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: iOS dll path fallback in yapb loadCSBinary()')
+    sys.exit(0)
+elif new in data:
+    print('SKIP: already patched')
+    sys.exit(0)
+else:
+    print('WARNING: pattern not found in engine.cpp')
     sys.exit(0)
 "
 
