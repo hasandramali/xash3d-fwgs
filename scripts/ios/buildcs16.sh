@@ -67,6 +67,39 @@ else:
     sys.exit(0)
 "
 
+# Fix SIGSEGV at 0x10 in GetRarityOfKill: TheCSBots() returns nullptr because
+# ReGameDLL_CS bot system is not initialized when yapb manages bots.
+# Accessing this->m_activeGrenadeList.begin() on a null CCSBotManager pointer
+# dereferences __end_.__next_ at offset 0x10, causing the crash.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/3rdparty/ReGameDLL_CS/regamedll/dlls/multiplay_gamerules.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = (
+    b'\t\t\tif (TheCSBots()->IsLineBlockedBySmoke(&inEyePos, &pVictim->pev->origin))' + eol
+)
+new = (
+    b'\t\t\tif (TheCSBots() != nullptr && TheCSBots()->IsLineBlockedBySmoke(&inEyePos, &pVictim->pev->origin))' + eol
+)
+if old in data:
+    count = data.count(old)
+    if count > 1:
+        print(f'WARNING: {count} matches, expect 1. Patching anyway.')
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: TheCSBots null check in GetRarityOfKill')
+    sys.exit(0)
+elif new in data:
+    print('SKIP: already patched')
+    sys.exit(0)
+else:
+    print('WARNING: pattern not found')
+    sys.exit(0)
+"
+
 # Make TheBotPhrases a global static object instead of a nullptr pointer.
 # CCSBotManager (which sets TheBotPhrases) uses C++ operator new and virtual
 # functions that trigger PAC IB trap on arm64e (A14+). By pre-allocating
