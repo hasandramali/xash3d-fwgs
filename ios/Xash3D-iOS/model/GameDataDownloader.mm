@@ -443,7 +443,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 - (BOOL)requestLicense:(int)appId error:(NSError **)error;
 - (NSArray *)requestCDNServerListWithError:(NSError **)error;
 - (NSData *)getDepotDecryptionKey:(int)appId depotId:(int)depotId error:(NSError **)error;
-- (int64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error;
+- (uint64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error;
 - (void)parseLogonResponseHeader:(NSData *)header;
 - (void)disconnect;
 @end
@@ -960,7 +960,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     return nil;
 }
 
-- (int64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error {
+- (uint64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error {
     bytes b; auto f1=packVarint((1<<3)|0); auto v1=packVarint(appId);
     b.insert(b.end(),f1.begin(),f1.end()); b.insert(b.end(),v1.begin(),v1.end());
     auto f2=packVarint((2<<3)|0); auto v2=packVarint(depotId);
@@ -985,7 +985,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             while (sp < d.size()) {
                 uint64_t tag = SteamProto::readVarint(d.data(), sp, d.size());
                 int fn = (int)(tag>>3), wt = (int)(tag&7);
-                if (fn == 1 && wt == 0) return (int64_t)SteamProto::readVarint(d.data(), sp, d.size());
+                if (fn == 1 && wt == 0) return SteamProto::readVarint(d.data(), sp, d.size());
                 else { if (wt == 0) SteamProto::readVarint(d.data(), sp, d.size()); else if (wt == 1) sp += 8; else if (wt == 2) { uint64_t l = SteamProto::readVarint(d.data(), sp, d.size()); sp += (size_t)l; } else if (wt == 5) sp += 4; else sp++; }
             }
         } else if (e==1) {
@@ -997,7 +997,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
                     while (spp < sl) {
                         uint64_t tag = SteamProto::readVarint(sp, spp, sl);
                         int fn = (int)(tag>>3), wt = (int)(tag&7);
-                        if (fn == 1 && wt == 0) return (int64_t)SteamProto::readVarint(sp, spp, sl);
+                        if (fn == 1 && wt == 0) return SteamProto::readVarint(sp, spp, sl);
                         else { if (wt == 0) SteamProto::readVarint(sp, spp, sl); else if (wt == 1) spp += 8; else if (wt == 2) { uint64_t l = SteamProto::readVarint(sp, spp, sl); spp += (size_t)l; } else if (wt == 5) spp += 4; else spp++; }
                     }
                 }
@@ -1011,10 +1011,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
 #pragma mark - Manifest download & parsing
 
-static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, int64_t rc, NSArray *hosts) {
+static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t rc, NSArray *hosts) {
     for (int hi=0;;hi++) {
         NSString *host = hosts[hi % hosts.count];
-        NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%lld",depotId,(long long)manifestId,(long long)rc]
+        NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%llu",depotId,(long long)manifestId,(unsigned long long)rc]
                                : [NSString stringWithFormat:@"depot/%d/manifest/%lld/5",depotId,(long long)manifestId];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/%@",host,path]]];
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval=15;
@@ -1237,10 +1237,10 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             if (!dk) { logToFile(@"[setup] Depot key FAILED for depot %d", depotId); continue; }
             logToFile(@"[setup] Got depot key: %lu bytes", (unsigned long)dk.length);
             logToFile(@"[setup] Requesting manifest request code for depot %d...", depotId);
-            int64_t rc = [client requestManifestRequestCode:depotId appId:appId manifestId:(int64_t)[mid unsignedLongLongValue] error:nil];
+            uint64_t rc = [client requestManifestRequestCode:depotId appId:appId manifestId:(int64_t)[mid unsignedLongLongValue] error:nil];
             if (rc == 0) { logToFile(@"[setup] Manifest request code is 0 for depot %d", depotId); continue; }
-            logToFile(@"[setup] Got manifest request code: %lld for depot %d", (long long)rc, depotId);
-            [depotSetups addObject:@{@"depotId":@(depotId), @"depotKey":dk, @"requestCode":@(rc)}];
+            logToFile(@"[setup] Got manifest request code: %llu for depot %d", (unsigned long long)rc, depotId);
+            [depotSetups addObject:@{@"depotId":@(depotId), @"depotKey":dk, @"requestCode":@((unsigned long long)rc)}];
         }
         [client disconnect];
         logToFile(@"[setup] depotSetups count: %lu", (unsigned long)depotSetups.count);
@@ -1256,9 +1256,9 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         for (NSDictionary *ds in depotSetups) {
             int depotId = [ds[@"depotId"] intValue];
             int64_t mid = (int64_t)[HARDCODED_MANIFEST_IDS()[@(depotId)] unsignedLongLongValue];
-            int64_t rc = [ds[@"requestCode"] longLongValue];
+            uint64_t rc = [ds[@"requestCode"] unsignedLongLongValue];
             if (onProgress) onProgress([NSString stringWithFormat:@"Downloading manifest for depot %d...", depotId], 0);
-            logToFile(@"[manifest] Downloading manifest for depot %d manifestId=%lld rc=%lld", depotId, (long long)mid, (long long)rc);
+            logToFile(@"[manifest] Downloading manifest for depot %d manifestId=%lld rc=%llu", depotId, (long long)mid, (unsigned long long)rc);
             NSData *manifestBytes = downloadManifestFromCDN(depotId, mid, rc, cdnHosts);
             if (!manifestBytes) { logToFile(@"[manifest] FAILED: downloadManifestFromCDN returned nil"); continue; }
             logToFile(@"[manifest] Got manifest: %lu bytes", (unsigned long)manifestBytes.length);
