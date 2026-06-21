@@ -1,5 +1,7 @@
 #import "GameDataDownloader.h"
 #import <os/log.h>
+#import <UIKit/UIKit.h>
+#import <UserNotifications/UserNotifications.h>
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #include <vector>
 #include <string>
@@ -27,6 +29,34 @@ static const int PROTO_MASK = 0x80000000;
 static const int TCP_MAGIC = 0x31305456;
 static const uint64_t ANON_STEAM_ID = (10ULL << 52) | (1ULL << 56);
 static const int CM_PORT = 27017;
+
+// Per-depot working CDN host index cache
+static NSMutableDictionary *s_workingCdnHost;
+
+static int workingHostIndex(int depotId, NSArray *hosts) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ s_workingCdnHost = [NSMutableDictionary dictionary]; });
+    NSNumber *cached = s_workingCdnHost[@(depotId)];
+    int hi = cached ? [cached intValue] : 0;
+    if (hi < 0 || hi >= (int)hosts.count) hi = 0;
+    return hi;
+}
+
+static void setWorkingHostIndex(int depotId, int idx) {
+    s_workingCdnHost[@(depotId)] = @(idx);
+}
+
+static void cleanupTmpFiles(NSString *targetDir) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:targetDir];
+    NSString *file;
+    while ((file = [en nextObject])) {
+        if ([file hasSuffix:@".tmp"]) {
+            NSString *path = [targetDir stringByAppendingPathComponent:file];
+            [fm removeItemAtPath:path error:nil];
+        }
+    }
+}
 
 static NSArray *CM_SERVERS() {
     return @[@"162.254.197.40", @"162.254.199.170",
@@ -1012,7 +1042,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 #pragma mark - Manifest download & parsing
 
 static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t rc, NSArray *hosts) {
-    for (int hi=0;;hi++) {
+    for (int hi = workingHostIndex(depotId, hosts);;hi++) {
         NSString *host = hosts[hi % hosts.count];
         NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%llu",depotId,(long long)manifestId,(unsigned long long)rc]
                                : [NSString stringWithFormat:@"depot/%d/manifest/%lld/5",depotId,(long long)manifestId];
@@ -1027,7 +1057,7 @@ static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t
             dispatch_semaphore_signal(sem);
         }] resume];
         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        if (res) { logToFile(@"[cdn-manifest] depot %d host %@ OK (%d bytes)", depotId, host, (int)res.length); return res; }
+        if (res) { logToFile(@"[cdn-manifest] depot %d host %@ OK (%d bytes)", depotId, host, (int)res.length); setWorkingHostIndex(depotId, hi % (int)hosts.count); return res; }
         logToFile(@"[cdn-manifest] depot %d host %@ FAILED HTTP %d (try %d)", depotId, host, statusCode, hi);
         usleep(500000);
         if (hi > (int)hosts.count * 3) break;
@@ -1099,7 +1129,7 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
     NSMutableString *hex = [NSMutableString string];
     for (NSUInteger i = 0; i < sha1.length; i++) [hex appendFormat:@"%02x", sp[i]];
 
-    for (int hi = 0; ; hi++) {
+    for (int hi = workingHostIndex(depotId, hosts);; hi++) {
         NSString *host = hosts[hi % hosts.count];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/depot/%d/chunk/%@", host, depotId, hex]]];
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval = 15;
@@ -1128,7 +1158,7 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
             dispatch_semaphore_signal(sem);
         }] resume];
         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        if (res) return res;
+        if (res) { setWorkingHostIndex(depotId, hi % (int)hosts.count); return res; }
         usleep(500000);
         if (hi > (int)hosts.count * 3) break;
     }
@@ -1184,17 +1214,27 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 }
 
 - (void)downloadGame:(NSString *)gameDir onProgress:(void(^)(NSString*,float))onProgress completion:(void(^)(NSError*))completion {
+    __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
+    bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"Steam Download" expirationHandler:^{
+        [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+        bgTask = UIBackgroundTaskInvalid;
+    }];
+    [[UNUserNotificationCenter currentNotificationCenter] requestAuthorizationWithOptions:(UNAuthorizationOptionAlert|UNAuthorizationOptionSound) completionHandler:^(BOOL granted, NSError * _Nullable e) {
+        if (e) logToFile(@"[notif] auth error: %@", e.localizedDescription);
+    }];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSDictionary *info = GAMES()[gameDir];
         if (!info) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Unknown game: %@",gameDir]}]);
+                if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
         int appId = [info[@"appId"] intValue];
         NSArray *depotIds = info[@"depotIds"];
         NSString *displayName = info[@"displayName"];
         NSString *targetDir = [_docsDir stringByAppendingPathComponent:gameDir];
+        cleanupTmpFiles(targetDir);
 
         SteamCMClient *client = [[SteamCMClient alloc] initWithOnStatus:^(NSString *m) { if (onProgress) onProgress(m, 0); }];
 
@@ -1203,7 +1243,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         logToFile(@"Connecting to Steam CM...");
         if (![client connectWithError:&err]) {
             logToFile(@"Connect failed: %@", err.localizedDescription);
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
 
@@ -1212,7 +1252,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         if (![client anonymousLoginWithError:&err]) {
             logToFile(@"Login failed: %@", err.localizedDescription);
             [client disconnect];
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
 
@@ -1222,7 +1262,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         if (!cdnHosts) {
             logToFile(@"CDN servers failed: %@", err.localizedDescription);
             [client disconnect];
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
         logToFile(@"Got %lu CDN hosts", (unsigned long)cdnHosts.count);
@@ -1248,6 +1288,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         if (depotSetups.count == 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Could not set up any depots"}]);
+                if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
 
@@ -1274,6 +1315,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             logToFile(@"[download] No files found in manifest(s)");
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No files found"}]);
+                if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
 
@@ -1307,10 +1349,21 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *msg = anyFailed ? [NSString stringWithFormat:@"%@ downloaded with some errors",displayName] : [NSString stringWithFormat:@"%@ downloaded successfully",displayName];
             if (anyFailed)
-                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"%@ downloaded with some errors",displayName]}]);
+                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:msg}]);
             else
                 completion(nil);
+            // Local notification on completion
+            logToFile(@"[notif] sending: %@", msg);
+            UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+            UNMutableNotificationContent *nc = [[UNMutableNotificationContent alloc] init];
+            nc.title = @"Xash3D Download Complete";
+            nc.body = msg;
+            nc.sound = [UNNotificationSound defaultSound];
+            UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:@"XashDownloadDone" content:nc trigger:nil];
+            [center addNotificationRequest:req withCompletionHandler:nil];
+            if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; logToFile(@"[bg] ended background task"); }
         });
     });
 }
