@@ -350,6 +350,15 @@ static NSString *decryptFilename(const uint8_t *e, size_t el, NSData *dk) {
     uint8_t ci[16]; memcpy(ci, iv, 16);
     mbedtls_aes_crypt_cbc(&ac, MBEDTLS_AES_DECRYPT, bl, ci, (const uint8_t *)dec.bytes+16, (uint8_t *)pt.mutableBytes);
     mbedtls_aes_free(&ac);
+    // Strip PKCS7 padding (Android's Cipher PKCS5Padding does this automatically)
+    if (bl > 0) {
+        uint8_t p = ((const uint8_t *)pt.bytes)[bl-1];
+        if (p > 0 && p <= 16) {
+            size_t ps = bl - p; bool ok = true;
+            for (size_t i = ps; i < bl; i++) if (((const uint8_t *)pt.bytes)[i] != p) { ok=false; break; }
+            if (ok) pt.length = ps;
+        }
+    }
     NSString *r = [[NSString alloc] initWithData:pt encoding:NSUTF8StringEncoding];
     return r ? [r stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\0"]] : raw;
 }
