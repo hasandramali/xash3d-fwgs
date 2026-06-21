@@ -2023,7 +2023,7 @@ void Con_DrawConsole( void )
 	case ca_disconnected:
 		if( cls.key_dest != key_menu )
 		{
-			Con_DrawSolidConsole( refState.height );
+			Con_DrawSolidConsole( con.vislines );
 			Key_SetKeyDest( key_console );
 		}
 		break;
@@ -2038,7 +2038,7 @@ void Con_DrawConsole( void )
 		if( Con_BackgroundMapActive( ))
 		{
 			if( cls.key_dest == key_console )
-				Con_DrawSolidConsole( refState.height );
+				Con_DrawSolidConsole( con.vislines );
 		}
 		else
 		{
