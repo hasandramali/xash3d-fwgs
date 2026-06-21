@@ -26,7 +26,7 @@ int main(int argc, char **argv)
 }
 '''
 
-frameworks = ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConfiguration', 'CFNetwork', 'AVFoundation', 'CoreGraphics', 'Metal', 'OpenGLES', 'CoreAudio', 'AudioToolbox', 'CoreMotion', 'CoreBluetooth', 'CoreHaptics', 'Security']
+frameworks = ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConfiguration', 'CFNetwork', 'AVFoundation', 'CoreGraphics', 'Metal', 'OpenGLES', 'CoreAudio', 'AudioToolbox', 'CoreMotion', 'CoreBluetooth', 'CoreHaptics', 'Security', 'UserNotifications']
 
 @TaskGen.extension('.m')
 def m_hook(self, node):
