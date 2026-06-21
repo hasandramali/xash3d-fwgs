@@ -38,7 +38,8 @@ static int workingHostIndex(int depotId, NSArray *hosts) {
     dispatch_once(&onceToken, ^{ s_workingCdnHost = [NSMutableDictionary dictionary]; });
     NSNumber *cached = s_workingCdnHost[@(depotId)];
     int hi = cached ? [cached intValue] : 0;
-    if (hi < 0 || hi >= (int)hosts.count) hi = 0;
+    int hc = (int)(hosts.count % INT_MAX);
+    if (hi < 0 || hi >= hc) hi = 0;
     return hi;
 }
 
@@ -1042,8 +1043,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 #pragma mark - Manifest download & parsing
 
 static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t rc, NSArray *hosts) {
+    int hc = (int)(hosts.count % INT_MAX);
+    int retryDelay = 500;
     for (int hi = workingHostIndex(depotId, hosts);;hi++) {
-        NSString *host = hosts[hi % hosts.count];
+        NSString *host = hosts[hi % hc];
         NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%llu",depotId,(long long)manifestId,(unsigned long long)rc]
                                : [NSString stringWithFormat:@"depot/%d/manifest/%lld/5",depotId,(long long)manifestId];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/%@",host,path]]];
@@ -1057,10 +1060,11 @@ static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t
             dispatch_semaphore_signal(sem);
         }] resume];
         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        if (res) { logToFile(@"[cdn-manifest] depot %d host %@ OK (%d bytes)", depotId, host, (int)res.length); setWorkingHostIndex(depotId, hi % (int)hosts.count); return res; }
+        if (res) { logToFile(@"[cdn-manifest] depot %d host %@ OK (%d bytes)", depotId, host, (int)res.length); setWorkingHostIndex(depotId, hi % hc); return res; }
         logToFile(@"[cdn-manifest] depot %d host %@ FAILED HTTP %d (try %d)", depotId, host, statusCode, hi);
-        usleep(500000);
-        if (hi > (int)hosts.count * 3) break;
+        usleep(retryDelay);
+        retryDelay = MIN(retryDelay * 1.5, 5000);
+        if (hi > hc * 3) break;
     }
     logToFile(@"[cdn-manifest] depot %d ALL HOSTS EXHAUSTED", depotId);
     return nil;
@@ -1128,9 +1132,11 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
     const uint8_t *sp = (const uint8_t *)sha1.bytes;
     NSMutableString *hex = [NSMutableString string];
     for (NSUInteger i = 0; i < sha1.length; i++) [hex appendFormat:@"%02x", sp[i]];
+    int hc = (int)(hosts.count % INT_MAX);
+    int retryDelay = 500;
 
     for (int hi = workingHostIndex(depotId, hosts);; hi++) {
-        NSString *host = hosts[hi % hosts.count];
+        NSString *host = hosts[hi % hc];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/depot/%d/chunk/%@", host, depotId, hex]]];
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval = 15;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res = nil;
@@ -1158,9 +1164,10 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
             dispatch_semaphore_signal(sem);
         }] resume];
         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        if (res) { setWorkingHostIndex(depotId, hi % (int)hosts.count); return res; }
-        usleep(500000);
-        if (hi > (int)hosts.count * 3) break;
+        if (res) { setWorkingHostIndex(depotId, hi % hc); return res; }
+        usleep(retryDelay);
+        retryDelay = MIN(retryDelay * 1.5, 5000);
+        if (hi > hc * 3) break;
     }
     return nil;
 }
@@ -1210,7 +1217,20 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
 - (instancetype)initWithDocumentsDir:(NSString *)docsDir {
     if (self = [super init]) { _docsDir = [docsDir copy]; initLogPath(_docsDir); }
+    [[UNUserNotificationCenter currentNotificationCenter] requestAuthorizationWithOptions:(UNAuthorizationOptionAlert|UNAuthorizationOptionSound) completionHandler:^(BOOL granted, NSError * _Nullable e) {
+        if (e) logToFile(@"[notif] auth error: %@", e.localizedDescription);
+        else logToFile(@"[notif] auth granted=%d", granted);
+    }];
     return self;
+}
+
+- (BOOL)hasGameData:(NSString *)gameDir {
+    NSString *path = [_docsDir stringByAppendingPathComponent:gameDir];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&isDir]) return NO;
+    if (!isDir) return NO;
+    return [fm contentsOfDirectoryAtPath:path error:nil].count > 0;
 }
 
 - (void)downloadGame:(NSString *)gameDir onProgress:(void(^)(NSString*,float))onProgress completion:(void(^)(NSError*))completion {
@@ -1218,9 +1238,6 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
     bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"Steam Download" expirationHandler:^{
         [[UIApplication sharedApplication] endBackgroundTask:bgTask];
         bgTask = UIBackgroundTaskInvalid;
-    }];
-    [[UNUserNotificationCenter currentNotificationCenter] requestAuthorizationWithOptions:(UNAuthorizationOptionAlert|UNAuthorizationOptionSound) completionHandler:^(BOOL granted, NSError * _Nullable e) {
-        if (e) logToFile(@"[notif] auth error: %@", e.localizedDescription);
     }];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSDictionary *info = GAMES()[gameDir];
@@ -1357,12 +1374,18 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             // Local notification on completion
             logToFile(@"[notif] sending: %@", msg);
             UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-            UNMutableNotificationContent *nc = [[UNMutableNotificationContent alloc] init];
-            nc.title = @"Xash3D Download Complete";
-            nc.body = msg;
-            nc.sound = [UNNotificationSound defaultSound];
-            UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:@"XashDownloadDone" content:nc trigger:nil];
-            [center addNotificationRequest:req withCompletionHandler:nil];
+            [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
+                if (settings.authorizationStatus == UNAuthorizationStatusAuthorized || settings.authorizationStatus == UNAuthorizationStatusProvisional) {
+                    UNMutableNotificationContent *nc = [[UNMutableNotificationContent alloc] init];
+                    nc.title = @"Xash3D Download Complete";
+                    nc.body = msg;
+                    nc.sound = [UNNotificationSound defaultSound];
+                    UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:@"XashDownloadDone" content:nc trigger:nil];
+                    [center addNotificationRequest:req withCompletionHandler:nil];
+                } else {
+                    logToFile(@"[notif] skipped: not authorized (status=%ld)", (long)settings.authorizationStatus);
+                }
+            }];
             if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; logToFile(@"[bg] ended background task"); }
         });
     });

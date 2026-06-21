@@ -802,8 +802,8 @@ void Con_Init( void )
 	if( Sys_CheckParm( "-noresize" ))
 		Cvar_DirectSet( &con_noresize, "1" );
 
-	if( con_noresize.value > 50 )
-		Cvar_DirectSet( &con_noresize, "50" );
+	if( con_noresize.value > 60 )
+		Cvar_DirectSet( &con_noresize, "60" );
 
 	// init the console buffer
 	con.bufsize = CON_TEXTSIZE;
@@ -2175,15 +2175,9 @@ void Con_RunConsole( void )
 	// decide on the destination height of the console
 	if( host.allow_console && cls.key_dest == key_console )
 	{
-	#if XASH_MOBILE_PLATFORM
 		if( con_noresize.value >= 2 || ( con_noresize.value && cls.state >= ca_active && !cl.background ))
-			con.showlines = (refState.height >> 1) + bound( 0, con_noresize.value, 50 );
-		else con.showlines = refState.height; // always full screen on mobile devices
-#else
-		if( cls.state < ca_active || cl.first_frame )
-			con.showlines = refState.height;	// full screen
-		else con.showlines = (refState.height >> 1);	// half screen
-#endif
+			con.showlines = (refState.height >> 1) + bound( 0, con_noresize.value, 60 );
+		else con.showlines = refState.height;
 	}
 	else con.showlines = 0; // none visible
 

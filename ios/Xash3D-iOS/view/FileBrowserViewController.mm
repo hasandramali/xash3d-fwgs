@@ -771,6 +771,23 @@ static NSString *kCellID = @"FileCell";
 
 - (void)startDataDownloadForGame:(NSString *)gameDir
 {
+    // Check if game data already exists (like Android hasGamedir)
+    if ([self.dataDownloader hasGameData:gameDir]) {
+        NSString *displayName = [gameDir capitalizedString];
+        UIAlertController *overwriteAlert = [UIAlertController alertControllerWithTitle:@"Overwrite?" message:[NSString stringWithFormat:@"\"%@\" already exists. Overwrite?", displayName] preferredStyle:UIAlertControllerStyleAlert];
+        __weak typeof(self) weakSelf = self;
+        [overwriteAlert addAction:[UIAlertAction actionWithTitle:@"Skip" style:UIAlertActionStyleCancel handler:nil]];
+        [overwriteAlert addAction:[UIAlertAction actionWithTitle:@"Overwrite" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+            [weakSelf beginDownloadForGame:gameDir];
+        }]];
+        [self presentViewController:overwriteAlert animated:YES completion:nil];
+    } else {
+        [self beginDownloadForGame:gameDir];
+    }
+}
+
+- (void)beginDownloadForGame:(NSString *)gameDir
+{
     UIAlertController *progressAlert = [UIAlertController alertControllerWithTitle:@"Downloading Game Data" message:[NSString stringWithFormat:@"Downloading %@...", gameDir] preferredStyle:UIAlertControllerStyleAlert];
     UIProgressView *progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
     progressView.translatesAutoresizingMaskIntoConstraints = NO;
