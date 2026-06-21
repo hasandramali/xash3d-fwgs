@@ -332,8 +332,8 @@ static NSData *decryptChunk(const uint8_t *dk, size_t kl, const uint8_t *e, size
 static NSString *decryptFilename(const uint8_t *e, size_t el, NSData *dk) {
     NSString *raw = [[NSString alloc] initWithBytes:e length:el encoding:NSUTF8StringEncoding];
     if (!raw) return nil;
-    NSString *norm = [[[[raw stringByReplacingOccurrencesOfString:@"+" withString:@"-"]
-                        stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
+    NSString *norm = [[[[raw stringByReplacingOccurrencesOfString:@"-" withString:@"+"]
+                        stringByReplacingOccurrencesOfString:@"_" withString:@"/"]
                        stringByReplacingOccurrencesOfString:@"\n" withString:@""]
                       stringByReplacingOccurrencesOfString:@" " withString:@""];
     NSData *dec = [[NSData alloc] initWithBase64EncodedString:norm options:NSDataBase64DecodingIgnoreUnknownCharacters];
