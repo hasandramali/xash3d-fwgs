@@ -169,6 +169,12 @@ qboolean NET_MakeSocketNonBlocking( int socket_fd )
 	return true;
 }
 
+qboolean NET_MakeSocketReuseAddr( int socket_fd )
+{
+	uint opt = 1;
+	return !NET_IsSocketError( setsockopt( socket_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof( opt )));
+}
+
 void NET_NetadrToIP6Bytes( uint8_t *ip6, const netadr_t *adr )
 {
 	memcpy( &ip6[0], adr->ip6_0, 2 );
@@ -1609,7 +1615,7 @@ static int NET_IPSocket( const char *net_iface, int port, int family )
 		Con_DPrintf( S_WARN "%s: port: %d setsockopt SO_BROADCAST: %s\n", __func__, port, NET_ErrorString( ));
 	}
 
-	if( NET_IsSocketError( setsockopt( net_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&optval, sizeof( optval ))))
+	if( !NET_MakeSocketReuseAddr( net_socket ))
 	{
 		Con_DPrintf( S_WARN "%s: port: %d setsockopt SO_REUSEADDR: %s\n", __func__, port, NET_ErrorString( ));
 		closesocket( net_socket );
@@ -1771,8 +1777,8 @@ static void NET_DetermineLocalAddress( void )
 	struct sockaddr_storage	address;
 	WSAsize_t		namelen;
 
-	memset( &net_local, 0, sizeof( netadr_t ));
-	memset( &net6_local, 0, sizeof( netadr_t ));
+	memset( &net_local, 0, sizeof( net_local ));
+	memset( &net6_local, 0, sizeof( net6_local ));
 
 	if( !net.allow_ip && !net.allow_ip6 )
 	{

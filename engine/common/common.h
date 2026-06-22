@@ -901,6 +901,7 @@ void NET_MasterClear( void );
 void NET_MasterShutdown( void );
 qboolean NET_GetMaster( netadr_t from, uint *challenge, double *last_heartbeat );
 qboolean NET_MasterQuery( uint32_t key, qboolean net, const char *filter );
+void NET_QueryServerByAddress( netadr_t adr, connprotocol_t proto );
 
 //
 // munge.c
@@ -938,6 +939,15 @@ const char *SoundList_GetRandom( soundlst_group_t group );
 const char *SoundList_Get( soundlst_group_t group, int idx );
 void SoundList_Init( void );
 void SoundList_Shutdown( void );
+
+//
+// xrcon.c
+//
+void XRcon_Init( void );
+void XRcon_Shutdown( void );
+void XRcon_Frame( void );
+void XRcon_Print( const char *msg );
+qboolean XRcon_IsActive( void );
 
 #ifdef REF_DLL
 #error "common.h in ref_dll"
