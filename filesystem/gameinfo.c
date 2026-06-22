@@ -201,7 +201,9 @@ static void FS_InitGameInfo( gameinfo_t *GameInfo, const char *gamedir, qboolean
 	}
 	else
 	{
-		Q_strncpy( GameInfo->basedir, fs_basedir, sizeof( GameInfo->basedir ));
+		if( !Q_stricmp( gamedir, "czeror" ) || !Q_stricmp( gamedir, "czero" ))
+			Q_strncpy( GameInfo->basedir, "cstrike", sizeof( GameInfo->basedir ));
+		else Q_strncpy( GameInfo->basedir, fs_basedir, sizeof( GameInfo->basedir ));
 		Q_strncpy( GameInfo->title, gamedir, sizeof( GameInfo->title ));
 		Q_strncpy( GameInfo->startmap, "c0a0", sizeof( GameInfo->startmap ));
 		Q_strncpy( GameInfo->dll_path, "cl_dlls", sizeof( GameInfo->dll_path ));
