@@ -396,6 +396,47 @@ else:
     sys.exit(0)
 "
 
+# Fix knife primary attack (+attack1) crash with shield on iOS.
+# Swing() has the same issue as Stab() - ApplyMultiDamage during client
+# prediction crashes in pfnPvAllocEntPrivateData. Guard damage code.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/dlls/wpn_shared/wpn_knife.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = (
+    b'\t\tClearMultiDamage();' + eol +
+    eol +
+    b'\t\tif (m_flNextPrimaryAttack + 0.4f < UTIL_WeaponTimeBase())' + eol +
+    b'\t\t\tpEntity->TraceAttack(m_pPlayer->pev, 20, gpGlobals->v_forward, &tr, (DMG_NEVERGIB | DMG_BULLET));' + eol +
+    b'\t\telse' + eol +
+    b'\t\t\tpEntity->TraceAttack(m_pPlayer->pev, 15, gpGlobals->v_forward, &tr, (DMG_NEVERGIB | DMG_BULLET));' + eol +
+    eol +
+    b'\t\tApplyMultiDamage(m_pPlayer->pev, m_pPlayer->pev);' + eol
+)
+new = (
+    b'#ifndef CLIENT_DLL' + eol +
+    b'\t\tClearMultiDamage();' + eol +
+    eol +
+    b'\t\tif (m_flNextPrimaryAttack + 0.4f < UTIL_WeaponTimeBase())' + eol +
+    b'\t\t\tpEntity->TraceAttack(m_pPlayer->pev, 20, gpGlobals->v_forward, &tr, (DMG_NEVERGIB | DMG_BULLET));' + eol +
+    b'\t\telse' + eol +
+    b'\t\t\tpEntity->TraceAttack(m_pPlayer->pev, 15, gpGlobals->v_forward, &tr, (DMG_NEVERGIB | DMG_BULLET));' + eol +
+    eol +
+    b'\t\tApplyMultiDamage(m_pPlayer->pev, m_pPlayer->pev);' + eol +
+    b'#endif' + eol
+)
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: knife Swing() damage guarded with CLIENT_DLL')
+else:
+    print('WARNING: pattern not found in wpn_knife.cpp')
+    sys.exit(0)
+"
+
 mkdir -p ../../build/ios/libs
 LIBSDIR=$(realpath ../../build/ios/libs)
 cd $MODPATH
