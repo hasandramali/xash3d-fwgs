@@ -360,6 +360,42 @@ else:
     sys.exit(0)
 "
 
+# Fix knife secondary attack (+attack2) crash on iOS.
+# Stab() calls ApplyMultiDamage during client-side prediction which crashes
+# in pfnPvAllocEntPrivateData. Guard damage code with #ifndef CLIENT_DLL
+# (same as other weapon code does).
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/dlls/wpn_shared/wpn_knife.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = (
+    b'\t\tUTIL_MakeVectors(m_pPlayer->pev->v_angle);' + eol +
+    b'\t\tClearMultiDamage();' + eol +
+    eol +
+    b'\t\tpEntity->TraceAttack(m_pPlayer->pev, flDamage, gpGlobals->v_forward, &tr, (DMG_NEVERGIB | DMG_BULLET));' + eol +
+    b'\t\tApplyMultiDamage(m_pPlayer->pev, m_pPlayer->pev);' + eol
+)
+new = (
+    b'\t\tUTIL_MakeVectors(m_pPlayer->pev->v_angle);' + eol +
+    b'#ifndef CLIENT_DLL' + eol +
+    b'\t\tClearMultiDamage();' + eol +
+    eol +
+    b'\t\tpEntity->TraceAttack(m_pPlayer->pev, flDamage, gpGlobals->v_forward, &tr, (DMG_NEVERGIB | DMG_BULLET));' + eol +
+    b'\t\tApplyMultiDamage(m_pPlayer->pev, m_pPlayer->pev);' + eol +
+    b'#endif' + eol
+)
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: knife Stab() damage guarded with CLIENT_DLL')
+else:
+    print('WARNING: pattern not found in wpn_knife.cpp')
+    sys.exit(0)
+"
+
 mkdir -p ../../build/ios/libs
 LIBSDIR=$(realpath ../../build/ios/libs)
 cd $MODPATH
