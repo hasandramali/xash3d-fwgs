@@ -266,6 +266,100 @@ else:
     sys.exit(0)
 "
 
+# Disable radar by default. Player can type "drawradar" to enable it.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/cl_dll/hud/radar.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = b'void CHudRadar::InitHUDData( void )' + eol + b'{' + eol + b'\tUserCmd_ShowRadar();' + eol + b'\tReset();' + eol + b'}'
+new = b'void CHudRadar::InitHUDData( void )' + eol + b'{' + eol + b'\tUserCmd_HideRadar();' + eol + b'\tReset();' + eol + b'}'
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: radar disabled by default (use drawradar to enable)')
+else:
+    print('WARNING: pattern not found in radar.cpp')
+    sys.exit(0)
+"
+
+# Disable sniper scope arc background and default crosshair.
+# Keep only the CS 1.6 zoom sprite (sniper_scope.spr) from ammo.cpp.
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/cl_dll/hud/sniperscope.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = (
+    b'int CHudSniperScope::Draw(float flTime)' + eol +
+    b'{' + eol +
+    b'\tif(gHUD.m_iFOV > 40)' + eol +
+    b'\t\treturn 1;' + eol +
+    eol +
+    b'\tgEngfuncs.pTriAPI->RenderMode(kRenderTransColor);' + eol +
+    b'\tgEngfuncs.pTriAPI->Brightness(1.0);' + eol +
+    b'\tgEngfuncs.pTriAPI->Color4ub(0, 0, 0, 255);' + eol +
+    b'\tgEngfuncs.pTriAPI->CullFace(TRI_NONE);' + eol +
+    eol +
+    b'\tgRenderAPI.GL_SelectTexture(0);' + eol +
+    eol +
+    b'\tDrawTexture( m_iScopeArc[0], left, 0, centerx, centery );' + eol +
+    b'\tDrawTexture( m_iScopeArc[1], centerx, 0, right, centery );' + eol +
+    b'\tDrawTexture( m_iScopeArc[2], centerx, centery, right, TrueHeight );' + eol +
+    b'\tDrawTexture( m_iScopeArc[3], left, centery, centerx, TrueHeight );' + eol +
+    eol +
+    b'\tgRenderAPI.GL_Bind( 0, gHUD.m_WhiteTex );' + eol +
+    b'\t// gEngfuncs.pTriAPI->Begin( TRI_QUADS );' + eol +
+    b'\t\tDrawUtils::Draw2DQuad( 0, 0, left + 2, TrueHeight );' + eol +
+    b'\t\tDrawUtils::Draw2DQuad( right, 0, right + ( TrueWidth - right ), TrueHeight );' + eol +
+    b'\t' + eol +
+    b'\t// default crosshair pixel perfect lines' + eol +
+    b'\t\tDrawUtils::Draw2DQuad( left, centery + 1, right, centery + 2 );' + eol +
+    b'\t\tDrawUtils::Draw2DQuad( centerx - 1, 0, centerx, TrueHeight );' + eol +
+    b'\t// gEngfuncs.pTriAPI->End();' + eol +
+    eol +
+    b'\treturn 0;' + eol +
+    b'}'
+)
+new = (
+    b'int CHudSniperScope::Draw(float flTime)' + eol +
+    b'{' + eol +
+    b'\t// disabled - only CS 1.6 zoom sprite (sniper_scope.spr) is used' + eol +
+    b'\treturn 1;' + eol +
+    b'}'
+)
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: sniper scope arcs and default crosshair disabled')
+else:
+    print('WARNING: pattern not found in sniperscope.cpp')
+    sys.exit(0)
+"
+
+# Enable numericalmenu on iOS (was Android-only).
+python3 -c "
+import sys
+fn = 'mod-build/cs16-client/cl_dll/menu.cpp'
+with open(fn, 'rb') as f:
+    data = f.read()
+eol = b'\r\n' if b'\r\n' in data else b'\n'
+old = b'#ifdef __ANDROID__' + eol + b'\t\tszCmd = \"exec touch/numerical_menu.cfg\";' + eol + b'\t\tbreak;' + eol + b'#else' + eol + b'\t\treturn;' + eol + b'#endif'
+new = b'#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IOS)' + eol + b'\t\tszCmd = \"exec touch/numerical_menu.cfg\";' + eol + b'\t\tbreak;' + eol + b'#else' + eol + b'\t\treturn;' + eol + b'#endif'
+if old in data:
+    data = data.replace(old, new, 1)
+    with open(fn, 'wb') as f:
+        f.write(data)
+    print('PATCHED: numericalmenu enabled on iOS')
+else:
+    print('WARNING: pattern not found in menu.cpp')
+    sys.exit(0)
+"
+
 mkdir -p ../../build/ios/libs
 LIBSDIR=$(realpath ../../build/ios/libs)
 cd $MODPATH
