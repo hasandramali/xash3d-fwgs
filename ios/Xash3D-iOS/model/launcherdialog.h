@@ -30,7 +30,7 @@ typedef enum XashGameStatus_e
 extern XashGameStatus_t g_iStartGameStatus;
 
 extern int g_iArgc;
-extern char **g_pszArgv;
+extern const char **g_pszArgv;
 
 const char *IOS_GetDocsDir();
 const char *IOS_GetBundleDir();
@@ -39,6 +39,9 @@ BOOL IOS_IsResourcesReady();
 void IOS_LaunchDialog(void);
 char *IOS_GetUDID(void);
 void IOS_Log(const char *text);
+
+// Immersive mode / safe area helpers
+void IOS_ConstrainGameViewToSafeArea(void);
 
 #ifdef __cplusplus
 }

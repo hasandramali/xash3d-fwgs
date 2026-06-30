@@ -688,7 +688,8 @@ void GAME_EXPORT Host_Error( const char *error, ... )
 
 	if( host.framecount < 3 )
 	{
-		Sys_Error( "%sInit: %s", __func__, hosterror1 );
+		Con_Printf( S_ERROR "%sInit: %s", __func__, hosterror1 );
+		Host_AbortCurrentFrame();
 		return;
 	}
 
@@ -1110,8 +1111,6 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 		Con_Printf( "Developer level: " S_YELLOW "%i" S_DEFAULT "\n", developer );
 	}
 
-	Con_Printf( "Host_InitCommon: Host_InitCommon complete, returning to Host_Main\n" );
-
 	host.bugcomp = Host_CheckBugcomp();
 
 	Cmd_AddCommand( "memlist", Mem_Stats_f, "prints memory pool information" );
@@ -1128,32 +1127,22 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 		Host_RunTests( 1 );
 #endif
 
-	Con_Printf( "Host_InitCommon: calling FS_LoadGameInfo\n" );
 	FS_LoadGameInfo();
-	Con_Printf( "Host_InitCommon: FS_LoadGameInfo done\n" );
 	Host_CheckGameLibraries();
-	Con_Printf( "Host_InitCommon: Host_CheckGameLibraries done\n" );
 	Cvar_PostFSInit();
-	Con_Printf( "Host_InitCommon: Cvar_PostFSInit done\n" );
 
 	Image_CheckPaletteQ1 ();
-	Con_Printf( "Host_InitCommon: Image_CheckPaletteQ1 done\n" );
 
 	// NOTE: only once resource without which engine can't continue work
 	if( !FS_FileExists( "gfx/conchars", false ))
 		Sys_Error( "%s: couldn't load gfx.wad\n", __func__ );
-	Con_Printf( "Host_InitCommon: gfx/conchars exists\n" );
 
 	Host_InitDecals ();	// reload decals
-	Con_Printf( "Host_InitCommon: Host_InitDecals done\n" );
 
 	HPAK_Init();
-	Con_Printf( "Host_InitCommon: HPAK_Init done\n" );
 
 	IN_Init();
-	Con_Printf( "Host_InitCommon: IN_Init done\n" );
 	Key_Init();
-	Con_Printf( "Host_InitCommon: Key_Init done, Host_InitCommon complete\n" );
 }
 
 static void Host_FreeCommon( void )
@@ -1185,9 +1174,7 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 
 	host.starttime = Platform_DoubleTime();
 
-	Con_Printf( "Host_Main: calling Host_InitCommon\n" );
 	Host_InitCommon( argc, argv, progname, bChangeGame, exename, sizeof( exename ));
-	Con_Printf( "Host_Main: Host_InitCommon returned\n" );
 
 	// init commands and vars
 	if( host_developer.value >= DEV_EXTENDED )
@@ -1244,12 +1231,8 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 		Cvar_Get( "host_allow_changegame", "0", FCVAR_READ_ONLY, "allows to change games" );
 	}
 
-	Con_Printf( "Host_Main: calling SV_Init\n" );
 	SV_Init();
-	Con_Printf( "Host_Main: SV_Init done\n" );
-	Con_Printf( "Host_Main: calling CL_Init (this creates SDL window)\n" );
 	CL_Init();
-	Con_Printf( "Host_Main: CL_Init done\n" );
 
 	HTTP_Init();
 	SoundList_Init();
@@ -1342,20 +1325,13 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 	HPAK_CheckIntegrity( hpk_custom_file.string );
 
 	// main window message loop
-	Con_Printf( "Host_Main: entering main loop\n" );
-	int frameCount = 0;
 	while( host.status != HOST_CRASHED )
 	{
 		double newtime = Platform_DoubleTime();
 		COM_Frame( newtime - oldtime );
 		oldtime = newtime;
-
-		frameCount++;
-		if(( frameCount % 100 ) == 0 )
-			Con_Printf( "Host_Main: frame %d\n", frameCount );
 	}
 
-	Con_Printf( "Host_Main: main loop exited, status=%d\n", host.status );
 	return 0;
 }
 

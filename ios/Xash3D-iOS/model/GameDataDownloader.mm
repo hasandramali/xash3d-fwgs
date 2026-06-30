@@ -1,5 +1,7 @@
 #import "GameDataDownloader.h"
 #import <os/log.h>
+#import <UIKit/UIKit.h>
+#import <UserNotifications/UserNotifications.h>
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #include <vector>
 #include <string>
@@ -27,6 +29,35 @@ static const int PROTO_MASK = 0x80000000;
 static const int TCP_MAGIC = 0x31305456;
 static const uint64_t ANON_STEAM_ID = (10ULL << 52) | (1ULL << 56);
 static const int CM_PORT = 27017;
+
+// Per-depot working CDN host index cache
+static NSMutableDictionary *s_workingCdnHost;
+
+static int workingHostIndex(int depotId, NSArray *hosts) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ s_workingCdnHost = [NSMutableDictionary dictionary]; });
+    NSNumber *cached = s_workingCdnHost[@(depotId)];
+    int hi = cached ? [cached intValue] : 0;
+    int hc = (int)(hosts.count % INT_MAX);
+    if (hi < 0 || hi >= hc) hi = 0;
+    return hi;
+}
+
+static void setWorkingHostIndex(int depotId, int idx) {
+    s_workingCdnHost[@(depotId)] = @(idx);
+}
+
+static void cleanupTmpFiles(NSString *targetDir) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:targetDir];
+    NSString *file;
+    while ((file = [en nextObject])) {
+        if ([file hasSuffix:@".tmp"]) {
+            NSString *path = [targetDir stringByAppendingPathComponent:file];
+            [fm removeItemAtPath:path error:nil];
+        }
+    }
+}
 
 static NSArray *CM_SERVERS() {
     return @[@"162.254.197.40", @"162.254.199.170",
@@ -132,6 +163,12 @@ static void skipProtoField(const uint8_t *d, size_t &p, size_t l) {
 static bytes packVarint(int64_t val) {
     bytes buf; uint64_t v = (uint64_t)val;
     while (v >= 0x80) { buf.push_back((uint8_t)(v & 0x7F) | 0x80); v >>= 7; }
+    buf.push_back((uint8_t)(v & 0x7F));
+    return buf;
+}
+static bytes packVarint32(int32_t val) {
+    bytes buf; uint32_t v = (uint32_t)val;
+    while (v >= 0x80u) { buf.push_back((uint8_t)(v & 0x7F) | 0x80); v >>= 7; }
     buf.push_back((uint8_t)(v & 0x7F));
     return buf;
 }
@@ -326,8 +363,8 @@ static NSData *decryptChunk(const uint8_t *dk, size_t kl, const uint8_t *e, size
 static NSString *decryptFilename(const uint8_t *e, size_t el, NSData *dk) {
     NSString *raw = [[NSString alloc] initWithBytes:e length:el encoding:NSUTF8StringEncoding];
     if (!raw) return nil;
-    NSString *norm = [[[[raw stringByReplacingOccurrencesOfString:@"+" withString:@"-"]
-                        stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
+    NSString *norm = [[[[raw stringByReplacingOccurrencesOfString:@"-" withString:@"+"]
+                        stringByReplacingOccurrencesOfString:@"_" withString:@"/"]
                        stringByReplacingOccurrencesOfString:@"\n" withString:@""]
                       stringByReplacingOccurrencesOfString:@" " withString:@""];
     NSData *dec = [[NSData alloc] initWithBase64EncodedString:norm options:NSDataBase64DecodingIgnoreUnknownCharacters];
@@ -344,6 +381,15 @@ static NSString *decryptFilename(const uint8_t *e, size_t el, NSData *dk) {
     uint8_t ci[16]; memcpy(ci, iv, 16);
     mbedtls_aes_crypt_cbc(&ac, MBEDTLS_AES_DECRYPT, bl, ci, (const uint8_t *)dec.bytes+16, (uint8_t *)pt.mutableBytes);
     mbedtls_aes_free(&ac);
+    // Strip PKCS7 padding (Android's Cipher PKCS5Padding does this automatically)
+    if (bl > 0) {
+        uint8_t p = ((const uint8_t *)pt.bytes)[bl-1];
+        if (p > 0 && p <= 16) {
+            size_t ps = bl - p; bool ok = true;
+            for (size_t i = ps; i < bl; i++) if (((const uint8_t *)pt.bytes)[i] != p) { ok=false; break; }
+            if (ok) pt.length = ps;
+        }
+    }
     NSString *r = [[NSString alloc] initWithData:pt encoding:NSUTF8StringEncoding];
     return r ? [r stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\0"]] : raw;
 }
@@ -420,6 +466,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     NSThread *_heartbeatThread;
     int _heartbeatSeconds;
     BOOL _heartbeatRunning;
+    int64_t _nextJobId;
 }
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os;
 - (BOOL)connectWithError:(NSError **)error;
@@ -427,7 +474,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 - (BOOL)requestLicense:(int)appId error:(NSError **)error;
 - (NSArray *)requestCDNServerListWithError:(NSError **)error;
 - (NSData *)getDepotDecryptionKey:(int)appId depotId:(int)depotId error:(NSError **)error;
-- (int64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error;
+- (uint64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error;
 - (void)parseLogonResponseHeader:(NSData *)header;
 - (void)disconnect;
 @end
@@ -435,18 +482,19 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 @implementation SteamCMClient
 
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os {
-    if (self = [super init]) { _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; _heartbeatSeconds = 9; _heartbeatRunning = NO; }
+    if (self = [super init]) { _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; _heartbeatSeconds = 9; _heartbeatRunning = NO; _nextJobId = 1; }
     return self;
 }
 - (void)dealloc { [self stopHeartbeat]; [self disconnect]; }
 - (void)status:(NSString *)s { if (_onStatus) _onStatus(s); }
 
 - (BOOL)writeExact:(const uint8_t *)d length:(size_t)l {
-    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n <= 0) { logToFile(@"writeExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } o += n; }
+    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n > 0) o += n; else if (n == 0) return NO; else if (errno == EAGAIN || errno == EINTR) continue; else { logToFile(@"writeExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
     return YES;
 }
 - (BOOL)readExact:(uint8_t *)d length:(size_t)l {
-    size_t o = 0; while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n <= 0) { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } o += n; }
+    size_t o = 0; int againRetries = 0;
+    while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n > 0) { o += n; againRetries = 0; } else if (n == 0) return NO; else if (errno == EINTR) continue; else if (errno == EAGAIN) { if (++againRetries > 3) { logToFile(@"readExact: too many EAGAIN retries at %zu/%zu", o, l); return NO; } continue; } else { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
     return YES;
 }
 
@@ -504,7 +552,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             body.insert(body.end(),f.begin(),f.end()); body.insert(body.end(),v.begin(),v.end());
             bytes hdr; auto h1 = packVarint((1<<3)|1); auto si = packFixed64(_currentSteamId);
             hdr.insert(hdr.end(),h1.begin(),h1.end()); hdr.insert(hdr.end(),si.begin(),si.end());
-            auto h2 = packVarint((2<<3)|0); auto se = packVarint(_currentSessionId);
+            auto h2 = packVarint((2<<3)|0); auto se = packVarint32(_currentSessionId);
             hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
             logToFile(@"Sending heartbeat (sessionId=%d steamId=%llu)", ss->_currentSessionId, (unsigned long long)ss->_currentSteamId);
             [ss sendProtobufMsg:1009 body:body header:hdr];
@@ -728,18 +776,47 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
                     if (sh) [self parseLogonResponseHeader:sh];
                     const uint8_t *sp = (const uint8_t *)sd.bytes;
                     size_t sl = sd.length, spp = 0;
-                    SteamProto::readVarint(sp, spp, sl);
-                    int lr = (int)SteamProto::readVarint(sp, spp, sl);
-                    if (lr == 1) ok = YES;
+                    while (spp < sl) {
+                        uint64_t tag = SteamProto::readVarint(sp, spp, sl);
+                        int fn = (int)(tag>>3), wt = (int)(tag&7);
+                        if (fn == 1 && wt == 0) {
+                            int lr = (int)SteamProto::readVarint(sp, spp, sl);
+                            if (lr == 1) ok = YES;
+                        } else if (fn == 2 && wt == 0) {
+                            _heartbeatSeconds = (int)SteamProto::readVarint(sp, spp, sl);
+                            logToFile(@"  heartbeat_seconds=%d", _heartbeatSeconds);
+                        } else {
+                            if (wt == 0) SteamProto::readVarint(sp, spp, sl);
+                            else if (wt == 1) spp += 8;
+                            else if (wt == 2) { uint64_t l = SteamProto::readVarint(sp, spp, sl); spp += (size_t)l; }
+                            else if (wt == 5) spp += 4;
+                            else spp++;
+                        }
+                    }
                 }
             }
         } else if (emsg == 751) {
             NSData *hdrData = [NSData dataWithBytes:hdr.data() length:hdr.size()];
             [self parseLogonResponseHeader:hdrData];
-            size_t sp = 0; SteamProto::readVarint(body.data(), sp, body.size());
-            int lr = (int)SteamProto::readVarint(body.data(), sp, body.size());
-            logToFile(@"  Direct logon: eresult=%d sessionId=%d steamId=%llu", lr, _currentSessionId, (unsigned long long)_currentSteamId);
-            if (lr == 1) ok = YES;
+            size_t sp = 0;
+            while (sp < body.size()) {
+                uint64_t tag = SteamProto::readVarint(body.data(), sp, body.size());
+                int fn = (int)(tag>>3), wt = (int)(tag&7);
+                if (fn == 1 && wt == 0) {
+                    int lr = (int)SteamProto::readVarint(body.data(), sp, body.size());
+                    logToFile(@"  Direct logon: eresult=%d sessionId=%d steamId=%llu", lr, _currentSessionId, (unsigned long long)_currentSteamId);
+                    if (lr == 1) ok = YES;
+                } else if (fn == 2 && wt == 0) {
+                    _heartbeatSeconds = (int)SteamProto::readVarint(body.data(), sp, body.size());
+                    logToFile(@"  heartbeat_seconds=%d", _heartbeatSeconds);
+                } else {
+                    if (wt == 0) SteamProto::readVarint(body.data(), sp, body.size());
+                    else if (wt == 1) sp += 8;
+                    else if (wt == 2) { uint64_t l = SteamProto::readVarint(body.data(), sp, body.size()); sp += (size_t)l; }
+                    else if (wt == 5) sp += 4;
+                    else sp++;
+                }
+            }
         } else if (emsg == 757) {
             logToFile(@"  ServiceMethodResponse (emsg 757) — login rejected");
             break;
@@ -782,10 +859,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f.begin(),f.end()); b.insert(b.end(),v.begin(),v.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     [self sendProtobufMsg:5572 body:b header:h];
-    for (int t=0;t<15;t++) {
+    for (int t=0;t<3;t++) {
         int e; bytes d; BOOL ip;
         if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
         if (e == 1) {
@@ -813,8 +890,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     auto f2=packVarint((2<<3)|0); b.insert(b.end(),f2.begin(),f2.end()); auto v2=packVarint(5); b.insert(b.end(),v2.begin(),v2.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
+    auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
+    h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
     std::string jn="ContentServerDirectory.GetServersForSteamPipe#1";
     auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());
     h.insert(h.end(),h12.begin(),h12.end()); h.insert(h.end(),jl.begin(),jl.end()); h.insert(h.end(),jn.begin(),jn.end());
@@ -867,35 +946,52 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f2.begin(),f2.end()); b.insert(b.end(),v2.begin(),v2.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
     [self sendProtobufMsg:5438 body:b header:h];
+    logToFile(@"[depotKey] Sent request for depot %d", depotId);
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
+        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) { logToFile(@"[depotKey] readMessage failed try %d", t); continue; }
+        logToFile(@"[depotKey] Got emsg=%d body=%zu try %d", e, d.size(), t);
         if (e==1) {
             NSArray *subs = [self parseMultiMessage:d];
+            logToFile(@"[depotKey] Multi has %lu sub-messages", (unsigned long)subs.count);
             for (NSDictionary *sub in subs) {
-                if ([sub[@"emsg"] intValue] == 5439) {
+                int subEmsg = [sub[@"emsg"] intValue];
+                logToFile(@"[depotKey] Sub-msg emsg=%d size=%lu", subEmsg, (unsigned long)[sub[@"body"] length]);
+                if (subEmsg == 5439) {
                     NSData *sd = sub[@"body"];
                     const uint8_t *sp=(const uint8_t *)sd.bytes; size_t sl=sd.length, spp=0;
-                    SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl);
+                    skipProtoField(sp, spp, sl);
+                    skipProtoField(sp, spp, sl);
+                    SteamProto::readVarint(sp, spp, sl);
                     int kl=(int)SteamProto::readVarint(sp, spp, sl);
-                    if (kl>0 && (size_t)kl<=sl-spp) return [NSData dataWithBytes:sp+spp length:kl];
+                    logToFile(@"[depotKey] Parsed keyLength=%d remaining=%zu", kl, sl-spp);
+                    if (kl>0 && (size_t)kl<=sl-spp) {
+                        logToFile(@"[depotKey] Returning key of %d bytes", kl);
+                        return [NSData dataWithBytes:sp+spp length:kl];
+                    }
                 }
             }
         } else if (e==5439) {
-            size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size());
-            SteamProto::readVarint(d.data(),sp,d.size()); SteamProto::readVarint(d.data(),sp,d.size());
-            int kl=(int)SteamProto::readVarint(d.data(),sp,d.size());
-            if (kl>0&&(size_t)kl<=d.size()-sp) return [NSData dataWithBytes:d.data()+sp length:kl];
-        } else if (e==757) break;
+            size_t sp=0;
+            skipProtoField(d.data(), sp, d.size());
+            skipProtoField(d.data(), sp, d.size());
+            SteamProto::readVarint(d.data(), sp, d.size());
+            int kl=(int)SteamProto::readVarint(d.data(), sp, d.size());
+            logToFile(@"[depotKey] Direct 5439: keyLength=%d remaining=%zu", kl, d.size()-sp);
+            if (kl>0&&(size_t)kl<=d.size()-sp) {
+                logToFile(@"[depotKey] Returning key of %d bytes", kl);
+                return [NSData dataWithBytes:d.data()+sp length:kl];
+            }
+        } else if (e==757) { logToFile(@"[depotKey] Got logged off"); break; }
     }
     if (error) *error=[NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No depot key"}];
     return nil;
 }
 
-- (int64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error {
+- (uint64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error {
     bytes b; auto f1=packVarint((1<<3)|0); auto v1=packVarint(appId);
     b.insert(b.end(),f1.begin(),f1.end()); b.insert(b.end(),v1.begin(),v1.end());
     auto f2=packVarint((2<<3)|0); auto v2=packVarint(depotId);
@@ -904,8 +1000,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     b.insert(b.end(),f3.begin(),f3.end()); b.insert(b.end(),v3.begin(),v3.end());
     bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
     h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint(_currentSessionId);
+    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
     h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
+    auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
+    h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
     std::string jn="ContentServerDirectory.GetManifestRequestCode#1";
     auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());
     h.insert(h.end(),h12.begin(),h12.end()); h.insert(h.end(),jl.begin(),jl.end()); h.insert(h.end(),jn.begin(),jn.end());
@@ -913,15 +1011,26 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     for (int t=0;t<15;t++) {
         int e; bytes d; BOOL ip;
         if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
-        if (e==147) { size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size()); return (int64_t)SteamProto::readVarint(d.data(),sp,d.size()); }
-        else if (e==1) {
+        if (e==147) {
+            size_t sp=0;
+            while (sp < d.size()) {
+                uint64_t tag = SteamProto::readVarint(d.data(), sp, d.size());
+                int fn = (int)(tag>>3), wt = (int)(tag&7);
+                if (fn == 1 && wt == 0) return SteamProto::readVarint(d.data(), sp, d.size());
+                else { if (wt == 0) SteamProto::readVarint(d.data(), sp, d.size()); else if (wt == 1) sp += 8; else if (wt == 2) { uint64_t l = SteamProto::readVarint(d.data(), sp, d.size()); sp += (size_t)l; } else if (wt == 5) sp += 4; else sp++; }
+            }
+        } else if (e==1) {
             NSArray *subs = [self parseMultiMessage:d];
             for (NSDictionary *sub in subs) {
                 if ([sub[@"emsg"] intValue] == 147) {
                     NSData *sd = sub[@"body"];
-                    const uint8_t *sp=(const uint8_t *)sd.bytes; size_t sl=sd.length, spp=0;
-                    SteamProto::readVarint(sp, spp, sl);
-                    return (int64_t)SteamProto::readVarint(sp, spp, sl);
+                    const uint8_t *sp = (const uint8_t *)sd.bytes; size_t sl = sd.length, spp = 0;
+                    while (spp < sl) {
+                        uint64_t tag = SteamProto::readVarint(sp, spp, sl);
+                        int fn = (int)(tag>>3), wt = (int)(tag&7);
+                        if (fn == 1 && wt == 0) return SteamProto::readVarint(sp, spp, sl);
+                        else { if (wt == 0) SteamProto::readVarint(sp, spp, sl); else if (wt == 1) spp += 8; else if (wt == 2) { uint64_t l = SteamProto::readVarint(sp, spp, sl); spp += (size_t)l; } else if (wt == 5) spp += 4; else spp++; }
+                    }
                 }
             }
         } else if (e==757) break;
@@ -933,23 +1042,31 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
 #pragma mark - Manifest download & parsing
 
-static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, int64_t rc, NSArray *hosts) {
-    for (int hi=0;;hi++) {
-        NSString *host = hosts[hi % hosts.count];
-        NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%lld",depotId,(long long)manifestId,(long long)rc]
+static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t rc, NSArray *hosts) {
+    int hc = (int)(hosts.count % INT_MAX);
+    int retryDelay = 500;
+    for (int hi = workingHostIndex(depotId, hosts);;hi++) {
+        NSString *host = hosts[hi % hc];
+        NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%llu",depotId,(long long)manifestId,(unsigned long long)rc]
                                : [NSString stringWithFormat:@"depot/%d/manifest/%lld/5",depotId,(long long)manifestId];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/%@",host,path]]];
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval=15;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res=nil;
+        __block int statusCode = 0;
         [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-            if (((NSHTTPURLResponse *)r).statusCode==200 && d.length>0) res = unzipFirstEntry(d);
+            if (e) logToFile(@"[cdn-manifest] depot %d host %@ error: %@", depotId, host, e.localizedDescription);
+            statusCode = (int)((NSHTTPURLResponse *)r).statusCode;
+            if (statusCode == 200 && d.length>0) res = unzipFirstEntry(d);
             dispatch_semaphore_signal(sem);
         }] resume];
         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        if (res) return res;
-        usleep(500000);
-        if (hi > (int)hosts.count * 3) break;
+        if (res) { logToFile(@"[cdn-manifest] depot %d host %@ OK (%d bytes)", depotId, host, (int)res.length); setWorkingHostIndex(depotId, hi % hc); return res; }
+        logToFile(@"[cdn-manifest] depot %d host %@ FAILED HTTP %d (try %d)", depotId, host, statusCode, hi);
+        usleep(retryDelay);
+        retryDelay = MIN(retryDelay * 1.5, 5000);
+        if (hi > hc * 3) break;
     }
+    logToFile(@"[cdn-manifest] depot %d ALL HOSTS EXHAUSTED", depotId);
     return nil;
 }
 
@@ -1015,9 +1132,11 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
     const uint8_t *sp = (const uint8_t *)sha1.bytes;
     NSMutableString *hex = [NSMutableString string];
     for (NSUInteger i = 0; i < sha1.length; i++) [hex appendFormat:@"%02x", sp[i]];
+    int hc = (int)(hosts.count % INT_MAX);
+    int retryDelay = 500;
 
-    for (int hi = 0; ; hi++) {
-        NSString *host = hosts[hi % hosts.count];
+    for (int hi = workingHostIndex(depotId, hosts);; hi++) {
+        NSString *host = hosts[hi % hc];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/depot/%d/chunk/%@", host, depotId, hex]]];
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval = 15;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res = nil;
@@ -1045,9 +1164,10 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
             dispatch_semaphore_signal(sem);
         }] resume];
         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        if (res) return res;
-        usleep(500000);
-        if (hi > (int)hosts.count * 3) break;
+        if (res) { setWorkingHostIndex(depotId, hi % hc); return res; }
+        usleep(retryDelay);
+        retryDelay = MIN(retryDelay * 1.5, 5000);
+        if (hi > hc * 3) break;
     }
     return nil;
 }
@@ -1097,21 +1217,41 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
 - (instancetype)initWithDocumentsDir:(NSString *)docsDir {
     if (self = [super init]) { _docsDir = [docsDir copy]; initLogPath(_docsDir); }
+    [[UNUserNotificationCenter currentNotificationCenter] requestAuthorizationWithOptions:(UNAuthorizationOptionAlert|UNAuthorizationOptionSound) completionHandler:^(BOOL granted, NSError * _Nullable e) {
+        if (e) logToFile(@"[notif] auth error: %@", e.localizedDescription);
+        else logToFile(@"[notif] auth granted=%d", granted);
+    }];
     return self;
 }
 
+- (BOOL)hasGameData:(NSString *)gameDir {
+    NSString *path = [_docsDir stringByAppendingPathComponent:gameDir];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&isDir]) return NO;
+    if (!isDir) return NO;
+    return [fm contentsOfDirectoryAtPath:path error:nil].count > 0;
+}
+
 - (void)downloadGame:(NSString *)gameDir onProgress:(void(^)(NSString*,float))onProgress completion:(void(^)(NSError*))completion {
+    __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
+    bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"Steam Download" expirationHandler:^{
+        [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+        bgTask = UIBackgroundTaskInvalid;
+    }];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSDictionary *info = GAMES()[gameDir];
         if (!info) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Unknown game: %@",gameDir]}]);
+                if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
         int appId = [info[@"appId"] intValue];
         NSArray *depotIds = info[@"depotIds"];
         NSString *displayName = info[@"displayName"];
         NSString *targetDir = [_docsDir stringByAppendingPathComponent:gameDir];
+        cleanupTmpFiles(targetDir);
 
         SteamCMClient *client = [[SteamCMClient alloc] initWithOnStatus:^(NSString *m) { if (onProgress) onProgress(m, 0); }];
 
@@ -1120,7 +1260,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         logToFile(@"Connecting to Steam CM...");
         if (![client connectWithError:&err]) {
             logToFile(@"Connect failed: %@", err.localizedDescription);
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
 
@@ -1129,18 +1269,17 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         if (![client anonymousLoginWithError:&err]) {
             logToFile(@"Login failed: %@", err.localizedDescription);
             [client disconnect];
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
 
-        // License already granted in login Multi (emsg 5501) — no separate request needed
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
         logToFile(@"Requesting CDN server list...");
         NSArray *cdnHosts = [client requestCDNServerListWithError:&err];
         if (!cdnHosts) {
             logToFile(@"CDN servers failed: %@", err.localizedDescription);
             [client disconnect];
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
         logToFile(@"Got %lu CDN hosts", (unsigned long)cdnHosts.count);
@@ -1149,18 +1288,24 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         for (NSNumber *did in depotIds) {
             int depotId = [did intValue];
             NSNumber *mid = HARDCODED_MANIFEST_IDS()[did];
-            if (!mid || [mid unsignedLongLongValue] == 0) continue;
+            if (!mid || [mid unsignedLongLongValue] == 0) { logToFile(@"[setup] No manifest ID for depot %d", depotId); continue; }
+            logToFile(@"[setup] Getting depot key for depot %d...", depotId);
             NSData *dk = [client getDepotDecryptionKey:appId depotId:depotId error:nil];
-            if (!dk) continue;
-            int64_t rc = [client requestManifestRequestCode:depotId appId:appId manifestId:(int64_t)[mid unsignedLongLongValue] error:nil];
-            if (rc == 0) continue;
-            [depotSetups addObject:@{@"depotId":@(depotId), @"depotKey":dk, @"requestCode":@(rc)}];
+            if (!dk) { logToFile(@"[setup] Depot key FAILED for depot %d", depotId); continue; }
+            logToFile(@"[setup] Got depot key: %lu bytes", (unsigned long)dk.length);
+            logToFile(@"[setup] Requesting manifest request code for depot %d...", depotId);
+            uint64_t rc = [client requestManifestRequestCode:depotId appId:appId manifestId:(int64_t)[mid unsignedLongLongValue] error:nil];
+            if (rc == 0) { logToFile(@"[setup] Manifest request code is 0 for depot %d", depotId); continue; }
+            logToFile(@"[setup] Got manifest request code: %llu for depot %d", (unsigned long long)rc, depotId);
+            [depotSetups addObject:@{@"depotId":@(depotId), @"depotKey":dk, @"requestCode":@((unsigned long long)rc)}];
         }
         [client disconnect];
+        logToFile(@"[setup] depotSetups count: %lu", (unsigned long)depotSetups.count);
 
         if (depotSetups.count == 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Could not set up any depots"}]);
+                if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
 
@@ -1169,11 +1314,14 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         for (NSDictionary *ds in depotSetups) {
             int depotId = [ds[@"depotId"] intValue];
             int64_t mid = (int64_t)[HARDCODED_MANIFEST_IDS()[@(depotId)] unsignedLongLongValue];
-            int64_t rc = [ds[@"requestCode"] longLongValue];
+            uint64_t rc = [ds[@"requestCode"] unsignedLongLongValue];
             if (onProgress) onProgress([NSString stringWithFormat:@"Downloading manifest for depot %d...", depotId], 0);
+            logToFile(@"[manifest] Downloading manifest for depot %d manifestId=%lld rc=%llu", depotId, (long long)mid, (unsigned long long)rc);
             NSData *manifestBytes = downloadManifestFromCDN(depotId, mid, rc, cdnHosts);
-            if (!manifestBytes) continue;
+            if (!manifestBytes) { logToFile(@"[manifest] FAILED: downloadManifestFromCDN returned nil"); continue; }
+            logToFile(@"[manifest] Got manifest: %lu bytes", (unsigned long)manifestBytes.length);
             NSArray *files = parseManifestFiles(manifestBytes, ds[@"depotKey"]);
+            logToFile(@"[manifest] parseManifestFiles returned %lu files", (unsigned long)files.count);
             for (NSDictionary *f in files) {
                 [allFiles addObject:@{@"depotId":@(depotId), @"file":f, @"depotKey":ds[@"depotKey"]}];
             }
@@ -1181,8 +1329,10 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         }
 
         if (allFiles.count == 0) {
+            logToFile(@"[download] No files found in manifest(s)");
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No files found"}]);
+                if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
 
@@ -1216,10 +1366,27 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *msg = anyFailed ? [NSString stringWithFormat:@"%@ downloaded with some errors",displayName] : [NSString stringWithFormat:@"%@ downloaded successfully",displayName];
             if (anyFailed)
-                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"%@ downloaded with some errors",displayName]}]);
+                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:msg}]);
             else
                 completion(nil);
+            // Local notification on completion
+            logToFile(@"[notif] sending: %@", msg);
+            UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+            [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
+                if (settings.authorizationStatus == UNAuthorizationStatusAuthorized || settings.authorizationStatus == UNAuthorizationStatusProvisional) {
+                    UNMutableNotificationContent *nc = [[UNMutableNotificationContent alloc] init];
+                    nc.title = @"Xash3D Download Complete";
+                    nc.body = msg;
+                    nc.sound = [UNNotificationSound defaultSound];
+                    UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:@"XashDownloadDone" content:nc trigger:nil];
+                    [center addNotificationRequest:req withCompletionHandler:nil];
+                } else {
+                    logToFile(@"[notif] skipped: not authorized (status=%ld)", (long)settings.authorizationStatus);
+                }
+            }];
+            if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; logToFile(@"[bg] ended background task"); }
         });
     });
 }

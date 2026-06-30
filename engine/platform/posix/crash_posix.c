@@ -18,15 +18,22 @@ GNU General Public License for more details.
 #if XASH_FREEBSD || XASH_NETBSD || XASH_OPENBSD || XASH_ANDROID || XASH_LINUX || XASH_APPLE
 #include <signal.h>
 #include <sys/mman.h>
-#if XASH_ANDROID
+#if defined( XASH_ANDROID ) || defined( XASH_APPLE )
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
+#if XASH_ANDROID
 #include <android/log.h>
+#endif
+#if XASH_APPLE
+#include <dlfcn.h>
+#include <execinfo.h>
 #endif
 #include "library.h"
 #include "input.h"
 #include "crash.h"
+#include "platform/platform.h"
 
 #if XASH_ANDROID
 static char crashlog_path[MAX_OSPATH];
@@ -61,13 +68,96 @@ static void Sys_Crash( int signal, siginfo_t *si, void *context )
 	(void)unused;
 
 #if HAVE_LIBBACKTRACE
-	qboolean detailed_message = false;
-	if( have_libbacktrace && !detailed_message )
+#if XASH_APPLE
+	// libbacktrace depends on libunwind (arm64e on iOS 17+), which uses
+	// pointer authentication (PAC). When called from an arm64 signal handler,
+	// unwinding through the stack triggers recursive PAC IB traps.
+	// Use Apple's frame-pointer backtrace() fallback instead (below).
+	(void)have_libbacktrace;
+	(void)logfd;
+#else
+	if( have_libbacktrace )
 	{
 		len = Sys_CrashDetailsLibbacktrace( logfd, crash_message, len, sizeof( crash_message ));
-		detailed_message = true;
 	}
+#endif
 #endif // HAVE_LIBBACKTRACE
+
+#if XASH_APPLE
+	// libbacktrace Mach-O backend requires DWARF debug info which is stripped
+	// from iOS release builds. Fallback to Apple's frame-pointer-based backtrace.
+	{
+		void *bt_buffer[128];
+		int bt_size = backtrace( bt_buffer, 128 );
+		if( bt_size > 0 )
+		{
+			int start = 0;
+			// Skip crash handler frames
+			for( int i = 0; i < bt_size && i < 4; i++ )
+			{
+				Dl_info info;
+				if( dladdr( bt_buffer[i], &info ) && info.dli_sname )
+				{
+					if( !Q_strcmp( info.dli_sname, "Sys_Crash" ) ||
+						!Q_strcmp( info.dli_sname, "Sys_CrashDetailsLibbacktrace" ) ||
+						!Q_strcmp( info.dli_sname, "_sigtramp" ))
+						start = i + 1;
+				}
+			}
+			ssize_t unused;
+			unused = write( STDERR_FILENO, "\nBacktrace:\n", 11 );
+			if( logfd >= 0 )
+				unused = write( logfd, "\nBacktrace:\n", 11 );
+			len += Q_snprintf( crash_message + len, sizeof( crash_message ) - len, "\n" );
+
+			for( int i = start; i < bt_size; i++ )
+			{
+				char line[256];
+				int n;
+				Dl_info info;
+				if( dladdr( bt_buffer[i], &info ) && info.dli_sname )
+				{
+					n = Q_snprintf( line, sizeof( line ), "  %2d: %s + %#zx (%s)\n",
+						i - start, info.dli_sname,
+						(uintptr_t)bt_buffer[i] - (uintptr_t)info.dli_saddr,
+						info.dli_fname ? COM_FileWithoutPath( info.dli_fname ) : "???" );
+				}
+				else
+				{
+					n = Q_snprintf( line, sizeof( line ), "  %2d: %p\n", i - start, bt_buffer[i] );
+				}
+				unused = write( STDERR_FILENO, line, n );
+				if( logfd >= 0 )
+					unused = write( logfd, line, n );
+				if( len + n < (int)sizeof( crash_message ) - 1 )
+				{
+					memcpy( crash_message + len, line, n );
+					len += n;
+				}
+			}
+			(void)unused;
+		}
+	}
+#endif // XASH_APPLE
+
+#if XASH_IOS
+	// Write crash details to xash_ios.log in Documents directory
+	{
+		const char *docs = IOS_GetDocsDir();
+		if( docs )
+		{
+			char path[1024];
+			Q_snprintf( path, sizeof( path ), "%s/xash_ios.log", docs );
+			int fd = open( path, O_WRONLY | O_CREAT | O_APPEND, 0644 );
+			if( fd >= 0 )
+			{
+				ssize_t unused = write( fd, crash_message, len );
+				close( fd );
+				(void)unused;
+			}
+		}
+	}
+#endif // XASH_IOS
 
 #if XASH_ANDROID
 	// also write to a dedicated crash report file the Java side picks up on next launch

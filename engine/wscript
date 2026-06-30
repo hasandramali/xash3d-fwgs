@@ -26,11 +26,16 @@ int main(int argc, char **argv)
 }
 '''
 
-frameworks = ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConfiguration', 'CFNetwork', 'AVFoundation', 'CoreGraphics']
+frameworks = ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConfiguration', 'CFNetwork', 'AVFoundation', 'CoreGraphics', 'Metal', 'OpenGLES', 'CoreAudio', 'AudioToolbox', 'CoreMotion', 'CoreBluetooth', 'CoreHaptics', 'Security', 'UserNotifications']
 
 @TaskGen.extension('.m')
 def m_hook(self, node):
 	return self.create_compiled_task('c', node)
+
+@TaskGen.extension('.mm')
+def mm_hook(self, node):
+	self.env.append_unique('CXXFLAGS', '-fobjc-arc')
+	return self.create_compiled_task('cxx', node)
 
 def options(opt):
 	grp = opt.add_option_group('Engine options')
@@ -129,6 +134,7 @@ def configure(conf):
 	if conf.env.IOS:
 		for i in frameworks :
 			conf.check(features='c cprogram', framework=i, uselib_store=i, msg='Checking for %s framework' % i)
+		conf.check_cc(lib='z', uselib_store='Z', msg='Checking for zlib')
 
 	conf.define('ENGINE_DLL', 1)
 
@@ -161,7 +167,7 @@ def build(bld):
 	# public includes for renderers and utils use
 	bld(name = 'engine_includes', export_includes = '. common common/imagelib', use = 'filesystem_includes')
 
-	libs = ['engine_includes', 'public', 'werror', 'backtrace_custom', 'library_suffix', 'build_vcs', 'mbedtls']
+	libs = ['engine_includes', 'public', 'werror', 'backtrace_custom', 'library_suffix', 'build_vcs', 'mbedtls', 'yy_thunks']
 	includes = ['server', 'client', 'client/vgui', 'common/soundlib', 'platform']
 
 	# basic build: dedicated only
@@ -180,7 +186,23 @@ def build(bld):
 	if bld.env.IOS:
 		source += bld.path.ant_glob('platform/ios/*.c')
 		source += bld.path.ant_glob('platform/ios/*.m')
+		source += bld.path.ant_glob('platform/ios/*.mm')
 		includes += bld.path.ant_glob('platform/ios')
+
+		ios_launcher = bld.path.parent.find_node('ios/Xash3D-iOS')
+		if ios_launcher:
+			source += ios_launcher.ant_glob('model/*.mm')
+			source += ios_launcher.ant_glob('view/*.mm')
+			source += ios_launcher.ant_glob('controller/*.mm')
+			includes.append(ios_launcher.make_node('model').abspath())
+			includes.append(ios_launcher.make_node('view').abspath())
+			includes.append(ios_launcher.make_node('controller').abspath())
+
+		root = bld.path.parent
+		lzma_node = root.find_node('3rdparty/lzma')
+		if lzma_node:
+			source += lzma_node.ant_glob('*.c')
+			includes.append(lzma_node.abspath())
 	
 	# include sources for optional features
 	if bld.get_define('XASH_CUSTOM_SWAP'):
@@ -277,6 +299,7 @@ def build(bld):
 
 		if bld.env.IOS:
 			libs += frameworks
+			libs += ['Z']
 			defines += ['XASH_SDLMAIN=1']
 
 		if bld.env.DEST_OS in ['nswitch', 'psvita', 'emscripten']:

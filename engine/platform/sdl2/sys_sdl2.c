@@ -127,16 +127,10 @@ void SDLash_Init( void )
 		SDL_setenv( "SDL_GAMECONTROLLER_IGNORE_DEVICES", "0x28DE/0x11FF", 1 );
 	}
 
-	int sdlInitResult = SDL_Init( SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_EVENTS );
-	if( sdlInitResult )
+	if( SDL_Init( SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_EVENTS ) )
 	{
-		Con_Printf( S_ERROR "SDL_Init failed: %s\n", SDL_GetError() );
 		Sys_Warn( "SDL_Init failed: %s", SDL_GetError() );
 		host.type = HOST_DEDICATED;
-	}
-	else
-	{
-		Con_Printf( "SDL_Init succeeded (timer+video+events)\n" );
 	}
 
 	SDL_SetHint( SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0" );
@@ -159,18 +153,14 @@ void SDLash_Init( void )
 
 	SDL_StopTextInput();
 
-#if !XASH_MOBILE_PLATFORM
 	SDLash_InitCursors();
-#endif
 	SDLash_InitSensors();
 }
 
 void SDLash_Shutdown( void )
 {
 	SDLash_ShutdownSensors();
-#if !XASH_MOBILE_PLATFORM
 	SDLash_FreeCursors();
-#endif
 
 	SDL_Quit();
 }

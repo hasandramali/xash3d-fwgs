@@ -172,7 +172,7 @@ int CL_IsDevOverviewMode( void )
 
 connprotocol_t CL_Protocol( void )
 {
-	return cls.legacymode;
+	return cls.net_protocol;
 }
 
 void CL_SetCheatState( qboolean multiplayer, qboolean allow_cheats )
@@ -236,7 +236,7 @@ static void CL_CreateResourceList( void )
 		Cvar_DirectSet( &cl_logoext, "bmp" );
 
 	Q_snprintf( szFileName, sizeof( szFileName ), "logos/remapped.%s", cl_logoext.string );
-	if( cls.legacymode == PROTO_GOLDSRC )
+	if( cls.net_protocol == PROTO_GOLDSRC )
 	{
 		CL_ConvertImageToWAD3( szFileName );
 		Q_strncpy( szFileName, "tempdecal.wad", sizeof( szFileName ));
@@ -336,7 +336,7 @@ static void CL_CheckClientState( void )
 		Cvar_SetValue( "scr_loading", 0.0f );	// reset progress bar
 		Netchan_ReportFlow( &cls.netchan );
 
-		if( cls.legacymode == PROTO_GOLDSRC )
+		if( cls.net_protocol == PROTO_GOLDSRC )
 		{
 			CL_ServerCommand(true, "specmode 4\n");
 			CL_ServerCommand(true, "specmode 4\n");
@@ -876,7 +876,7 @@ static void CL_WritePacket( void )
 	byte data[MAX_CMD_BUFFER] = { 0 };
 	runcmd_t *pcmd;
 	int numbackup, maxbackup, maxcmds;
-	const connprotocol_t proto = cls.legacymode;
+	const connprotocol_t proto = cls.net_protocol;
 
 	// FIXME: on Xash protocol we don't send move commands until ca_active
 	// to prevent outgoing_command outrun incoming_acknowledged
@@ -1382,7 +1382,7 @@ static void CL_CheckForResend( void )
 		cls.state = ca_connecting;
 		Q_strncpy( cls.servername, "localhost", sizeof( cls.servername ));
 		NET_NetadrSetType( &cls.serveradr, NA_LOOPBACK );
-		cls.legacymode = PROTO_CURRENT;
+		cls.net_protocol = PROTO_CURRENT;
 
 		// we don't need a challenge on the localhost
 		CL_SendConnectPacket( PROTO_CURRENT, 0 );
@@ -1457,7 +1457,7 @@ static void CL_CheckForResend( void )
 		// but tell us that test is allowed
 		// in this case, just send connect packet and hope for the best
 		if( cls.bandwidth_test.passed || cls.bandwidth_test.failed )
-			CL_SendConnectPacket( cls.legacymode, cls.bandwidth_test.challenge );
+			CL_SendConnectPacket( cls.net_protocol, cls.bandwidth_test.challenge );
 		else
 			CL_SendBandwidthTest( adr, false );
 	}
@@ -1520,7 +1520,7 @@ static void CL_Connect_f( void )
 	Key_SetKeyDest( key_console );
 
 	cls.state = ca_connecting;
-	cls.legacymode = proto;
+	cls.net_protocol = proto;
 	Q_strncpy( cls.servername, server, sizeof( cls.servername ));
 	cls.connect_time = MAX_HEARTBEAT; // CL_CheckForResend() will fire immediately
 	cls.max_fragment_size = FRAGMENT_MAX_SIZE; // guess a we can establish connection with maximum fragment size
@@ -1726,7 +1726,7 @@ static void CL_Reconnect( qboolean setup_netchan )
 {
 	if( setup_netchan )
 	{
-		CL_SetupNetchanForProtocol( cls.legacymode );
+		CL_SetupNetchanForProtocol( cls.net_protocol );
 	}
 	else
 	{
@@ -1771,7 +1771,7 @@ void CL_Disconnect( void )
 	CL_Stop_f();
 
 	// send a disconnect message to the server
-	CL_SendDisconnectMessage( cls.legacymode );
+	CL_SendDisconnectMessage( cls.net_protocol );
 	SteamBroker_TerminateGameConnection();
 	CL_ClearState ();
 
@@ -1789,7 +1789,7 @@ void CL_Disconnect( void )
 	cls.connect_retry = 0;
 	memset( &cls.bandwidth_test, 0, sizeof( cls.bandwidth_test ));
 	cls.signon = 0;
-	cls.legacymode = PROTO_CURRENT;
+	cls.net_protocol = PROTO_CURRENT;
 
 	// back to menu in non-developer mode
 	if( host_developer.value || cls.key_dest == key_menu )
@@ -1817,7 +1817,7 @@ void CL_Crashed( void )
 	CL_Stop_f(); // stop any demos
 
 	// send a disconnect message to the server
-	CL_SendDisconnectMessage( cls.legacymode );
+	CL_SendDisconnectMessage( cls.net_protocol );
 
 	Host_WriteOpenGLConfig();
 	Host_WriteConfig();	// write config
@@ -1923,7 +1923,7 @@ static void CL_Reconnect_f( void )
 
 	if( !COM_StringEmptyOrNULL( cls.servername ))
 	{
-		connprotocol_t proto = cls.legacymode;
+		connprotocol_t proto = cls.net_protocol;
 
 		if( cls.state >= ca_connected )
 			CL_Disconnect();
@@ -1932,7 +1932,7 @@ static void CL_Reconnect_f( void )
 		cls.demonum = cls.movienum = -1;	// not in the demo loop now
 		cls.state = ca_connecting;
 		cls.signon = 0;
-		cls.legacymode = proto; // don't change protocol
+		cls.net_protocol = proto; // don't change protocol
 
 		Con_Printf( "reconnecting...\n" );
 	}
@@ -2093,11 +2093,14 @@ static void CL_ParseGoldSrcStatusMessage( netadr_t from, sizebuf_t *msg, qboolea
 
 	if( legacy_format )
 	{
-		string address;
 		int mod;
 
-		p = MSG_ReadByte( msg );
-		Q_strncpy( address, MSG_ReadString( msg ), sizeof( address ));
+		// FIXME: this is invalid, `m` servers might be geniune 47 proto servers
+		// but many servers that reply with legacy format are 47/48
+		// so at least let the user to connect them
+		p = PROTOCOL_GOLDSRC_VERSION;
+
+		MSG_ReadString( msg ); // address
 		Q_strncpy( host, MSG_ReadString( msg ), sizeof( host ));
 		Q_strncpy( map, MSG_ReadString( msg ), sizeof( map ));
 		Q_strncpy( gamedir, MSG_ReadString( msg ), sizeof( gamedir ));
@@ -2517,7 +2520,7 @@ static void CL_Challenge( const char *c, netadr_t from )
 	// try to autodetect protocol by challenge response
 	if( !Q_strcmp( c, S2C_GOLDSRC_CHALLENGE ))
 	{
-		cls.legacymode = PROTO_GOLDSRC;
+		cls.net_protocol = PROTO_GOLDSRC;
 
 		cls.steam_auth = Q_atoi( Cmd_Argv( 2 )) == 3;
 
@@ -2533,14 +2536,14 @@ static void CL_Challenge( const char *c, netadr_t from )
 
 	cls.bandwidth_test.challenge = Q_atoi( Cmd_Argv( 1 ));
 
-	if( cls.legacymode == PROTO_CURRENT && cl_test_bandwidth.value && !cls.bandwidth_test.passed )
+	if( cls.net_protocol == PROTO_CURRENT && cl_test_bandwidth.value && !cls.bandwidth_test.passed )
 	{
 		// when connecting to old server or server that has bandwidth test disabled
 		// it might be more preferrable to have some sane fragment size
 		if( !Q_atoi( Cmd_Argv( 2 )))
 		{
 			Cvar_SetValue( "cl_dlmax", FRAGMENT_DEFAULT_SIZE );
-			CL_SendConnectPacket( cls.legacymode, cls.bandwidth_test.challenge );
+			CL_SendConnectPacket( cls.net_protocol, cls.bandwidth_test.challenge );
 		}
 		else
 		{
@@ -2550,7 +2553,7 @@ static void CL_Challenge( const char *c, netadr_t from )
 	else
 	{
 		// challenge from the server we are connecting to
-		CL_SendConnectPacket( cls.legacymode, cls.bandwidth_test.challenge );
+		CL_SendConnectPacket( cls.net_protocol, cls.bandwidth_test.challenge );
 	}
 }
 
@@ -2695,7 +2698,7 @@ static void CL_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	// server connection
 	if( !Q_strcmp( c, S2C_GOLDSRC_CONNECTION ) || !Q_strcmp( c, S2C_CONNECTION ))
 	{
-		CL_ClientConnect( cls.legacymode, c, from );
+		CL_ClientConnect( cls.net_protocol, c, from );
 	}
 	else if( !Q_strcmp( c, A2A_INFO ))
 	{
@@ -2815,7 +2818,7 @@ static void CL_ReadNetMessage( void )
 	size_t	curSize;
 	void (*parsefn)( sizebuf_t *msg );
 
-	switch( cls.legacymode )
+	switch( cls.net_protocol )
 	{
 	case PROTO_QUAKE:
 		parsefn = CL_ParseQuakeMessage;
@@ -3111,7 +3114,7 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 			MSG_Init( &msg, "Resource Registration", msg_buf, sizeof( msg_buf ));
 
 			if( CL_PrecacheResources( ))
-				CL_RegisterResources( &msg, cls.legacymode );
+				CL_RegisterResources( &msg, cls.net_protocol );
 
 			if( MSG_GetNumBytesWritten( &msg ) > 0 )
 			{
@@ -3171,7 +3174,7 @@ tell server about changed userinfo
 */
 void CL_UpdateInfo( const char *key, const char *value )
 {
-	switch( cls.legacymode )
+	switch( cls.net_protocol )
 	{
 	case PROTO_GOLDSRC:
 		if( cl_advertise_engine_in_name.value && !Q_stricmp( key, "name" ) && Q_strnicmp( value, "[Xash3D]", 8 ))

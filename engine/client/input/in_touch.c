@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "math.h"
 #include "vgui_draw.h"
 #include "mobility_int.h"
+#include "keydefs.h"
 
 #if !XASH_NO_TOUCH
 
@@ -2088,6 +2089,56 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 		{
 			static float x1 = 0.0f;
 			x1 += dx;
+			static qboolean scrollHappened = false;
+
+			// tap counting for TAB/UPARROW in console mode
+			if( cls.key_dest == key_console )
+			{
+				static double lastTapTime = 0.0;
+				static int tapCount = 0;
+
+				if( type == event_down )
+				{
+					scrollHappened = false;
+
+					if( lastTapTime > 0.0 && (host.realtime - lastTapTime) < 0.9 )
+					{
+						tapCount++;
+
+						if( tapCount == 2 && !Con_InputIsEmpty() )
+						{
+							// double-tap with input → TAB auto-complete
+							Key_Console( K_TAB );
+							tapCount = 0;
+							lastTapTime = 0.0;
+							return 0;
+						}
+						else if( tapCount >= 3 && Con_InputIsEmpty() )
+						{
+							// triple-tap on empty input → recall last command
+							Key_Console( K_UPARROW );
+							tapCount = 0;
+							lastTapTime = 0.0;
+							return 0;
+						}
+						// tapCount == 2 && empty: wait for 3rd tap
+						// tapCount >= 3 && non-empty: no-op, will reset below
+					}
+					else
+					{
+						tapCount = 1; // first tap or timeout
+					}
+
+					if( tapCount > 3 )
+						tapCount = 0;
+					lastTapTime = 0.0; // reset, will be set on event_up
+				}
+				else if( type == event_up )
+				{
+					if( !scrollHappened && tapCount > 0 )
+						lastTapTime = host.realtime;
+				}
+			}
 
 			if( type == event_up ) // don't show keyboard on every tap
 			{
@@ -2106,11 +2157,13 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 				{
 					Con_PageUp( 1 );
 					y1 = 0;
+					scrollHappened = true;
 				}
 				if( y1 < -0.01f )
 				{
 					Con_PageDown( 1 );
 					y1 = 0;
+					scrollHappened = true;
 				}
 			}
 

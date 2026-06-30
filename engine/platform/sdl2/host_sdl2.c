@@ -446,8 +446,6 @@ void Platform_PreCreateMove( void )
 	if( m_ignore.value )
 	{
 		SDL_GetRelativeMouseState( NULL, NULL );
-#if !XASH_MOBILE_PLATFORM
 		SDL_ShowCursor( SDL_TRUE );
-#endif
 	}
 }

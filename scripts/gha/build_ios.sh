@@ -4,78 +4,37 @@
 
 cd "$GITHUB_WORKSPACE" || die
 
-# Build engine and 3rdparty libs with cmake + ios-cmake toolchain
-# -B ios/cmake-build so the Xcode project finds the static libraries
-cmake -G Xcode \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_TOOLCHAIN_FILE="${PWD}/3rdparty/ios-cmake/ios.toolchain.cmake" \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DPLATFORM=OS64 \
-    -DXASH_STATIC_GAMELIB=1 \
-    -DXASH_GLES=1 \
-    -DDEPLOYMENT_TARGET=13.0 \
-    -B ios/cmake-build \
-    -S . || die
+./waf configure --enable-lto --ios build install --destdir=build/ios || die_configure
 
-cmake --build ios/cmake-build --config Release || die
+cp -vr /Library/Frameworks/SDL2.framework ./build
 
-# Flatten CMake-built static libraries for the hand-written launcher project.
-# Xcode's generated product path changes between generators/toolchains, so the
-# launcher links from this stable directory instead of guessing per-target paths.
-rm -rf ios/cmake-build/libs || die
-mkdir -p ios/cmake-build/libs || die
-find ios/cmake-build -path ios/cmake-build/libs -prune -o -name 'lib*.a' -exec cp -f {} ios/cmake-build/libs/ \; || die
+mkdir -p build/ios/libs
+LIBSDIR=$(realpath build/ios/libs)
 
-# Build hlsdk game libraries (bundled for reference, downloaded at runtime via GameLibDownloader)
+# Build valve from local hlsdk submodule
 pushd hlsdk || die
-mkdir -p ../ios/libs || die
-cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_INSTALL_PREFIX=$(realpath ../ios/libs) \
-    -DCMAKE_BUILD_TYPE=Debug -B build -S .
+cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_INSTALL_PREFIX="$LIBSDIR" -DCMAKE_BUILD_TYPE=Debug -B build -S .
 cmake --build build --target install || die
 popd || die
 
-# Ensure SDL2.framework is available for Xcode packaging and embedding.
-# Try system frameworks first, then repo root. Copy it to ./build so createipa.sh finds it.
-if [ -d "/Library/Frameworks/SDL2.framework" ]; then
-    mkdir -p build
-    cp -R "/Library/Frameworks/SDL2.framework" "build/SDL2.framework"
-elif [ -d "./SDL2.framework" ]; then
-    mkdir -p build
-    cp -R "./SDL2.framework" "build/SDL2.framework"
-else
-    echo "SDL2.framework not found in /Library/Frameworks or repo root."
-    echo "Place SDL2.framework in the runner's /Library/Frameworks or add it to the repository root as SDL2.framework."
-    exit 1
-fi
+# Rename valve dylibs to arch suffix (engine expects _arm64)
+find "$LIBSDIR" -name "*.dylib" -type f | while read f; do
+    dir=$(dirname "$f")
+    base=$(basename "$f" .dylib)
+    if [[ "$base" != *_arm64 ]] && [[ "$base" != *_x86* ]] && [[ "$base" != *_i386 ]]; then
+        mv "$f" "$dir/${base}_arm64.dylib"
+    fi
+done
 
-# Build the iOS launcher Xcode project
-# The Xcode project references the cmake sub-project at ios/cmake-build/
-# and links all engine static libs into the final app
-xcodebuild \
-    -project ios/Xash3D-iOS.xcodeproj \
-    -scheme Xash3D-iOS \
-    -configuration Release \
-    -sdk iphoneos \
-    -derivedDataPath ios/build \
-    CODE_SIGN_IDENTITY="" \
-    CODE_SIGNING_REQUIRED=NO \
-    CODE_SIGNING_ALLOWED=NO \
-    build || die
+# Build CS16 client
+bash scripts/ios/buildcs16.sh || echo "Warning: cs16 build failed, continuing"
 
-# Embed SDL2.framework into the app bundle (required for @rpath loading at runtime)
-APP_PATH="ios/build/Build/Products/Release-iphoneos/Xash3D.app"
-FRAMEWORKS_DIR="$APP_PATH/Frameworks"
-if [ -d "build/SDL2.framework" ]; then
-    mkdir -p "$FRAMEWORKS_DIR"
-    cp -Rf "build/SDL2.framework" "$FRAMEWORKS_DIR/"
-    # Re-sign the embedded framework (ad-hoc)
-    codesign --sign "-" --force "$FRAMEWORKS_DIR/SDL2.framework" 2>/dev/null || true
-    echo "Embedded SDL2.framework into $FRAMEWORKS_DIR"
-fi
+# Build bot10 (goes to valve/dlls)
+bash scripts/ios/buildhlsdk.sh bot10 valve || echo "Warning: bot10 build failed, continuing"
 
-# Package into .ipa
+# Build opfor (goes to gearbox)
+bash scripts/ios/buildhlsdk.sh opfor gearbox || echo "Warning: opfor build failed, continuing"
+
 ./scripts/ios/createipa.sh
 
 mkdir -p artifacts/

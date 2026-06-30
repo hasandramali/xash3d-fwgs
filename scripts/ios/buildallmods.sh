@@ -18,7 +18,7 @@ cd "$SCRIPTDIR" || exit 1
 ./buildhlsdk.sh decay-pc
 ./buildhlsdk.sh echoes
 ./buildhlsdk.sh gravgun
-./buildhlsdk.sh opfor
+
 ./buildhlsdk.sh sci
 ./buildhlsdk.sh topdown
 ./buildhlsdk.sh half-screwed
@@ -36,6 +36,5 @@ cd "$SCRIPTDIR" || exit 1
 #untested if this works
 export XENWARRIOR=ON
 ./buildhlsdk.sh sohl1.2 xenwar
-./buildhlsdk.sh 
-
-./createipa.sh
+# build default valve hlsdk (mobile_hacks branch) — MUST be last among hlsdk builds
+./buildhlsdk.sh

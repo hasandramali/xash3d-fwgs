@@ -1,16 +1,26 @@
 #import "FileBrowserViewController.h"
 #import "TextEditorViewController.h"
-#import "GameLibDownloader.h"
 #import "GameDataDownloader.h"
 #include "launcherdialog.h"
+#import <objc/runtime.h>
+
+@interface _BlockAction : NSObject
+@property (nonatomic, copy) void (^block)(void);
+- (void)handleTap;
+@end
+@implementation _BlockAction
+- (void)handleTap { if (self.block) self.block(); }
+@end
 
 @interface FileBrowserViewController () <UIDocumentPickerDelegate, UIAlertViewDelegate>
 @property (nonatomic, strong) NSArray *directories;
 @property (nonatomic, strong) NSArray *files;
 @property (nonatomic, strong) NSFileManager *fm;
-@property (nonatomic, strong) NSString *pasteboardPath;
-@property (nonatomic, assign) BOOL isMoveOperation;
+@property (nonatomic, assign) BOOL forceLandscape;
 @end
+
+static NSString *_pasteboardPath = nil;
+static BOOL _isMoveOperation = NO;
 
 static NSString *kCellID = @"FileCell";
 
@@ -23,8 +33,7 @@ static NSString *kCellID = @"FileCell";
         _currentPath = [path copy];
         _fm = [NSFileManager defaultManager];
         NSString *docsDir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    _downloader = [[GameLibDownloader alloc] initWithDocumentsDir:docsDir];
-    _dataDownloader = [[GameDataDownloader alloc] initWithDocumentsDir:docsDir];
+        _dataDownloader = [[GameDataDownloader alloc] initWithDocumentsDir:docsDir];
     }
     return self;
 }
@@ -50,9 +59,9 @@ static NSString *kCellID = @"FileCell";
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
     UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
     UIBarButtonItem *folderBtn = [[UIBarButtonItem alloc] initWithTitle:@"New Folder" style:UIBarButtonItemStylePlain target:self action:@selector(newFolderTapped)];
-    UIBarButtonItem *downloadDataBtn = [[UIBarButtonItem alloc] initWithTitle:@"Download" style:UIBarButtonItemStylePlain target:self action:@selector(downloadDataTapped)];
+    UIBarButtonItem *downloadDataBtn = [[UIBarButtonItem alloc] initWithTitle:@"Download Data" style:UIBarButtonItemStylePlain target:self action:@selector(downloadDataTapped)];
     UIBarButtonItem *pasteBtn = [[UIBarButtonItem alloc] initWithTitle:@"Paste" style:UIBarButtonItemStylePlain target:self action:@selector(pasteTapped)];
-    pasteBtn.enabled = (self.pasteboardPath != nil);
+    pasteBtn.enabled = (_pasteboardPath != nil);
     self.toolbarItems = @[importBtn, flex, folderBtn, flex, downloadDataBtn, flex, pasteBtn];
     self.navigationController.toolbarHidden = NO;
 
@@ -70,65 +79,306 @@ static NSString *kCellID = @"FileCell";
     [super viewWillAppear:animated];
     self.navigationController.toolbarHidden = NO;
     [self reloadFiles];
+    [self updatePasteButton];
 }
 
-- (void)launchTapped
+- (NSArray *)availableGameDirs
 {
     NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+    NSMutableArray *dirs = [NSMutableArray array];
     NSArray *contents = [self.fm contentsOfDirectoryAtPath:docs error:nil];
-    NSMutableArray *gameDirs = [NSMutableArray array];
     for (NSString *name in contents) {
         if ([name hasPrefix:@"."]) continue;
         NSString *full = [docs stringByAppendingPathComponent:name];
         BOOL isDir = NO;
-        [self.fm fileExistsAtPath:full isDirectory:&isDir];
-        if (!isDir) continue;
-        if ([self.fm fileExistsAtPath:[full stringByAppendingPathComponent:@"liblist.gam"]] ||
-            [self.fm fileExistsAtPath:[full stringByAppendingPathComponent:@"gameinfo.txt"]])
-            [gameDirs addObject:name];
+        if ([self.fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+            NSString *liblist = [full stringByAppendingPathComponent:@"liblist.gam"];
+            if ([self.fm fileExistsAtPath:liblist]) {
+                [dirs addObject:name];
+            }
+        }
     }
-    if (gameDirs.count == 0) {
-        [gameDirs addObject:@"valve"];
+    // Also include known dirs even if no liblist.gam found yet
+    NSArray *known = @[@"valve", @"cstrike", @"gearbox", @"tfc", @"czero", @"dod"];
+    for (NSString *name in known) {
+        if (![dirs containsObject:name]) {
+            NSString *full = [docs stringByAppendingPathComponent:name];
+            BOOL isDir = NO;
+            if ([self.fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+                [dirs addObject:name];
+            }
+        }
     }
-    if (gameDirs.count == 1) {
-        [self showLaunchDialogForGame:gameDirs[0]];
-    } else {
-        [self showGamePicker:gameDirs];
-    }
+    return [dirs sortedArrayUsingSelector:@selector(compare:)];
 }
 
-- (void)showGamePicker:(NSArray *)gameDirs
+- (void)launchTapped
 {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Game" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *dir in gameDirs) {
-        [alert addAction:[UIAlertAction actionWithTitle:dir style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self showLaunchDialogForGame:dir];
+    NSArray *gameDirs = [self availableGameDirs];
+    if (gameDirs.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Games Found" message:@"Download game data or transfer game folders to Documents directory." preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    UIAlertController *picker = [UIAlertController alertControllerWithTitle:@"Select Game" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *name in gameDirs) {
+        [picker addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self showLaunchDialogForGame:name];
         }]];
     }
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad)
-        alert.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
-    [self presentViewController:alert animated:YES completion:nil];
+        picker.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (NSString *)botDllForGame:(NSString *)gamedir
+{
+    if ([gamedir isEqualToString:@"cstrike"])
+        return @"dlls/yapb_arm64.dylib";
+    if ([gamedir isEqualToString:@"valve"])
+        return @"dlls/bot_arm64.dylib";
+    return nil;
 }
 
 - (void)showLaunchDialogForGame:(NSString *)gamedir
 {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Launch Game" message:@"Configure command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = gamedir;
-        tf.placeholder = @"Game directory";
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    }];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = @"-dev 1 -console -log";
-        tf.placeholder = @"Extra arguments";
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self doLaunchWithGameDir:alert.textFields[0].text extraArgs:alert.textFields[1].text];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    NSString *savedArgs = [[NSUserDefaults standardUserDefaults] stringForKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
+    NSString *args = savedArgs ?: @"-dev 1 -console -log";
+    NSString *botDll = [self botDllForGame:gamedir];
+    [self showArgsDialogForGame:gamedir args:args botDll:botDll];
+}
+
+- (void)showArgsDialogForGame:(NSString *)gamedir args:(NSString *)defaultArgs botDll:(NSString *)botDll
+{
+    UIViewController *vc = [[UIViewController alloc] init];
+    vc.modalPresentationStyle = UIModalPresentationPageSheet;
+    vc.preferredContentSize = CGSizeMake(320, 340);
+
+    UIView *root = vc.view;
+    root.backgroundColor = [UIColor systemBackgroundColor];
+
+    // Scroll view for keyboard avoidance
+    UIScrollView *scrollView = [[UIScrollView alloc] init];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+    [root addSubview:scrollView];
+
+    // Content view inside scroll view
+    UIView *contentView = [[UIView alloc] init];
+    contentView.translatesAutoresizingMaskIntoConstraints = NO;
+    contentView.backgroundColor = [UIColor clearColor];
+    [scrollView addSubview:contentView];
+
+    // Title
+    UILabel *titleLbl = [[UILabel alloc] init];
+    titleLbl.text = [NSString stringWithFormat:@"Launch %@", gamedir];
+    titleLbl.font = [UIFont boldSystemFontOfSize:17];
+    titleLbl.textAlignment = NSTextAlignmentCenter;
+    titleLbl.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:titleLbl];
+
+    // Immersive Mode label
+    UILabel *imLbl = [[UILabel alloc] init];
+    imLbl.text = @"Immersive Mode";
+    imLbl.font = [UIFont systemFontOfSize:15];
+    imLbl.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:imLbl];
+
+    // Immersive Mode switch
+    UISwitch *imSwitch = [[UISwitch alloc] init];
+    imSwitch.on = NO;
+    NSString *imKey = [NSString stringWithFormat:@"immersive_mode_%@", gamedir];
+    id saved = [[NSUserDefaults standardUserDefaults] objectForKey:imKey];
+    if (saved) imSwitch.on = [saved boolValue];
+    imSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:imSwitch];
+
+    // Enable Bots switch (only if botDll available)
+    UISwitch *botSwitch = nil;
+    UILabel *botLbl = nil;
+    NSString *botsKey = [NSString stringWithFormat:@"bots_enabled_%@", gamedir];
+    if (botDll.length > 0) {
+        botLbl = [[UILabel alloc] init];
+        botLbl.text = @"Enable Bots";
+        botLbl.font = [UIFont systemFontOfSize:15];
+        botLbl.translatesAutoresizingMaskIntoConstraints = NO;
+        [contentView addSubview:botLbl];
+
+        botSwitch = [[UISwitch alloc] init];
+        botSwitch.on = [[NSUserDefaults standardUserDefaults] boolForKey:botsKey];
+        botSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+        [contentView addSubview:botSwitch];
+    }
+
+    // Args text field
+    UITextField *argField = [[UITextField alloc] init];
+    argField.text = defaultArgs;
+    argField.placeholder = @"Extra arguments";
+    argField.borderStyle = UITextBorderStyleRoundedRect;
+    argField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    argField.font = [UIFont systemFontOfSize:14];
+    argField.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:argField];
+
+    // Cancel button
+    UIButton *cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [cancelBtn setTitle:@"Cancel" forState:UIControlStateNormal];
+    cancelBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:cancelBtn];
+
+    // Launch button
+    UIButton *launchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [launchBtn setTitle:@"Launch" forState:UIControlStateNormal];
+    launchBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+    launchBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:launchBtn];
+
+    // Separator line
+    UIView *sep = [[UIView alloc] init];
+    sep.backgroundColor = [UIColor separatorColor];
+    sep.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:sep];
+
+    // Vertical divider between buttons
+    UIView *div = [[UIView alloc] init];
+    div.backgroundColor = [UIColor separatorColor];
+    div.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:div];
+
+    // Scroll view fills root
+    [NSLayoutConstraint activateConstraints:@[
+        [scrollView.topAnchor constraintEqualToAnchor:root.topAnchor],
+        [scrollView.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+        [scrollView.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+        [scrollView.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+    ]];
+
+    // Content view fills scroll view width, determines height
+    [NSLayoutConstraint activateConstraints:@[
+        [contentView.topAnchor constraintEqualToAnchor:scrollView.topAnchor],
+        [contentView.leadingAnchor constraintEqualToAnchor:scrollView.leadingAnchor],
+        [contentView.trailingAnchor constraintEqualToAnchor:scrollView.trailingAnchor],
+        [contentView.bottomAnchor constraintEqualToAnchor:scrollView.bottomAnchor],
+        [contentView.widthAnchor constraintEqualToAnchor:scrollView.widthAnchor],
+    ]];
+
+    // Accumulator for vertical chain
+    UIView *prevView;
+
+    // Title at top of content view
+    [NSLayoutConstraint activateConstraints:@[
+        [titleLbl.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:16],
+        [titleLbl.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
+        [titleLbl.leadingAnchor constraintGreaterThanOrEqualToAnchor:contentView.leadingAnchor constant:16],
+        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:contentView.trailingAnchor constant:-16],
+    ]];
+    prevView = titleLbl;
+
+    // Immersive Mode row
+    [NSLayoutConstraint activateConstraints:@[
+        [imLbl.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:24],
+        [imLbl.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [imLbl.centerYAnchor constraintEqualToAnchor:imSwitch.centerYAnchor],
+        [imSwitch.topAnchor constraintEqualToAnchor:imLbl.topAnchor],
+        [imSwitch.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+    ]];
+    prevView = imSwitch;
+
+    // Bots row (if applicable)
+    if (botDll.length > 0 && botLbl && botSwitch) {
+        [NSLayoutConstraint activateConstraints:@[
+            [botLbl.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:16],
+            [botLbl.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+            [botLbl.centerYAnchor constraintEqualToAnchor:botSwitch.centerYAnchor],
+            [botSwitch.topAnchor constraintEqualToAnchor:botLbl.topAnchor],
+            [botSwitch.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        ]];
+        prevView = botSwitch;
+    }
+
+    // Args text field
+    [NSLayoutConstraint activateConstraints:@[
+        [argField.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:16],
+        [argField.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [argField.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        [argField.heightAnchor constraintEqualToConstant:34],
+    ]];
+    prevView = argField;
+
+    // Separator
+    [NSLayoutConstraint activateConstraints:@[
+        [sep.topAnchor constraintEqualToAnchor:prevView.bottomAnchor constant:20],
+        [sep.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
+        [sep.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
+        [sep.heightAnchor constraintEqualToConstant:1 / [UIScreen mainScreen].scale],
+    ]];
+    prevView = sep;
+
+    // Bottom buttons row
+    [NSLayoutConstraint activateConstraints:@[
+        [cancelBtn.topAnchor constraintEqualToAnchor:prevView.bottomAnchor],
+        [cancelBtn.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
+        [cancelBtn.trailingAnchor constraintEqualToAnchor:div.leadingAnchor],
+        [cancelBtn.heightAnchor constraintEqualToConstant:44],
+
+        [div.centerXAnchor constraintEqualToAnchor:contentView.centerXAnchor],
+        [div.topAnchor constraintEqualToAnchor:prevView.bottomAnchor],
+        [div.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor],
+        [div.widthAnchor constraintEqualToConstant:1 / [UIScreen mainScreen].scale],
+
+        [launchBtn.topAnchor constraintEqualToAnchor:prevView.bottomAnchor],
+        [launchBtn.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
+        [launchBtn.leadingAnchor constraintEqualToAnchor:div.trailingAnchor],
+        [launchBtn.heightAnchor constraintEqualToConstant:44],
+    ]];
+
+    // Ensure cancelBtn/launchBtn bottom connects to contentView bottom
+    [NSLayoutConstraint activateConstraints:@[
+        [cancelBtn.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor],
+        [launchBtn.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor],
+    ]];
+
+    // Tap to dismiss keyboard
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
+    [vc.view addGestureRecognizer:tap];
+
+    // Cancel: dismiss using block-based action
+    __weak UIViewController *weakVC = vc;
+    _BlockAction *cancelAction = [[_BlockAction alloc] init];
+    cancelAction.block = ^{ [weakVC dismissViewControllerAnimated:YES completion:nil]; };
+    [cancelBtn addTarget:cancelAction action:@selector(handleTap) forControlEvents:UIControlEventTouchUpInside];
+    objc_setAssociatedObject(cancelBtn, "cancelAction", cancelAction, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    // Launch: dismiss and start game
+    __weak FileBrowserViewController *weakSelf = self;
+    _BlockAction *launchAction = [[_BlockAction alloc] init];
+    launchAction.block = ^{
+        NSString *text = argField.text ?: @"";
+        [[NSUserDefaults standardUserDefaults] setBool:imSwitch.on forKey:imKey];
+        [[NSUserDefaults standardUserDefaults] setObject:text forKey:[NSString stringWithFormat:@"launch_args_%@", gamedir]];
+        if (botSwitch) {
+            [[NSUserDefaults standardUserDefaults] setBool:botSwitch.on forKey:botsKey];
+        }
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        if (!imSwitch.on)
+            text = [text stringByAppendingString:@" -noimmersive"];
+        if (botSwitch && botSwitch.on && botDll.length > 0)
+            text = [text stringByAppendingFormat:@" -dll %@", botDll];
+        [vc dismissViewControllerAnimated:YES completion:^{
+            [weakSelf doLaunchWithGameDir:gamedir extraArgs:text];
+        }];
+    };
+    [launchBtn addTarget:launchAction action:@selector(handleTap) forControlEvents:UIControlEventTouchUpInside];
+    objc_setAssociatedObject(launchBtn, "launchAction", launchAction, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    [self presentViewController:vc animated:YES completion:nil];
+}
+
+- (void)dismissKeyboard
+{
+    [self.view endEditing:YES];
 }
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
@@ -139,6 +389,11 @@ static NSString *kCellID = @"FileCell";
         snprintf( buf, sizeof(buf), "Xash: gameDir=%s extraArgs=%s", [gameDir UTF8String], [extraArgs UTF8String] );
         IOS_Log( buf );
     }
+
+    // Allow landscape, then force orientation before launching the engine
+    self.forceLandscape = YES;
+    [UIViewController attemptRotationToDeviceOrientation];
+    [self forceLandscapeOrientation];
 
     CGRect rect = [[UIScreen mainScreen] bounds];
     CGFloat scale = [UIScreen mainScreen].scale;
@@ -157,7 +412,7 @@ static NSString *kCellID = @"FileCell";
 
     // Build C-style argv
     int argc = (int)MIN(argArray.count, 63);
-    static char *c_args[64];
+    static const char *c_args[64];
     static char c_storage[64][256];
     for (int i = 0; i < argc; i++) {
         strncpy(c_storage[i], [argArray[i] UTF8String], 255);
@@ -168,41 +423,24 @@ static NSString *kCellID = @"FileCell";
     g_pszArgv = c_args;
     g_iArgc = argc;
 
-    // Auto-download game libs if needed
-    if (![self.downloader isDownloaded:gameDir]) {
-        UIAlertController *downloading = [UIAlertController alertControllerWithTitle:@"Downloading Game Libraries" message:[NSString stringWithFormat:@"Downloading libraries for %@...", gameDir] preferredStyle:UIAlertControllerStyleAlert];
-        UIProgressView *pv = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-        pv.translatesAutoresizingMaskIntoConstraints = NO;
-        [downloading.view addSubview:pv];
-        [NSLayoutConstraint activateConstraints:@[
-            [pv.leadingAnchor constraintEqualToAnchor:downloading.view.leadingAnchor constant:16],
-            [pv.trailingAnchor constraintEqualToAnchor:downloading.view.trailingAnchor constant:-16],
-            [pv.bottomAnchor constraintEqualToAnchor:downloading.view.bottomAnchor constant:-48],
-        ]];
-        [downloading addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
-            g_iStartGameStatus = XGS_SKIP;
-        }]];
-        [self presentViewController:downloading animated:YES completion:nil];
+    // Game libraries are pre-built and bundled in the app bundle
+    // The engine will find them in the app's game directory
+    IOS_Log( "Xash: starting engine with pre-built game libraries" );
+    g_iStartGameStatus = XGS_START;
+    IOS_Log( "Xash: g_iStartGameStatus set to XGS_START" );
+}
 
-        [self.downloader download:gameDir onProgress:^(float progress) {
-            dispatch_async(dispatch_get_main_queue(), ^{ pv.progress = progress; });
-        } completion:^(NSError *error) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [downloading dismissViewControllerAnimated:YES completion:^{
-                        if (!error) {
-                            IOS_Log( "Xash: download complete, starting engine" );
-                            g_iStartGameStatus = XGS_START;
-                            IOS_Log( "Xash: g_iStartGameStatus set to XGS_START after download" );
-                        } else {
-                            IOS_Log( "Xash: download failed, not starting engine" );
-                        }
-                    }];
-                });
-        }];
+- (void)forceLandscapeOrientation
+{
+    if (@available(iOS 16.0, *)) {
+        UIWindowScene *scene = (UIWindowScene *)[[[UIApplication sharedApplication] connectedScenes] anyObject];
+        if ([scene respondsToSelector:@selector(requestGeometryUpdateWithPreferences:errorHandler:)]) {
+            UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] init];
+            prefs.interfaceOrientations = UIInterfaceOrientationMaskLandscape;
+            [scene requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+        }
     } else {
-        IOS_Log( "Xash: game already downloaded, starting engine immediately" );
-        g_iStartGameStatus = XGS_START;
-        IOS_Log( "Xash: g_iStartGameStatus set to XGS_START" );
+        [[UIDevice currentDevice] setValue:@(UIInterfaceOrientationLandscapeLeft) forKey:@"orientation"];
     }
 }
 
@@ -412,21 +650,21 @@ static NSString *kCellID = @"FileCell";
 
 - (void)copyItem:(NSString *)path
 {
-    self.pasteboardPath = path;
-    self.isMoveOperation = NO;
+    _pasteboardPath = [path copy];
+    _isMoveOperation = NO;
     [self updatePasteButton];
 }
 
 - (void)pasteTapped
 {
-    if (!self.pasteboardPath) return;
-    NSString *name = [self.pasteboardPath lastPathComponent];
+    if (!_pasteboardPath) return;
+    NSString *name = [_pasteboardPath lastPathComponent];
     NSString *dest = [self.currentPath stringByAppendingPathComponent:name];
 
     if ([self.fm fileExistsAtPath:dest]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Overwrite?" message:[NSString stringWithFormat:@"\"%@\" already exists. Overwrite?", name] preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"Skip" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
-            self.pasteboardPath = nil;
+            _pasteboardPath = nil;
             [self updatePasteButton];
         }]];
         [alert addAction:[UIAlertAction actionWithTitle:@"Overwrite" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
@@ -442,11 +680,11 @@ static NSString *kCellID = @"FileCell";
 - (void)doPaste:(NSString *)dest
 {
     NSError *err = nil;
-    if (self.isMoveOperation)
-        [self.fm moveItemAtPath:self.pasteboardPath toPath:dest error:&err];
+    if (_isMoveOperation)
+        [self.fm moveItemAtPath:_pasteboardPath toPath:dest error:&err];
     else
-        [self.fm copyItemAtPath:self.pasteboardPath toPath:dest error:&err];
-    self.pasteboardPath = nil;
+        [self.fm copyItemAtPath:_pasteboardPath toPath:dest error:&err];
+    _pasteboardPath = nil;
     [self updatePasteButton];
     if (err) [self showError:err];
     [self reloadFiles];
@@ -454,12 +692,12 @@ static NSString *kCellID = @"FileCell";
 
 - (void)updatePasteButton
 {
-    if (self.toolbarItems.count >= 9) {
-        UIBarButtonItem *pasteBtn = self.toolbarItems[8];
-        pasteBtn.enabled = (self.pasteboardPath != nil);
-        if (self.isMoveOperation)
+    if (self.toolbarItems.count >= 7) {
+        UIBarButtonItem *pasteBtn = self.toolbarItems[6];
+        pasteBtn.enabled = (_pasteboardPath != nil);
+        if (_isMoveOperation)
             pasteBtn.title = @"Move Here";
-        else if (self.pasteboardPath)
+        else if (_pasteboardPath)
             pasteBtn.title = @"Paste";
         else
             pasteBtn.title = @"Paste";
@@ -509,44 +747,7 @@ static NSString *kCellID = @"FileCell";
     [self reloadFiles];
 }
 
-#pragma mark - Download
-
-- (void)downloadTapped
-{
-    [self.downloader fetchManifestWithCompletion:^(NSDictionary *manifest, NSError *error) {
-        if (error || !manifest) {
-            [self showError:error ?: [NSError errorWithDomain:@"FileBrowser" code:0 userInfo:@{NSLocalizedDescriptionKey: @"Failed to fetch manifest"}]];
-            return;
-        }
-        [self showGameList:manifest];
-    }];
-}
-
-- (void)showGameList:(NSDictionary *)manifest
-{
-    NSDictionary *mods = manifest[@"mods"];
-    if (![mods isKindOfClass:[NSDictionary class]] || mods.count == 0) {
-        [self showError:[NSError errorWithDomain:@"FileBrowser" code:0 userInfo:@{NSLocalizedDescriptionKey: @"No games available"}]];
-        return;
-    }
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download Game" message:@"Select a game to download game libraries" preferredStyle:UIAlertControllerStyleActionSheet];
-
-    for (NSString *key in [[mods allKeys] sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)]) {
-        NSString *dl = [self.downloader isDownloaded:key] ? @" (downloaded)" : @"";
-        NSString *title = [NSString stringWithFormat:@"%@%@", key, dl];
-        [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self startDownloadForGame:key];
-        }]];
-    }
-
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alert.popoverPresentationController.barButtonItem = self.toolbarItems[4];
-    }
-    [self presentViewController:alert animated:YES completion:nil];
-}
+#pragma mark - Download Game Data (Steam CDN)
 
 - (void)downloadDataTapped
 {
@@ -563,12 +764,29 @@ static NSString *kCellID = @"FileCell";
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
 
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alert.popoverPresentationController.barButtonItem = self.toolbarItems[6];
+        alert.popoverPresentationController.barButtonItem = self.toolbarItems[4];
     }
     [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)startDataDownloadForGame:(NSString *)gameDir
+{
+    // Check if game data already exists (like Android hasGamedir)
+    if ([self.dataDownloader hasGameData:gameDir]) {
+        NSString *displayName = [gameDir capitalizedString];
+        UIAlertController *overwriteAlert = [UIAlertController alertControllerWithTitle:@"Overwrite?" message:[NSString stringWithFormat:@"\"%@\" already exists. Overwrite?", displayName] preferredStyle:UIAlertControllerStyleAlert];
+        __weak typeof(self) weakSelf = self;
+        [overwriteAlert addAction:[UIAlertAction actionWithTitle:@"Skip" style:UIAlertActionStyleCancel handler:nil]];
+        [overwriteAlert addAction:[UIAlertAction actionWithTitle:@"Overwrite" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+            [weakSelf beginDownloadForGame:gameDir];
+        }]];
+        [self presentViewController:overwriteAlert animated:YES completion:nil];
+    } else {
+        [self beginDownloadForGame:gameDir];
+    }
+}
+
+- (void)beginDownloadForGame:(NSString *)gameDir
 {
     UIAlertController *progressAlert = [UIAlertController alertControllerWithTitle:@"Downloading Game Data" message:[NSString stringWithFormat:@"Downloading %@...", gameDir] preferredStyle:UIAlertControllerStyleAlert];
     UIProgressView *progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
@@ -602,38 +820,6 @@ static NSString *kCellID = @"FileCell";
     }];
 }
 
-- (void)startDownloadForGame:(NSString *)gamedir
-{
-    UIAlertController *progressAlert = [UIAlertController alertControllerWithTitle:@"Downloading" message:[NSString stringWithFormat:@"Downloading %@...", gamedir] preferredStyle:UIAlertControllerStyleAlert];
-    UIProgressView *progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-    progressView.translatesAutoresizingMaskIntoConstraints = NO;
-    [progressAlert.view addSubview:progressView];
-    [NSLayoutConstraint activateConstraints:@[
-        [progressView.leadingAnchor constraintEqualToAnchor:progressAlert.view.leadingAnchor constant:16],
-        [progressView.trailingAnchor constraintEqualToAnchor:progressAlert.view.trailingAnchor constant:-16],
-        [progressView.bottomAnchor constraintEqualToAnchor:progressAlert.view.bottomAnchor constant:-48],
-    ]];
-    [progressAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:progressAlert animated:YES completion:nil];
-
-    __weak typeof(self) weakSelf = self;
-    [self.downloader download:gamedir onProgress:^(float progress) {
-        progressView.progress = progress;
-        progressAlert.message = [NSString stringWithFormat:@"Downloading %@... %.0f%%", gamedir, progress * 100];
-    } completion:^(NSError *error) {
-        [progressAlert dismissViewControllerAnimated:YES completion:^{
-            if (error) {
-                [weakSelf showError:error];
-            } else {
-                UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Done" message:[NSString stringWithFormat:@"%@ downloaded successfully", gamedir] preferredStyle:UIAlertControllerStyleAlert];
-                [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [weakSelf presentViewController:done animated:YES completion:nil];
-            }
-            [weakSelf reloadFiles];
-        }];
-    }];
-}
-
 #pragma mark - Helpers
 
 - (void)showError:(NSError *)err
@@ -658,20 +844,11 @@ static NSString *kCellID = @"FileCell";
     return [UIImage systemImageNamed:@"doc"];
 }
 
-@end
-
-#pragma mark - UINavigationController orientation override
-
-@implementation UINavigationController (OrientationLock)
+#pragma mark - Orientation
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations
 {
-    return UIInterfaceOrientationMaskAll;
-}
-
-- (BOOL)shouldAutorotate
-{
-    return YES;
+    return self.forceLandscape ? UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskPortrait;
 }
 
 @end

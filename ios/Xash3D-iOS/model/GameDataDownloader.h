@@ -4,7 +4,8 @@
 
 - (instancetype)initWithDocumentsDir:(NSString *)docsDir;
 
-- (void)downloadGame:(NSString *)appId
+- (BOOL)hasGameData:(NSString *)gameDir;
+- (void)downloadGame:(NSString *)gameDir
           onProgress:(void(^)(NSString *status, float progress))onProgress
            completion:(void(^)(NSError *error))completion;
 

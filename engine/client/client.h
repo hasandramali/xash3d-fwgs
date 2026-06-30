@@ -647,7 +647,7 @@ typedef struct
 	string   internetservers_customfilter;
 
 	// multiprotocol support
-	connprotocol_t legacymode;
+	connprotocol_t net_protocol;
 	int extensions;
 
 	netadr_t serveradr;
@@ -1140,6 +1140,7 @@ void Con_FastClose( void );
 void Con_Bottom( void );
 void Con_PageDown( int lines );
 void Con_PageUp( int lines );
+qboolean Con_InputIsEmpty( void );
 
 //
 // mod_dbghulls.c

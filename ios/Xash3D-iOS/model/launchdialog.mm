@@ -7,6 +7,7 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -23,11 +24,11 @@ extern int Q_buildnum( void );
 
 extern "C" XashGameStatus_t g_iStartGameStatus = XGS_SKIP;
 extern "C" int g_iArgc = 0;
-extern "C" char **g_pszArgv = NULL;
+extern "C" const char **g_pszArgv = NULL;
 
 extern "C" int IOS_GetArgs( char ***out )
 {
-    *out = g_pszArgv;
+    *out = (char **)g_pszArgv;
     return g_iArgc;
 }
 
@@ -125,20 +126,56 @@ extern "C" BOOL IOS_IsResourcesReady()
             [fileManager fileExistsAtPath:[doc stringByAppendingPathComponent:@"cstrike"]]);
 }
 
+// UINavigationController subclass that locks to portrait for the launcher
+@interface LauncherNavigationController : UINavigationController
+@end
+@implementation LauncherNavigationController
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations
+{
+    // Delegate to topViewController so game launch can override to landscape
+    UIViewController *top = self.topViewController;
+    if (top)
+        return [top supportedInterfaceOrientations];
+    return UIInterfaceOrientationMaskPortrait;
+}
+@end
+
+static void IOS_ForceOrientation( UIInterfaceOrientationMask mask, UIInterfaceOrientation orientation )
+{
+    if( @available( iOS 16.0, * ))
+    {
+        UIWindowScene *scene = (UIWindowScene *)[[[UIApplication sharedApplication] connectedScenes] anyObject];
+        if( [scene respondsToSelector:@selector( requestGeometryUpdateWithPreferences:errorHandler: )] )
+        {
+            UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] init];
+            prefs.interfaceOrientations = mask;
+            [scene requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+        }
+    }
+    else
+    {
+        [[UIDevice currentDevice] setValue:@(orientation) forKey:@"orientation"];
+    }
+}
+
 void IOS_PrepareView()
 {
     NSString *docs = [NSString stringWithUTF8String:IOS_GetDocsDir()];
     FileBrowserViewController *fbc = [[FileBrowserViewController alloc] initWithPath:docs];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:fbc];
+    LauncherNavigationController *nav = [[LauncherNavigationController alloc] initWithRootViewController:fbc];
     g_launcherWindow = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     [g_launcherWindow setRootViewController:nav];
     [g_launcherWindow makeKeyAndVisible];
+
+    // force portrait for launcher
+    IOS_ForceOrientation( UIInterfaceOrientationMaskPortrait, UIInterfaceOrientationPortrait );
+
     IOS_WriteLogLine( "Xash: launcher view prepared" );
 }
 
 extern "C" void IOS_SetDefaultArgs()
 {
-    static char *args[64] = { "xash", "-dev", "1", "-game", "valve" };
+    static const char *args[64] = { "xash", "-dev", "1", "-game", "valve" };
     g_pszArgv = args;
     g_iArgc = 5;
 }
@@ -208,4 +245,79 @@ extern "C" void IOS_GetSystemVersion(int *major, int *minor, int *patch)
     if(major) *major = (int)ver.majorVersion;
     if(minor) *minor = (int)ver.minorVersion;
     if(patch) *patch = (int)ver.patchVersion;
+}
+
+static char kReapplyKey;
+
+static void IOS_ReapplySafeArea(UIWindow *window, CGFloat leftPad)
+{
+    UIView *gameView = window.rootViewController.view;
+    if (!gameView) return;
+    [UIView performWithoutAnimation:^{
+        CGRect f = gameView.frame;
+        f.origin.x = leftPad;
+        f.size.width = window.bounds.size.width - leftPad;
+        gameView.frame = f;
+    }];
+}
+
+extern "C" void IOS_ConstrainGameViewToSafeArea(void)
+{
+    // Find the key window (SDL's window)
+    UIWindow *window = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                for (UIWindow *w in ws.windows) {
+                    if (w.isKeyWindow) { window = w; break; }
+                }
+                if (window) break;
+            }
+        }
+    }
+    if (!window)
+        window = [UIApplication sharedApplication].keyWindow;
+    if (!window) return;
+
+    UIEdgeInsets insets = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *))
+        insets = window.safeAreaInsets;
+
+    // Only constrain left side (notch area), with reduced padding
+    CGFloat leftPad = insets.left * 0.65f;
+    if (leftPad < 1) return;
+
+    // Remove old observers if re-init
+    id oldObservers = objc_getAssociatedObject(window, &kReapplyKey);
+    if (oldObservers) {
+        for (id obs in (NSArray *)oldObservers)
+            [[NSNotificationCenter defaultCenter] removeObserver:obs];
+        objc_setAssociatedObject(window, &kReapplyKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    // Create a black background view that fills the entire screen
+    UIView *bgView = [[UIView alloc] initWithFrame:window.bounds];
+    bgView.backgroundColor = [UIColor blackColor];
+    bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [window insertSubview:bgView atIndex:0];
+
+    // Apply initial constraint: resize game view so content avoids notch
+    IOS_ReapplySafeArea(window, leftPad);
+
+    // Re-apply on any event that may reset the game view frame
+    __weak UIWindow *weakWindow = window;
+    void (^block)(NSNotification *) = ^(NSNotification *note) {
+        UIWindow *w = weakWindow;
+        if (!w) return;
+        IOS_ReapplySafeArea(w, leftPad);
+    };
+
+    id obs1 = [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardDidShowNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs2 = [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardDidHideNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs3 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs4 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+    id obs5 = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:block];
+
+    objc_setAssociatedObject(window, &kReapplyKey, @[obs1, obs2, obs3, obs4, obs5], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
