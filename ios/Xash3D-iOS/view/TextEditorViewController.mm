@@ -54,7 +54,10 @@ static const NSInteger kMaxTextFileSize = 1024 * 1024;
         label.text = [NSString stringWithFormat:@"File too large (%ld KB).\nMax: 1 MB", (long)(fileSize / 1024)];
         label.textAlignment = NSTextAlignmentCenter;
         label.numberOfLines = 0;
-        label.textColor = [UIColor secondaryLabelColor];
+        if ([UIColor respondsToSelector:@selector(secondaryLabelColor)])
+            label.textColor = [UIColor secondaryLabelColor];
+        else
+            label.textColor = [UIColor grayColor];
         label.translatesAutoresizingMaskIntoConstraints = NO;
         [self.view addSubview:label];
         [NSLayoutConstraint activateConstraints:@[

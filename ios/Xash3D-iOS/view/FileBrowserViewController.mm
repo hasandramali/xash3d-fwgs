@@ -157,7 +157,7 @@ static NSString *kCellID = @"FileCell";
     vc.preferredContentSize = CGSizeMake(320, 340);
 
     UIView *root = vc.view;
-    root.backgroundColor = [UIColor systemBackgroundColor];
+    root.backgroundColor = [FileBrowserViewController safeSystemBackgroundColor];
 
     // Scroll view for keyboard avoidance
     UIScrollView *scrollView = [[UIScrollView alloc] init];
@@ -237,13 +237,13 @@ static NSString *kCellID = @"FileCell";
 
     // Separator line
     UIView *sep = [[UIView alloc] init];
-    sep.backgroundColor = [UIColor separatorColor];
+    sep.backgroundColor = [FileBrowserViewController safeSeparatorColor];
     sep.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:sep];
 
     // Vertical divider between buttons
     UIView *div = [[UIView alloc] init];
-    div.backgroundColor = [UIColor separatorColor];
+    div.backgroundColor = [FileBrowserViewController safeSeparatorColor];
     div.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:div];
 
@@ -532,7 +532,7 @@ static NSString *kCellID = @"FileCell";
         UILabel *subl = [[UILabel alloc] init];
         subl.text = size;
         subl.font = [UIFont systemFontOfSize:12];
-        subl.textColor = [UIColor secondaryLabelColor];
+        subl.textColor = [FileBrowserViewController safeSecondaryLabelColor];
         [subl sizeToFit];
         cell.accessoryView = subl;
     } else {
@@ -565,20 +565,20 @@ static NSString *kCellID = @"FileCell";
     NSMutableArray *actions = [NSMutableArray array];
 
     if (!isDir) {
-        [actions addObject:[UIAction actionWithTitle:@"Share/Export" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a) {
+        [actions addObject:[UIAction actionWithTitle:@"Share/Export" image:[FileBrowserViewController safeSystemImage:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a) {
             [self shareFile:full];
         }]];
     }
 
-    [actions addObject:[UIAction actionWithTitle:@"Copy" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *a) {
+    [actions addObject:[UIAction actionWithTitle:@"Copy" image:[FileBrowserViewController safeSystemImage:@"doc.on.doc"] identifier:nil handler:^(UIAction *a) {
         [self copyItem:full];
     }]];
 
-    [actions addObject:[UIAction actionWithTitle:@"Rename" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a) {
+    [actions addObject:[UIAction actionWithTitle:@"Rename" image:[FileBrowserViewController safeSystemImage:@"pencil"] identifier:nil handler:^(UIAction *a) {
         [self renameItem:full];
     }]];
 
-    [actions addObject:[UIAction actionWithTitle:@"Delete" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(UIAction *a) {
+    [actions addObject:[UIAction actionWithTitle:@"Delete" image:[FileBrowserViewController safeSystemImage:@"trash"] identifier:nil handler:^(UIAction *a) {
         [self deleteItem:full];
     }]];
 
@@ -829,19 +829,47 @@ static NSString *kCellID = @"FileCell";
     [self presentViewController:alert animated:YES completion:nil];
 }
 
++ (UIImage *)safeSystemImage:(NSString *)name
+{
+    if ([UIImage respondsToSelector:@selector(systemImageNamed:)])
+        return [UIImage systemImageNamed:name];
+    return nil;
+}
+
++ (UIColor *)safeSystemBackgroundColor
+{
+    if ([UIColor respondsToSelector:@selector(systemBackgroundColor)])
+        return [UIColor systemBackgroundColor];
+    return [UIColor whiteColor];
+}
+
++ (UIColor *)safeSeparatorColor
+{
+    if ([UIColor respondsToSelector:@selector(separatorColor)])
+        return [UIColor separatorColor];
+    return [UIColor colorWithWhite:0.8 alpha:1.0];
+}
+
++ (UIColor *)safeSecondaryLabelColor
+{
+    if ([UIColor respondsToSelector:@selector(secondaryLabelColor)])
+        return [UIColor secondaryLabelColor];
+    return [UIColor grayColor];
+}
+
 - (UIImage *)defaultFolderImage
 {
-    return [UIImage systemImageNamed:@"folder"];
+    return [FileBrowserViewController safeSystemImage:@"folder"];
 }
 
 - (UIImage *)defaultTextImage
 {
-    return [UIImage systemImageNamed:@"doc.text"];
+    return [FileBrowserViewController safeSystemImage:@"doc.text"];
 }
 
 - (UIImage *)defaultFileImage
 {
-    return [UIImage systemImageNamed:@"doc"];
+    return [FileBrowserViewController safeSystemImage:@"doc"];
 }
 
 #pragma mark - Orientation
