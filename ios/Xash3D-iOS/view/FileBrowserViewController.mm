@@ -732,6 +732,19 @@ static NSString *kCellID = @"FileCell";
     [self presentViewController:picker animated:YES completion:nil];
 }
 
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url
+{
+    [url startAccessingSecurityScopedResource];
+    NSString *name = [[url lastPathComponent] stringByRemovingPercentEncoding];
+    NSString *dest = [self.currentPath stringByAppendingPathComponent:name];
+    [self.fm removeItemAtPath:dest error:nil];
+    NSError *err = nil;
+    [self.fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:dest] error:&err];
+    [url stopAccessingSecurityScopedResource];
+    if (err) [self showError:err];
+    [self reloadFiles];
+}
+
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
     for (NSURL *url in urls) {

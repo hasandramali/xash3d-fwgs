@@ -45,7 +45,7 @@
 	<key>LSSupportsGameMode</key>
 	<true/>
 	<key>MinimumOSVersion</key>
-	<string>12.0</string>
+	<string>10.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone permissions are required for voice chat</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

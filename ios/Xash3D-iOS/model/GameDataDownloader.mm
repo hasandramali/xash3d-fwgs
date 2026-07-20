@@ -1235,10 +1235,17 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
 - (void)downloadGame:(NSString *)gameDir onProgress:(void(^)(NSString*,float))onProgress completion:(void(^)(NSError*))completion {
     __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
-    bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"Steam Download" expirationHandler:^{
-        [[UIApplication sharedApplication] endBackgroundTask:bgTask];
-        bgTask = UIBackgroundTaskInvalid;
-    }];
+    if ([[UIApplication sharedApplication] respondsToSelector:@selector(beginBackgroundTaskWithName:expirationHandler:)]) {
+        bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"Steam Download" expirationHandler:^{
+            [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+            bgTask = UIBackgroundTaskInvalid;
+        }];
+    } else {
+        bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+            [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+            bgTask = UIBackgroundTaskInvalid;
+        }];
+    }
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSDictionary *info = GAMES()[gameDir];
         if (!info) {

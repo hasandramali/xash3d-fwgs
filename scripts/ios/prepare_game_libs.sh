@@ -21,7 +21,7 @@ if [ ! -f "$LIBSDIR/valve/cl_dlls/client_arm64.dylib" ] && [ ! -f "$LIBSDIR/valv
     if [ -f "$REPO_ROOT/hlsdk/CMakeLists.txt" ]; then
         echo "prepare_game_libs: Using local hlsdk/ submodule"
         cd "$REPO_ROOT/hlsdk"
-        cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+        cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=10.0 \
               -DCMAKE_INSTALL_PREFIX="$LIBSDIR" -DCMAKE_BUILD_TYPE=Debug \
               -B build -S .
         cmake --build build --target install

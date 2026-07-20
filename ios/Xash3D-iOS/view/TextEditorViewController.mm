@@ -90,13 +90,23 @@ static const NSInteger kMaxTextFileSize = 1024 * 1024;
     self.textView.spellCheckingType = UITextSpellCheckingTypeNo;
     [self.view addSubview:self.textView];
 
-    self.bottomConstraint = [self.textView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.textView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        self.bottomConstraint,
-        [self.textView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.textView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-    ]];
+    if (@available(iOS 11.0, *)) {
+        self.bottomConstraint = [self.textView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor];
+        [NSLayoutConstraint activateConstraints:@[
+            [self.textView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+            self.bottomConstraint,
+            [self.textView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+            [self.textView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        ]];
+    } else {
+        self.bottomConstraint = [self.textView.bottomAnchor constraintEqualToAnchor:self.bottomLayoutGuide.topAnchor];
+        [NSLayoutConstraint activateConstraints:@[
+            [self.textView.topAnchor constraintEqualToAnchor:self.topLayoutGuide.bottomAnchor],
+            self.bottomConstraint,
+            [self.textView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+            [self.textView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        ]];
+    }
 
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardWillShow:) name:UIKeyboardWillShowNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
