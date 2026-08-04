@@ -1091,6 +1091,9 @@ static qboolean SV_ClipToEntity( edict_t *touch, moveclip_t *clip )
 {
 	trace_t	trace;
 	model_t	*mod;
+	
+	if( touch->free || !SV_IsValidEdict( touch ))
+		return true;
 
 	if( SV_IsValidEdict( clip->passedict ) && !SV_CheckGroupTrace( touch, clip->passedict ))
 		return true;
@@ -1263,6 +1266,9 @@ static void SV_ClipToWorldBrush( areanode_t *node, moveclip_t *clip )
 		next = l->next;
 
 		touch = EDICT_FROM_AREA( l );
+		
+		if( touch->free || !SV_IsValidEdict( touch ))
+			continue;
 
 		if( touch->v.solid != SOLID_BSP || touch == clip->passedict || !( touch->v.flags & FL_WORLDBRUSH ))
 			continue;
