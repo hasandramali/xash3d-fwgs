@@ -737,6 +737,7 @@ extern convar_t	r_vbo_detail;
 extern convar_t	r_vbo_overbrightmode;
 extern convar_t r_studio_sort_textures;
 extern convar_t r_studio_drawelements;
+extern convar_t r_studio_builtin_renderer;
 extern convar_t r_shadows;
 extern convar_t r_shadow_height;
 extern convar_t r_shadow_x;
