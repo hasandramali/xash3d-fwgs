@@ -136,7 +136,8 @@ def configure(conf):
 	
 	for i in get_frameworks(conf.env):
 		conf.check(features='c cprogram', framework=i, uselib_store=i, msg='Checking for %s framework' % i)
-		conf.check_cc(lib='z', uselib_store='Z', msg='Checking for zlib')
+
+	conf.check_cc(lib='z', uselib_store='Z', msg='Checking for zlib')
 
 	conf.define('ENGINE_DLL', 1)
 
@@ -190,7 +191,7 @@ def build(bld):
 		source += bld.path.ant_glob('platform/ios/*.m')
 		source += bld.path.ant_glob('platform/ios/*.mm')
 		includes += bld.path.ant_glob('platform/ios')
-		elif bld.env.DEST_OS == 'darwin':
+	elif bld.env.DEST_OS == 'darwin':
 		source += bld.path.ant_glob('platform/apple/*.c')
 
 		ios_launcher = bld.path.parent.find_node('ios/Xash3D-iOS')
