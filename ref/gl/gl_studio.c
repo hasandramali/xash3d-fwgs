@@ -2078,8 +2078,6 @@ static void R_StudioDrawPoints( void )
 	for( int j = 0; j < m_pSubModel->nummesh; j++ )
 	{
 		float	oldblend = tr.blend;
-		uint startArrayVerts = g_studio.numverts;
-		uint startArrayElems = g_studio.numelems;
 
 		pmesh = g_studio.meshes[j].mesh;
 		short *ptricmds = (short *)((byte *)m_pStudioHeader + pmesh->triindex);
