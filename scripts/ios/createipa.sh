@@ -47,6 +47,26 @@ if [ -d "$BUILDDIR" ]; then
     cp -r "$BUILDDIR/ios/xash3d.app" ios/Payload/
     rm -r "$BUILDDIR/ios/xash3d.app"
     cd ios || exit 1
+
+    # Patch all Mach-Os to report iOS 10.0 as the minimum OS version.
+    # Xcode 26 cannot link below iOS 12, so we build at 12.0 and lower the
+    # recorded minimum with vtool so the app installs and runs on iOS 10.
+    if command -v vtool &>/dev/null; then
+        SDK_VERSION=$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo "26.0")
+        patch_minos() {
+            local f="$1"
+            vtool -set-build-version ios 10.0 "$SDK_VERSION" -o "$f" "$f" 2>/dev/null || return 1
+            vtool -add-version-min 10.0 -o "$f" "$f" 2>/dev/null || true
+            echo "Patched $f minimum OS to iOS 10"
+        }
+        for f in Payload/xash3d.app/xash Payload/xash3d.app/SDL2.framework/SDL2; do
+            [ -f "$f" ] && patch_minos "$f"
+        done
+        while read -r f; do patch_minos "$f"; done < <(find Payload/xash3d.app -name '*.dylib' -type f)
+    else
+        echo "Warning: vtool not found, app will require iOS 12"
+    fi
+
     codesign --entitlements "$(realpath ../../engine/platform/ios/bundle/entitlements.plist)" --sign "-" --force Payload/xash3d.app
     if [ -e ../xash3d.ipa ]; then
         rm ../xash3d.ipa
