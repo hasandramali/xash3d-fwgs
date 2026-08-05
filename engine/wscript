@@ -37,11 +37,6 @@ def get_frameworks(env):
 def m_hook(self, node):
 	return self.create_compiled_task('c', node)
 
-@TaskGen.extension('.mm')
-def mm_hook(self, node):
-	self.env.append_unique('CXXFLAGS', '-fobjc-arc')
-	return self.create_compiled_task('cxx', node)
-
 def options(opt):
 	grp = opt.add_option_group('Engine options')
 
@@ -126,23 +121,20 @@ def configure(conf):
 		else:
 			find_sdl(conf)
 
+
 	if conf.options.STATIC:
 		conf.env.STATIC = True
 		conf.define('XASH_NO_LIBDL', 1)
 
-	if not conf.env.DEST_OS in ['win32', 'android'] and not conf.env.IOS:
+	if not conf.env.DEST_OS in ['win32', 'android']:
 		conf.check_pthreads(mode='c')
-
-	if not conf.env.IOS:
-		for i in get_frameworks(conf.env):
-			conf.check(features='c cprogram', framework=i, uselib_store=i, msg='Checking for %s framework' % i)
-
-		if conf.env.DEST_OS != 'win32':
-			conf.check_cc(lib='z', uselib_store='Z', msg='Checking for zlib', mandatory=False)
+	
+	for i in get_frameworks(conf.env):
+		conf.check(features='c cprogram', framework=i, uselib_store=i, msg='Checking for %s framework' % i)
 
 	conf.define('ENGINE_DLL', 1)
 
-	if conf.options.FFMPEG and not conf.env.IOS:
+	if conf.options.FFMPEG:
 		pkgconf_args = '--cflags' if conf.options.FFMPEG_DLOPEN else '--cflags --libs'
 		features = 'c' if conf.options.FFMPEG_DLOPEN else 'c cprogram'
 
@@ -190,25 +182,9 @@ def build(bld):
 	if bld.env.IOS:
 		source += bld.path.ant_glob('platform/ios/*.c')
 		source += bld.path.ant_glob('platform/ios/*.m')
-		source += bld.path.ant_glob('platform/ios/*.mm')
 		includes += bld.path.ant_glob('platform/ios')
 	elif bld.env.DEST_OS == 'darwin':
 		source += bld.path.ant_glob('platform/apple/*.c')
-
-		ios_launcher = bld.path.parent.find_node('ios/Xash3D-iOS')
-		if ios_launcher:
-			source += ios_launcher.ant_glob('model/*.mm')
-			source += ios_launcher.ant_glob('view/*.mm')
-			source += ios_launcher.ant_glob('controller/*.mm')
-			includes.append(ios_launcher.make_node('model').abspath())
-			includes.append(ios_launcher.make_node('view').abspath())
-			includes.append(ios_launcher.make_node('controller').abspath())
-
-		root = bld.path.parent
-		lzma_node = root.find_node('3rdparty/lzma')
-		if lzma_node:
-			source += lzma_node.ant_glob('*.c')
-			includes.append(lzma_node.abspath())
 	
 	# include sources for optional features
 	if bld.get_define('XASH_CUSTOM_SWAP'):
@@ -237,13 +213,12 @@ def build(bld):
 	else: # POSIX
 		libs += ['M', 'RT', 'PTHREAD', 'ASOUND', 'HAIKU', 'MAGX', 'LOG', 'SOCKET']
 		libs += get_frameworks(bld.env)
-		if bld.env.IOS or bld.env.DEST_OS == 'darwin':
-			libs += ['Z']
 		if not bld.env.STATIC:
 			libs += ['DL']
 
-	if bld.env.SERVER and not bld.env.IOS:
-		# iOS üzerinde Dedicated Server hedefini derleme
+	if bld.env.SERVER:
+		# TODO: avoid possible name collision when client is built without launcher
+		# but dedicated server is enabled. They're both called 'xash' in this case
 		server_source = copy(source)
 		server_libs = copy(libs)
 		bld.program(
@@ -255,6 +230,23 @@ def build(bld):
 			rpath = bld.env.DEFAULT_RPATH,
 			install_path = bld.env.BINDIR,
 		)
+
+		# the execution stucks on macOS, disable for now
+		if bld.env.TESTS and Utils.unversioned_sys_platform() != 'darwin':
+			fs_tg = bld.get_tgen_by_name('filesystem_stdio')
+			fs_tg.post()
+			tg = bld.program(
+				source = server_source,
+				target = 'xash_tests_dedicated',
+				use = server_libs,
+				includes = includes,
+				features = 'test',
+				defines = 'XASH_ENABLE_MAIN=1 XASH_DEDICATED=1 XASH_ENGINE_TESTS=1',
+				rpath = bld.env.DEFAULT_RPATH,
+				install_path = None,
+				ut_str = '${SRC[0].abspath()} -dev 2 -runtests',
+			)
+			tg.ut_paths = fs_tg.link_task.outputs[0].parent.abspath() + os.pathsep
 
 	if bld.env.CLIENT:
 		defines = []
@@ -322,3 +314,31 @@ def build(bld):
 			rpath = bld.env.DEFAULT_RPATH,
 			linkflags = linkflags,
 		)
+
+		# the execution stucks on macOS, disable for now
+		if bld.env.TESTS and Utils.unversioned_sys_platform() != 'darwin':
+			fs_tg = bld.get_tgen_by_name('filesystem_stdio')
+			fs_tg.post()
+			tg = bld.program(source = source,
+				target = 'xash_tests',
+				includes = includes,
+				features = 'cxx c test',
+				use = libs,
+				defines = defines + ['XASH_ENABLE_MAIN=1', 'XASH_ENGINE_TESTS=1'],
+				install_path = None,
+				rpath = bld.env.DEFAULT_RPATH,
+				linkflags = linkflags,
+				ut_str = '${SRC[0].abspath()} -dev 2 -runtests',
+			)
+			paths = [fs_tg.link_task.outputs[0].parent.abspath()]
+
+			if bld.env.LIBPATH_SDL2:
+				paths += bld.env.LIBPATH_SDL2
+
+			tg.ut_paths = os.pathsep.join(paths) + os.pathsep
+
+			# taken from dyld(1) man-page
+			if Utils.unversioned_sys_platform() == 'darwin':
+				if not hasattr(tg, 'ut_env'):
+					setattr(tg, 'ut_env', dict(os.environ))
+				tg.ut_env['DYLD_FALLBACK_FRAMEWORK_PATH'] = '/Library/Frameworks:/System/Library/Frameworks'
