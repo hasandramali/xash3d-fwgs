@@ -28,7 +28,7 @@ int main(int argc, char **argv)
 
 def get_frameworks(env):
 	if env.IOS:
-		return ['Foundation', 'UIKit', 'QuartzCore', 'GameController', 'SystemConfiguration', 'CFNetwork', 'AVFoundation', 'CoreGraphics', 'Metal', 'OpenGLES', 'CoreAudio', 'AudioToolbox', 'CoreMotion', 'CoreBluetooth', 'CoreHaptics', 'Security', 'UserNotifications']
+		return ['UIKit', 'Foundation', 'UserNotifications', 'CoreGraphics']
 	if env.DEST_OS == 'darwin':
 		return ['IOKit', 'CoreFoundation']
 	return []
