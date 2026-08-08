@@ -46,7 +46,8 @@ class GameDataDownloader(private val ctx: Context) {
             "cstrike" to GameInfo(90, listOf(11), "Counter-Strike", 280_000_000L),
             "tfc" to GameInfo(90, listOf(21), "Team Fortress Classic", 119_000_000L),
             "gearbox" to GameInfo(90, listOf(51), "Opposing Force", 273_000_000L),
-            "czero" to GameInfo(90, listOf(81), "Condition Zero", 400_000_000L)
+            "czero" to GameInfo(90, listOf(81), "Condition Zero", 400_000_000L),
+            "svencoop" to GameInfo(225840, listOf(225841), "Sven Co-op", 2_600_000_000L)
         )
 
         // Hardcoded manifest IDs for anonymous downloads (from HLDS-appmanifest repo, July 2023)
@@ -59,7 +60,8 @@ class GameDataDownloader(private val ctx: Context) {
             81 to 3601230779843470737L,
             1  to 5928322771446233610L,
             4  to 8690279432129063737L,
-            1006 to 6912453647411644579L
+            1006 to 6912453647411644579L,
+            225841 to 7100405834093858048L
         )
 
         private val nextJobId = AtomicLong(1L)
@@ -257,6 +259,17 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
 
     fun estimatedSize(gamedir: String): Long = GAMES[gamedir]?.estimatedSize ?: 0L
 
+    // svencoop's base-content depot (225841) only carries the svencoop/ tree.
+    // Keep it self-contained: no root files, and never pull Windows binaries (.exe/.dll).
+    private fun shouldDownloadFile(gamedir: String, path: String): Boolean {
+        return when (gamedir) {
+            "svencoop" -> path.startsWith("svencoop/") &&
+                !path.endsWith(".exe", ignoreCase = true) &&
+                !path.endsWith(".dll", ignoreCase = true)
+            else -> true
+        }
+    }
+
     fun hasCheckedFirstRun(): Boolean =
         firstRunPrefs.getBoolean("first_run_checked", false)
 
@@ -342,10 +355,10 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                     Log.w("SteamCM", "[download] Could not download manifest for depot ${ds.depotId}")
                     continue
                 }
-                val files = parseManifestFiles(manifestBytes, ds.depotKey)
+                val files = parseManifestFiles(manifestBytes, ds.depotKey).filter { f -> shouldDownloadFile(gamedir, f.path) }
                 files.forEachIndexed { i, f -> allFiles.add(DepotFile(ds, f, i)) }
                 totalFiles += files.size
-                Log.d("SteamCM", "[download] Depot ${ds.depotId}: ${files.size} files from manifest")
+                Log.d("SteamCM", "[download] Depot ${ds.depotId}: ${files.size} files from manifest (after filtering)")
             }
 
             if (allFiles.isEmpty()) {
