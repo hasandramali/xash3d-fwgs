@@ -47,7 +47,10 @@ class GameDataDownloader(private val ctx: Context) {
             "tfc" to GameInfo(90, listOf(21), "Team Fortress Classic", 119_000_000L),
             "gearbox" to GameInfo(90, listOf(51), "Opposing Force", 273_000_000L),
             "czero" to GameInfo(90, listOf(81), "Condition Zero", 400_000_000L),
-            "svencoop" to GameInfo(225840, listOf(225841), "Sven Co-op", 2_600_000_000L)
+            // Anonymous access uses the dedicated-server tool 276060 (parent: 225840),
+            // which mounts the same base-content depot 225841; the free client 225840
+            // itself can't be claimed by an anonymous login.
+            "svencoop" to GameInfo(276060, listOf(225841), "Sven Co-op", 2_600_000_000L)
         )
 
         // Hardcoded manifest IDs for anonymous downloads (from HLDS-appmanifest repo, July 2023)
@@ -319,22 +322,33 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
 
             data class DepotSetup(val depotId: Int, val manifestId: Long, val depotKey: ByteArray, val requestCode: Long)
             val depots = mutableListOf<DepotSetup>()
+            val setupErrors = mutableListOf<String>()
             for (depotId in effectiveIds) {
                 val manifestId = HARDCODED_MANIFEST_IDS[depotId]
                 if (manifestId == null || manifestId == 0L) {
-                    Log.w("SteamCM", "[download] No hardcoded manifest ID for depot $depotId, skipping")
+                    val reason = "no hardcoded manifest ID"
+                    setupErrors.add("depot $depotId: $reason")
+                    Log.w("SteamCM", "[download] $reason for depot $depotId, skipping")
                     continue
                 }
                 val depotKey: ByteArray
                 try {
                     depotKey = client.getDepotDecryptionKey(info.appId, depotId)
-                } catch (e: Exception) { Log.w("SteamCM", "[depotKey] depot $depotId: ${e.message}"); continue }
+                } catch (e: Exception) {
+                    setupErrors.add("depot $depotId: depot key failed (${e.message})")
+                    Log.w("SteamCM", "[depotKey] depot $depotId: ${e.message}"); continue
+                }
                 val requestCode: Long
                 try {
                     requestCode = client.requestManifestRequestCode(depotId, info.appId, manifestId)
-                } catch (e: Exception) { Log.w("SteamCM", "[rpc] depot $depotId: ${e.message}"); continue }
+                } catch (e: Exception) {
+                    setupErrors.add("depot $depotId: manifest request code failed (${e.message})")
+                    Log.w("SteamCM", "[rpc] depot $depotId: ${e.message}"); continue
+                }
                 if (requestCode == 0L) {
-                    Log.w("SteamCM", "[download] Manifest request code 0 for depot $depotId, skipping")
+                    val reason = "Steam rejected manifest $manifestId (request code 0)"
+                    setupErrors.add("depot $depotId: $reason")
+                    Log.w("SteamCM", "[download] $reason, skipping")
                     continue
                 }
                 depots.add(DepotSetup(depotId, manifestId, depotKey, requestCode))
@@ -342,7 +356,8 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
             client.disconnect()
 
             if (depots.isEmpty()) {
-                return@withContext Result.failure(Exception("Could not set up any depots for download"))
+                val detail = if (setupErrors.isEmpty()) "" else ": ${setupErrors.joinToString("; ")}"
+                return@withContext Result.failure(Exception("Could not set up any depots for download$detail"))
             }
 
             var totalFiles = 0L
