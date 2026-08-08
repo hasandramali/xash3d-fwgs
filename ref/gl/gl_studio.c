@@ -122,6 +122,7 @@ typedef struct
 // studio-related cvars
 CVAR_DEFINE_AUTO( r_studio_sort_textures, "0", FCVAR_GLCONFIG, "change draw order for additive meshes" );
 CVAR_DEFINE_AUTO( r_studio_drawelements, "1", FCVAR_GLCONFIG, "use glDrawElements for studiomodels" );
+CVAR_DEFINE_AUTO( r_studio_builtin_renderer, "0", 0, "use built-in studio model renderer instead of the one provided by client library (debugging)" );
 static cvar_t			*cl_righthand = NULL;
 
 static r_studio_interface_t	*pStudioDraw;
@@ -1906,6 +1907,43 @@ static void R_StudioDrawArrays( uint startverts, uint startelems )
 
 /*
 ===============
+R_StudioSubmitMesh
+
+===============
+*/
+static void R_StudioSubmitMesh( short *ptricmds, vec3_t *pstudionorms, float s, float t, float shellscale, int tesslevel )
+{
+	if( tesslevel > 0 )
+	{
+		// R_StudioDrawTruformMesh( ptricmds, pstudionorms, s, t, shellscale, tesslevel );
+	}
+	else if( r_studio_drawelements.value )
+	{
+		uint startArrayVerts = g_studio.numverts;
+		uint startArrayElems = g_studio.numelems;
+
+		if( FBitSet( g_nFaceFlags, STUDIO_NF_CHROME ))
+			R_StudioBuildArrayChromeMesh( ptricmds, pstudionorms, s, t, shellscale );
+		else if( FBitSet( g_nFaceFlags, STUDIO_NF_UV_COORDS ))
+			R_StudioBuildArrayFloatMesh( ptricmds, pstudionorms );
+		else
+			R_StudioBuildArrayNormalMesh( ptricmds, pstudionorms, s, t );
+
+		R_StudioDrawArrays( startArrayVerts, startArrayElems );
+	}
+	else
+	{
+		if( FBitSet( g_nFaceFlags, STUDIO_NF_CHROME ))
+			R_StudioDrawChromeMesh( ptricmds, pstudionorms, s, t, shellscale );
+		else if( FBitSet( g_nFaceFlags, STUDIO_NF_UV_COORDS ))
+			R_StudioDrawFloatMesh( ptricmds, pstudionorms );
+		else
+			R_StudioDrawNormalMesh( ptricmds, pstudionorms, s, t );
+	}
+}
+
+/*
+===============
 R_StudioDrawPoints
 
 ===============
@@ -2040,8 +2078,6 @@ static void R_StudioDrawPoints( void )
 	for( int j = 0; j < m_pSubModel->nummesh; j++ )
 	{
 		float	oldblend = tr.blend;
-		uint startArrayVerts = g_studio.numverts;
-		uint startArrayElems = g_studio.numelems;
 
 		pmesh = g_studio.meshes[j].mesh;
 		short *ptricmds = (short *)((byte *)m_pStudioHeader + pmesh->triindex);
@@ -2073,24 +2109,7 @@ static void R_StudioDrawPoints( void )
 
 		R_StudioSetupSkin( m_pStudioHeader, pskinref[pmesh->skinref] );
 
-		if( r_studio_drawelements.value )
-		{
-			if( FBitSet( g_nFaceFlags, STUDIO_NF_CHROME ))
-				R_StudioBuildArrayChromeMesh( ptricmds, pstudionorms, s, t, shellscale );
-			else if( FBitSet( g_nFaceFlags, STUDIO_NF_UV_COORDS ))
-				R_StudioBuildArrayFloatMesh( ptricmds, pstudionorms );
-			else R_StudioBuildArrayNormalMesh( ptricmds, pstudionorms, s, t );
-
-			R_StudioDrawArrays( startArrayVerts, startArrayElems );
-		}
-		else
-		{
-			if( FBitSet( g_nFaceFlags, STUDIO_NF_CHROME ))
-				R_StudioDrawChromeMesh( ptricmds, pstudionorms, s, t, shellscale );
-			else if( FBitSet( g_nFaceFlags, STUDIO_NF_UV_COORDS ))
-				R_StudioDrawFloatMesh( ptricmds, pstudionorms );
-			else R_StudioDrawNormalMesh( ptricmds, pstudionorms, s, t );
-		}
+		R_StudioSubmitMesh( ptricmds, pstudionorms, s, t, shellscale, 0 );
 
 		if( FBitSet( g_nFaceFlags, STUDIO_NF_MASKED ))
 		{
@@ -3190,6 +3209,12 @@ static void R_StudioDrawModelInternal( cl_entity_t *e, int flags )
 	{
 		if( e->player )
 			R_StudioDrawPlayer( flags, &e->curstate );
+		else R_StudioDrawModel( flags );
+	}
+	else if( unlikely( r_studio_builtin_renderer.value ))
+	{
+		if( e->player )
+			R_StudioDrawPlayer( flags, R_StudioGetPlayerState( e->index - 1 ));
 		else R_StudioDrawModel( flags );
 	}
 	else

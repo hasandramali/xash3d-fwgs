@@ -65,10 +65,13 @@ Available on GamerLab - http://gamer-lab.com/eng/code_mods_goldsrc/Half-Life_2D_
 ## Gang Wars
 Mirrored on github - https://github.com/nekonomicon/gw1.45src
 
-## Go-mod
+## Go-Mod
 Versions 2.0 and 3.0, available in mod archives on ModDB - https://www.moddb.com/mods/go-mod/downloads
 
 Version 3.0, mirrored on github - https://github.com/nekonomicon/Go-mod30
+
+## Go-Mod: Reborn
+Official github repository - https://github.com/LambdaLuke87/Go-Mod-Reborn-Lite-Build
 
 ## GT mod
 Available on GamerLab - http://gamer-lab.com/eng/code_mods_goldsrc/GT_mod_(Polnie_ishodniki)
@@ -111,6 +114,13 @@ Mirrored on github - https://github.com/solidi/hl-mods/tree/master/pong
 
 ## Half-Life: Quest Mode
 Available on cs-mapping.com.ua - https://old.cs-mapping.com.ua/forum/showthread.php?t=38030
+
+## Half-Life: Sum
+Original Version: Branch **sum_orig** in halflife-featureful - https://github.com/FreeSlave/halflife-featureful/tree/sum_orig
+
+Version 2022: Branch **sum_2022** in halflife-featureful - https://github.com/FreeSlave/halflife-featureful/tree/sum_2022
+
+Current Version: Branch **sum** in halflife-featureful - https://github.com/FreeSlave/halflife-featureful/tree/sum
 
 ## Half-Life: Top-Down
 Official gitlab repository - https://gitlab.com/Sockman/hltopdown
@@ -253,6 +263,12 @@ Mirrored on github - https://github.com/a1batross/XashXT_original
 *Source code is a part of Spirit of Half-Life 1.0-1.2 under XENWARRIOR macro*
 
 [Logic&Trick's](https://github.com/LogicAndTrick) mirror - https://files.logic-and-trick.com/#/Half-Life/Mods/Spirit%20of%20Half-Life
+
+## Yet another PS2 Half-Life port
+Official github repository - https://github.com/supadupaplex/ya-ps2hl-dll
+
+## Zombie Panic!
+Official github repository - https://github.com/Monochrome-Inc/ZombiePanic-HL
 
 ## Zombie-X
 Available in mod archive on ModDB - https://www.moddb.com/mods/zombie-x-10-final/downloads/zombie-x-10-dle-beta6-last-version
@@ -460,6 +476,9 @@ Branch **dmc** in hlsdk-portable - https://github.com/FWGS/hlsdk-portable/tree/d
 
 ## Xen-Warrior
 Branch **sohl1.2** in hlsdk-portable - https://github.com/FWGS/hlsdk-portable/tree/sohl1.2
+
+## Yet another PS2 Half-Life port
+Branch **ps2hl** in hlsdk-portable - https://github.com/FWGS/hlsdk-portable/tree/ps2hl
 
 ## Zombie-X
 Branch **zombie-x** in hlsdk-portable - https://github.com/FWGS/hlsdk-portable/tree/zombie-x
