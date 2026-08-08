@@ -1633,7 +1633,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cmake -G \"Xcode\" -DCMAKE_BUILD_TYPE=$(CONFIGURATION) -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/../3rdparty/ios-cmake/ios.toolchain.cmake\" -DPLATFORM=OS64 -DXASH_STATIC_GAMELIB=1 -DXASH_GLES=1 -DDEPLOYMENT_TARGET=13.0 -S \"${SRCROOT}/../\" -B \"${SRCROOT}/cmake-build\"\n";
+			shellScript = "cmake -G \"Xcode\" -DCMAKE_BUILD_TYPE=$(CONFIGURATION) -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/../3rdparty/ios-cmake/ios.toolchain.cmake\" -DPLATFORM=OS64 -DXASH_STATIC_GAMELIB=1 -DXASH_GLES=1 -DDEPLOYMENT_TARGET=12.0 -S \"${SRCROOT}/../\" -B \"${SRCROOT}/cmake-build\"\n";
 		};
 		3DC89471260FAC5800F7A4A6 /* Build Game Libraries */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -1699,7 +1699,7 @@
 					"$(SRCROOT)/../public",
 				);
 				INFOPLIST_FILE = Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1774,7 +1774,7 @@
 					"$(SRCROOT)/../public",
 				);
 				INFOPLIST_FILE = Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
