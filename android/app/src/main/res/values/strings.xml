@@ -134,4 +134,24 @@
     <string name="dependency_half_life_required">Please install Half-Life first.</string>
     <string name="dependency_cs_required">Counter-Strike installation required.</string>
     <string name="dependency_hl_cs_required">Half-Life and Counter-Strike must be installed.</string>
+
+    <!-- Steam account auth -->
+    <string name="steam_auth">Steam Account</string>
+    <string name="steam_login_title">Sign in to Steam</string>
+    <string name="steam_login_message">Sign in to generate a real Steam auth ticket for online play. Requires an account that owns Sven Co-op (or any Half-Life game).</string>
+    <string name="steam_username_hint">Steam username</string>
+    <string name="steam_password_hint">Password</string>
+    <string name="steam_email_code_hint">Email code</string>
+    <string name="steam_twofactor_hint">Two-factor code</string>
+    <string name="steam_login_button">Log In</string>
+    <string name="steam_logout_button">Log Out</string>
+    <string name="steam_connecting">Connecting to Steam…</string>
+    <string name="steam_authenticating">Authenticating…</string>
+    <string name="steam_logged_in">Logged in as %1$s</string>
+    <string name="steam_need_email_code">Steam Guard email code sent. Enter it below.</string>
+    <string name="steam_need_twofactor">Enter your Steam Guard two-factor code.</string>
+    <string name="steam_error">Steam login failed: %1$s</string>
+    <string name="steam_insecure">-insecure (VAC off)</string>
+    <string name="steam_insecure_summary">Disable VAC/Steam validation on servers (enables -insecure). Ticket is still sent.</string>
+    <string name="steam_broker_running">Ticket broker running on port %1$d</string>
 </resources>

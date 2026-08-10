@@ -204,6 +204,9 @@ class LibraryFragment : Fragment(), MenuProvider {
 			R.id.action_download -> {
 				findNavController().navigate(R.id.action_libraryFragment_to_gameDataDownloaderFragment)
 			}
+			R.id.action_steam -> {
+				findNavController().navigate(R.id.action_libraryFragment_to_steamAuthFragment)
+			}
 		}
 
 		return false

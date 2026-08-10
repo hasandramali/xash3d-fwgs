@@ -276,6 +276,17 @@ public class XashActivity extends SDLActivity {
             argv = argv.replace(" -dll @yapb", "").replace("-dll @yapb ", "");
         }
 
+        // Steam auth: use the local ticket broker when a Steam session is available.
+        if (hasStoredSteamSession()) {
+            su.xash.engine.model.SteamAuthManager.get(this).ensureSessionAsync();
+            if (!argv.contains("cl_ticket_generator")) {
+                argv += " +set cl_ticket_generator \"steam\"";
+            }
+            if (getBooleanPreference("steam_insecure", true) && !hasArgument(argv, "-insecure")) {
+                argv += " -insecure";
+            }
+        }
+
         Log.d(TAG, "Final argv: " + argv);
         mCachedArgv = argv.trim();
         return mCachedArgv;
@@ -464,6 +475,13 @@ public class XashActivity extends SDLActivity {
         }
 
         return defaultValue;
+    }
+
+    private boolean hasStoredSteamSession() {
+        SharedPreferences authPrefs = getSharedPreferences("steam_auth", MODE_PRIVATE);
+        String loginKey = authPrefs.getString("login_key", "");
+        long steamId = authPrefs.getLong("steam_id", 0L);
+        return !loginKey.isEmpty() && steamId != 0L;
     }
 
     @Override

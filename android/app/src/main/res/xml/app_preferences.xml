@@ -55,6 +55,12 @@
             app:key="enable_yapb_bots"
             app:title="@string/game_settings_yapb_bots"
             app:defaultValue="false" />
+
+        <SwitchPreferenceCompat
+            app:key="steam_insecure"
+            app:title="@string/steam_insecure"
+            app:summary="@string/steam_insecure_summary"
+            app:defaultValue="true" />
     </PreferenceCategory>
 
 </PreferenceScreen>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent">
+
+	<ScrollView
+		android:layout_width="match_parent"
+		android:layout_height="match_parent">
+
+		<LinearLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:orientation="vertical"
+			android:padding="16dp">
+
+			<com.google.android.material.textview.MaterialTextView
+				android:id="@+id/authStatus"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+			<com.google.android.material.textfield.TextInputLayout
+				android:id="@+id/usernameLayout"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="16dp"
+				android:hint="@string/steam_username_hint"
+				app:boxBackgroundMode="outline">
+
+				<com.google.android.material.textfield.TextInputEditText
+					android:id="@+id/usernameInput"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:inputType="text"
+					android:importantForAutofill="no" />
+			</com.google.android.material.textfield.TextInputLayout>
+
+			<com.google.android.material.textfield.TextInputLayout
+				android:id="@+id/passwordLayout"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="8dp"
+				android:hint="@string/steam_password_hint"
+				app:boxBackgroundMode="outline"
+				app:endIconMode="password_toggle">
+
+				<com.google.android.material.textfield.TextInputEditText
+					android:id="@+id/passwordInput"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:inputType="textPassword"
+					android:importantForAutofill="no" />
+			</com.google.android.material.textfield.TextInputLayout>
+
+			<com.google.android.material.textfield.TextInputLayout
+				android:id="@+id/codeLayout"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="8dp"
+				android:hint="@string/steam_email_code_hint"
+				android:visibility="gone"
+				app:boxBackgroundMode="outline">
+
+				<com.google.android.material.textfield.TextInputEditText
+					android:id="@+id/codeInput"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:inputType="text"
+					android:importantForAutofill="no" />
+			</com.google.android.material.textfield.TextInputLayout>
+
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/loginButton"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="16dp"
+				android:text="@string/steam_login_button" />
+
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/logoutButton"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="8dp"
+				android:text="@string/steam_logout_button"
+				android:visibility="gone"
+				style="@style/Widget.Material3.Button.OutlinedButton" />
+
+		</LinearLayout>
+	</ScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
