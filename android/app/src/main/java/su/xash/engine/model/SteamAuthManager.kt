@@ -28,6 +28,8 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -136,7 +138,7 @@ class SteamAuthManager(private val ctx: Context) {
     private val prefs = ctx.getSharedPreferences("steam_auth", Context.MODE_PRIVATE)
 
     // connection state
-    private val connectLock = Any()
+    private val connectLock = Mutex()
     private var socket: Socket? = null
     private var output: OutputStream? = null
     private var input: InputStream? = null
@@ -183,12 +185,14 @@ class SteamAuthManager(private val ctx: Context) {
      * Throws on failure.
      */
     suspend fun connect() = withContext(Dispatchers.IO) {
-        if (connected) return@withContext
-        connectSocket()
-        doHandshake()
-        startReader()
-        connected = true
-        Log.i(TAG, "connected to Steam CM")
+        connectLock.withLock {
+            if (connected) return@withContext
+            connectSocket()
+            doHandshake()
+            startReader()
+            connected = true
+            Log.i(TAG, "connected to Steam CM")
+        }
     }
 
     /**
@@ -202,7 +206,7 @@ class SteamAuthManager(private val ctx: Context) {
         twoFactorCode: String? = null
     ): LoginState = withContext(Dispatchers.IO) {
         try {
-            val result = synchronized(connectLock) {
+            val result = connectLock.withLock {
                 if (!connected) {
                     connectSocket()
                     doHandshake()
@@ -235,7 +239,7 @@ class SteamAuthManager(private val ctx: Context) {
         val steamId = storedSteamId
         if (loginKey.isNullOrEmpty() || steamId == 0L) return@withContext LoginState.Failed(0, "No stored login key")
         try {
-            val result = synchronized(connectLock) {
+            val result = connectLock.withLock {
                 if (!connected) {
                     connectSocket()
                     doHandshake()
@@ -837,7 +841,7 @@ class SteamAuthManager(private val ctx: Context) {
         return stream.toByteArray()
     }
 
-    private fun sendAuthList(appid: Int): ByteArray {
+    private suspend fun sendAuthList(appid: Int): ByteArray {
         val jobId = nextJobId.getAndIncrement()
         val future = CompletableFuture<SteamMsg>()
         pendingJobs[jobId] = future
