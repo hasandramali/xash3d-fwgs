@@ -808,6 +808,30 @@ void SPR_AdjustSize( float *x, float *y, float *w, float *h )
 	*h *= yscale;
 }
 
+/*
+====================
+SayText_AdjustSize
+
+scale saytext independent of hud_scale, using hud_saytext_scale
+====================
+*/
+void SayText_AdjustSize( float *x, float *y, float *w, float *h )
+{
+	float scale = hud_saytext_scale.value;
+
+	if( scale == 0.0f || scale == 1.0f )
+		return; // scaling disabled
+
+	// same virtual resolution semantics as hud_scale
+	if( scale >= 320.0f )
+		scale = refState.width / scale;
+
+	*x *= scale;
+	*y *= scale;
+	*w *= scale;
+	*h *= scale;
+}
+
 static void SPR_AdjustTexCoords( int texnum, float width, float height, float *s1, float *t1, float *s2, float *t2 )
 {
 	const qboolean filtering = REF_GET_PARM( PARM_TEX_FILTERING, texnum );
@@ -2553,7 +2577,7 @@ int GAME_EXPORT pfnDrawConsoleString( int x, int y, char *string )
 	Vector4Copy( clgame.ds.textColor, color );
 	Vector4Set( clgame.ds.textColor, 255, 255, 255, 255 );
 
-	return x + CL_DrawString( x, y, string, color, font, FONT_DRAW_UTF8 | FONT_DRAW_HUD );
+	return x + CL_DrawString( x, y, string, color, font, FONT_DRAW_UTF8 | FONT_DRAW_SAYTEXT );
 }
 
 /*
@@ -2584,7 +2608,7 @@ void GAME_EXPORT pfnDrawConsoleStringLen( const char *pText, int *length, int *h
 	cl_font_t *font = Con_GetFont( con_fontsize.value );
 
 	if( height ) *height = font->charHeight;
-	CL_DrawStringLen( font, pText, length, NULL, FONT_DRAW_UTF8 | FONT_DRAW_HUD );
+	CL_DrawStringLen( font, pText, length, NULL, FONT_DRAW_UTF8 | FONT_DRAW_SAYTEXT );
 }
 
 /*

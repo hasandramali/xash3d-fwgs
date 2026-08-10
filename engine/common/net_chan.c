@@ -34,6 +34,7 @@ GNU General Public License for more details.
 #define FLOW_AVG			( 2.0f / 3.0f )	// how fast to converge flow estimates
 #define FLOW_INTERVAL		0.1		// don't compute more often than this
 #define MAX_RELIABLE_PAYLOAD		1400		// biggest packet that has frag and or reliable data
+#define NETCHAN_RELIABLE_RESEND_TIME	0.1		// seconds to wait before re-sending an unacked reliable payload
 
 // forward declarations
 void Netchan_FlushIncoming( netchan_t *chan, int stream );
@@ -256,6 +257,7 @@ void Netchan_Setup( netsrc_t sock, netchan_t *chan, netadr_t adr, int qport, voi
 	chan->client = client;
 	chan->pfnBlockSize = pfnBlockSize;
 	chan->use_munge = FBitSet( flags, NETCHAN_USE_MUNGE ) ? true : false;
+	chan->munge_tx_only = FBitSet( flags, NETCHAN_USE_MUNGE_TX ) ? true : false;
 	chan->use_bz2 = FBitSet( flags, NETCHAN_USE_BZIP2 ) ? true : false;
 	chan->use_lzss = FBitSet( flags, NETCHAN_USE_LZSS ) ? true : false;
 	chan->gs_netchan = FBitSet( flags, NETCHAN_GOLDSRC ) ? true : false;
@@ -292,6 +294,30 @@ qboolean Netchan_IncomingReady( netchan_t *chan )
 	}
 
 	return false;
+}
+
+/*
+============
+Netchan_DumpHex
+
+debug helper: hexdump an outgoing/incoming packet
+================
+*/
+static void Netchan_DumpHex( const char *name, const byte *data, size_t size )
+{
+	char line[80];
+	int pos = 0;
+	size_t i;
+
+	for( i = 0; i < size; i++ )
+	{
+		pos += Q_snprintf( line + pos, sizeof( line ) - pos, "%02x ", data[i] );
+		if( ( i % 16 ) == 15 || i == size - 1 )
+		{
+			Con_DPrintf( "%s [%zu/%zu]: %s\n", name, i + 1, size, line );
+			pos = 0;
+		}
+	}
 }
 
 /*
@@ -410,6 +436,7 @@ void Netchan_Clear( netchan_t *chan )
 
 	chan->cleartime = 0.0;
 	chan->reliable_length = 0;
+	chan->last_reliable_send_time = 0.0;
 
 	for( int i = 0; i < MAX_STREAMS; i++ )
 	{
@@ -729,7 +756,38 @@ Netchan_CreateFragments
 */
 void Netchan_CreateFragments( netchan_t *chan, sizebuf_t *msg )
 {
-	// always queue any pending reliable data ahead of the fragmentation buffer
+	// AGSBYPASS: Sven ONLY understands a fragment header for genuinely
+	// multi-packet payloads. A small reliable command (e.g. the ~41-byte
+	// clc_resourcelist reply or a ~21-byte clc_stringcmd "spawn") must leave as
+	// PLAIN reliable message. If we route it through the fragment streams, Sven's
+	// SV_ReadClientMessage rejects it with "badread" and never acks it (reliable
+	// deadlock). So for a GoldSrc client, FOLD any pending reliable data
+	// (chan->message + the msg argument) together when the whole pending reliable
+	// payload fits one packet; only fall back to real fragmentation when it would
+	// not fit.
+	if( chan->sock == NS_CLIENT )
+	{
+		int maxsplit	= ( chan->pfnBlockSize && chan->pfnBlockSize( chan->client, FRAGSIZE_SPLIT ))
+				  ? chan->pfnBlockSize( chan->client, FRAGSIZE_SPLIT ) : MAX_RELIABLE_PAYLOAD;
+		int relbytes	= ( chan->reliable_length + 7 ) >> 3;
+		int msgsize	= MSG_GetNumBytesWritten( &chan->message );
+		int msglen	= MSG_GetNumBytesWritten( msg );
+		int total	= relbytes + msgsize + msglen;
+
+		if( maxsplit > 0 && total <= maxsplit )
+		{
+			if( msglen > 0 )
+			{
+				Con_DPrintf( "gs-frag: FOLD %d-byte msg -> chan->message (total %d <= split %d) PLAIN\n", msglen, total, maxsplit );
+				MSG_WriteBytes( &chan->message, MSG_GetData( msg ), msglen );
+			}
+			return; // stays staged; Netchan_TransmitBits sends it as one plain reliable message
+		}
+
+		Con_DPrintf( "gs-frag: FRAGMENT %d-byte msg (total %d > split %d)\n", msglen, total, maxsplit );
+	}
+
+	// legacy path: always queue any pending reliable data ahead of the fragment
 	if( MSG_GetNumBytesWritten( &chan->message ) > 0 )
 	{
 		Netchan_CreateFragments_( chan, &chan->message );
@@ -1509,6 +1567,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	byte	send_buf[NET_MAX_MESSAGE];
 	qboolean	send_reliable_fragment;
 	qboolean	send_reliable;
+	qboolean	reliable_fresh = false;
 	sizebuf_t	send;
 	int	i;
 	float	fRate;
@@ -1527,6 +1586,21 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	send_reliable = false;
 
 	if( chan->incoming_acknowledged > chan->last_reliable_sequence && chan->incoming_reliable_acknowledged != chan->reliable_sequence )
+		send_reliable = true;
+
+	// Lost-packet fallback for asymmetric/lossy links (WiFi): the reference
+	// GoldSrc gate above requires the peer to cumulatively acknowledge a
+	// packet BEYOND the reliable one before resending. If the reliable
+	// packet itself was dropped, the peer never acks it and the gate stays
+	// locked forever, stranding the reliable queue and overflowing the
+	// peer's outgoing reliable buffer. Resend on a timeout instead, only
+	// while the peer demonstrably has NOT received the reliable packet
+	// (incoming_acknowledged < last_reliable_sequence), so the payload can
+	// never be re-executed on the peer by this fallback.
+	if( !send_reliable && chan->reliable_length > 0
+		&& chan->incoming_acknowledged < chan->last_reliable_sequence
+		&& chan->incoming_reliable_acknowledged != chan->reliable_sequence
+		&& ( host.realtime - chan->last_reliable_send_time >= NETCHAN_RELIABLE_RESEND_TIME ))
 		send_reliable = true;
 
 	// A packet can have "reliable payload + frag payload + unreliable payload
@@ -1602,6 +1676,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 			memcpy( chan->reliable_buf, chan->message_buf, MSG_GetNumBytesWritten( &chan->message ));
 			chan->reliable_length = MSG_GetNumBitsWritten( &chan->message );
 			MSG_Clear( &chan->message );
+			reliable_fresh = true;
 
 			// if we send fragments, this is where they'll start
 			for( i = 0; i < MAX_STREAMS; i++ )
@@ -1665,6 +1740,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 				MSG_WriteBits( &temp, MSG_GetData( &pbuf->frag_message ), MSG_GetNumBitsWritten( &pbuf->frag_message ));
 				chan->reliable_length += MSG_GetNumBitsWritten( &pbuf->frag_message );
 				chan->frag_length[i] = MSG_GetNumBitsWritten( &pbuf->frag_message );
+				reliable_fresh = true;
 
 				// unlink pbuf
 				Netchan_UnlinkFragment( pbuf, &chan->fragbufs[i] );
@@ -1676,6 +1752,17 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 					chan->frag_startpos[j] += chan->frag_length[i];
 			}
 		}
+	}
+
+	// TEMP DEBUG: a pending reliable queue that does NOT get (re)sent this
+	// packet is the lock signature we are chasing
+	if( net_showpackets.value == 3.0f && chan->sock == NS_CLIENT && chan->gs_netchan
+		&& chan->reliable_length > 0 && !send_reliable )
+	{
+		Con_Printf( "%s: TXDROP rlen=%d sendrel=%d iack=%u lastrel=%u irack=%u relseq=%u seq=%u\n",
+			__func__, chan->reliable_length, send_reliable,
+			chan->incoming_acknowledged, chan->last_reliable_sequence,
+			chan->incoming_reliable_acknowledged, chan->reliable_sequence, chan->outgoing_sequence );
 	}
 
 	memset( send_buf, 0, sizeof( send_buf ));
@@ -1718,6 +1805,10 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 		MSG_WriteWord( &send, (int)net_qport.value );
 	}
 
+	// Match reference GoldSrc (net_chan.cpp:458): the per-stream fragment
+	// header is emitted ONLY when there are actual fragments in flight.
+	// Unfragmented reliable messages (e.g. the "new" command) are written
+	// directly with no stream header, exactly like the real HLDS client.
 	if( send_reliable && send_reliable_fragment )
 	{
 		for( i = 0; i < MAX_STREAMS; i++ )
@@ -1728,8 +1819,19 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 				MSG_WriteLong( &send, chan->reliable_fragid[i] );
 				if( chan->gs_netchan )
 				{
-					MSG_WriteShort( &send, chan->frag_startpos[i] >> 3 );
-					MSG_WriteShort( &send, chan->frag_length[i] >> 3 );
+					// GoldSrc clients send fragStart/fragLength as 16-bit byte
+					// counts. Sven server->client packets use 32-bit fields, so
+					// keep this narrow form scoped to outbound client packets.
+					if( chan->sock == NS_CLIENT )
+					{
+						MSG_WriteWord( &send, chan->frag_startpos[i] >> 3 );
+						MSG_WriteWord( &send, chan->frag_length[i] >> 3 );
+					}
+					else
+					{
+						MSG_WriteLong( &send, chan->frag_startpos[i] >> 3 );
+						MSG_WriteLong( &send, chan->frag_length[i] >> 3 );
+					}
 				}
 				else
 				{
@@ -1748,7 +1850,13 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	if( send_reliable )
 	{
 		MSG_WriteBits( &send, chan->reliable_buf, chan->reliable_length );
-		chan->last_reliable_sequence = chan->outgoing_sequence - 1;
+		// anchor the confirmation gate to the FIRST transmission of this
+		// reliable payload; retransmits must not race the peer's acknowledgements
+		if( reliable_fresh )
+			chan->last_reliable_sequence = chan->outgoing_sequence - 1;
+		// stamp every transmission (first + retransmits) so the lost-packet
+		// fallback keeps a sane resend cadence for a stuck reliable queue
+		chan->last_reliable_send_time = host.realtime;
 	}
 
 	if( length )
@@ -1789,6 +1897,17 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	{
 		int splitsize = chan->pfnBlockSize( chan->client, FRAGSIZE_SPLIT );
 
+		// STEAM/SIGNON DEBUG: dump the exact outgoing bytes the server will
+		// read AFTER unmunge (i.e. dump BEFORE we munge them). Limit to small
+		// signon-size packets to avoid gameplay spam.
+		if( chan->sock == NS_CLIENT && Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 2 &&
+			MSG_GetNumBytesWritten( &send ) <= 256 )
+		{
+			Con_DPrintf( "Netchan_Transmit: DUMP outgoing (%d bytes) seq=%d munge=%d\n",
+				MSG_GetNumBytesWritten( &send ), chan->outgoing_sequence - 1, chan->use_munge );
+			Netchan_DumpHex( "TX", MSG_GetData( &send ), MSG_GetNumBytesWritten( &send ));
+		}
+
 		if( chan->use_munge )
 			COM_Munge2( send.pData + 8, MSG_GetNumBytesWritten( &send ) - 8, (byte)( chan->outgoing_sequence - 1 ));
 
@@ -1806,12 +1925,15 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 
 	if( net_showpackets.value && net_showpackets.value != 2.0f )
 	{
-		Con_Printf( " %s --> sz=%i seq=%i ack=%i rel=%i tm=%f\n"
+		// unmasked (30-bit, matching the peer's normalized view): seq/ack are
+		// the exact wire fields the server's s <-- print will show
+		Con_Printf( " %s --> sz=%i seq=%u ack=%u rel=%i frag=%i tm=%f\n"
 			, ns_strings[chan->sock]
 			, MSG_GetNumBytesWritten( &send )
-			, ( chan->outgoing_sequence - 1 ) & 63
-			, chan->incoming_sequence & 63
+			, ( chan->outgoing_sequence - 1 ) & 0x3FFFFFFF
+			, chan->incoming_sequence
 			, send_reliable ? 1 : 0
+			, send_reliable_fragment ? 1 : 0
 			, (float)host.realtime );
 	}
 }
@@ -1859,7 +1981,7 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 	uint sequence = MSG_ReadLong( msg );
 	uint sequence_ack = MSG_ReadLong( msg );
 
-	if( chan->use_munge && MSG_GetMaxBytes( msg ) >= 8 )
+	if( chan->use_munge && !chan->munge_tx_only && MSG_GetMaxBytes( msg ) >= 8 )
 		COM_UnMunge2( msg->pData + 8, MSG_GetMaxBytes( msg ) - 8, sequence & 0xFF );
 
 	// read the qport if we are a server; serves as a NAT-stable
@@ -1875,7 +1997,11 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 
 	qboolean message_contains_fragments = FBitSet( sequence, BIT( 30 )) ? true : false;
 
-	if( message_contains_fragments )
+	// Match reference GoldSrc (net_chan.cpp:702): the per-stream fragment
+	// header is read ONLY when the packet actually carries fragments.
+	qboolean read_frag_header = message_contains_fragments;
+
+	if( read_frag_header )
 	{
 		for( int i = 0; i < MAX_STREAMS; i++ )
 		{
@@ -1885,8 +2011,18 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 				fragid[i] = MSG_ReadLong( msg );
 				if( chan->gs_netchan )
 				{
-					frag_offset[i] = MSG_ReadShort( msg ) << 3;
-					frag_length[i] = MSG_ReadShort( msg ) << 3;
+					// GoldSrc client->server packets use 16-bit byte counts,
+					// while Sven server->client packets use 32-bit byte counts.
+					if( chan->sock == NS_SERVER )
+					{
+						frag_offset[i] = MSG_ReadWord( msg ) << 3;
+						frag_length[i] = MSG_ReadWord( msg ) << 3;
+					}
+					else
+					{
+						frag_offset[i] = MSG_ReadLong( msg ) << 3;
+						frag_length[i] = MSG_ReadLong( msg ) << 3;
+					}
 				}
 				else
 				{
@@ -1897,7 +2033,12 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 		}
 
 		if( !Netchan_Validate( chan, msg, frag_message, fragid, frag_offset, frag_length ))
+		{
+			Con_DPrintf( "%s: Netchan_Validate FAILED (gs_netchan=%d frag=%d) from %s\n",
+				__func__, chan->gs_netchan, message_contains_fragments,
+				NET_AdrToString( chan->remote_address ) );
 			return false;
+		}
 	}
 
 	sequence &= ~BIT( 31 );
@@ -1948,6 +2089,16 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 	net_drop = sequence - ( chan->incoming_sequence + 1 );
 	if( net_drop > 0 && net_showdrop.value )
 		Con_Printf( "%s:dropped %i packets at %i\n", NET_AdrToString( chan->remote_address ), net_drop, sequence );
+
+	// TEMP DEBUG: capture ack-gate tuple while the outgoing reliable queue is
+	// pending; reveals the exact gate that fails to clear reliable_length
+	if( net_showpackets.value == 3.0f && chan->reliable_length > 0
+		&& chan->sock == NS_CLIENT && chan->gs_netchan )
+	{
+		int will_clear = ( reliable_ack == (uint)chan->reliable_sequence ) && ( sequence_ack >= (uint)chan->last_reliable_sequence );
+		Con_Printf( "%s: ACKGATE relack=%u relseq=%u seqack=%u lastrel=%u rlen=%d clr=%d\n",
+			__func__, reliable_ack, chan->reliable_sequence, sequence_ack, chan->last_reliable_sequence, chan->reliable_length, will_clear );
+	}
 
 	// if the current outgoing reliable message has been acknowledged
 	// clear the buffer to make way for the next
@@ -2027,8 +2178,8 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 				frag_offset[j] -= frag_length[i];
 		}
 
-		// is there anything left to process?
-		if( MSG_GetNumBitsLeft( msg ) <= 0 )
+		// is there anything left to process? (rehlds parity: net_message.cursize <= 16)
+		if( MSG_GetNumBytesWritten( msg ) <= 16 )
 		{
 			return false;
 		}

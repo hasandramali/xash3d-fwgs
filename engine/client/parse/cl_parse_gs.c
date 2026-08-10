@@ -288,6 +288,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	frame_t *oldframe;
 	int numbase = 0;
 	int playerbytes = 0;
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
 
 	// save first uncompressed packet as timestamp
 	if( cls.changelevel && !delta && cls.demorecording )
@@ -303,7 +304,9 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 
 	if( delta )
 	{
-		uint oldpacket = MSG_ReadByte( msg );
+		// Svengine writes the delta sequence number in 16 bits; the clientdata
+		// path (CL_ParseClientData) already reads a WORD for PROTO_GOLDSRC.
+		uint oldpacket = MSG_ReadWord( msg );
 		oldframe = &cl.frames[oldpacket & CL_UPDATE_MASK];
 
 		if( !CL_ValidateDeltaPacket( oldpacket, oldframe ))
@@ -333,7 +336,9 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	{
 		int bufstart, newnum;
 		qboolean player;
+		const char *srcMark = "?";
 		delta_header_t hdr;
+		int entStartBit = MSG_GetNumBitsRead( msg );
 		int val = MSG_ReadWord( msg );
 
 		if( val )
@@ -366,16 +371,35 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 				Con_Printf( S_WARN "%s: delta entity on non-delta update (%d)\n", __func__, oldnum );
 
 			// from delta
+			srcMark = "old-delta";
 			CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent );
 			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 		else if( oldnum > newnum )
 		{
 			// from baseline
+			srcMark = "baseline";
 			CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL );
 		}
 
-		if( player ) playerbytes += MSG_GetNumBytesRead( msg ) - bufstart;
+		// entity-level wire ledger: decode the delta packet header so the
+		// packed "who/what" info (remove/custom/instanced flags, table, and
+		// the exact bit span each entity consumed) is readable without any
+		// offline re-assembly of the hex stream.
+		if( dbg >= 4 && !hdr.remove )
+		{
+			const char *tbl = hdr.custom ? "custom" : ( player ? "player" : "normal" );
+			Con_DPrintf( "GS-ENT: delta=%d eindex=%d custom=%d inst=%d off=%d table=%s src=%s bits=%d..%d (%d bits)\n",
+				delta, newnum, hdr.custom, hdr.instanced, hdr.offset, tbl, srcMark,
+				entStartBit, MSG_GetNumBitsRead( msg ), MSG_GetNumBitsRead( msg ) - entStartBit );
+		}
+		else if( dbg >= 4 )
+		{
+			Con_DPrintf( "GS-ENT: delta=%d eindex=%d REMOVE bits=%d..%d\n",
+				delta, newnum, entStartBit, MSG_GetNumBitsRead( msg ));
+		}
+
+		if( player ) playerbytes += MSG_GetNumBitsRead( msg ) - bufstart;
 	}
 
 	if( MSG_CheckOverflow( msg ))
@@ -422,7 +446,7 @@ static float MSG_ReadGSBitCoord( sizebuf_t *sb )
 		int sign = MSG_ReadOneBit( sb );
 
 		if( ival )
-			ival = MSG_ReadUBitLong( sb, 12 );
+			ival = MSG_ReadUBitLong( sb, 24 );
 		if( fval )
 			fval = MSG_ReadUBitLong( sb, 3 );
 
@@ -468,7 +492,7 @@ static void CL_ParseSoundPacketGS( sizebuf_t *msg )
 	else attn = 1.0f;
 
 	int chan = MSG_ReadUBitLong( msg, 3 );
-	int entnum = MSG_ReadUBitLong( msg, MAX_GOLDSRC_ENTITY_BITS );
+	int entnum = MSG_ReadUBitLong( msg, MAX_GOLDSRC_SOUND_BITS );
 	int sound;
 	if( FBitSet( flags, SND_GOLDSRC_LARGE_INDEX ))
 		sound = MSG_ReadWord( msg );
@@ -569,8 +593,40 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 
 		cmd = MSG_ReadServerCmd( msg );
 
+		// Sven Co-op dedicated servers pad the reliable stream with 0x00 bytes
+		// directly after fixed-size user messages (buffer.dat shows the exact
+		// pattern twice: cmd 148 VoiceMask, 8-byte mask, then 00 00 before the
+		// next payload). Under the GoldSrc wire format 0x00 is svc_bad, which
+		// Host_Error()s the client mid-signon. The Sven client engine tolerates
+		// this padding, so skip the stray byte and keep parsing instead of
+		// aborting. Harmless on vanilla GoldSrc too: mid-message 0x00 is never a
+		// valid command, so consuming it is strictly more robust (the tail is
+		// still guarded by the overflow check and the sizeof-left sanity skip).
+		if( cmd == svc_bad && cls.net_protocol == PROTO_GOLDSRC )
+		{
+			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+				Con_Printf( "SVC-PAD: skipping svc_bad(0x00) pad byte at offset %d (Sven stream padding)\n", bufStart );
+			continue;
+		}
+
+		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+			Con_DPrintf( "%s: svc cmd=%d (%s) signon=%d state=%d msgbits=%d byte=%d bit=%d\n", __func__, cmd, CL_MsgInfo( cmd ), cls.signon, cls.state, MSG_GetNumBitsLeft( msg ), (int)bufStart, MSG_GetNumBitsRead( msg ) );
+
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 3 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
+		{
+			int startByte = MSG_GetNumBitsWritten( msg ) >> 3;
+			int maxBytes = MSG_GetMaxBytes( msg );
+			int rem = maxBytes > startByte ? maxBytes - startByte : 0;
+			if( rem > 0 )
+			{
+				Con_DPrintf( "%s: DUMP svc payload (svc cmd %d, %d bytes from offset %d)\n", __func__, cmd, rem, startByte );
+				CL_DumpHex( "svc_pay", MSG_GetData( msg ) + startByte, rem );
+			}
+		}
+
 		// record command for debugging spew on parse problem
-		CL_Parse_RecordCommand( cmd, bufStart );
+		CL_Parse_RecordCommand( cmd, bufStart, MSG_GetNumBitsWritten( msg ) );
 
 		if( CL_ParseCommonMessage( msg, PROTO_GOLDSRC, cmd, bufStart ))
 			continue;
@@ -641,9 +697,17 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 			cl.paused = ( MSG_ReadByte( msg ) != 0 );
 			break;
 		case svc_goldsrc_killedmonster:
-		case svc_goldsrc_foundsecret:
-			// this does nothing
+			// does nothing in Sven Co-op
 			break;
+		case svc_goldsrc_foundsecret:
+		{
+			// Sven Co-op sends a one-byte payload length, then that many bytes.
+			// Without consuming it the parser treats the next byte as a command (svc_bad).
+			int len = MSG_ReadByte( msg );
+			while( len-- > 0 )
+				MSG_ReadByte( msg );
+			break;
+		}
 		case svc_goldsrc_spawnstaticsound:
 			CL_ParseSpawnStaticSound( msg );
 			break;

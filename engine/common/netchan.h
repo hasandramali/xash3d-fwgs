@@ -172,6 +172,7 @@ typedef enum netchan_flags_e
 	NETCHAN_GOLDSRC    = BIT( 2 ),
 	NETCHAN_USE_LZSS   = BIT( 3 ), // mutually exclusive with bzip2
 	NETCHAN_USE_COOKIE = BIT( 4 ), // per-connection 64-bit cookie prefixed to every sequenced packet (NET_EXT_NETCHAN_COOKIE)
+	NETCHAN_USE_MUNGE_TX = BIT( 5 ), // munge outgoing packets only (some GoldSrc servers unmunge inbound but send plain outbound)
 } netchan_flags_t;
 
 // Network Connection Channel
@@ -194,6 +195,7 @@ typedef struct netchan_s
 	unsigned int		outgoing_sequence;			// message we are sending to remote
 	unsigned int		reliable_sequence;			// whether the message contains reliable payload, single bit
 	unsigned int		last_reliable_sequence;		// outgoing sequence number of last send that had reliable data
+	double		last_reliable_send_time;	// stamp of last transmission of the pending reliable payload
 
 	// callback to get actual framgment size
 	void		*client;
@@ -238,6 +240,7 @@ typedef struct netchan_s
 	size_t		total_received;
 
 	qboolean	use_munge;
+	qboolean	munge_tx_only;
 	qboolean	use_bz2;
 	qboolean	use_lzss;
 	qboolean	gs_netchan;

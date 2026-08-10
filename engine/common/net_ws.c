@@ -34,7 +34,6 @@ GNU General Public License for more details.
 #define SPLITPACKET_MIN_SIZE      508   // RFC 791: 576(min ip packet) - 60 (ip header) - 8 (udp header)
 #define SPLITPACKET_MAX_SIZE      64000
 #define NET_MAX_FRAGMENTS         ( NET_MAX_FRAGMENT / (SPLITPACKET_MIN_SIZE - sizeof( SPLITPACKET )))
-#define NET_MAX_GOLDSRC_FRAGMENTS 5 // magic number
 
 // ff02:1
 static const uint8_t k_ipv6Bytes_LinkLocalAllNodes[16] =
@@ -79,13 +78,6 @@ typedef struct
 	int            sequence_number;
 	unsigned short packet_id;
 } SPLITPACKET;
-
-typedef struct
-{
-	int           net_id;
-	int           sequence_number;
-	unsigned char packet_id;
-} SPLITPACKETGS;
 #pragma pack(pop)
 
 typedef struct
@@ -1225,7 +1217,16 @@ receive long packet from network
 */
 static qboolean NET_GetLong( byte *pData, size_t size, size_t *outSize, size_t splitsize, connprotocol_t proto )
 {
-	const size_t header_size = proto == PROTO_GOLDSRC ? sizeof( SPLITPACKETGS ) : sizeof( SPLITPACKET );
+	// SC-proto: rehlds Sven and real Sven Co-op servers always split with the
+	// byte-packed 10-byte header (fragment count in the low byte of a 16-bit
+	// packet_id, fragment number in the high byte), regardless of the protocol
+	// negotiated. The stock Half-Life nibble layout is not supported anymore.
+	const size_t header_size = sizeof( SPLITPACKET );
+	SPLITPACKET *pHeader = (SPLITPACKET *)pData;
+	int sequence_number, packet_count, packet_number, max_splits;
+	unsigned short packet_id;
+
+	(void)proto; // Sven header layout does not depend on the negotiated protocol
 
 	if( splitsize < header_size )
 		return false;
@@ -1236,30 +1237,12 @@ static qboolean NET_GetLong( byte *pData, size_t size, size_t *outSize, size_t s
 		return false;
 	}
 
-	int sequence_number, packet_count, packet_number, max_splits;
-	unsigned short packet_id;
-	if( proto == PROTO_GOLDSRC )
-	{
-		SPLITPACKETGS *pHeader = (SPLITPACKETGS *)pData;
+	sequence_number = pHeader->sequence_number;
+	packet_id = pHeader->packet_id;
+	packet_count = ( packet_id & 0xFF );
+	packet_number = ( packet_id >> 8 );
 
-		sequence_number = pHeader->sequence_number;
-		packet_id = pHeader->packet_id;
-		packet_count = ( packet_id & 0xF );
-		packet_number = ( packet_id >> 4 );
-
-		max_splits = NET_MAX_GOLDSRC_FRAGMENTS;
-	}
-	else
-	{
-		SPLITPACKET *pHeader = (SPLITPACKET *)pData;
-
-		sequence_number = pHeader->sequence_number;
-		packet_id = pHeader->packet_id;
-		packet_count = ( packet_id & 0xFF );
-		packet_number = ( packet_id >> 8 );
-
-		max_splits = ARRAYSIZE( net.split_flags );
-	}
+	max_splits = ARRAYSIZE( net.split_flags );
 
 	if( packet_number < 0 || packet_count <= 0 || packet_number >= max_splits || packet_count > max_splits || packet_number >= packet_count )
 	{
@@ -1516,6 +1499,45 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 	SOCKET		net_socket = 0;
 	netadrtype_t type = NET_NetadrType( &to );
 
+	// TXPROBE: prove whether client datagrams actually reach the local wire
+	// and from which source port (catches silent socket rebinds / ring drops)
+	static int txprobe_port = 0;
+	if( net_showpackets.value == 3.0f && sock == NS_CLIENT )
+	{
+		int srcport = 0;
+		const char *state = "UNKNOWN";
+
+		if( !net.initialized || type == NA_LOOPBACK )
+		{
+			state = "LOOPBACK-RING";
+		}
+		else if( type == NA_IP || type == NA_BROADCAST )
+		{
+			if( !NET_IsSocketValid( net.ip_sockets[sock] ))
+			{
+				state = "INVALID-SOCKET";
+			}
+			else
+			{
+				struct sockaddr_storage laddr = { 0 };
+				WSAsize_t llen = sizeof( laddr );
+
+				state = "UDP";
+
+				if( !NET_IsSocketError( getsockname( net.ip_sockets[sock], (struct sockaddr *)&laddr, &llen )))
+					srcport = ntohs( ((struct sockaddr_in *)&laddr )->sin_port );
+
+				if( txprobe_port && srcport != txprobe_port )
+					Con_Printf( "TXPROBE PORT-CHANGED %u -> %u\n", txprobe_port, srcport );
+				if( srcport )
+					txprobe_port = srcport;
+			}
+		}
+
+		Con_Printf( "TXPROBE NS_CLIENT state=%s type=%d remote=%s srcport=%d len=%u\n",
+			state, type, NET_AdrToString( to ), srcport, (unsigned)length );
+	}
+
 	if( !net.initialized || type == NA_LOOPBACK )
 	{
 		NET_SendLoopPacket( sock, length, data, to );
@@ -1542,13 +1564,20 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 
 	int ret = NET_SendLong( sock, net_socket, data, length, 0, &addr, NET_SockAddrLen( &addr ), splitsize );
 
+	if( net_showpackets.value == 3.0f && sock == NS_CLIENT )
+		Con_Printf( "TXPROBE sendto ret=%d (expected %u)\n", ret, (unsigned)length );
+
 	if( NET_IsSocketError( ret ))
 	{
 		int err = WSAGetLastError();
 
 		// WSAEWOULDBLOCK is silent
 		if( err == WSAEWOULDBLOCK )
+		{
+			if( net_showpackets.value == 3.0f && sock == NS_CLIENT )
+				Con_Printf( "TXPROBE WSAEWOULDBLOCK (send postponed)\n" );
 			return;
+		}
 
 		// some PPP links don't allow broadcasts
 		if( err == WSAEADDRNOTAVAIL && ( type == NA_BROADCAST || type == NA_MULTICAST_IP6 ))
@@ -1578,6 +1607,26 @@ NET_SendPacket
 void NET_SendPacket( netsrc_t sock, size_t length, const void *data, netadr_t to )
 {
 	NET_SendPacketEx( sock, length, data, to, 0 );
+}
+
+/*
+====================
+NET_SetSocketBuffers
+
+Increase kernel socket buffers, otherwise bursts of
+datagrams (e.g. sign-on) overflow default SO_RCVBUF and
+reliable packets get dropped before Netchan even sees them.
+====================
+*/
+static void NET_SetSocketBuffers( int net_socket )
+{
+	int bufsize = 512 * 1024; // 512KB
+
+	if( NET_IsSocketError( setsockopt( net_socket, SOL_SOCKET, SO_SNDBUF, (const char *)&bufsize, sizeof( bufsize ))))
+		Con_DPrintf( S_WARN "%s: setsockopt SO_SNDBUF: %s\n", __func__, NET_ErrorString( ));
+
+	if( NET_IsSocketError( setsockopt( net_socket, SOL_SOCKET, SO_RCVBUF, (const char *)&bufsize, sizeof( bufsize ))))
+		Con_DPrintf( S_WARN "%s: setsockopt SO_RCVBUF: %s\n", __func__, NET_ErrorString( ));
 }
 
 /*
@@ -1613,6 +1662,9 @@ static int NET_IPSocket( const char *net_iface, int port, int family )
 		timeout.tv_sec = timeout.tv_usec = 0;
 		setsockopt( net_socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
 	}
+
+	// make the buffers big enough for datagram bursts
+	NET_SetSocketBuffers( net_socket );
 
 	// make it broadcast capable
 	if( NET_IsSocketError( setsockopt( net_socket, SOL_SOCKET, SO_BROADCAST, (char *)&_true, sizeof( _true ))))

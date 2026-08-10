@@ -2787,7 +2787,7 @@ static void GAME_EXPORT pfnWriteCoord( float flValue )
 {
 	MSG_WriteCoord( &sv.multicast, flValue );
 	if( svgame.msg_trace ) Con_Printf( "\t^3%s( %f )\n", __func__, flValue );
-	svgame.msg_realsize += 2;
+	svgame.msg_realsize += 4;
 }
 
 /*

@@ -10,12 +10,12 @@ jobs:
       matrix:
         include:
           # Linux builds
-          - os: ubuntu-22.04
-            targetos: linux
-            targetarch: amd64
-          - os: ubuntu-22.04
-            targetos: linux
-            targetarch: i386
+#          - os: ubuntu-22.04
+#            targetos: linux
+#            targetarch: amd64
+#          - os: ubuntu-22.04
+#            targetos: linux
+#            targetarch: i386
 #         - os: ubuntu-22.04-arm
 #           targetos: linux
 #           targetarch: arm64
@@ -36,13 +36,13 @@ jobs:
             targetos: android
             targetarch: multiarch
 
-          # Windows builds
-          - os: windows-latest
-            targetos: win32
-            targetarch: amd64
-          - os: windows-2022
-            targetos: win32
-            targetarch: i386
+#          # Windows builds
+#          - os: windows-latest
+#            targetos: win32
+#            targetarch: amd64
+#          - os: windows-2022
+#            targetos: win32
+#            targetarch: i386
 
           # Apple builds
 #          - os: macos-14

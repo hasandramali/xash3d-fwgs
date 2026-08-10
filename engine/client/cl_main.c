@@ -69,6 +69,7 @@ CVAR_DEFINE_AUTO( hud_fontscale, "1.0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud fo
 CVAR_DEFINE_AUTO( hud_fontrender, "0", FCVAR_ARCHIVE, "hud font render mode (0: additive, 1: holes, 2: trans)" );
 CVAR_DEFINE_AUTO( hud_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud at current resolution" );
 CVAR_DEFINE_AUTO( hud_scale_minimal_width, "640", FCVAR_ARCHIVE|FCVAR_LATCH, "if hud_scale results in a HUD virtual screen smaller than this value, it won't be applied" );
+CVAR_DEFINE_AUTO( hud_saytext_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale saytext at current resolution; 0 = disabled (not scaled)" );
 CVAR_DEFINE_AUTO( cl_solid_players, "1", 0, "Make all players not solid (can't traceline them)" );
 CVAR_DEFINE_AUTO( cl_updaterate, "101", FCVAR_USERINFO|FCVAR_ARCHIVE, "refresh rate of server messages" );
 CVAR_DEFINE_AUTO( cl_showevents, "0", FCVAR_ARCHIVE, "show events playback" );
@@ -101,6 +102,8 @@ static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FI
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
+static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "goldSrc netchan packet munge: 0=off, 1=both directions (vanilla/ReHLDS servers), 2=outgoing only (Sven Coop dedicated servers unmunge inbound but send plain outbound)" );
+static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -895,6 +898,8 @@ static void CL_WritePacket( void )
 
 	if( cls.state < min_state )
 	{
+		if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC )
+			Con_DPrintf( "%s: OUT pre-signon empty ack (state=%d signon=%d)\n", __func__, cls.state, cls.signon );
 		Netchan_TransmitBits( &cls.netchan, 0, "" );
 		return;
 	}
@@ -989,7 +994,14 @@ static void CL_WritePacket( void )
 
 			buf.pData[key - 1] = Q_min( size, 255 );
 			buf.pData[key] = CRC32_BlockSequence( &buf.pData[key + 1], size, cls.netchan.outgoing_sequence );
-			COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
+
+			// Sven Co-op's SV_ParseMove reads loss/backup/newcmds directly as
+			// plain bytes (no COM_UnMunge on the move body, verified in hw.dll
+			// @0x1db9f50). Vanilla GoldSrc/ReHLDS DO unmunge (munge1, key=seq).
+			// Gate the move-body munge1 on cl_goldsrc_munge: mode 0 (Sven) sends
+			// plain, modes 1/2 (vanilla) keep the munge.
+			if( cl_goldsrc_munge.value != 0 )
+				COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
 		}
 		else if( !Host_IsLocalClient( ))
 		{
@@ -1012,7 +1024,11 @@ static void CL_WritePacket( void )
 		{
 			cl.delta_sequence = cl.validsequence;
 			MSG_BeginClientCmd( &buf, clc_delta );
-			MSG_WriteByte( &buf, cl.validsequence & 0xff );
+			// Sven reads clc_delta's sequence as a 16-bit field
+			// (SV_ParseDelta PROTO_BITS_SVEN_DELTA_SEQUENCE), stock GoldSrc as a byte
+			if( proto == PROTO_GOLDSRC )
+				MSG_WriteShort( &buf, cl.validsequence & 0xffff );
+			else MSG_WriteByte( &buf, cl.validsequence & 0xff );
 		}
 		else cl.delta_sequence = -1;
 
@@ -1028,6 +1044,21 @@ static void CL_WritePacket( void )
 		MSG_Clear( &cls.datagram );
 
 		Netchan_TransmitBits( &cls.netchan, MSG_GetNumBitsWritten( &buf ), MSG_GetData( &buf ));
+
+		if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
+		{
+			size_t rlbytes = ( cls.netchan.reliable_length + 7 ) / 8;
+			Con_DPrintf( "%s: OUT seq=%d unreliable_bits=%d reliable_bits=%d\n",
+				__func__, cls.netchan.outgoing_sequence - 1,
+				MSG_GetNumBitsWritten( &buf ), cls.netchan.reliable_length );
+			if( rlbytes > 0 )
+			{
+				Con_DPrintf( "%s: DUMP reliable (queued cmds)\n", __func__ );
+				CL_DumpHex( "reliable", cls.netchan.reliable_buf, rlbytes );
+			}
+			Con_DPrintf( "%s: DUMP unreliable (move/stringcmd)\n", __func__ );
+			CL_DumpHex( "unreliable", MSG_GetData( &buf ), MSG_GetNumBytesWritten( &buf ));
+		}
 	}
 	else
 	{
@@ -1036,6 +1067,12 @@ static void CL_WritePacket( void )
 
 	// update download/upload slider.
 	Netchan_UpdateProgress( &cls.netchan );
+
+	// STEAM/SIGNON DEBUG: confirm the reliable "new" command actually leaves
+	// the client. reliable_length>0 means a reliable msg is queued/unsent.
+	if( cl_goldsrc_debug.value >= 1 )
+		Con_DPrintf( "%s: OUTBOUND state=%d signon=%d reliable_bits=%d seq=%d\n",
+			__func__, cls.state, cls.signon, cls.netchan.reliable_length, cls.netchan.outgoing_sequence );
 }
 
 /*
@@ -1164,6 +1201,24 @@ static void CL_GetCDKey( char *protinfo, size_t protinfosize )
 	Info_SetValueForKey( protinfo, "cdkey", key, protinfosize );
 }
 
+void CL_DumpHex( const char *name, const void *data, size_t size )
+{
+	const uint8_t *bytes = (const uint8_t *)data;
+	char line[80];
+	int pos = 0;
+	size_t i;
+
+	for( i = 0; i < size; i++ )
+	{
+		pos += Q_snprintf( line + pos, sizeof( line ) - pos, "%02x ", bytes[i] );
+		if( ( i % 16 ) == 15 || i == size - 1 )
+		{
+			Con_DPrintf( "%s [%zu/%zu]: %s\n", name, i + 1, size, line );
+			pos = 0;
+		}
+	}
+}
+
 static void CL_WriteSteamTicket( sizebuf_t *send )
 {
 	string key;
@@ -1215,6 +1270,20 @@ void CL_SendGoldSrcConnectPacket( netadr_t adr, int challenge, const void *ticke
 		CL_WriteSteamTicket( &send );
 	else
 		MSG_WriteBytes( &send, ticket, ticketlen );
+
+	Con_DPrintf( "%s: sending GoldSrc connect to %s, challenge=%d, protinfo \"%s\"\n", __func__, NET_AdrToString( adr ), challenge, protinfo );
+	if( ticket != NULL )
+	{
+		Con_DPrintf( "%s: ticket_len=%zu\n", __func__, ticketlen );
+		CL_DumpHex( "ticket", ticket, ticketlen );
+	}
+
+	if( cl_goldsrc_debug.value >= 2 )
+	{
+		Con_DPrintf( "%s: DUMP connect packet (%zu bytes)\n", __func__, MSG_GetNumBytesWritten( &send ));
+		CL_DumpHex( "connect_packet", MSG_GetData( &send ), MSG_GetNumBytesWritten( &send ));
+		Con_DPrintf( "%s: protinfo=\"%s\" userinfo=\"%s\"\n", __func__, protinfo, cls.userinfo );
+	}
 
 	if( MSG_CheckOverflow( &send ))
 		Con_Printf( S_ERROR "%s: %s overflow!\n", __func__, MSG_GetName( &send ) );
@@ -1691,7 +1760,19 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 	switch( proto )
 	{
 	case PROTO_GOLDSRC:
-		SetBits( flags, NETCHAN_USE_MUNGE | NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
+		SetBits( flags, NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
+
+		if( cl_goldsrc_munge.value == 1 )
+		{
+			SetBits( flags, NETCHAN_USE_MUNGE );
+			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (both directions)^7\n" );
+		}
+		else if( cl_goldsrc_munge.value == 2 )
+		{
+			SetBits( flags, NETCHAN_USE_MUNGE | NETCHAN_USE_MUNGE_TX );
+			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (outgoing only, Sven Coop mode)^7\n" );
+		}
+
 		pfnBlockSize = CL_GetGoldSrcFragmentSize;
 		break;
 	default:
@@ -1712,6 +1793,14 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 	}
 
 	Netchan_Setup( NS_CLIENT, &cls.netchan, net_from, Cvar_VariableInteger( "net_qport" ), NULL, pfnBlockSize, flags );
+
+	// the user's rate must drive the client's own outgoing bandwidth choke,
+	// not the hardcoded DEFAULT_RATE (9999) Netchan_Setup leaves in the
+	// channel. With ~550-byte packets that choke throttles the client to
+	// ~18 pps, starving the server of acknowledgements; on lossy links that
+	// dries up the ack stream and the server's outgoing reliable buffer
+	// overflows. Mirror the server-side clamp for consistency.
+	cls.netchan.rate = bound( MIN_RATE, rate.value, MAX_RATE );
 
 	if( FBitSet( flags, NETCHAN_USE_COOKIE ))
 		Netchan_SetCookie( &cls.netchan, cls.netchan_pending_cookie );
@@ -2701,6 +2790,8 @@ static void CL_Challenge( const char *c, netadr_t from, sizebuf_t *msg )
 			cls.server_steamid = strtoull( Cmd_Argv( 3 ), NULL, 10 );
 			cls.vac2_secure = Q_atoi( Cmd_Argv( 4 ));
 		}
+
+		Con_DPrintf( "%s: goldsrc challenge, steam_auth=%d server_steamid=%"PRIu64" vac2_secure=%d\n", __func__, cls.steam_auth ? 1 : 0, cls.server_steamid, cls.vac2_secure ? 1 : 0 );
 	}
 
 	cls.bandwidth_test.challenge = Q_atoi( Cmd_Argv( 1 ));
@@ -2767,6 +2858,8 @@ static void CL_Reject( const char *c, const char *args, netadr_t from )
 
 	if( !CL_IsFromConnectingServer( from ))
 		return;
+
+	Con_DPrintf( "%s: server %s rejected connection: \"%s\"\n", __func__, NET_AdrToString( from ), args );
 
 	CL_ErrorMsg( c, args, from, NULL );
 
@@ -3033,8 +3126,34 @@ static void CL_ReadNetMessage( void )
 				continue;
 			}
 
+			// STEAM/SIGNON DEBUG: dump RAW server bytes BEFORE Netchan_Process,
+			// which may silently drop them. Without this we're blind to signon
+			// packets the server sends but we reject.
+			if( cl_goldsrc_debug.value >= 3 && cls.net_protocol == PROTO_GOLDSRC )
+			{
+				Con_DPrintf( "%s: RAW inbound from %s bytes=%zu inseq=%d\n", __func__,
+					NET_AdrToString( net_from ), curSize, cls.netchan.incoming_sequence );
+				CL_DumpHex( "raw-in", MSG_GetData( &net_message ), curSize );
+			}
+
 			if( !Netchan_Process( &cls.netchan, &net_message ))
+			{
+				Con_DPrintf( "%s: Netchan_Process REJECTED packet from %s bytes=%zu inseq=%d\n",
+					__func__, NET_AdrToString( net_from ), curSize, cls.netchan.incoming_sequence );
 				continue;	// wasn't accepted for some reason
+			}
+
+			// STEAM/SIGNON DEBUG: log inbound server packet size so we can tell
+			// whether the server is actually sending signon data or just ACKs.
+			if( cl_goldsrc_debug.value >= 1 )
+				Con_DPrintf( "%s: INBOUND from %s bytes=%zu signon=%d state=%d\n",
+					__func__, NET_AdrToString( net_from ), curSize, cls.signon, cls.state );
+
+			if( cl_goldsrc_debug.value >= 3 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
+			{
+				Con_DPrintf( "%s: DUMP inbound packet\n", __func__ );
+				CL_DumpHex( "inbound", MSG_GetData( &net_message ), curSize );
+			}
 		}
 
 		if( cls.state == ca_active )
@@ -3045,6 +3164,20 @@ static void CL_ReadNetMessage( void )
 		else
 		{
 			CL_ResetFrame( &cl.frames[cls.netchan.incoming_sequence & CL_UPDATE_MASK] );
+		}
+
+		// STEAM/SIGNON ACK: acknowledge on RECEIPT right after Netchan_Process,
+		// before parsing. Netchan_Process already bumped incoming_sequence to
+		// "received" — the signal the server's reliable window waits on. Parsing
+		// a big GoldSrc baseline can take tens/hundreds of ms on a slow device;
+		// acking after the parse lets the server's unacked reliable data
+		// (ReHLDS/Sven MAX_MSGLEN ~3990B) fill with ~1500B spawn messages and
+		// overflow into "Reliable channel overflowed".
+		if( cls.net_protocol == PROTO_GOLDSRC && cls.state >= ca_connected && cls.state < ca_active )
+		{
+			if( cl_goldsrc_debug.value >= 2 )
+				Con_DPrintf( "%s: in-band signon ack (unacked reliable=%d)\n", __func__, cls.netchan.incoming_reliable_sequence );
+			Netchan_TransmitBits( &cls.netchan, 0, "" );
 		}
 
 		CL_ParseNetMessage( &net_message, parsefn );
@@ -3336,6 +3469,9 @@ void CL_ServerCommand( qboolean reliable, const char *fmt, ... )
 		MSG_BeginClientCmd( &cls.datagram, clc_stringcmd );
 		MSG_WriteString( &cls.datagram, string );
 	}
+
+	if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC )
+		Con_DPrintf( "%s: QUEUE %s stringcmd: \"%s\"\n", __func__, reliable ? "reliable" : "datagram", string );
 }
 
 /*
@@ -3673,6 +3809,8 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_resend );
 	Cvar_RegisterVariable( &cl_allow_upload );
 	Cvar_RegisterVariable( &cl_allow_download );
+	Cvar_RegisterVariable( &cl_goldsrc_munge );
+	Cvar_RegisterVariable( &cl_goldsrc_debug );
 	Cvar_RegisterVariable( &cl_download_ingame );
 	Cvar_RegisterVariable( &cl_logofile );
 	Cvar_RegisterVariable( &cl_logocolor );
@@ -3740,6 +3878,7 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &hud_fontrender );
 	Cvar_RegisterVariable( &hud_scale );
 	Cvar_RegisterVariable( &hud_scale_minimal_width );
+	Cvar_RegisterVariable( &hud_saytext_scale );
 	Cvar_RegisterVariable( &cl_showevents );
 	Cvar_Get( "lastdemo", "", FCVAR_ARCHIVE, "last played demo" );
 	Cvar_RegisterVariable( &ui_renderworld );

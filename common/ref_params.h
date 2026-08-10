@@ -70,6 +70,8 @@ typedef struct ref_params_s
 	int		nextView;		// the renderer calls ClientDLL_CalcRefdef() and Renderview
 					// so long in cycles until this value is 0 (multiple views)
 	int		onlyClientDraw;	// if !=0 nothing is drawn by the engine except clientDraw functions
+// Xash3D extension
+	float		fov_x, fov_y;	// actual fov can be overrided on nextView
 } ref_params_t;
 
 // same as ref_params but for overview mode

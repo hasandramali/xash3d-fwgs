@@ -7,9 +7,9 @@ cd "$SCRIPTDIR" || exit 1
 MODPATH=mod-build/$1
 if [ -z "$1" ]; then
     MODPATH=mod-build/hlsdk
-    git clone --recursive https://github.com/FWGS/hlsdk-portable -b mobile_hacks "$MODPATH"
+    git clone --recursive https://github.com/hasandramali/hlsdk-portable -b svencoop "$MODPATH"
 else
-    git clone --recursive https://github.com/FWGS/hlsdk-portable -b "$1" "$MODPATH"
+    git clone --recursive https://github.com/hasandramali/hlsdk-portable -b "$1" "$MODPATH"
 fi
 
 mkdir -p ../../build/ios/libs || exit 1

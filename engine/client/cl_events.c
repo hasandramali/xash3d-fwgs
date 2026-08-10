@@ -405,7 +405,7 @@ void CL_ParseEvent( sizebuf_t *msg, connprotocol_t proto )
 	int		num_events = MSG_ReadUBitLong( msg, 5 );
 
 	if( proto == PROTO_GOLDSRC )
-		entity_bits = MAX_GOLDSRC_ENTITY_BITS;
+		entity_bits = MAX_GOLDSRC_EVENT_BITS;
 	else
 		entity_bits = MAX_ENTITY_BITS;
 

@@ -17,6 +17,9 @@
 		<action
 			android:id="@+id/action_libraryFragment_to_gameDataDownloaderFragment"
 			app:destination="@id/gameDataDownloaderFragment" />
+		<action
+			android:id="@+id/action_libraryFragment_to_steamAuthFragment"
+			app:destination="@id/steamAuthFragment" />
 	</fragment>
 	<fragment
 		android:id="@+id/gameSettingsFragment"
@@ -41,4 +44,8 @@
 		android:id="@+id/gameDataDownloaderFragment"
 		android:name="su.xash.engine.ui.downloader.GameDataDownloaderFragment"
 		android:label="@string/game_data_downloader" />
+	<fragment
+		android:id="@+id/steamAuthFragment"
+		android:name="su.xash.engine.ui.steam.SteamAuthFragment"
+		android:label="@string/steam_auth" />
 </navigation>

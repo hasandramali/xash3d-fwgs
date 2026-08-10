@@ -440,10 +440,10 @@ void MSG_WriteBitAngle( sizebuf_t *sb, float fAngle, int numbits )
 
 void MSG_WriteCoord( sizebuf_t *sb, float val )
 {
-	// g-cont. we loose precision here but keep old size of coord variable!
+	// Sven (GoldSrc 48) transmits coordinates as 32-bit long, Half-Life as short
 	if( FBitSet( host.features, ENGINE_WRITE_LARGE_COORD ))
-		MSG_WriteShort( sb, Q_rint( val ));
-	else MSG_WriteShort( sb, (int)( val * 8.0f ));
+		MSG_WriteLong( sb, Q_rint( val ));
+	else MSG_WriteLong( sb, (int)( val * 8.0f ));
 }
 
 void MSG_WriteVec3Coord( sizebuf_t *sb, const float *fa )
@@ -753,10 +753,10 @@ int MSG_ReadWord( sizebuf_t *sb )
 
 float MSG_ReadCoord( sizebuf_t *sb )
 {
-	// g-cont. we loose precision here but keep old size of coord variable!
+	// Sven (GoldSrc 48) transmits coordinates as 32-bit long, Half-Life as short
 	if( FBitSet( host.features, ENGINE_WRITE_LARGE_COORD ))
-		return (float)(MSG_ReadShort( sb ));
-	return (float)(MSG_ReadShort( sb ) * ( 1.0f / 8.0f ));
+		return (float)(MSG_ReadLong( sb ));
+	return (float)(MSG_ReadLong( sb ) * ( 1.0f / 8.0f ));
 }
 
 void MSG_ReadVec3Coord( sizebuf_t *sb, vec3_t fa )

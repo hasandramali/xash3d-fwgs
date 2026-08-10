@@ -460,7 +460,8 @@ void CL_BatchResourceRequest( qboolean initialize )
 			CL_MoveToOnHandList( p );
 			break;
 		case t_world:
-			ASSERT( 0 );
+			// Sven Co-op sends world/check resources with this type;
+			// GoldSrc client ignores them (world model arrives as t_model idx 1)
 			break;
 		}
 	}
@@ -516,7 +517,7 @@ int CL_EstimateNeededResources( void )
 			}
 			break;
 		case t_world:
-			ASSERT( 0 );
+			// never a to-download resource (Sven Co-op map/check entries)
 			break;
 		}
 	}
@@ -684,27 +685,25 @@ CL_ParseResourceRequest
 */
 void CL_SendResourceList( const resource_t *list, int count )
 {
-	byte buffer[MAX_INIT_MSG];
-	sizebuf_t sbuf;
-
-	MSG_Init( &sbuf, "ResourceBlock", buffer, sizeof( buffer ));
-	MSG_BeginClientCmd( &sbuf, clc_resourcelist );
-	MSG_WriteShort( &sbuf, count );
+	// Sven reads the client resource-list reply as a plain reliable message.
+	// Send it on the direct reliable channel instead of the fragment framework:
+	// a small (single-packet) reply must not carry the fragment flag, otherwise
+	// Sven's SV_ReadClientMessage despairs on the fragment reassembly and keeps
+	// returning "badread", never acknowledging the reply (reliable deadlock).
+	MSG_BeginClientCmd( &cls.netchan.message, clc_resourcelist );
+	MSG_WriteShort( &cls.netchan.message, count );
 
 	for( int i = 0; i < count; i++ )
 	{
-		MSG_WriteString( &sbuf, list[i].szFileName );
-		MSG_WriteByte( &sbuf, list[i].type );
-		MSG_WriteShort( &sbuf, list[i].nIndex );
-		MSG_WriteLong( &sbuf, list[i].nDownloadSize );
-		MSG_WriteByte( &sbuf, list[i].ucFlags );
+		MSG_WriteString( &cls.netchan.message, list[i].szFileName );
+		MSG_WriteByte( &cls.netchan.message, list[i].type );
+		MSG_WriteShort( &cls.netchan.message, list[i].nIndex );
+		MSG_WriteLong( &cls.netchan.message, list[i].nDownloadSize );
+		MSG_WriteByte( &cls.netchan.message, list[i].ucFlags );
 
 		if( FBitSet( list[i].ucFlags, RES_CUSTOM ))
-			MSG_WriteBytes( &sbuf, list[i].rgucMD5_hash, 16 );
+			MSG_WriteBytes( &cls.netchan.message, list[i].rgucMD5_hash, 16 );
 	}
-
-	Netchan_CreateFragments( &cls.netchan, &sbuf );
-	Netchan_FragSend( &cls.netchan );
 }
 
 static void CL_ParseResourceRequest( sizebuf_t *msg )
@@ -871,15 +870,23 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 	}
 
 	Q_snprintf( mapfile, sizeof( mapfile ), "maps/%s.bsp", clgame.mapname );
-	if( CRC32_MapFile( &cl.worldmapCRC, mapfile, cl.maxclients > 1 ))
+	if( !CRC32_MapFile( &cl.worldmapCRC, mapfile, cl.maxclients > 1 ))
+		cl.worldmapCRC = cl.checksum;
+
+	if( proto != PROTO_GOLDSRC )
 	{
-		// validate map checksum
 		if( cl.worldmapCRC != cl.checksum )
 		{
-			Con_Printf( S_ERROR "Your map [%s] differs from the server's.\n", clgame.mapname );
-			CL_Disconnect_f(); // for local game, call EndGame
-			Host_AbortCurrentFrame(); // to avoid svc_bad
+			Con_Printf( S_ERROR "Your map [%s] differs from the server's (client CRC %08X, server CRC %08X, file '%s', gamedir '%s', maxclients %d).\n",
+				clgame.mapname, cl.worldmapCRC, cl.checksum, mapfile, gamefolder, cl.maxclients );
+			CL_Disconnect_f();
+			Host_AbortCurrentFrame();
 		}
+	}
+	else if( cl.worldmapCRC != cl.checksum )
+	{
+		Con_Printf( S_WARN "Map CRC differs (client %08X, server %08X) but continuing for GoldSrc server.\n",
+			cl.worldmapCRC, cl.checksum );
 	}
 
 	if( clgame.maxModels > MAX_MODELS )
@@ -1101,7 +1108,12 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	// clear to old value before delta parsing
 	if( MSG_ReadOneBit( msg ))
 	{
-		int	delta_sequence = MSG_ReadByte( msg );
+		int	delta_sequence;
+
+		if( proto == PROTO_GOLDSRC )
+			delta_sequence = MSG_ReadWord( msg );
+		else
+			delta_sequence = MSG_ReadByte( msg );
 
 		from_cd = &cl.frames[delta_sequence & CL_UPDATE_MASK].clientdata;
 		from_wd = cl.frames[delta_sequence & CL_UPDATE_MASK].weapondata;
@@ -1118,17 +1130,36 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 		Delta_ReadGSFields( msg, DT_CLIENTDATA_T, from_cd, to_cd, cl.mtime[0] );
 	else MSG_ReadClientData( msg, from_cd, to_cd, cl.mtime[0] );
 
-	for( i = 0; i < 64; i++ )
+	// Sven Co-op enumerates all 256 weapon slots (8-bit index) and closes the
+	// section with a clear present bit; consume that trailing bit as well, else
+	// the byte holding it is read as a command (0x00 -> svc_bad). GoldSrc slots
+	// above MAX_LOCAL_WEAPONS are drained into a scratch slot to keep the bit
+	// cursor aligned without overflowing the frame's weapon array.
+	if( proto == PROTO_GOLDSRC )
 	{
-		// check for end of weapondata (and clientdata_t message)
-		if( !MSG_ReadOneBit( msg )) break;
+		for( i = 0; ; i++ )
+		{
+			if( !MSG_ReadOneBit( msg )) break;
 
-		// read the weapon idx
-		idx = MSG_ReadUBitLong( msg, MAX_WEAPON_BITS );
+			idx = MSG_ReadUBitLong( msg, 8 );
 
-		if( proto == PROTO_GOLDSRC )
-			Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
-		else MSG_ReadWeaponData( msg, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
+			if( idx < MAX_LOCAL_WEAPONS )
+				Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
+			else Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &nullwd[0], &nullwd[0], cl.mtime[0] );
+		}
+	}
+	else
+	{
+		for( i = 0; i < MAX_LOCAL_WEAPONS; i++ )
+		{
+			// check for end of weapondata (and clientdata_t message)
+			if( !MSG_ReadOneBit( msg )) break;
+
+			// read the weapon idx
+			idx = MSG_ReadUBitLong( msg, MAX_WEAPON_BITS );
+
+			MSG_ReadWeaponData( msg, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
+		}
 	}
 
 	// make a local copy of physinfo
@@ -1729,6 +1760,8 @@ void CL_RegisterResources( sizebuf_t *msg, connprotocol_t proto )
 				int32_t crc = cl.worldmapCRC;
 				COM_Munge2((byte*)&crc, sizeof( crc ), ( 0xff - cl.servercount ) & 0xff );
 				MSG_WriteStringf( msg, "spawn %i %i", cl.servercount, crc );
+				MSG_BeginClientCmd( msg, clc_stringcmd );
+				MSG_WriteString( msg, "sendents" );
 			}
 			else MSG_WriteStringf( msg, "spawn %i", cl.servercount );
 		}
@@ -1770,7 +1803,7 @@ static void CL_ParseConsistencyInfo( sizebuf_t *msg, connprotocol_t proto )
 		int delta;
 
 		if( isdelta ) delta = MSG_ReadUBitLong( msg, 5 ) + lastcheck;
-		else delta = MSG_ReadUBitLong( msg, proto == PROTO_GOLDSRC ? MAX_GOLDSRC_MODEL_BITS : MAX_MODEL_BITS );
+		else delta = MSG_ReadUBitLong( msg, proto == PROTO_GOLDSRC ? MAX_GOLDSRC_CONSISTENCY_BITS : MAX_MODEL_BITS );
 
 		int skip = delta - lastcheck;
 
@@ -2230,10 +2263,22 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	int	i, iSize;
 
 	// NOTE: any user message is really parse at engine, not in client.dll
+	// TEMP-TRACE: print entry and constants so we know exactly which branch fires.
+	// Read the next byte without consuming it (peek at current read offset).
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+	{
+		int nReg = 0;
+		for( int t = 0; t < MAX_USER_MESSAGES && clgame.msg[t].name[0]; t++ )
+			if( clgame.msg[t].number == svc_num ) nReg++;
+		Con_Printf( "USRMSG-TRACE: svc_num=%d proto=%d rng[%d..%d] registered_match=%d curbits=%d\n",
+			svc_num, proto, svc_lastmsg, svc_lastmsg + MAX_USER_MESSAGES, nReg,
+			( int )MSG_GetNumBitsRead( msg ) );
+	}
 	if( svc_num <= svc_lastmsg || svc_num > ( MAX_USER_MESSAGES + svc_lastmsg ))
 	{
 		// out or range
-		Host_Error( "%s: illegible server message %d\n", __func__, svc_num );
+		CL_DumpBadMessage( msg, svc_num, MSG_GetNumBytesRead( msg ) - 1 );
+		Host_Error( "%s: illegible server message %d (RANGE)\n", __func__, svc_num );
 		return;
 	}
 
@@ -2244,8 +2289,187 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			break;
 	}
 
+	// probably unregistered. Under GoldSrc (Sven Co-op) the server sends
+	// engine-level user messages (e.g. "ServerName" at 122, serverinfo at 147)
+	// directly as a raw svc byte, WITHOUT a preceding svc_usermessage (39)
+	// registration record, so they never land in clgame.msg[]. Don't die on
+	// such an unknown optional message: consume its variable-size payload
+	// (size prefix matches the variable-size branch below) and keep parsing.
 	if( i == MAX_USER_MESSAGES ) // probably unregistered
+	{
+		if( proto == PROTO_GOLDSRC )
+		{
+			// Sven Co-op sends these engine/game user messages as plain svc
+			// bytes without a preceding svc_usermessage (39) registration, so
+			// they never land in clgame.msg[] and are "unregistered" here.
+			// hw.dll (Sven engine) parse rule (reverse-verified against the
+			// server.dll REG_USER_MSG table, steam-refs/sven/server.dll):
+			//   - registered size == -1  -> a u16 length prefix precedes payload
+			//   - registered size >= 0   -> FIXED size, NO length in the stream
+			// Small fixed-size ones (ClassicMode=137 @1, ScoreInfo=83 @20,
+			// InvRemove=133 @5, AmmoPickup=88 @5) must be consumed inline
+			// (wire-verified perfect alignment for 137 against buffer.dat).
+			// CustWeapon=77, WeapPickup=89, ServerName=122 and ClServerInfo=147
+			// are VARIABLE (-1), so they fall through to the u16-length path.
+			// Xash must consume those fixed amounts instead of reading a u16
+			// length, otherwise 133's payload low bytes are misread as a
+			// length=0 and the following svc_bad(0x00) kills the connection.
+			// Sven's own REG_USER_MSG table (binary-verified against
+			// steam-refs/sven/server.dll REG_USER_MSG=0x1011E190 call-sites,
+			// index = svc_num - svc_lastmsg). size >= 0 is FIXED payload with
+			// NO length prefix in the stream; size 0xFFFFFFFF(-1) is variable
+			// (u16 length precedes). Handled here inline so a fixed-size one is
+			// never mis-read as a bogus huge u16 length (svc78 ResetHUD 1 byte
+			// used to be misparsed as 0x4f00 == 20224 and crashed the client).
+			switch( svc_num )
+			{
+			case 64: case 69: case 101: // SelAmmo, Health, TimeEnd
+				for( int k = 0; k < 4; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 70:                    // Damage
+				for( int k = 0; k < 18; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 66: case 68: case 72: case 78: // Geiger, FlashBat, Train, ResetHUD
+			case 80: case 81: case 86:   // CdAudio, GameTitle, GameMode
+			case 92: case 103:           // SetFOV, CbElec
+			case 117: case 121:          // SRPrimedOff, VGUIMenu
+			case 134: case 136: case 137: // ViewMode, ClassicMode (+/-1 ambiguity tail)
+				MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 1-byte msg)\n", svc_num );
+				return;
+			case 67: case 71: case 91:   // Flashlight, Battery, HideHUD
+			case 98:                     // Spectator (ToggleElem 138 is VARIABLE on
+			                             // live Sven 5.0: u16 len + payload pairs like
+			                             // weapon records [u16 id][classname z]; a captured
+			                             // server.dll sample registered it fixed-2, but the
+			                             // live wire (buffer.dat 138 @834: 8a 0d 00 11 00
+			                             // "weapon_uzi\0") proves u16-length. So keep it out
+			                             // of this fixed-2 bucket -> variable path below.)
+				for( int k = 0; k < 2; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 2-byte msg)\n", svc_num );
+				return;
+			case 113:                    // SporeTrail
+				for( int k = 0; k < 3; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 96: case 116: case 141: // AmmoX, SRPrimed, UpdateNum
+			case 133: case 88:           // InvRemove, AmmoPickup
+				for( int k = 0; k < 5; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 5-byte msg)\n", svc_num );
+				return;
+			case 143:                    // UpdateTime
+				for( int k = 0; k < 9; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 9-byte msg)\n", svc_num );
+				return;
+			case 148: case 149:          // VoiceMask (Sven 5.0 live server registers it at
+			                             // 149 on the wire, 148 in the server.dll sample; both
+			                             // are the 64-bit voice mask, wire-verified against
+			                             // buffer.dat: cmd 0x95 followed by 01 00 00 00 00
+			                             // 00 00 00 then svc_roomtype(37) + u16 room)
+				for( int k = 0; k < 8; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven VoiceMask fixed 8-byte msg)\n", svc_num );
+				return;
+			case 94:                     // ScreenShake
+				for( int k = 0; k < 6; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 6-byte msg)\n", svc_num );
+				return;
+			case 95:                     // ScreenFade
+				for( int k = 0; k < 10; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 10-byte msg)\n", svc_num );
+				return;
+			case 104:                    // EndVote (zero-size, no payload)
+				return;
+			case 119: case 112:          // ShieldRic, GargSplash
+				for( int k = 0; k < 12; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 110: case 115:          // ShkFlash, SRDetonate
+				for( int k = 0; k < 13; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 111:                    // CreateBlood
+				for( int k = 0; k < 14; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 83: // ScoreInfo (Sven registered size 20, not the HL1 9)
+				for( int k = 0; k < 20; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 20-byte msg)\n", svc_num );
+				return;
+			case 128:                    // Fog
+				for( int k = 0; k < 24; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 126:                    // WeatherFX
+				for( int k = 0; k < 68; k++ )
+					MSG_ReadByte( msg );
+				return;
+			default:
+				break;
+			}
+
+			// variable-size (or unknown) unregistered user message:
+			//   - Sven registered variable (-1) msgs (CustWeapon 77, WeapPickup
+			//     89, ServerName 122, ClServerInfo 147) carry a u16 length.
+			//   - Observed Sven engine "consume-the-rest" msgs (150 @bit64 + 407
+			//     bytes, 192 @bit3328 + 376 bytes in buffer.dat) carry NO length
+			//     prefix -- the payload runs to the next svc / end of message.
+			//     Reading a "size" there swallows payload bytes (0x0e 0xe8 ==>
+			//     59406) and Host_Errors the client.
+			// Try the length prefix first; a size that cannot fit the remaining
+			// bytes means the prefix is absent -> consume the remainder instead.
+			// HEX TRACE: record the raw leading payload bytes of any message the
+			// fixed-size switch did not know, so an unknown usermsg stays
+			// identifiable in the log (matches svc_pay dump from cl_parse_gs.c).
+			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 2 )
+			{
+				char hexbuf[65];
+				int avail = MSG_GetNumBitsLeft( msg ) >> 3;
+				int show = Q_min( avail, 16 );
+				byte pb[16];
+				MSG_ReadBytes( msg, pb, sizeof( pb ), show );
+				MSG_SeekToBit( msg, ( MSG_GetNumBitsRead( msg ) - ( show << 3 )), SEEK_SET );
+				Q_snprintf( hexbuf, sizeof( hexbuf ), "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+					pb[0], pb[1], pb[2], pb[3], pb[4], pb[5], pb[6], pb[7],
+					pb[8], pb[9], pb[10], pb[11], pb[12], pb[13], pb[14], pb[15] );
+				Con_Printf( "USRMSG-HEX: svc_num=%d payload[0..%d]=%s\n", svc_num, show - 1, hexbuf );
+			}
+			int skipSize = ( Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
+				? MSG_ReadWord( msg ) : MSG_ReadByte( msg );
+			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH || skipSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
+			{
+				Con_Printf( S_WARN "%s: unregistered msg %d has no size prefix: skipping to end of message\n", __func__, svc_num );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (size-less GoldSrc msg, consumed to end)\n", svc_num );
+				MSG_SeekToBit( msg, 0, SEEK_END );
+			}
+			else
+			{
+				while( skipSize-- > 0 )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (unregistered GoldSrc msg skipped)\n", svc_num );
+			}
+			return;
+		}
 		Host_Error( "%s: illegible server message %d\n", __func__, svc_num );
+	}
 
 	// NOTE: some user messages handled into engine
 	if( !Q_strcmp( clgame.msg[i].name, "ScreenShake" ))
@@ -2264,7 +2488,13 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	// message with variable sizes receive an actual size as first byte
 	if( iSize == -1 )
 	{
-		if( proto == PROTO_GOLDSRC )
+		// Sven Co-op writes variable-size user messages with a 16-bit size
+		// prefix (wire-verified: svc122 "ServerName" == [u16 len]["Sven Co-op
+		// 5.0 server\0"], and the following svc147 == [u16 len][payload]).
+		// Vanilla GoldSrc uses a 1-byte size. Match Sven only in its mode.
+		if( proto == PROTO_GOLDSRC && Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
+			iSize = MSG_ReadWord( msg );
+		else if( proto == PROTO_GOLDSRC )
 			iSize = MSG_ReadByte( msg );
 		else iSize = MSG_ReadWord( msg );
 	}
@@ -2410,6 +2640,7 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 	switch( svc_num )
 	{
 	case svc_bad:
+		CL_DumpBadMessage( msg, svc_num, startoffset );
 		Host_Error( "svc_bad\n" );
 		break;
 	case svc_time:
@@ -2565,7 +2796,7 @@ void CL_ParseServerMessage( sizebuf_t *msg )
 		cmd = MSG_ReadServerCmd( msg );
 
 		// record command for debugging spew on parse problem
-		CL_Parse_RecordCommand( cmd, bufStart );
+		CL_Parse_RecordCommand( cmd, bufStart, MSG_GetNumBitsWritten( msg ) );
 
 		if( CL_ParseCommonMessage( msg, PROTO_CURRENT, cmd, bufStart ))
 			continue;

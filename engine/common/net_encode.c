@@ -38,16 +38,39 @@ GNU General Public License for more details.
 #define DT_SIGNED_GS	BIT( 31 ) // GoldSrc-specific sign modificator
 
 // helper macroses
-#define UCMD_DEF_( name, x )	#name, offsetof( usercmd_t, x ), sizeof( ((usercmd_t *)0)->x )
-#define PHYS_DEF_( name, x )	#name, offsetof( movevars_t, x ), sizeof( ((movevars_t *)0)->x )
+#define UCMD_DEF_( name, x )	#name, offsetof( usercmd_t, x ), sizeof( ((usercmd_t *)0)->x ), UCMD_FLAGS( x )
+#define PHYS_DEF_( name, x )	#name, offsetof( movevars_t, x ), sizeof( ((movevars_t *)0)->x ), PHYS_FLAGS( x )
 
-#define ENTS_DEF( x )	#x, offsetof( entity_state_t, x ), sizeof( ((entity_state_t *)0)->x )
+#define ENTS_DEF( x )	#x, offsetof( entity_state_t, x ), sizeof( ((entity_state_t *)0)->x ), ENTS_FLAGS( x )
 #define UCMD_DEF( x )	UCMD_DEF_( x, x )
-#define EVNT_DEF( x )	#x, offsetof( event_args_t, x ), sizeof( ((event_args_t *)0)->x )
+#define EVNT_DEF( x )	#x, offsetof( event_args_t, x ), sizeof( ((event_args_t *)0)->x ), EVNT_FLAGS( x )
 #define PHYS_DEF( x )	PHYS_DEF_( x, x )
-#define CLDT_DEF( x )	#x, offsetof( clientdata_t, x ), sizeof( ((clientdata_t *)0)->x )
-#define WPDT_DEF( x )	#x, offsetof( weapon_data_t, x ), sizeof( ((weapon_data_t *)0)->x )
-#define DESC_DEF( x )	#x, offsetof( goldsrc_delta_t, x ), sizeof( ((goldsrc_delta_t *)0)->x )
+#define CLDT_DEF( x )	#x, offsetof( clientdata_t, x ), sizeof( ((clientdata_t *)0)->x ), CLDT_FLAGS( x )
+#define WPDT_DEF( x )	#x, offsetof( weapon_data_t, x ), sizeof( ((weapon_data_t *)0)->x ), WPDT_FLAGS( x )
+#define DESC_DEF( x )	#x, offsetof( goldsrc_delta_t, x ), sizeof( ((goldsrc_delta_t *)0)->x ), DESC_FLAGS( x )
+
+// The GoldSrc/Sven wire does not carry per-field type flags, so derive them
+// from the local (binary-compatible) struct members. The controlling
+// expression is never evaluated (_Generic), only its C type is inspected.
+#define GS_FIELD_FLAGS( expr )	_Generic( (expr), \
+			float: DT_FLOAT|DT_SIGNED, \
+			double: DT_FLOAT|DT_SIGNED, \
+			int: DT_INTEGER|DT_SIGNED, \
+			unsigned int: DT_INTEGER, \
+			short: DT_SHORT|DT_SIGNED, \
+			unsigned short: DT_SHORT, \
+			char: DT_BYTE, \
+			signed char: DT_BYTE|DT_SIGNED, \
+			unsigned char: DT_BYTE, \
+			default: DT_STRING )
+
+#define UCMD_FLAGS( x )	GS_FIELD_FLAGS( ((usercmd_t *)0)->x )
+#define PHYS_FLAGS( x )	GS_FIELD_FLAGS( ((movevars_t *)0)->x )
+#define ENTS_FLAGS( x )	GS_FIELD_FLAGS( ((entity_state_t *)0)->x )
+#define EVNT_FLAGS( x )	GS_FIELD_FLAGS( ((event_args_t *)0)->x )
+#define CLDT_FLAGS( x )	GS_FIELD_FLAGS( ((clientdata_t *)0)->x )
+#define WPDT_FLAGS( x )	GS_FIELD_FLAGS( ((weapon_data_t *)0)->x )
+#define DESC_FLAGS( x )	GS_FIELD_FLAGS( ((goldsrc_delta_t *)0)->x )
 
 static qboolean		delta_init = false;
 
@@ -552,7 +575,8 @@ static qboolean Delta_AddField( delta_info_t *dt, const char *pName, int flags, 
 	const delta_field_t *pFieldInfo = Delta_FindFieldInfo( dt->pInfo, pName, dt->maxFields );
 	if( !pFieldInfo )
 	{
-		Con_DPrintf( S_ERROR "%s: couldn't find description for %s->%s\n", __func__, dt->pName, pName );
+		Con_Printf( S_ERROR "%s: couldn't find description for %s->%s (numFields=%d maxFields=%d)\n",
+			__func__, dt->pName, pName ? pName : "(null)", dt->numFields, dt->maxFields );
 		return false;
 	}
 
@@ -1418,7 +1442,7 @@ static void Delta_ReadField_( sizebuf_t *msg, delta_t *pField, void *to, double 
 	}
 	else if( pField->flags & DT_ANGLE )
 	{
-		flAngle = MSG_ReadBitAngle( msg, pField->bits );
+		flAngle = MSG_ReadUBitLong( msg, pField->bits ) * ( 360.0f / (float)( 1 << pField->bits ));
 		*(float *)((byte *)to + pField->offset ) = flAngle;
 	}
 	else if( pField->flags & DT_TIMEWINDOW_8 )
@@ -1453,26 +1477,141 @@ static qboolean Delta_ReadField( sizebuf_t *msg, delta_t *pField, const void *fr
 	return true;
 }
 
+/*
+=====================
+Delta_DebugFieldValue
+
+Render the already-decoded value of a delta field that Delta_ReadField_
+just wrote into `to`. This is what makes the GSDELTA ledger self-contained:
+floats/times are printed post-multiplier, angles in degrees, ints raw — so
+a single engine.log line carries the FINAL value and no offline re-compute
+is needed to read the trace.
+=====================
+*/
+static void Delta_DebugFieldValue( const delta_t *pField, const void *to, char *buf, size_t bufsize )
+{
+	const void *pv = (const uint8_t *)to + pField->offset;
+
+	if( pField->flags & DT_FLOAT )
+		Q_snprintf( buf, bufsize, "%.6g", *(const float *)pv );
+	else if( pField->flags & DT_ANGLE )
+		Q_snprintf( buf, bufsize, "%.3fdeg", *(const float *)pv );
+	else if( pField->flags & DT_TIMEWINDOW_8 || pField->flags & DT_TIMEWINDOW_BIG )
+		Q_snprintf( buf, bufsize, "%.5f", *(const float *)pv );
+	else if( pField->flags & DT_STRING )
+		Q_snprintf( buf, bufsize, "\"%s\"", (const char *)pv );
+	else if( pField->flags & DT_BYTE )
+		Q_snprintf( buf, bufsize, "%d", ( pField->flags & DT_SIGNED ) ? *(const int8_t *)pv : *(const uint8_t *)pv );
+	else if( pField->flags & DT_SHORT )
+		Q_snprintf( buf, bufsize, "%d", ( pField->flags & DT_SIGNED ) ? *(const int16_t *)pv : *(const uint16_t *)pv );
+	else
+		Q_snprintf( buf, bufsize, "%d", ( pField->flags & DT_SIGNED ) ? *(const int32_t *)pv : *(const uint32_t *)pv );
+}
+
 static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const void *from, void *to, double timebase )
 {
 	uint8_t bits[8] = { 0 };
 	delta_t *pField;
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
+	int entryBit;
 	int i;
 
-	byte c = MSG_ReadUBitLong( msg, 3 );
+	entryBit = MSG_GetNumBitsRead( msg );
+
+	byte c = MSG_ReadUBitLong( msg, 4 );
 
 	for( i = 0; i < c; i++ )
 		bits[i] = MSG_ReadByte( msg );
+
+	// field-level bit ledger: reconstruct exactly which fields the client
+	// consumed and where each field landed in the bitstream. Together with
+	// the table dump on parse error this makes table/layout mismatches
+	// visible in a single engine.log.
+	if( dbg >= 6 )
+	{
+		char flags[8 * 3 + 1];
+		int nflags = Q_min( c, (int)sizeof( bits ));
+		for( i = 0; i < nflags; i++ )
+			Q_snprintf( flags + i * 3, sizeof( flags ) - i * 3, "%02x%s", bits[i], i + 1 < nflags ? " " : "" );
+		Con_DPrintf( "GSDELTA-READ: table=%s c=%d bitflags=%s startbit=%d\n",
+			dt->pName, c, flags, entryBit );
+	}
 
 	for( i = 0, pField = dt->pFields; i < dt->numFields; i++, pField++ )
 	{
 		int b = Q_min( i >> 3, (int)sizeof( bits ) - 1 );
 		int n = 1 << ( i & 7 );
+		int bitBefore = MSG_GetNumBitsRead( msg );
 
 		if( FBitSet( bits[b], n ))
+		{
 			Delta_ReadField_( msg, pField, to, timebase );
-		else Delta_CopyField( pField, from, to, timebase );
+			if( dbg >= 6 )
+			{
+				char valbuf[64];
+				Delta_DebugFieldValue( pField, to, valbuf, sizeof( valbuf ));
+				Con_DPrintf( "GSDELTA-FIELD: table=%s idx=%d name='%s' bits=%d types=0x%x pre=%.5g post=%.5g read_at_bit=%d consumed_bits=%d value=%s\n",
+					dt->pName, i, pField->name ? pField->name : "?", pField->bits, pField->flags,
+					pField->multiplier, pField->post_multiplier, bitBefore, MSG_GetNumBitsRead( msg ) - bitBefore, valbuf );
+			}
+		}
+		else
+		{
+			Delta_CopyField( pField, from, to, timebase );
+			if( dbg >= 6 )
+			{
+				char valbuf[64];
+				Delta_DebugFieldValue( pField, to, valbuf, sizeof( valbuf ));
+				Con_DPrintf( "GSDELTA-COPY: table=%s idx=%d name='%s' bits=%d value=%s\n",
+					dt->pName, i, pField->name ? pField->name : "?", pField->bits, valbuf );
+			}
+		}
 	}
+
+	if( dbg >= 6 )
+		Con_DPrintf( "GSDELTA-READ: table=%s done endbit=%d total_bits=%d\n",
+			dt->pName, MSG_GetNumBitsRead( msg ), MSG_GetNumBitsRead( msg ) - entryBit );
+}
+
+/*
+=====================
+Delta_DebugDumpTable
+
+dump the *current* state of a delta table (field list, widths, offsets)
+as seen by the client right now. Called on parse errors so a table/layout
+mismatch (e.g. 17 vs 34 fields) is visible in a single engine.log.
+=====================
+*/
+void Delta_DebugDumpTable( sizebuf_t *msg, int index, const char *context )
+{
+	const delta_info_t *dt = Delta_FindStructByIndex( index );
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
+
+	if( !dt )
+	{
+		Con_Printf( "GSDELTA-TABLE %s: index=%d not found\n", context, index );
+		return;
+	}
+
+	Con_Printf( "GSDELTA-TABLE %s: name=%s numFields=%d maxFields=%d initialized=%d\n",
+		context, dt->pName, dt->numFields, dt->maxFields, dt->bInitialized );
+
+	if( !dt->bInitialized || !dt->pFields || dbg < 5 )
+		return;
+
+	for( int i = 0; i < dt->numFields; i++ )
+	{
+		const delta_t *p = &dt->pFields[i];
+		Con_Printf( "  [%3d] name='%s' offset=%d size=%d flags=0x%x bits=%d\n",
+			i, p->name ? p->name : "?", p->offset, p->size, p->flags, p->bits );
+	}
+}
+
+void Delta_DebugDumpAllTables( const char *context )
+{
+	Con_Printf( "GSDELTA-ALL %s: numTables=%d\n", context, Delta_NumTables() );
+	for( int i = 0; i < Delta_NumTables(); i++ )
+		Delta_DebugDumpTable( NULL, i, context );
 }
 
 void Delta_ReadGSFields( sizebuf_t *msg, int index, const void *from, void *to, double timebase )
@@ -1503,7 +1642,7 @@ void Delta_WriteGSFields( sizebuf_t *msg, int index, const void *from, const voi
 		}
 	}
 
-	MSG_WriteUBitLong( msg, c, 3 );
+	MSG_WriteUBitLong( msg, c, 4 );
 	for( i = 0; i < c; i++ )
 		MSG_WriteByte( msg, bits[i] );
 
@@ -2035,39 +2174,219 @@ qboolean MSG_ReadDeltaEntity( sizebuf_t *msg, const entity_state_t *from, entity
 	return true;
 }
 
+static void Delta_GSDumpPayload( const char *label, const sizebuf_t *msg, int startBit )
+{
+	static const char hexd[] = "0123456789abcdef";
+	int start = startBit >> 3;
+	int end = msg->nDataBits >> 3;
+	int len = end - start;
+
+	if( len > 256 ) len = 256;
+	if( len <= 0 ) return;
+
+	for( int i = 0; i < len; i += 16 )
+	{
+		char hex[64];
+		int n = Q_min( 16, len - i );
+		for( int j = 0; j < n; j++ )
+		{
+			byte b = msg->pData[start + i + j];
+			hex[j * 3] = hexd[b >> 4];
+			hex[j * 3 + 1] = hexd[b & 15];
+			hex[j * 3 + 2] = ' ';
+		}
+		hex[n * 3] = 0;
+		Con_Printf( "%s %04x: %s\n", label, start + i, hex );
+	}
+}
+
+/*
+===================================
+GoldSrc/Sven Co-op delta description
+
+The Sven engine sends ALL table descriptions in ONE svc_deltatable message.
+Each table is:
+
+	name\0
+	u16   count   (number of slots; real field records == count / 2,
+	               each field is a (data-blob, name+descriptor) pair)
+	then  count/2 records, each:
+	       [data blob]      opaque junk, skipped by token scan
+	       [name\0]         field name
+	       [descriptor]     variable length (see below)
+	                         - u16  offset, ONLY present if nonzero
+	                         - u8   marker byte (0x01 in captures)
+	                         - u8   significant_bits
+	                         - u32  premultiply   (fixed point, 4000 == 1.0)
+	                         - u32  postmultiply  (fixed point, 4000 == 1.0)
+
+The descriptor is what the server's DELTA_WriteDelta emits for the field
+description against a zeroed record (g_MetaDelta): meta fields whose value
+is zero (e.g. fieldOffset == 0) are omitted on the wire, which is why the
+offset u16 disappears for the first struct member. There is NO flags byte:
+type flags are taken from the local struct layout (see GS_FIELD_FLAGS).
+
+After the last table comes a usermsg id->name registration array plus
+other Sven payload, which is simply consumed up to the end of the message.
+===================================
+*/
+static qboolean Delta_ReadGSToken( sizebuf_t *msg, char *buf, size_t maxlen )
+{
+	// skip non-printable data until a NUL-terminated printable run of
+	// at least 3 chars is found; consumes the trailing NUL as well
+	while( MSG_GetNumBitsLeft( msg ) >= 8 )
+	{
+		int c = MSG_ReadByte( msg );
+
+		if( c < 32 || c > 126 )
+			continue; // junk byte
+
+		size_t len = 0;
+		while( c >= 32 && c <= 126 )
+		{
+			if( len < maxlen - 1 )
+				buf[len] = (char)c;
+			len++;
+
+			if( MSG_GetNumBitsLeft( msg ) < 8 )
+			{
+				buf[0] = 0;
+				return false;
+			}
+			c = MSG_ReadByte( msg );
+		}
+
+		if( len >= 3 && c == 0 )
+		{
+			if( len > maxlen - 1 )
+				len = maxlen - 1;
+			buf[len] = 0;
+			return true;
+		}
+		// not a usable token, keep scanning
+	}
+
+	buf[0] = 0;
+	return false;
+}
+
 void Delta_ParseTableField_GS( sizebuf_t *msg )
 {
-	const char *s = MSG_ReadString( msg );
-	delta_info_t *dt = Delta_FindStruct( s );
-	goldsrc_delta_t null = { 0 };
+	char name[32], pending[32] = "";
+	delta_info_t *dt;
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
 
 	// delta encoders it's already initialized on this machine (local game)
+	// re-initialize and load delta.lst before applying server overrides
 	if( delta_init )
-		Delta_Shutdown();
-
-	if( !dt )
-		Host_Error( "%s: not initialized", __func__ );
-
-	int num_fields = MSG_ReadShort( msg );
-	if( num_fields > dt->maxFields )
-		Host_Error( "%s: numFields > maxFields", __func__ );
+		Delta_Init();
 
 	MSG_StartBitWriting( msg );
 
-	for( int i = 0; i < num_fields; i++ )
+	while( MSG_GetNumBitsLeft( msg ) >= 8 )
 	{
-		goldsrc_delta_t to;
+		const char *s = name;
 
-		Delta_ParseGSFields( msg, &dt_goldsrc_meta, &null, &to, 0.0f );
-
-		// patch our DT_SIGNED flag
-		if( FBitSet( to.fieldType, DT_SIGNED_GS ))
+		if( pending[0] )
 		{
-			ClearBits( to.fieldType, DT_SIGNED_GS );
-			SetBits( to.fieldType, DT_SIGNED );
+			// next table name was already read while parsing the previous one
+			Q_strncpy( name, pending, sizeof( name ));
+			pending[0] = 0;
 		}
-		Delta_AddField( dt, to.fieldName, to.fieldType, to.significant_bits, to.premultiply, to.postmultiply );
+		else if( !Delta_ReadGSToken( msg, name, sizeof( name )))
+		{
+			break;
+		}
+
+		dt = Delta_FindStruct( s );
+		if( !dt )
+		{
+			// reached the usermsg registration array / trailing payload
+			if( dbg >= 1 )
+				Con_DPrintf( "GS-DELTA: tail '%s' bitpos=%d bitsleft=%d\n", s, msg->iCurBit, MSG_GetNumBitsLeft( msg ));
+			break;
+		}
+
+		int num_fields = MSG_ReadShort( msg );
+		int pairs = Q_min( num_fields / 2, 512 ); // blob+name pairs
+
+		if( dbg >= 2 )
+			Con_DPrintf( "GS-DELTA: table='%s' num_fields=%d pairs=%d maxFields=%d bitpos=%d\n",
+				s, num_fields, pairs, dt->maxFields, msg->iCurBit );
+
+		for( int i = 0; i < pairs; i++ )
+		{
+			int bitBefore = msg->iCurBit;
+
+			if( !Delta_ReadGSToken( msg, name, sizeof( name )))
+				break;
+
+			if( Delta_FindStruct( name ))
+			{
+				// field list done, next table name is already consumed
+				Q_strncpy( pending, name, sizeof( pending ));
+				break;
+			}
+
+			const delta_field_t *pInfo = Delta_FindFieldInfo( dt->pInfo, name, dt->maxFields );
+
+			int fOffset = 0;
+			int fBits = 1;
+			uint fPre = 0, fPost = 0;
+
+			// the server omits the u16 offset when the field offset is zero
+			if( !pInfo || pInfo->offset != 0 )
+			{
+				fOffset = MSG_ReadShort( msg );
+			}
+			MSG_ReadByte( msg ); // constant marker byte
+			fBits = MSG_ReadByte( msg );
+			fPre = MSG_ReadUBitLong( msg, 32 );
+			fPost = MSG_ReadUBitLong( msg, 32 );
+
+			if( dbg >= 2 )
+				Con_DPrintf( "  [%d] bit=%d name='%s' offset=%d sigbits=%d pre=%u post=%u\n",
+					i, bitBefore, name, fOffset, fBits, fPre, fPost );
+
+			if( !pInfo )
+			{
+				// Sven-specific field this engine doesn't know; consume in wire but skip
+				if( dbg >= 2 )
+					Con_DPrintf( S_WARN "%s: %s->%s: unknown wire field, skipped\n", __func__, dt->pName, name );
+				continue;
+			}
+
+			if( pInfo->offset != fOffset )
+			{
+				Con_DPrintf( S_WARN "%s: %s->%s: offset mismatch wire=%d local=%d\n", __func__, dt->pName, name, fOffset, pInfo->offset );
+			}
+
+			// premultiply/postmultiply are fixed point with 4000 == 1.0
+			float mul = ( fPre != 0 ) ? (float)fPre / 4000.0f : 1.0f;
+			float post_mul = ( fPost != 0 ) ? (float)fPost / 4000.0f : 1.0f;
+
+			Delta_AddField( dt, name, pInfo->flags, fBits, mul, post_mul );
+		}
+
+		dt->bInitialized = true;
 	}
+
+	// after applying the server overrides, dump the resulting layout so a
+	// wire/local field-count mismatch (Sven's 17 vs delta.lst's 34) can be
+	// caught in the same log that shows the rest of the parse.
+	if( dbg >= 5 )
+		Delta_DebugDumpAllTables( "after-deltatable" );
+
+	if( dbg >= 3 )
+		Delta_GSDumpPayload( "GS-DELTA-TAIL", msg, msg->iCurBit );
+
+	// consume the remaining payload (usermsg registrations etc.) to reach
+	// the exact end of the message, so no leftover bytes are parsed as svc
+	while( MSG_GetNumBitsLeft( msg ) >= 8 )
+		MSG_ReadByte( msg );
+
+	if( dbg >= 2 )
+		Con_DPrintf( "GS-DELTA: done bitpos=%d bitsleft=%d\n", msg->iCurBit, MSG_GetNumBitsLeft( msg ));
 
 	MSG_EndBitWriting( msg );
 }

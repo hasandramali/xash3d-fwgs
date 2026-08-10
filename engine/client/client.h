@@ -343,6 +343,7 @@ typedef struct
 #define FONT_DRAW_NOLF     BIT( 4 ) // ignore \n
 #define FONT_DRAW_RESETCOLORONLF BIT( 5 ) // yet another flag to simulate consecutive Con_DrawString calls...
 #define FONT_DRAW_NOCOLOR  BIT( 6 ) // do not set color to draw this character
+#define FONT_DRAW_SAYTEXT  BIT( 7 ) // pass to drawing function to apply hud_saytext_scale
 
 typedef struct
 {
@@ -715,6 +716,7 @@ extern convar_t	hud_fontscale;
 extern convar_t hud_fontrender;
 extern convar_t	hud_scale;
 extern convar_t hud_scale_minimal_width;
+extern convar_t hud_saytext_scale;
 extern convar_t	r_showtextures;
 extern convar_t	cl_bmodelinterp;
 extern convar_t	cl_lw;		// local weapons
@@ -767,6 +769,7 @@ void CL_AddToResourceList( resource_t *pResource, resource_t *pList );
 void CL_RemoveFromResourceList( resource_t *pResource );
 void CL_MoveToOnHandList( resource_t *pResource );
 void CL_ClearResourceLists( void );
+void CL_DumpHex( const char *name, const void *data, size_t size );
 void CL_SendResourceList( const resource_t *list, int count );
 
 //
@@ -774,7 +777,7 @@ void CL_SendResourceList( const resource_t *list, int count );
 //
 void CL_ReplayBufferDat_f( void );
 void CL_Parse_Debug( qboolean enable );
-void CL_Parse_RecordCommand( int cmd, int startoffset );
+void CL_Parse_RecordCommand( int cmd, int startoffset, int startbit );
 void CL_ResetFrame( frame_t *frame );
 
 //
@@ -874,6 +877,7 @@ model_t *CL_LoadClientSprite( const char *filename );
 model_t *CL_LoadModel( const char *modelname, int *index );
 HSPRITE pfnSPR_LoadExt( const char *szPicName, uint texFlags );
 void SPR_AdjustSize( float *x, float *y, float *w, float *h );
+void SayText_AdjustSize( float *x, float *y, float *w, float *h );
 int CL_GetScreenInfo( SCREENINFO *pscrinfo );
 pmtrace_t *PM_CL_TraceLine( float *start, float *end, int flags, int usehull, int ignore_pe );
 const char *PM_CL_TraceTexture( int ground, float *vstart, float *vend );

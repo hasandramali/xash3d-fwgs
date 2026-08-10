@@ -17,10 +17,17 @@ GNU General Public License for more details.
 #if HAVE_LIBBACKTRACE
 #include <signal.h>
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "common.h"
 #include "backtrace.h"
 #include "input.h"
 #include "crash.h"
+
+#if XASH_ANDROID
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
 static struct backtrace_state *g_bt_state;
 static qboolean enable_libbacktrace;
@@ -161,10 +168,38 @@ int Sys_CrashDetailsLibbacktrace( int logfd, char *message, int len, size_t max_
 	return pd.len;
 }
 
+static void Sys_LibbacktracePath( const char *argv0, char *out, size_t out_size )
+{
+	// Android's argv[0] is often the app_process wrapper or an unreadable
+	// path, which makes backtrace_create_state() fail and silently keeps us
+	// without any backtrace. Always resolve the real, readable executable.
+#if XASH_ANDROID
+	ssize_t n = readlink( "/proc/self/exe", out, out_size - 1 );
+	if( n > 0 )
+	{
+		out[n] = 0;
+		return;
+	}
+#else
+	(void)argv0;
+	if( argv0 && argv0[0] )
+	{
+		Q_strncpy( out, argv0, out_size );
+		return;
+	}
+#endif
+
+	if( out_size > 0 )
+		out[0] = 0;
+}
+
 qboolean Sys_SetupLibbacktrace( const char *argv0 )
 {
+	char path[MAX_OSPATH];
+
 	enable_libbacktrace = true;
-	g_bt_state = backtrace_create_state( argv0, true, Sys_BacktraceError, NULL );
+	Sys_LibbacktracePath( argv0, path, sizeof( path ));
+	g_bt_state = backtrace_create_state( path, true, Sys_BacktraceError, NULL );
 	return g_bt_state != NULL && enable_libbacktrace;
 }
 
