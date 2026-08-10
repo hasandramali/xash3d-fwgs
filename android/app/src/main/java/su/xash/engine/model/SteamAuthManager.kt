@@ -538,6 +538,8 @@ class SteamAuthManager(private val ctx: Context) {
                 while (!Thread.interrupted()) {
                     handlePacket(readPacket())
                 }
+            } catch (e: java.net.SocketTimeoutException) {
+                Log.d(TAG, "reader read timeout, continuing")
             } catch (e: Exception) {
                 if (Thread.interrupted()) return@Thread
                 Log.w(TAG, "reader stopped: ${e.message}")
@@ -979,7 +981,7 @@ class SteamAuthManager(private val ctx: Context) {
         bos.write(Proto.packInt32(emsg or PROTO_MASK))
         bos.write(Proto.packInt32(0))
         bos.write(body)
-        sendRaw(bos.toByteArray())
+        sendRaw(if (encrypted) encryptAES(bos.toByteArray()) else bos.toByteArray())
     }
 
     private fun sendProtobufMsg(emsg: Int, body: ByteArray, header: ByteArray?) {
@@ -989,7 +991,7 @@ class SteamAuthManager(private val ctx: Context) {
         bos.write(Proto.packInt32(headerBytes.size))
         bos.write(headerBytes)
         bos.write(body)
-        sendRaw(bos.toByteArray())
+        sendRaw(if (encrypted) encryptAES(bos.toByteArray()) else bos.toByteArray())
     }
 
     private fun encryptAES(data: ByteArray): ByteArray {
