@@ -91,6 +91,7 @@ class SteamAuthManager(private val ctx: Context) {
         private var instance: SteamAuthManager? = null
 
         /** Process-wide singleton so the CM connection + broker outlive the fragment. */
+        @JvmStatic
         fun get(ctx: Context): SteamAuthManager =
             instance ?: synchronized(this) {
                 instance ?: SteamAuthManager(ctx.applicationContext).also { instance = it }
