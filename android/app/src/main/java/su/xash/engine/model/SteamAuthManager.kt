@@ -532,7 +532,7 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private fun startReader() {
-        if (readerThread != null) return
+        if (readerThread?.isAlive == true) return
         readerThread = Thread {
             try {
                 while (!Thread.interrupted()) {
@@ -544,10 +544,13 @@ class SteamAuthManager(private val ctx: Context) {
                 if (Thread.interrupted()) return@Thread
                 Log.w(TAG, "reader stopped: ${e.message}")
             } finally {
+                readerThread = null
                 if (!expectDisconnect) {
                     connected = false
                     loggedIn = false
                     prefs.edit().putBoolean("logged_in", false).apply()
+                    try { heartbeatJob?.interrupt() } catch (_: Exception) { }
+                    try { socket?.close() } catch (_: Exception) { }
                     logonFuture?.completeExceptionally(Exception("Connection lost"))
                 }
             }
@@ -556,53 +559,70 @@ class SteamAuthManager(private val ctx: Context) {
 
     private fun handlePacket(packet: Packet) {
         val emsg = packet.emsg
-        when (emsg) {
-            1 -> handleMulti(packet.body)
-            779 -> handleGameConnectTokens(packet.body)
-            5463 -> handleNewLoginKey(packet.body)
-            751 -> handleLogonResponse(packet)
-            757 -> {
-                Log.i(TAG, "logged off (eresult=${readEresult(packet.body)})")
-                connected = false
-                loggedIn = false
-                logonFuture?.completeExceptionally(Exception("Logged off"))
-            }
-            5429 -> { /* TicketAuthComplete — engine already validated */ }
-            else -> {
-                if (packet.isProto) {
-                    val jobId = readHeaderJobIdTarget(packet.header)
-                    if (jobId != 0L) {
-                        pendingJobs.remove(jobId)?.complete(SteamMsg(emsg, packet.body))
-                        return
-                    }
+        try {
+            when (emsg) {
+                1 -> handleMulti(packet.body)
+                779 -> handleGameConnectTokens(packet.body)
+                5463 -> handleNewLoginKey(packet.body)
+                751 -> handleLogonResponse(packet)
+                757 -> {
+                    Log.i(TAG, "logged off (eresult=${readEresult(packet.body)})")
+                    connected = false
+                    loggedIn = false
+                    logonFuture?.completeExceptionally(Exception("Logged off"))
                 }
-                Log.d(TAG, "ignoring emsg=$emsg size=${packet.body.size}")
+                5429 -> { /* TicketAuthComplete — engine already validated */ }
+                else -> {
+                    if (packet.isProto) {
+                        val jobId = readHeaderJobIdTarget(packet.header)
+                        if (jobId != 0L) {
+                            pendingJobs.remove(jobId)?.complete(SteamMsg(emsg, packet.body))
+                            return
+                        }
+                    }
+                    Log.d(TAG, "ignoring emsg=$emsg size=${packet.body.size}")
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "handlePacket emsg=$emsg FAILED: ${e.message} body=${packet.body.take(128).joinToString("") { "%02X".format(it) }} header=${packet.header.take(64).joinToString("") { "%02X".format(it) }}")
+            // The packet is already fully consumed by readPacket(); do not tear down
+            // the reader thread (and with it the CM session + logon future) on a
+            // single malformed body/header.
         }
     }
 
     private fun handleLogonResponse(packet: Packet) {
         // extract steamid (field 1 fixed64) + sessionid (field 2 varint) from proto header
-        if (packet.isProto) {
-            val hr = ProtoReader(packet.header)
-            while (hr.remaining > 0) {
-                val tag = hr.readVarint()
-                when (tag shr 3) {
-                    1 -> if ((tag and 7) == 1) currentSteamId = hr.readLongLE() else hr.skipField()
-                    2 -> if ((tag and 7) == 0) currentSessionId = hr.readVarint() else hr.skipField()
-                    else -> hr.skipField()
+        try {
+            if (packet.isProto) {
+                val hr = ProtoReader(packet.header)
+                while (hr.remaining > 0) {
+                    val tag = hr.readVarint()
+                    when (tag shr 3) {
+                        1 -> if ((tag and 7) == 1) currentSteamId = hr.readLongLE() else hr.skipField()
+                        2 -> if ((tag and 7) == 0) currentSessionId = hr.readVarint() else hr.skipField()
+                        else -> hr.skipField()
+                    }
                 }
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "logon header parse failed: ${e.message} header=${packet.header.joinToString("") { "%02X".format(it) }}")
         }
         val rdr = ProtoReader(packet.body)
         var eresult = 2
-        while (rdr.remaining > 0) {
-            val tag = rdr.readVarint()
-            when (tag shr 3) {
-                1 -> eresult = rdr.readVarint()
-                3 -> heartbeatSeconds = rdr.readVarint()
-                else -> rdr.skipField()
+        try {
+            while (rdr.remaining > 0) {
+                val tag = rdr.readVarint()
+                when (tag shr 3) {
+                    1 -> eresult = rdr.readVarint()
+                    3 -> heartbeatSeconds = rdr.readVarint()
+                    else -> rdr.skipField()
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "logon body parse failed: ${e.message} body=${packet.body.joinToString("") { "%02X".format(it) }}")
+            logonFuture?.completeExceptionally(e)
+            return
         }
         Log.i(TAG, "logon response eresult=$eresult steamId=$currentSteamId sessionId=$currentSessionId")
         logonFuture?.complete(eresult)
@@ -626,6 +646,7 @@ class SteamAuthManager(private val ctx: Context) {
             val gis = GZIPInputStream(ByteArrayInputStream(msgBody))
             subData = gis.readBytes()
             gis.close()
+            Log.d(TAG, "multi decompressed ${msgBody.size} -> ${subData.size} bytes")
         }
         var off = 0
         while (off < subData.size) {
@@ -637,6 +658,7 @@ class SteamAuthManager(private val ctx: Context) {
             val rawEmsg = Proto.readInt32LE(subMsg, 0)
             val subIsProto = (rawEmsg and PROTO_MASK) != 0
             val subEmsg = rawEmsg and 0x7FFFFFFF
+            Log.d(TAG, "multi sub-msg emsg=$subEmsg proto=$subIsProto size=${subMsg.size}")
             if (subIsProto) {
                 val headerLen = Proto.readInt32LE(subMsg, 4)
                 val subHeader = if (headerLen > 0) subMsg.copyOfRange(8, 8 + headerLen) else ByteArray(0)
@@ -936,6 +958,7 @@ class SteamAuthManager(private val ctx: Context) {
         if (magic != TCP_MAGIC) throw Exception("invalid magic 0x%08X".format(magic))
 
         val encryptedPayload = readExact(packetLen)
+        Log.d(TAG, String.format("[read] packetLen=%d magic=0x%08X encHex=%s", packetLen, magic, encryptedPayload.take(16).joinToString("") { "%02X".format(it) } + "..."))
         val payload = if (encrypted) decryptAES(encryptedPayload) else encryptedPayload
         if (payload.size < 8) throw Exception("payload too small: ${payload.size}")
 
@@ -953,6 +976,7 @@ class SteamAuthManager(private val ctx: Context) {
             header = ByteArray(0)
             body = payload.copyOfRange(20, payload.size)
         }
+        Log.d(TAG, "[read] emsg=$emsg proto=$isProto size=${body.size} bodyHex=${body.take(24).joinToString("") { "%02X".format(it) }}")
         return Packet(emsg, body, isProto, header)
     }
 
