@@ -722,10 +722,13 @@ class SteamAuthManager(private val ctx: Context) {
         readerThread = Thread {
             try {
                 while (!Thread.interrupted()) {
-                    handlePacket(readPacket())
+                    try {
+                        handlePacket(readPacket())
+                    } catch (e: java.net.SocketTimeoutException) {
+                        // soTimeout guard: keep the loop (and the CM session) alive while idle.
+                        Log.d(TAG, "reader read timeout, continuing")
+                    }
                 }
-            } catch (e: java.net.SocketTimeoutException) {
-                Log.d(TAG, "reader read timeout, continuing")
             } catch (e: Exception) {
                 if (Thread.interrupted()) return@Thread
                 Log.w(TAG, "reader stopped: ${e.message}")
