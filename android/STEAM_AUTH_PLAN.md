@@ -209,6 +209,25 @@ Current downloader sends raw "JavaSteam-SerialNumber" for anon — works for ano
   loop, no socket teardown), so long waits (e.g. guard code entry) no longer kill the connection.
 - Re-entrancy guard: `loginModern()` returns Success immediately if already logged in, preventing
   a second auth flow that caused `logged off (eresult=26)` + connection close in testing.
+- **Detailed diagnostics logging** (`-dev 9 -log` / logcat):
+  - `engine/client/cl_steam.c`: logs the `sb_connect` request (server, server_steamid, secure,
+    challenge) and hex-dumps the full broker ticket on receipt (`SteamBroker_DumpHex`).
+  - `engine/client/cl_main.c`: logs the GoldSrc challenge auth info (steam_auth, server_steamid,
+    vac2_secure), the full outgoing connect packet (protinfo/challenge/server/ticket hex)
+    (`CL_DumpHex`), and the exact server rejection text in `CL_Reject`.
+  - `SteamAuthManager.kt` broker: logs full ticket hex (`Ticket hex:`) alongside size/steamId.
+- **Research (server-side validation)**:
+  - ReHLDS/HLDS does *not* parse the ticket: it passes the raw blob to
+    `steamclient.so::SendUserConnectAndAuthenticate`, which performs all checks. `CrossAuth`
+    (metamod-r for goldsrc) documents the failure mode: *"the server checks the AppId stored in
+    the player's ticket"* — a mismatched AppID yields `GameMismatch` / "STEAM validation rejected".
+  - Our blob format was verified **byte-for-byte against 5 real Steam-generated CS:GO tickets**:
+    `[20 GC magic][GCToken 8][SteamID 8][genDate 4][24][1][2][8 random][time][count]`
+    `[appTicketSize][ticketDataLen][version][steamid][AppID][...][signature]`. JavaSteam's
+    20-byte GameConnectToken layout matches (CM token = GCToken+SteamID+genDate).
+  - AppID is embedded at **blob offset 0x48** (4-byte LE). For Sven Co-op (225840 = 0x370d0) the
+    bytes at 0x48 should read `d0 70 03 00`. Confirm this in the new hex logs; if present, the
+    mismatch is server-side (server's `steam_appid.txt`/launch AppID ≠ 225840).
 
 ### TODO
 - CI build + device test: sign in, watch logcat `SteamAuth` for `begin auth` /

@@ -72,6 +72,24 @@ typedef struct
 
 static steam_broker_t broker;
 
+static void SteamBroker_DumpHex( const char *name, const void *data, size_t size )
+{
+	const uint8_t *bytes = (const uint8_t *)data;
+	char line[80];
+	int pos = 0;
+	size_t i;
+
+	for( i = 0; i < size; i++ )
+	{
+		pos += Q_snprintf( line + pos, sizeof( line ) - pos, "%02x ", bytes[i] );
+		if( ( i % 16 ) == 15 || i == size - 1 )
+		{
+			Con_DPrintf( "%s [%zu/%zu]: %s\n", name, i + 1, size, line );
+			pos = 0;
+		}
+	}
+}
+
 static void SteamBroker_SetState( sbrk_state_t new_state )
 {
 	if( broker.state != new_state )
@@ -260,6 +278,8 @@ static qboolean SteamBroker_ProcessFrame( void )
 				else if( MSG_ReadBytes( &sb, ticket_data, sizeof( ticket_data ), ticket_size ))
 				{
 					Con_Printf( "%s: SteamID: %"PRIu64", ticket: [%d, %d, %d, %d...]\n", __func__, steam_id, ticket_data[0], ticket_data[1], ticket_data[2], ticket_data[3] );
+					Con_DPrintf( "%s: server %s, challenge=%d, steam_id=%"PRIu64", ticket_size=%u\n", __func__, NET_AdrToString( broker.serveradr ), challenge, steam_id, ticket_size );
+					SteamBroker_DumpHex( "ticket", ticket_data, ticket_size );
 
 					memcpy( cls.steamid, &steam_id, sizeof( cls.steamid ));
 					CL_SendGoldSrcConnectPacket( broker.serveradr, broker.challenge, ticket_data, ticket_size );
@@ -460,6 +480,8 @@ qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 	// sb_connect <ip:port> <server_steamid> <secure> <challenge>
 	char buf[512];
 	int len = Q_snprintf( buf, sizeof( buf ), "sb_connect %s %"PRIu64" %d %d", NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge );
+
+	Con_DPrintf( "%s: requesting ticket (server %s, steamid %"PRIu64", secure %d, challenge %d)\n", __func__, NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge );
 
 	if( !SteamBroker_SendFrame( buf, len ))
 		return false;

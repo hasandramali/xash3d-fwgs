@@ -1164,6 +1164,24 @@ static void CL_GetCDKey( char *protinfo, size_t protinfosize )
 	Info_SetValueForKey( protinfo, "cdkey", key, protinfosize );
 }
 
+static void CL_DumpHex( const char *name, const void *data, size_t size )
+{
+	const uint8_t *bytes = (const uint8_t *)data;
+	char line[80];
+	int pos = 0;
+	size_t i;
+
+	for( i = 0; i < size; i++ )
+	{
+		pos += Q_snprintf( line + pos, sizeof( line ) - pos, "%02x ", bytes[i] );
+		if( ( i % 16 ) == 15 || i == size - 1 )
+		{
+			Con_DPrintf( "%s [%zu/%zu]: %s\n", name, i + 1, size, line );
+			pos = 0;
+		}
+	}
+}
+
 static void CL_WriteSteamTicket( sizebuf_t *send )
 {
 	string key;
@@ -1215,6 +1233,13 @@ void CL_SendGoldSrcConnectPacket( netadr_t adr, int challenge, const void *ticke
 		CL_WriteSteamTicket( &send );
 	else
 		MSG_WriteBytes( &send, ticket, ticketlen );
+
+	Con_DPrintf( "%s: sending GoldSrc connect to %s, challenge=%d, protinfo \"%s\"\n", __func__, NET_AdrToString( adr ), challenge, protinfo );
+	if( ticket != NULL )
+	{
+		Con_DPrintf( "%s: ticket_len=%zu\n", __func__, ticketlen );
+		CL_DumpHex( "ticket", ticket, ticketlen );
+	}
 
 	if( MSG_CheckOverflow( &send ))
 		Con_Printf( S_ERROR "%s: %s overflow!\n", __func__, MSG_GetName( &send ) );
@@ -2701,6 +2726,8 @@ static void CL_Challenge( const char *c, netadr_t from, sizebuf_t *msg )
 			cls.server_steamid = strtoull( Cmd_Argv( 3 ), NULL, 10 );
 			cls.vac2_secure = Q_atoi( Cmd_Argv( 4 ));
 		}
+
+		Con_DPrintf( "%s: goldsrc challenge, steam_auth=%d server_steamid=%"PRIu64" vac2_secure=%d\n", __func__, cls.steam_auth ? 1 : 0, cls.server_steamid, cls.vac2_secure ? 1 : 0 );
 	}
 
 	cls.bandwidth_test.challenge = Q_atoi( Cmd_Argv( 1 ));
@@ -2767,6 +2794,8 @@ static void CL_Reject( const char *c, const char *args, netadr_t from )
 
 	if( !CL_IsFromConnectingServer( from ))
 		return;
+
+	Con_DPrintf( "%s: server %s rejected connection: \"%s\"\n", __func__, NET_AdrToString( from ), args );
 
 	CL_ErrorMsg( c, args, from, NULL );
 

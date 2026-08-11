@@ -578,6 +578,7 @@ class SteamAuthManager(private val ctx: Context) {
                         val ticket = kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(APPID) }
                         val steamId = currentSteamId
                         Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId")
+                        Log.i(TAG, "Ticket hex: ${ticket.joinToString(" ") { "%02x".format(it) }}")
                         writeSbrkResponse(outs, challenge, steamId, ticket)
                     } else if (command.startsWith("sb_disconnect")) {
                         Log.i(TAG, "sb_disconnect ignored")
