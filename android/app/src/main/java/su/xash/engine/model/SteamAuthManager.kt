@@ -292,6 +292,7 @@ class SteamAuthManager(private val ctx: Context) {
         if (loginKey.isNullOrEmpty() || steamId == 0L) return@withContext LoginState.Failed(0, "No stored login key")
         try {
             authMutex.withLock {
+                if (loggedIn) return@withContext LoginState.Success
                 val result = connectLock.withLock {
                     if (!connected) {
                         connectSocket()
@@ -309,6 +310,7 @@ class SteamAuthManager(private val ctx: Context) {
                     )
                 }
                 if (result == ER_OK) {
+                    loggedIn = true
                     prefs.edit().putBoolean("logged_in", true).apply()
                     startHeartbeat()
                     return@withContext LoginState.Success
@@ -339,6 +341,7 @@ class SteamAuthManager(private val ctx: Context) {
         persistent: Boolean = true
     ): LoginState = withContext(Dispatchers.IO) {
         authMutex.withLock {
+            if (loggedIn) return@withLock LoginState.Success
             try {
                 connectLock.withLock {
                     if (!connected) {
@@ -421,6 +424,7 @@ class SteamAuthManager(private val ctx: Context) {
         }
         try {
             authMutex.withLock {
+                if (loggedIn) return@withContext LoginState.Success
                 val result = connectLock.withLock {
                     if (!connected) {
                         connectSocket()
@@ -439,6 +443,7 @@ class SteamAuthManager(private val ctx: Context) {
                     )
                 }
                 if (result == ER_OK) {
+                    loggedIn = true
                     prefs.edit().putBoolean("logged_in", true).apply()
                     startHeartbeat()
                     return@withContext LoginState.Success
@@ -645,7 +650,7 @@ class SteamAuthManager(private val ctx: Context) {
                 try {
                     val sock = Socket()
                     sock.connect(InetSocketAddress(host, port), 10000)
-                    sock.soTimeout = 10000
+                    sock.soTimeout = 120000
                     socket = sock
                     input = sock.getInputStream()
                     output = sock.getOutputStream()

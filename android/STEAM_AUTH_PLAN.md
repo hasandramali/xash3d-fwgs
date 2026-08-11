@@ -202,12 +202,20 @@ Current downloader sends raw "JavaSteam-SerialNumber" for anon — works for ano
   ClientAuthList(5432→5575) → combined ticket via the local broker.
 - UI: SteamAuthFragment (username/password + guard-code input), nav, drawable, strings,
   `-insecure` preference. XashActivity argv injection + `hasStoredSteamSession()`.
+- Cold-start UI fix: `loginWithStoredRefreshToken()`/`loginWithStoredKey()` now set the in-memory
+  `loggedIn` flag on success, so the fragment shows "Logged as" + logout button after a restore
+  (previously it stayed on the login screen despite being logged on).
+- Idle timeout: CM socket `soTimeout` relaxed to 120 s; reader survives read timeouts (kept the
+  loop, no socket teardown), so long waits (e.g. guard code entry) no longer kill the connection.
+- Re-entrancy guard: `loginModern()` returns Success immediately if already logged in, preventing
+  a second auth flow that caused `logged off (eresult=26)` + connection close in testing.
 
 ### TODO
 - CI build + device test: sign in, watch logcat `SteamAuth` for `begin auth` /
   `guard needed` / `logon response eresult=1`, then Sven Co-op connect
   (`148.251.68.215:27017`, server_steamid `90290412949884943`) with a real ticket.
-- Verify refresh-token restore path (`loginWithStoredRefreshToken`) on a cold start.
+- Verify refresh-token restore path (`loginWithStoredRefreshToken`) on a cold start
+  now that it correctly flips `loggedIn` (UI should show "Logged as" after restore).
 - DONE (verified against JavaSteam): Steam's `interval` is float seconds (typically 5.0); we use
   `interval * 1000` ms floor 500. JavaSteam's `delay(pollingInterval.toLong())` truncates the float
   to a Long of milliseconds (5.0 -> 5 ms) which is a bug in the reference; our interpretation is correct.
