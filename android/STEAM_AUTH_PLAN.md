@@ -1,21 +1,57 @@
 # Steam Auth Implementation Plan (Sven Co-op / GoldSrc ticket broker)
 
-Status: protocol research VERIFIED (JavaSteam + SteamKit2 cross-checked). Implementation NOT started.
+Status: MODERN TOKEN AUTH IMPLEMENTED in `SteamAuthManager.kt` (unified-message flow mirroring
+Pluvia/JavaSteam). Needs device testing/CI build. Classic password logon (5514 with field 51) is
+kept only as a fallback; the UI now drives the token flow.
 
 ## Goal
-Embeed real Steam account login (username/password + 2FA + persistent session) in the Android app,
-produce a real app ownership ticket + game connect token + auth session ticket for Sven Co-op
-(appid 225840), and serve it to the engine's existing `cl_steam.c` broker protocol
-(`cl_ticket_generator "steam"`, broker at `127.0.0.1:27420`).
+Embed real Steam account login in the Android app, produce a real app ownership ticket + game
+connect token + auth session ticket for Sven Co-op (appid 225840), and serve it to the engine's
+existing `cl_steam.c` broker protocol (`cl_ticket_generator "steam"`, broker at `127.0.0.1:27420`).
 
 ## Key Decisions
-- Goldberg/fake tickets abandoned. Real Steam ticket via JavaSteam/SteamKit2 flow.
-- No `CMsgClientGamesPlayed` (5410) — NOT required for the ticket. Ticket chain is
-  GetAppOwnershipTicket(857) + GameConnectTokens(779) + ClientAuthList(5432) → session ticket.
-- Linux appearance: `CMsgClientLogon.client_os_type = -500` (LinuxUnknown). Downloader already uses -500.
+- **Modern token auth is PRIMARY**: WebAPI `IAuthenticationService` over the CM connection via
+  unified messages (`ServiceMethodCallFromClientNonAuthed` EMsg 9804), exactly as Pluvia/JavaSteam
+  do on Android. Rationale: correct credentials on a guard-protected account return eresult=5 for
+  the classic password logon, and Steam's supported path is token auth.
+- Flow: `GetPasswordRSAPublicKey` -> RSA(password) -> `BeginAuthSessionViaCredentials` ->
+  (email/2FA code via `UpdateAuthSessionWithSteamGuardCode`, or device-confirmation poll) ->
+  `PollAuthSessionStatus` -> `refresh_token` -> `ClientLogon` (field 108 `access_token` = refresh token).
+- Persistent login via stored `refresh_token` (prefs "steam_auth"). Classic login_key kept as backup.
+- Goldberg/fake tickets abandoned. Real Steam ticket chain is unchanged:
+  GetAppOwnershipTicket(857) + GameConnectTokens(779) + ClientAuthList(5432) -> session ticket.
+- Android appearance: `client_os_type = -500` (AndroidUnknown), `platform_type = SteamClient(1)`.
 - `-insecure` toggle in Steam settings, default ON (VAC off, Steam auth still works).
 - Engine code untouched. Broker server runs on `127.0.0.1:27420` inside the app process.
 - Transport base: `GameDataDownloader.kt` `SteamCMClient` (proven, works with SteamCM).
+
+## Unified message (ServiceMethod) wire details — VERIFIED against JavaSteam
+- Request: EMsg **9804** (`ServiceMethodCallFromClientNonAuthed`, chosen because steamID is null
+  before logon), protobuf header with `client_steamid=0`, `client_sessionid=0`,
+  `jobid_source` (field 10, fixed64), `target_job_name` (field 12, string `Service.Method#1`).
+  Body = request proto.
+- Response: EMsg **147** (`ServiceMethodResponse`), header carries `jobid_target` (field 11) =
+  our jobid_source and `eresult` (field 13, int32, default 2). Body = response proto (raw, no wrapper).
+- Job correlation reuses the existing `pendingJobs` map keyed on header `jobid_target`.
+- RPC names (ProtoParser.kt: `"${service.name}.${method.methodName}#1"`):
+  `Authentication.GetPasswordRSAPublicKey#1`, `Authentication.BeginAuthSessionViaCredentials#1`,
+  `Authentication.PollAuthSessionStatus#1`, `Authentication.UpdateAuthSessionWithSteamGuardCode#1`.
+- `CAuthentication_*` proto fields (steammessages_auth.steamclient.proto):
+  - GetPasswordRSAPublicKey resp: publickey_mod(1), publickey_exp(2), timestamp(3 uint64).
+  - BeginAuthSessionViaCredentials req: account_name(2), encrypted_password(3), encryption_timestamp(4),
+    persistence(7 ESessionPersistence: Ephemeral=0, Persistent=1), website_id(8, "Client"),
+    device_details(9 msg: device_friendly_name(1), platform_type(2=SteamClient), os_type(3=-500)),
+    guard_data(10). Resp: client_id(1 uint64), request_id(2 bytes), interval(3 float/fixed32),
+    allowed_confirmations(4 repeated msg: confirmation_type(1), associated_message(2)), steamid(5).
+  - PollAuthSessionStatus req: client_id(1), request_id(2 bytes). Resp: new_client_id(1),
+    refresh_token(3), access_token(4), account_name(6), new_guard_data(7).
+  - UpdateAuthSessionWithSteamGuardCode req: client_id(1), steamid(2 fixed64), code(3), code_type(4).
+  - EAuthSessionGuardType: None=1, EmailCode=2, DeviceCode=3, DeviceConfirmation=4.
+- RSA password: `RSA/ECB/PKCS1Padding` (JavaSteam uses RSA/None/PKCS1Padding), base64, drop trailing "=".
+- Token logon body: CMsgClientLogon field **108** = refresh token; JavaSteam also sends
+  `client_package_version=1771` (field 5). Header steamid = UNKNOWN_INDIVIDUAL
+  `0x0110000100000000` (accountID 0, instance 1) — same as JavaSteam token logon.
+- Poll loop: `interval` (float, seconds) -> ms, floor 500 ms; overall timeout 120 s.
 
 ## VERIFIED Wire/Proto Details
 
@@ -151,71 +187,39 @@ MachineID children (HardwareUtils.cs:380-412): BB3=hex(SHA1(machineGuid)), FF2=h
 Fallbacks (DefaultMachineInfoProvider): guid = machinename+"-SteamKit", mac="SteamKit-MacAddress", disk="SteamKit-DiskId".
 Current downloader sends raw "JavaSteam-SerialNumber" for anon — works for anon but for a REAL logon use the well-formed MessageObject to be safe.
 
-## Implementation plan (files)
+## Implementation status
 
-### 1. `android/app/src/main/java/su/xash/engine/model/SteamAuthManager.kt` (NEW, main file)
-Self-contained CM client + auth + ticket + broker. Reuse transport code from GameDataDownloader
-(handshake, AES, readMessage, sendRaw, sendProtobufMsg, Proto, ProtoReader, ByteArrayOutputStream,
-TCP_MAGIC, STEAM_PUBLIC_KEY, CM_SERVERS). Either:
-  (a) duplicate the needed private helpers, or
-  (b) extract shared transport into a reusable class (cleaner; consider this first).
-Components:
-- `class SteamAuthManager(ctx)` with state: logged-in account name, steamid, login_key persisted
-  in SharedPreferences (e.g. "steam_auth"). Suspend API:
-  - `connectAndLogin(username, password): Result` — handshake, logon; handles email/2FA/rate limits
-  - `submitAuthCode(code)`, `submitTwoFactor(code)` — retry logon with code
-  - `loginWithStoredKey(): Boolean` — logon using saved login_key (persistent session)
-  - `logout()` — send ClientLogOff(706) or just disconnect
-  - `getSessionTicket(appid=225840): ByteArray` — full ticket chain (above)
-- Heartbeat thread (1009) using heartbeat_seconds from logon response.
-- Handle async messages in a reader loop: GameConnectTokens(779) → queue;
-  NewLoginKey(5463) → save login_key + reply NewLoginKeyAccepted(5464);
-  ClientLoggedOff(757) → mark disconnected; AccountInfo(768) → ignore;
-  TicketAuthComplete(5429) → optional log.
-- Logon body fields: protocol_version=65581, client_language="english", client_os_type=-500,
-  should_remember_password=true, machine_name, machine_id (well-formed MessageObject),
-  account_name, password OR login_key, auth_code/two_factor_code when resubmitting,
-  client_supplied_steam_id=stored steamid when using login key.
-- Parse logon response 751: eresult from body field 1; heartbeat_seconds field 3;
-  steamid from protoHeader.steamid (field 1 fixed64) + client_sessionid (field 2) for later headers.
-- Distinguish email code (eresult 63 → auth_code field 84) vs 2FA (85 → two_factor_code field 101).
-- On login success with should_remember_password, await NewLoginKey(5463), store login_key, ack 5464.
+### DONE (all in `android/app/src/main/java/su/xash/engine/model/SteamAuthManager.kt` + UI files)
+- Self-contained CM client: TCP handshake (1301/1304/1303) + ClientHello 9805 + AES transport,
+  reader thread that survives a single malformed packet, restartable on death.
+- **Modern token auth (primary)**: `loginModern()` + `submitAuthCode()` +
+  `loginWithStoredRefreshToken()`. Unified-message pipeline over EMsg 9804/147 with job
+  correlation via header jobid_target; RSA password encryption; persistence=Persistent;
+  guard-code submission; poll loop (interval ms, 120 s timeout); token logon via field 108.
+- Classic fallback: `login()` (password/email/2FA, fields 51/84/101) and `loginWithStoredKey()`
+  (field 60), both retained. Fragment now drives the modern flow.
+- Ticket chain unchanged and working: GetAppOwnershipTicket(857→858) + GameConnectTokens(779) +
+  ClientAuthList(5432→5575) → combined ticket via the local broker.
+- UI: SteamAuthFragment (username/password + guard-code input), nav, drawable, strings,
+  `-insecure` preference. XashActivity argv injection + `hasStoredSteamSession()`.
 
-### 2. Broker server (in SteamAuthManager.kt or separate SteamBrokerServer.kt)
-- `ServerSocket(27420)` on 127.0.0.1, accept loop on background thread.
-- Read: 4 bytes "SBRK", uint16 LE len, payload. Parse `sb_connect`.
-- On sb_connect: call `getSessionTicket(225840)` (suspend → run in executor/coroutine),
-  respond SBRK frame: "sb_connect\n" + int32 LE challenge + uint64 LE steamid + uint32 LE ticket_size + ticket.
-- On sb_disconnect: ignore (log).
-- If not logged in → respond with empty ticket or close connection gracefully (log + no response).
-- Broker lifecycle: start when logged in (and while game runs). Stop on logout.
-
-### 3. UI
-- Drawable `ic_baseline_steam_24.xml` (Steam logo vector).
-- `menu_library.xml`: add Steam item (action_steam) with steam icon.
-- `LibraryFragment.kt`: handle R.id.action_steam → navigate to SteamAuthFragment.
-- `nav_graph.xml`: add SteamAuthFragment destination + action from libraryFragment.
-- `SteamAuthFragment.kt` + layout: account status, login form (username/password), 2FA code field,
-  email code field, login/logout buttons, status text (connecting/auth-code-needed/2fa-needed/error),
-  `-insecure` SwitchPreference (key `steam_insecure`, default true).
-- `strings.xml`: steam title, login, logout, account label, 2FA hint, email code hint, statuses, insecure.
-
-### 4. XashActivity argv injection
-In `getFinalArgv()` add when logged in:
-- `+set cl_ticket_generator "steam"`
-- `+set cl_steam_broker_addr 127.0.0.1:27420`
-- `-insecure` when `steam_insecure` pref true (default on).
-Gate on SteamAuthManager.isLoggedIn (or stored login_key exists). Use hasArgument() to avoid duplicates.
-
-### 5. Test
-- Test server `148.251.68.215:27017` (auth=1, server_steamid=90290412949884943, vac=1).
-- Flow: login → start broker → launch Sven Co-op → connect → observe `CL_SendGoldSrcConnectPacket`
-  with real ticket, no `STEAM validation rejected`.
+### TODO
+- CI build + device test: sign in, watch logcat `SteamAuth` for `begin auth` /
+  `guard needed` / `logon response eresult=1`, then Sven Co-op connect
+  (`148.251.68.215:27017`, server_steamid `90290412949884943`) with a real ticket.
+- Verify refresh-token restore path (`loginWithStoredRefreshToken`) on a cold start.
+- DONE (verified against JavaSteam): Steam's `interval` is float seconds (typically 5.0); we use
+  `interval * 1000` ms floor 500. JavaSteam's `delay(pollingInterval.toLong())` truncates the float
+  to a Long of milliseconds (5.0 -> 5 ms) which is a bug in the reference; our interpretation is correct.
 
 ## Risks / Notes
 - CM login can be rate-limited (eresult 84) — backoff.
-- Machine ID well-formedness matters for real logins; use SteamKit2 binary KV format.
-- GameConnectTokens may need an interval; if queue empty, may need to wait/retry after login.
-- Job IDs: set jobid_source in header for 857/5432; match ack jobid_target.
+- Guard-protected accounts: BeginAuthSession returns allowed_confirmations; we handle
+  None / EmailCode / DeviceCode / DeviceConfirmation. DeviceConfirmation polls until the
+  mobile-app approve (120 s timeout).
+- Refresh token + guard_data stored in SharedPreferences ("steam_auth") as plaintext.
+- GameConnectTokens may arrive slightly after logon; if the queue is empty at ticket time,
+  wait/retry.
+- Job IDs: jobid_source in header; response matched on jobid_target. Unified responses (147)
+  match the same map.
 - The broker must keep the CM connection + heartbeat alive for the whole game session.
-- Credentials/login_key stored in SharedPreferences (plaintext; note in UI? acceptable).

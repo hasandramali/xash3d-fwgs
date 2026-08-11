@@ -60,11 +60,15 @@ class SteamAuthFragment : Fragment() {
 
         updateUi()
 
-        // If we already have a stored login key, try to restore the session.
+        // If we already have a stored session, try to restore it.
         if (auth.hasStoredKey && !auth.isLoggedIn) {
             lifecycleScope.launch {
                 statusText.text = getString(R.string.steam_connecting)
-                val state = auth.loginWithStoredKey()
+                val state = if (auth.hasStoredRefreshToken) {
+                    auth.loginWithStoredRefreshToken()
+                } else {
+                    auth.loginWithStoredKey()
+                }
                 handleState(state)
             }
         }
@@ -74,19 +78,23 @@ class SteamAuthFragment : Fragment() {
         val username = usernameInput.text.toString().trim()
         val password = passwordInput.text.toString()
         val code = codeInput.text.toString().trim()
-        if (username.isEmpty() || password.isEmpty()) {
+        if (pendingEmailCode || pendingTwoFactor) {
+            if (code.isEmpty()) {
+                statusText.text = getString(R.string.steam_need_guard_code)
+                return
+            }
+        } else if (username.isEmpty() || password.isEmpty()) {
             statusText.text = getString(R.string.steam_username_hint) + " / " + getString(R.string.steam_password_hint)
             return
         }
         lifecycleScope.launch {
             setLoading(true)
             statusText.text = getString(R.string.steam_authenticating)
-            val state = auth.login(
-                username = username,
-                password = password,
-                authCode = if (pendingEmailCode) code.ifEmpty { null } else null,
-                twoFactorCode = if (pendingTwoFactor) code.ifEmpty { null } else null
-            )
+            val state = if (pendingEmailCode || pendingTwoFactor) {
+                auth.submitAuthCode(code)
+            } else {
+                auth.loginModern(username = username, password = password)
+            }
             setLoading(false)
             handleState(state)
         }

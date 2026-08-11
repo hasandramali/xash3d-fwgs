@@ -2,6 +2,7 @@ package su.xash.engine.model
 
 import android.content.Context
 import android.os.Build
+import android.util.Base64
 import android.util.Log
 import java.io.ByteArrayInputStream
 import java.io.InputStream
@@ -27,6 +28,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -79,9 +81,30 @@ class SteamAuthManager(private val ctx: Context) {
         private const val ER_LOGIN_DENIED_NEED_TWO_FACTOR = 85
         private const val ER_TWO_FACTOR_CODE_MISMATCH = 88
         private const val ER_TWO_FACTOR_ACTIVATION_CODE_MISMATCH = 89
+        private const val ER_DUPLICATE_REQUEST = 23
+        private const val ER_INVALID_LOGIN_AUTH_CODE = 56
 
         private const val PROTOCOL_VERSION = 65581
         private const val CLIENT_OS_TYPE_ANDROID_UNKNOWN = -500
+
+        // Unified message (ServiceMethod) EMsg numbers, see JavaSteam emsg.steamd.
+        private const val EMsg_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED = 9804
+        private const val EMsg_SERVICE_METHOD_RESPONSE = 147
+
+        // CAuthentication_AllowedConfirmation.confirmation_type (EAuthSessionGuardType)
+        private const val GUARD_TYPE_NONE = 1
+        private const val GUARD_TYPE_EMAIL_CODE = 2
+        private const val GUARD_TYPE_DEVICE_CODE = 3
+        private const val GUARD_TYPE_DEVICE_CONFIRMATION = 4
+
+        // EAuthTokenPlatformType
+        private const val PLATFORM_STEAM_CLIENT = 1
+
+        // ESessionPersistence (enums.proto)
+        private const val PERSISTENCE_EPHEMERAL = 0
+        private const val PERSISTENCE_PERSISTENT = 1
+
+        private const val AUTH_POLL_TIMEOUT_MS = 120_000L
 
         // SteamID(accountID=0, instance=1, universe=1, Individual) used as the header steamid
         // for a fresh username/password logon (mirrors JavaSteam SteamID.UNKNOWN_INDIVIDUAL).
@@ -131,10 +154,31 @@ class SteamAuthManager(private val ctx: Context) {
         data class Error(val message: String) : LoginState()
     }
 
-    private class SteamMsg(val emsg: Int, val body: ByteArray)
+    private class SteamMsg(val emsg: Int, val body: ByteArray, val header: ByteArray = ByteArray(0))
 
     // A decoded packet with the (already stripped) proto header kept for job correlation.
     private class Packet(val emsg: Int, val body: ByteArray, val isProto: Boolean, val header: ByteArray)
+
+    // A service method (unified message) call that failed with a non-OK eresult.
+    private class AuthException(val eresult: Int, message: String) : Exception(message)
+
+    // Result of CAuthentication_PollAuthSessionStatus.
+    private class PollResult(
+        val accountName: String,
+        val accessToken: String,
+        val refreshToken: String,
+        val guardData: String
+    )
+
+    // In-flight credentials auth session (mirrors JavaSteam CredentialsAuthSession).
+    private class AuthSessionState(
+        var clientId: Long,
+        val requestId: ByteArray,
+        var pollingIntervalMs: Long,
+        val allowedConfirmations: MutableList<Pair<Int, String>>,
+        var steamId: Long,
+        var pendingCodeType: Int = GUARD_TYPE_DEVICE_CODE
+    )
 
     private val prefs = ctx.getSharedPreferences("steam_auth", Context.MODE_PRIVATE)
 
@@ -174,9 +218,16 @@ class SteamAuthManager(private val ctx: Context) {
     // stored session
     val accountName: String? get() = prefs.getString("account_name", null)
     val storedSteamId: Long get() = prefs.getLong("steam_id", 0L)
-    val hasStoredKey: Boolean get() = !prefs.getString("login_key", "").isNullOrEmpty()
+    val hasStoredKey: Boolean
+        get() = !prefs.getString("login_key", "").isNullOrEmpty() ||
+            !prefs.getString("refresh_token", "").isNullOrEmpty()
+    val hasStoredRefreshToken: Boolean get() = !prefs.getString("refresh_token", "").isNullOrEmpty()
     val isLoggedIn: Boolean get() = loggedIn
     val currentUsername: String get() = prefs.getString("account_name", null) ?: ""
+
+    // auth pipeline serialization + in-flight session (kept across user code submission)
+    private val authMutex = Mutex()
+    private var authSession: AuthSessionState? = null
 
     private fun machineName(): String = Build.MODEL.ifEmpty { "Android" }
     private fun machineId(): ByteArray = (Build.MODEL + "-Xash3D").toByteArray(Charsets.UTF_8)
@@ -240,32 +291,164 @@ class SteamAuthManager(private val ctx: Context) {
         val steamId = storedSteamId
         if (loginKey.isNullOrEmpty() || steamId == 0L) return@withContext LoginState.Failed(0, "No stored login key")
         try {
-            val result = connectLock.withLock {
-                if (!connected) {
-                    connectSocket()
-                    doHandshake()
-                    startReader()
-                    connected = true
+            authMutex.withLock {
+                val result = connectLock.withLock {
+                    if (!connected) {
+                        connectSocket()
+                        doHandshake()
+                        startReader()
+                        connected = true
+                    }
+                    sendLogon(
+                        username = prefs.getString("account_name", "") ?: "",
+                        password = null,
+                        authCode = null,
+                        twoFactorCode = null,
+                        loginKey = loginKey,
+                        steamId = steamId
+                    )
                 }
-                sendLogon(
-                    username = prefs.getString("account_name", "") ?: "",
-                    password = null,
-                    authCode = null,
-                    twoFactorCode = null,
-                    loginKey = loginKey,
-                    steamId = steamId
-                )
+                if (result == ER_OK) {
+                    prefs.edit().putBoolean("logged_in", true).apply()
+                    startHeartbeat()
+                    return@withContext LoginState.Success
+                }
+                prefs.edit().putBoolean("logged_in", false).apply()
+                LoginState.Failed(result, "Login key rejected ($result)")
             }
-            if (result == ER_OK) {
-                prefs.edit().putBoolean("logged_in", true).apply()
-                startHeartbeat()
-                return@withContext LoginState.Success
-            }
-            prefs.edit().putBoolean("logged_in", false).apply()
-            LoginState.Failed(result, "Login key rejected ($result)")
         } catch (e: Exception) {
             Log.e(TAG, "stored key login error: ${e.message}")
             LoginState.Error(e.message ?: "stored key login error")
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Modern token auth (SteamWeb API via unified messages, mirrors Pluvia/JavaSteam)
+    // ------------------------------------------------------------------
+
+    /**
+     * Logs in with username/password through the modern token-auth flow:
+     * GetPasswordRSAPublicKey -> BeginAuthSessionViaCredentials -> (guard) -> PollAuthSessionStatus
+     * -> refresh_token -> ClientLogon with access_token (field 108).
+     * Returns NeedEmailCode/NeedTwoFactor when a guard code is required; call [submitAuthCode]
+     * to continue. Persistent refresh token is stored for [loginWithStoredRefreshToken].
+     */
+    suspend fun loginModern(
+        username: String,
+        password: String,
+        persistent: Boolean = true
+    ): LoginState = withContext(Dispatchers.IO) {
+        authMutex.withLock {
+            try {
+                connectLock.withLock {
+                    if (!connected) {
+                        connectSocket()
+                        doHandshake()
+                        startReader()
+                        connected = true
+                    }
+                }
+                prefs.edit().putString("account_name", username).apply()
+
+                val session = beginAuthSession(username, password, persistent)
+                authSession = session
+
+                val preferred = sortConfirmations(session.allowedConfirmations).firstOrNull()
+                    ?: return@withLock LoginState.Failed(2, "No allowed confirmations")
+                when (preferred.first) {
+                    GUARD_TYPE_NONE -> finishAuthSession(session)
+                    GUARD_TYPE_DEVICE_CONFIRMATION -> finishAuthSession(session)
+                    GUARD_TYPE_EMAIL_CODE -> {
+                        session.pendingCodeType = GUARD_TYPE_EMAIL_CODE
+                        LoginState.NeedEmailCode
+                    }
+                    GUARD_TYPE_DEVICE_CODE -> {
+                        session.pendingCodeType = GUARD_TYPE_DEVICE_CODE
+                        LoginState.NeedTwoFactor
+                    }
+                    else -> LoginState.Failed(2, "Unsupported confirmation type ${preferred.first}")
+                }
+            } catch (e: AuthException) {
+                Log.w(TAG, "loginModern auth failure: eresult=${e.eresult} ${e.message}")
+                authSession = null
+                LoginState.Failed(e.eresult, e.message ?: "authentication failed")
+            } catch (e: Exception) {
+                Log.e(TAG, "loginModern error: ${e.message}")
+                authSession = null
+                LoginState.Error(e.message ?: "login error")
+            }
+        }
+    }
+
+    /**
+     * Continues an in-progress credentials auth session by submitting the Steam Guard
+     * code (email or 2FA) the account asked for, then polls to completion.
+     */
+    suspend fun submitAuthCode(code: String): LoginState = withContext(Dispatchers.IO) {
+        authMutex.withLock {
+            val session = authSession
+                ?: return@withLock LoginState.Failed(0, "No auth session in progress")
+            try {
+                sendSteamGuardCode(session, code.trim(), session.pendingCodeType)
+                finishAuthSession(session)
+            } catch (e: AuthException) {
+                when (e.eresult) {
+                    ER_INVALID_LOGIN_AUTH_CODE, ER_TWO_FACTOR_CODE_MISMATCH -> {
+                        // Session stays alive; user can retype and resubmit.
+                        LoginState.Failed(e.eresult, "Incorrect code, try again")
+                    }
+                    else -> {
+                        authSession = null
+                        LoginState.Failed(e.eresult, e.message ?: "code rejected")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "submitAuthCode error: ${e.message}")
+                authSession = null
+                LoginState.Error(e.message ?: "guard code error")
+            }
+        }
+    }
+
+    /**
+     * Re-login using a stored refresh token (persistent session from [loginModern]).
+     */
+    suspend fun loginWithStoredRefreshToken(): LoginState = withContext(Dispatchers.IO) {
+        val refreshToken = prefs.getString("refresh_token", null)
+        val accountName = prefs.getString("account_name", null)
+        if (refreshToken.isNullOrEmpty() || accountName.isNullOrEmpty()) {
+            return@withContext LoginState.Failed(0, "No stored refresh token")
+        }
+        try {
+            authMutex.withLock {
+                val result = connectLock.withLock {
+                    if (!connected) {
+                        connectSocket()
+                        doHandshake()
+                        startReader()
+                        connected = true
+                    }
+                    sendLogon(
+                        username = accountName,
+                        password = null,
+                        authCode = null,
+                        twoFactorCode = null,
+                        loginKey = null,
+                        steamId = null,
+                        accessToken = refreshToken
+                    )
+                }
+                if (result == ER_OK) {
+                    prefs.edit().putBoolean("logged_in", true).apply()
+                    startHeartbeat()
+                    return@withContext LoginState.Success
+                }
+                prefs.edit().putBoolean("logged_in", false).apply()
+                LoginState.Failed(result, "Refresh token rejected ($result)")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "stored refresh token login error: ${e.message}")
+            LoginState.Error(e.message ?: "stored refresh token login error")
         }
     }
 
@@ -275,7 +458,10 @@ class SteamAuthManager(private val ctx: Context) {
                 sendRawMsg(ByteArray(0), 706) // ClientLogOff
             }
         } catch (_: Exception) { }
-        prefs.edit().putBoolean("logged_in", false).apply()
+        prefs.edit()
+            .putBoolean("logged_in", false)
+            .putString("refresh_token", null)
+            .apply()
         loggedIn = false
         stopBroker()
         disconnect()
@@ -294,7 +480,7 @@ class SteamAuthManager(private val ctx: Context) {
         if (!hasStoredKey) return
         Thread {
             kotlinx.coroutines.runBlocking {
-                val state = loginWithStoredKey()
+                val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
                 if (state is LoginState.Success) startBroker()
             }
         }.apply { isDaemon = true; start() }
@@ -576,7 +762,7 @@ class SteamAuthManager(private val ctx: Context) {
                     if (packet.isProto) {
                         val jobId = readHeaderJobIdTarget(packet.header)
                         if (jobId != 0L) {
-                            pendingJobs.remove(jobId)?.complete(SteamMsg(emsg, packet.body))
+                            pendingJobs.remove(jobId)?.complete(SteamMsg(emsg, packet.body, packet.header))
                             return
                         }
                     }
@@ -732,7 +918,8 @@ class SteamAuthManager(private val ctx: Context) {
         authCode: String?,
         twoFactorCode: String?,
         loginKey: String?,
-        steamId: Long?
+        steamId: Long?,
+        accessToken: String? = null
     ): Int {
         val body = buildLogonBody(
             username = username,
@@ -740,7 +927,8 @@ class SteamAuthManager(private val ctx: Context) {
             authCode = authCode,
             twoFactorCode = twoFactorCode,
             loginKey = loginKey,
-            steamId = steamId
+            steamId = steamId,
+            accessToken = accessToken
         )
         val headerSteamId = steamId ?: UNKNOWN_INDIVIDUAL_STEAM_ID
         val header = buildProtoHeader(headerSteamId, 0)
@@ -778,17 +966,236 @@ class SteamAuthManager(private val ctx: Context) {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Token auth pipeline internals (mirror JavaSteam SteamAuthentication/AuthSession)
+    // ------------------------------------------------------------------
+
+    /** Sends a unified message (ServiceMethodCallFromClientNonAuthed) and awaits the response. */
+    private suspend fun unifiedRequest(
+        serviceMethod: String,
+        body: ByteArray,
+        allowedEresults: Set<Int> = setOf(ER_OK)
+    ): ByteArray {
+        val jobId = nextJobId.getAndIncrement()
+        val future = CompletableFuture<SteamMsg>()
+        pendingJobs[jobId] = future
+        sendProtobufMsg(
+            EMsg_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED,
+            body,
+            buildUnifiedHeader(serviceMethod, jobId)
+        )
+        val resp = awaitJob(future, serviceMethod)
+        val eresult = readHeaderEresult(resp.header)
+        if (eresult !in allowedEresults) {
+            throw AuthException(eresult, "$serviceMethod failed: eresult=$eresult")
+        }
+        return resp.body
+    }
+
+    private suspend fun beginAuthSession(
+        username: String,
+        password: String,
+        persistent: Boolean
+    ): AuthSessionState {
+        // 1. GetPasswordRSAPublicKey
+        val rsaReq = ByteArrayOutputStream()
+        writeStringField(rsaReq, 1, username)
+        val rsaResp = unifiedRequest("Authentication.GetPasswordRSAPublicKey#1", rsaReq.toByteArray())
+        val rdr = ProtoReader(rsaResp)
+        var modHex = ""
+        var expHex = ""
+        var timestamp = 0L
+        while (rdr.remaining > 0) {
+            val tag = rdr.readVarint()
+            when (tag shr 3) {
+                1 -> { val len = rdr.readVarint(); modHex = String(rdr.readBytes(len), Charsets.UTF_8) }
+                2 -> { val len = rdr.readVarint(); expHex = String(rdr.readBytes(len), Charsets.UTF_8) }
+                3 -> timestamp = rdr.readLongVarint()
+                else -> rdr.skipField(tag)
+            }
+        }
+        if (modHex.isEmpty() || expHex.isEmpty()) throw Exception("No password RSA key returned")
+        val encryptedPassword = encryptPasswordRsa(password, modHex, expHex)
+
+        // 2. BeginAuthSessionViaCredentials
+        val req = ByteArrayOutputStream()
+        writeStringField(req, 2, username)
+        writeStringField(req, 3, encryptedPassword)
+        req.write(Proto.packVarint(4 shl 3 or 0)); req.write(Proto.packLongVarint(timestamp))
+        req.write(Proto.packVarint(7 shl 3 or 0)); req.write(Proto.packVarint(if (persistent) PERSISTENCE_PERSISTENT else PERSISTENCE_EPHEMERAL))
+        writeStringField(req, 8, "Client")
+        val device = ByteArrayOutputStream()
+        writeStringField(device, 1, machineName())
+        device.write(Proto.packVarint(2 shl 3 or 0)); device.write(Proto.packVarint(PLATFORM_STEAM_CLIENT))
+        device.write(Proto.packVarint(3 shl 3 or 0)); device.write(Proto.packVarint(CLIENT_OS_TYPE_ANDROID_UNKNOWN))
+        val devBytes = device.toByteArray()
+        req.write(Proto.packVarint(9 shl 3 or 2)); req.write(Proto.packVarint(devBytes.size)); req.write(devBytes)
+        prefs.getString("guard_data", null)?.takeIf { it.isNotEmpty() }?.let { writeStringField(req, 10, it) }
+
+        val resp = unifiedRequest("Authentication.BeginAuthSessionViaCredentials#1", req.toByteArray())
+        val respRdr = ProtoReader(resp)
+        var clientId = 0L
+        var requestId = ByteArray(0)
+        var interval = 5f
+        var steamId = 0L
+        val confirmations = mutableListOf<Pair<Int, String>>()
+        while (respRdr.remaining > 0) {
+            val tag = respRdr.readVarint()
+            when (tag shr 3) {
+                1 -> clientId = respRdr.readLongVarint()
+                2 -> { val len = respRdr.readVarint(); requestId = respRdr.readBytes(len) }
+                3 -> interval = Float.fromBits(respRdr.readFixed32())
+                4 -> { val len = respRdr.readVarint(); confirmations.add(parseAllowedConfirmation(respRdr.readBytes(len))) }
+                5 -> steamId = respRdr.readLongVarint()
+                else -> respRdr.skipField(tag)
+            }
+        }
+        if (clientId == 0L) throw Exception("BeginAuthSessionViaCredentials returned no client_id")
+        return AuthSessionState(
+            clientId = clientId,
+            requestId = requestId,
+            pollingIntervalMs = (interval.toLong() * 1000L).coerceAtLeast(500L),
+            allowedConfirmations = confirmations,
+            steamId = steamId
+        )
+    }
+
+    private fun encryptPasswordRsa(password: String, modHex: String, expHex: String): String {
+        val pubKey = KeyFactory.getInstance("RSA").generatePublic(
+            RSAPublicKeySpec(BigInteger(modHex, 16), BigInteger(expHex, 16))
+        )
+        val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, pubKey)
+        val encrypted = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
+        // JavaSteam: base64 then drop the trailing "="
+        return Base64.encodeToString(encrypted, Base64.NO_WRAP).dropLast(1)
+    }
+
+    private fun parseAllowedConfirmation(data: ByteArray): Pair<Int, String> {
+        val rdr = ProtoReader(data)
+        var type = 0
+        var msg = ""
+        while (rdr.remaining > 0) {
+            val tag = rdr.readVarint()
+            when (tag shr 3) {
+                1 -> type = rdr.readVarint()
+                2 -> { val len = rdr.readVarint(); msg = String(rdr.readBytes(len), Charsets.UTF_8) }
+                else -> rdr.skipField(tag)
+            }
+        }
+        return type to msg
+    }
+
+    private fun sortConfirmations(list: List<Pair<Int, String>>): List<Pair<Int, String>> {
+        val order = mapOf(
+            GUARD_TYPE_NONE to 0,
+            GUARD_TYPE_DEVICE_CONFIRMATION to 1,
+            GUARD_TYPE_DEVICE_CODE to 2,
+            GUARD_TYPE_EMAIL_CODE to 3,
+            5 to 4, // EmailConfirmation
+            6 to 5, // MachineToken
+            0 to 6  // Unknown
+        )
+        return list.sortedBy { order[it.first] ?: Int.MAX_VALUE }
+    }
+
+    private suspend fun sendSteamGuardCode(session: AuthSessionState, code: String, codeType: Int) {
+        val body = ByteArrayOutputStream()
+        body.write(Proto.packVarint(1 shl 3 or 0)); body.write(Proto.packLongVarint(session.clientId))
+        body.write(Proto.packVarint(2 shl 3 or 1)); body.write(Proto.packInt64(session.steamId))
+        writeStringField(body, 3, code)
+        body.write(Proto.packVarint(4 shl 3 or 0)); body.write(Proto.packVarint(codeType))
+        // DuplicateRequest happens when the code was already accepted elsewhere; the next poll succeeds.
+        unifiedRequest(
+            "Authentication.UpdateAuthSessionWithSteamGuardCode#1",
+            body.toByteArray(),
+            allowedEresults = setOf(ER_OK, ER_DUPLICATE_REQUEST)
+        )
+    }
+
+    private suspend fun pollAuthSessionStatus(session: AuthSessionState): PollResult? {
+        val body = ByteArrayOutputStream()
+        body.write(Proto.packVarint(1 shl 3 or 0)); body.write(Proto.packLongVarint(session.clientId))
+        body.write(Proto.packVarint(2 shl 3 or 2))
+        body.write(Proto.packVarint(session.requestId.size))
+        body.write(session.requestId)
+        val resp = unifiedRequest("Authentication.PollAuthSessionStatus#1", body.toByteArray())
+        val rdr = ProtoReader(resp)
+        var refreshToken = ""
+        var accessToken = ""
+        var accountName = ""
+        var guardData = ""
+        while (rdr.remaining > 0) {
+            val tag = rdr.readVarint()
+            when (tag shr 3) {
+                1 -> session.clientId = rdr.readLongVarint()
+                3 -> { val len = rdr.readVarint(); refreshToken = String(rdr.readBytes(len), Charsets.UTF_8) }
+                4 -> { val len = rdr.readVarint(); accessToken = String(rdr.readBytes(len), Charsets.UTF_8) }
+                6 -> { val len = rdr.readVarint(); accountName = String(rdr.readBytes(len), Charsets.UTF_8) }
+                7 -> { val len = rdr.readVarint(); guardData = String(rdr.readBytes(len), Charsets.UTF_8) }
+                else -> rdr.skipField(tag)
+            }
+        }
+        if (refreshToken.isEmpty()) return null
+        return PollResult(accountName, accessToken, refreshToken, guardData)
+    }
+
+    private suspend fun finishAuthSession(session: AuthSessionState): LoginState {
+        val deadline = System.currentTimeMillis() + AUTH_POLL_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val result = pollAuthSessionStatus(session)
+            if (result != null) return completeAuth(result, session.steamId)
+            delay(session.pollingIntervalMs)
+        }
+        authSession = null
+        return LoginState.Failed(2, "Auth session timed out")
+    }
+
+    private suspend fun completeAuth(result: PollResult, steamId: Long): LoginState {
+        val username = result.accountName.ifEmpty { prefs.getString("account_name", "") ?: "" }
+        prefs.edit()
+            .putString("account_name", username)
+            .putString("refresh_token", result.refreshToken)
+            .putString("guard_data", result.guardData.orEmpty())
+            .putLong("steam_id", steamId)
+            .apply()
+        authSession = null
+        val logonResult = connectLock.withLock {
+            if (!connected) {
+                connectSocket()
+                doHandshake()
+                startReader()
+                connected = true
+            }
+            sendLogon(
+                username = username,
+                password = null,
+                authCode = null,
+                twoFactorCode = null,
+                loginKey = null,
+                steamId = null,
+                accessToken = result.refreshToken
+            )
+        }
+        return handleLogonResult(logonResult)
+    }
+
     private fun buildLogonBody(
         username: String,
         password: String?,
         authCode: String?,
         twoFactorCode: String?,
         loginKey: String?,
-        steamId: Long?
+        steamId: Long?,
+        accessToken: String? = null
     ): ByteArray {
         val buf = ByteArrayOutputStream()
         // 1 protocol_version
         buf.write(Proto.packVarint(1 shl 3 or 0)); buf.write(Proto.packVarint(PROTOCOL_VERSION))
+        // 5 client_package_version (JavaSteam sends 1771 on token logons)
+        if (accessToken != null) {
+            buf.write(Proto.packVarint(5 shl 3 or 0)); buf.write(Proto.packVarint(1771))
+        }
         // 6 client_language
         writeStringField(buf, 6, "english")
         // 7 client_os_type
@@ -814,6 +1221,8 @@ class SteamAuthManager(private val ctx: Context) {
         writeStringField(buf, 96, machineName())
         // 102 supports_rate_limit_response
         buf.write(Proto.packVarint(102 shl 3 or 0)); buf.write(Proto.packVarint(1))
+        // 108 access_token (refresh token from the token auth flow)
+        accessToken?.let { writeStringField(buf, 108, it) }
         return buf.toByteArray()
     }
 
@@ -943,6 +1352,20 @@ class SteamAuthManager(private val ctx: Context) {
         return 0L
     }
 
+    // CMsgProtoBufHeader.eresult (field 13) — carries the service method result.
+    private fun readHeaderEresult(header: ByteArray): Int {
+        val rdr = ProtoReader(header)
+        var eresult = 2
+        while (rdr.remaining > 0) {
+            val tag = rdr.readVarint()
+            when (tag shr 3) {
+                13 -> if ((tag and 7) == 0) eresult = rdr.readVarint() else rdr.skipField(tag)
+                else -> rdr.skipField(tag)
+            }
+        }
+        return eresult
+    }
+
     // ------------------------------------------------------------------
     // Packet framing / encryption (mirrors GameDataDownloader transport)
     // ------------------------------------------------------------------
@@ -1062,6 +1485,9 @@ class SteamAuthManager(private val ctx: Context) {
         loggedIn = false
         gameConnectTokens.clear()
         synchronized(ticketChangeLock) { ticketsByGame.clear() }
+        authSession = null
+        pendingJobs.values.forEach { it.completeExceptionally(Exception("Disconnected")) }
+        pendingJobs.clear()
     }
 
     private fun startHeartbeat() {
@@ -1118,6 +1544,27 @@ class SteamAuthManager(private val ctx: Context) {
             throw Exception("Truncated varint")
         }
 
+        fun readLongVarint(): Long {
+            var result = 0L
+            var shift = 0
+            while (pos < data.size) {
+                val b = data[pos++].toInt() and 0xFF
+                result = result or ((b and 0x7F).toLong() shl shift)
+                if (b and 0x80 == 0) return result
+                shift += 7
+            }
+            throw Exception("Truncated varint")
+        }
+
+        fun readFixed32(): Int {
+            val result = (data[pos].toInt() and 0xFF) or
+                ((data[pos + 1].toInt() and 0xFF) shl 8) or
+                ((data[pos + 2].toInt() and 0xFF) shl 16) or
+                ((data[pos + 3].toInt() and 0xFF) shl 24)
+            pos += 4
+            return result
+        }
+
         fun readLongLE(): Long {
             val result = (data[pos].toLong() and 0xFF) or
                 ((data[pos + 1].toLong() and 0xFF) shl 8) or
@@ -1171,6 +1618,17 @@ class SteamAuthManager(private val ctx: Context) {
             (v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte(),
             ((v shr 16) and 0xFF).toByte(), ((v shr 24) and 0xFF).toByte()
         )
+
+        fun packLongVarint(value: Long): ByteArray {
+            val bos = ByteArrayOutputStream()
+            var v = value
+            while (v and -0x80L != 0L) {
+                bos.write(((v and 0x7F) or 0x80).toByte())
+                v = v ushr 7
+            }
+            bos.write((v and 0x7F).toByte())
+            return bos.toByteArray()
+        }
 
         fun packInt64(v: Long): ByteArray = byteArrayOf(
             (v and 0xFF).toByte(),
@@ -1234,6 +1692,17 @@ class SteamAuthManager(private val ctx: Context) {
         if (jobidSource != null) {
             buf.write(Proto.packVarint(10 shl 3 or 1)); buf.write(Proto.packInt64(jobidSource))
         }
+        return buf.toByteArray()
+    }
+
+    // Non-authed ServiceMethod header: steamid/sessionid 0, jobid_source, target_job_name.
+    private fun buildUnifiedHeader(serviceMethod: String, jobidSource: Long): ByteArray {
+        val buf = ByteArrayOutputStream()
+        buf.write(Proto.packVarint(1 shl 3 or 1)); buf.write(Proto.packInt64(0L))
+        buf.write(Proto.packVarint(2 shl 3 or 0)); buf.write(Proto.packVarint(0))
+        buf.write(Proto.packVarint(10 shl 3 or 1)); buf.write(Proto.packInt64(jobidSource))
+        val name = serviceMethod.toByteArray(Charsets.UTF_8)
+        buf.write(Proto.packVarint(12 shl 3 or 2)); buf.write(Proto.packVarint(name.size)); buf.write(name)
         return buf.toByteArray()
     }
 }

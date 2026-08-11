@@ -150,6 +150,7 @@
     <string name="steam_logged_in">Logged in as %1$s</string>
     <string name="steam_need_email_code">Steam Guard email code sent. Enter it below.</string>
     <string name="steam_need_twofactor">Enter your Steam Guard two-factor code.</string>
+    <string name="steam_need_guard_code">Enter the Steam Guard code first.</string>
     <string name="steam_error">Steam login failed: %1$s</string>
     <string name="steam_insecure">-insecure (VAC off)</string>
     <string name="steam_insecure_summary">Disable VAC/Steam validation on servers (enables -insecure). Ticket is still sent.</string>
