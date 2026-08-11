@@ -84,8 +84,8 @@ class SteamAuthManager(private val ctx: Context) {
         private const val CLIENT_OS_TYPE_ANDROID_UNKNOWN = -500
 
         // SteamID(accountID=0, instance=1, universe=1, Individual) used as the header steamid
-        // for a fresh username/password logon (mirrors JavaSteam SteamUser.logOn).
-        private const val UNKNOWN_INDIVIDUAL_STEAM_ID = 0x0110001000000000L
+        // for a fresh username/password logon (mirrors JavaSteam SteamID.UNKNOWN_INDIVIDUAL).
+        private const val UNKNOWN_INDIVIDUAL_STEAM_ID = 0x0110000100000000L
 
         @Volatile
         private var instance: SteamAuthManager? = null
@@ -486,8 +486,8 @@ class SteamAuthManager(private val ctx: Context) {
         val challenge: ByteArray
         if (encReq.isProto) {
             val pr = ProtoReader(encReq.body)
-            pr.skipField() // protocol_version
-            pr.skipField() // universe
+            pr.skipFieldAtTag() // protocol_version
+            pr.skipFieldAtTag() // universe
             val tag3 = pr.readVarint()
             if (tag3 != (3 shl 3 or 2)) throw Exception("unexpected encrypt request field")
             val keyLen = pr.readVarint()
@@ -599,9 +599,9 @@ class SteamAuthManager(private val ctx: Context) {
                 while (hr.remaining > 0) {
                     val tag = hr.readVarint()
                     when (tag shr 3) {
-                        1 -> if ((tag and 7) == 1) currentSteamId = hr.readLongLE() else hr.skipField()
-                        2 -> if ((tag and 7) == 0) currentSessionId = hr.readVarint() else hr.skipField()
-                        else -> hr.skipField()
+                        1 -> if ((tag and 7) == 1) currentSteamId = hr.readLongLE() else hr.skipField(tag)
+                        2 -> if ((tag and 7) == 0) currentSessionId = hr.readVarint() else hr.skipField(tag)
+                        else -> hr.skipField(tag)
                     }
                 }
             }
@@ -610,13 +610,17 @@ class SteamAuthManager(private val ctx: Context) {
         }
         val rdr = ProtoReader(packet.body)
         var eresult = 2
+        var eresultExtended = 0
+        var legacyHeartbeat = 0
         try {
             while (rdr.remaining > 0) {
                 val tag = rdr.readVarint()
                 when (tag shr 3) {
                     1 -> eresult = rdr.readVarint()
+                    2 -> legacyHeartbeat = rdr.readVarint()
                     3 -> heartbeatSeconds = rdr.readVarint()
-                    else -> rdr.skipField()
+                    10 -> eresultExtended = rdr.readVarint()
+                    else -> rdr.skipField(tag)
                 }
             }
         } catch (e: Exception) {
@@ -624,7 +628,8 @@ class SteamAuthManager(private val ctx: Context) {
             logonFuture?.completeExceptionally(e)
             return
         }
-        Log.i(TAG, "logon response eresult=$eresult steamId=$currentSteamId sessionId=$currentSessionId")
+        if (heartbeatSeconds <= 0) heartbeatSeconds = legacyHeartbeat
+        Log.i(TAG, "logon response eresult=$eresult extended=$eresultExtended steamId=$currentSteamId sessionId=$currentSessionId heartbeat=$heartbeatSeconds")
         logonFuture?.complete(eresult)
     }
 
@@ -637,7 +642,7 @@ class SteamAuthManager(private val ctx: Context) {
             when (tag shr 3) {
                 1 -> sizeUnzipped = rdr.readVarint().toUInt()
                 2 -> { val len = rdr.readVarint(); msgBody = rdr.readBytes(len) }
-                else -> rdr.skipField()
+                else -> rdr.skipField(tag)
             }
         }
         if (msgBody == null) return
@@ -679,7 +684,7 @@ class SteamAuthManager(private val ctx: Context) {
             when (tag shr 3) {
                 1 -> maxTokens = rdr.readVarint()
                 2 -> { val len = rdr.readVarint(); tokens.add(rdr.readBytes(len)) }
-                else -> rdr.skipField()
+                else -> rdr.skipField(tag)
             }
         }
         tokens.forEach { gameConnectTokens.offer(it) }
@@ -696,7 +701,7 @@ class SteamAuthManager(private val ctx: Context) {
             when (tag shr 3) {
                 1 -> uniqueId = rdr.readVarint()
                 2 -> { val len = rdr.readVarint(); key = String(rdr.readBytes(len), Charsets.UTF_8) }
-                else -> rdr.skipField()
+                else -> rdr.skipField(tag)
             }
         }
         Log.i(TAG, "received new login key (unique_id=$uniqueId)")
@@ -841,7 +846,7 @@ class SteamAuthManager(private val ctx: Context) {
             when (tag shr 3) {
                 1 -> eresult = rdr.readVarint()
                 3 -> { val len = rdr.readVarint(); ticket = rdr.readBytes(len) }
-                else -> rdr.skipField()
+                else -> rdr.skipField(tag)
             }
         }
         if (eresult != ER_OK || ticket == null) {
@@ -921,7 +926,7 @@ class SteamAuthManager(private val ctx: Context) {
         while (rdr.remaining > 0) {
             val tag = rdr.readVarint()
             if (tag shr 3 == fieldNum && (tag and 7) == 0) result.add(rdr.readVarint())
-            else rdr.skipField()
+            else rdr.skipField(tag)
         }
         return result
     }
@@ -931,8 +936,8 @@ class SteamAuthManager(private val ctx: Context) {
         while (rdr.remaining > 0) {
             val tag = rdr.readVarint()
             when (tag shr 3) {
-                11 -> if ((tag and 7) == 1) return rdr.readLongLE() else rdr.skipField()
-                else -> rdr.skipField()
+                11 -> if ((tag and 7) == 1) return rdr.readLongLE() else rdr.skipField(tag)
+                else -> rdr.skipField(tag)
             }
         }
         return 0L
@@ -1132,9 +1137,7 @@ class SteamAuthManager(private val ctx: Context) {
             return result
         }
 
-        fun skipField() {
-            if (pos >= data.size) return
-            val tag = readVarint()
+        fun skipField(tag: Int) {
             when (tag and 0x7) {
                 0 -> readVarint()
                 1 -> pos += 8
@@ -1143,6 +1146,12 @@ class SteamAuthManager(private val ctx: Context) {
                 5 -> pos += 4
                 else -> pos += 1
             }
+        }
+
+        fun skipFieldAtTag() {
+            if (pos >= data.size) return
+            val tag = readVarint()
+            skipField(tag)
         }
     }
 
