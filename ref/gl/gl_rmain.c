@@ -981,7 +981,11 @@ void R_RenderScene( void )
 
 	R_DrawEntitiesOnList();
 
+	// Water surfaces (PrimeXT-style shader hooks live inside EmitWaterPolys).
 	R_DrawWaterSurfaces();
+
+	// Underwater fullscreen warp (post-processing)
+	R_WaterShader_UnderwaterWarp();
 }
 
 void R_GammaChanged( qboolean do_reset_gamma )
