@@ -41,7 +41,8 @@ import kotlin.coroutines.resumeWithException
  * session ticket expected by the engine's SteamBroker (cl_steam.c, cl_ticket_generator "steam").
  *
  * It serves a local SBRK broker on 127.0.0.1:27420 that responds to "sb_connect" frames with
- * the combined auth+ownership ticket for Sven Co-op (appid 225840).
+ * the combined auth+ownership session ticket. The appid is taken from the engine's sb_connect
+ * frame (per gamedir, see cl_steam.c SteamBroker_GetGoldSrcAppId) and defaults to Sven Co-op 225840.
  *
  * Protocol facts verified against steam-refs/ (JavaSteam + SteamKit2):
  *  - EMsg: ClientLogon=5514, ClientLogOnResponse=751, ClientLoggedOff=757, ClientGameConnectTokens=779,
@@ -98,6 +99,9 @@ class SteamAuthManager(private val ctx: Context) {
 
         // EAuthTokenPlatformType
         private const val PLATFORM_STEAM_CLIENT = 1
+
+        // SteamAuthTicket.TicketType (SteamKit2): AuthSession=2, WebApiTicket=5
+        private const val TICKET_TYPE_AUTH_SESSION = 2
 
         // ESessionPersistence (enums.proto)
         private const val PERSISTENCE_EPHEMERAL = 0
@@ -205,6 +209,8 @@ class SteamAuthManager(private val ctx: Context) {
     @Volatile private var expectDisconnect = false
 
     // ticket state
+    @Volatile private var currentGameDir: String? = null
+    private val ticketSequence = AtomicLong(0L)
     private val gameConnectTokens = LinkedBlockingQueue<ByteArray>()
     private val ticketsByGame = ConcurrentHashMap<Int, MutableList<CMsgAuthTicket>>()
     private val ticketChangeLock = Any()
@@ -607,19 +613,25 @@ class SteamAuthManager(private val ctx: Context) {
                         val serverSteamId = if (parts.size > 2) parts[2].toLongOrNull() ?: 0L else 0L
                         val secure = if (parts.size > 3) parts[3] != "0" else false
                         val challenge = if (parts.size > 4) parts[4].toIntOrNull() ?: 0 else 0
-                        Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge parts=${parts.toList()}")
+                        val reqAppid = if (parts.size > 5) parts[5].toIntOrNull() ?: 0 else 0
+                        val effectiveAppid = if (reqAppid > 0) reqAppid else (appidFromGameDir(currentGameDir) ?: APPID)
+                        Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge reqAppid=$reqAppid effectiveAppid=$effectiveAppid gamedir=$currentGameDir parts=${parts.toList()}")
                         Log.d(TAG, "$tag: connected=${connected} loggedIn=$loggedIn tokens=${gameConnectTokens.size} steamId=$currentSteamId")
                         val ticket = try {
-                            kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(APPID, serverSteamId) }
+                            kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(effectiveAppid, serverSteamId) }
                         } catch (e: Exception) {
                             Log.e(TAG, "$tag: getSessionTicket FAILED: ${e.message}", e)
                             throw e
                         }
                         val steamId = currentSteamId
-                        Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId")
+                        Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId appid=$effectiveAppid")
                         Log.i(TAG, "Ticket hex: ${ticket.joinToString(" ") { "%02x".format(it) }}")
                         writeSbrkResponse(outs, challenge, steamId, ticket)
                         Log.i(TAG, "$tag: response written")
+                    } else if (command.startsWith("sb_gamedir")) {
+                        val parts = command.split(" ")
+                        currentGameDir = if (parts.size > 1) parts[1] else null
+                        Log.i(TAG, "sb_gamedir=$currentGameDir")
                     } else if (command.startsWith("sb_disconnect")) {
                         Log.i(TAG, "sb_disconnect ignored")
                         break
@@ -632,6 +644,17 @@ class SteamAuthManager(private val ctx: Context) {
             Log.e(TAG, "$tag: broker client error: ${e.message}", e)
         }
         Log.i(TAG, "$tag: handler exiting")
+    }
+
+    private fun appidFromGameDir(gameDir: String?): Int? = when (gameDir?.lowercase()) {
+        "svencoop" -> 225840
+        "gearbox" -> 50
+        "bshift" -> 130
+        "tfc" -> 20
+        "dod" -> 30
+        "dmc" -> 40
+        "ricochet" -> 60
+        else -> 10 // valve, cstrike, hldm and other GoldSrc mods
     }
 
     private fun readSbrkFrame(ins: InputStream, tag: String = "sbrk"): ByteArray? {
@@ -1326,13 +1349,27 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private fun buildAuthTicket(gameConnectToken: ByteArray, serverSteamId: Long = 0L): ByteArray {
-        // Legacy GoldSrc layout (ISteamUser::InitiateGameConnection): [uint32 token size][token].
-        // The server's Steam validation rejects the modern session-block layout.
+        // SteamKit2 SteamAuthTicket.BuildAuthTicket (verified Steam session ticket) layout:
+        //   int32 tokenLen | token | int32 sessionSize(24) | int32 1 | int32 ticketType(AuthSession=2)
+        //   | 4B pub IP + 4B priv IP (random) | int32 timestamp | int32 sequence
+        // The game server's steamclient parses this block to validate the connection; without it
+        // SendUserConnectAndAuthenticate fails its basic checks ("STEAM validation rejected").
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size))
         stream.write(gameConnectToken)
-        Log.i(TAG, "buildAuthTicket: serverSteamId=$serverSteamId legacy authTicketSize=${stream.size}")
-        return stream.toByteArray()
+        val sessionSize = 24 // 6 x uint32: 1, ticketType, publicIp, privateIp, timestamp, sequence
+        stream.write(Proto.packInt32(sessionSize))
+        stream.write(Proto.packInt32(1)) // unknown, always 1
+        stream.write(Proto.packInt32(TICKET_TYPE_AUTH_SESSION))
+        val randBytes = ByteArray(8) // public/private IP fields, any value is accepted by Steam
+        SecureRandom().nextBytes(randBytes)
+        stream.write(randBytes)
+        val ts = (System.nanoTime() and 0xFFFFFFFFL).toInt()
+        stream.write(Proto.packInt32(ts))
+        stream.write(Proto.packInt32(ticketSequence.incrementAndGet().toInt()))
+        val bytes = stream.toByteArray()
+        Log.i(TAG, "buildAuthTicket: serverSteamId=$serverSteamId session ticket size=${bytes.size}")
+        return bytes
     }
 
     private suspend fun sendAuthList(appid: Int): ByteArray {

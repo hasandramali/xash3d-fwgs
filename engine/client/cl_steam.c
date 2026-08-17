@@ -46,6 +46,7 @@ GNU General Public License for more details.
 #define SBRK_TICKET_SIZE_MAX 		2048
 
 static CVAR_DEFINE_AUTO( cl_steam_broker_addr, "127.0.0.1:27420", FCVAR_PRIVILEGED|FCVAR_ARCHIVE, "address of steam broker instance" );
+static CVAR_DEFINE_AUTO( cl_steam_appid, "0", FCVAR_PRIVILEGED|FCVAR_ARCHIVE, "Steam appid used for GoldSrc auth tickets (0 = auto-detect from gamedir; 10 half-life/cs1.6, 50 opposing force, 130 blue shift, 225840 svencoop)" );
 
 typedef enum
 {
@@ -462,6 +463,31 @@ static void SteamBroker_UpdateConnected( void )
 	SteamBroker_HandleDataRx( );
 }
 
+static int SteamBroker_GetGoldSrcAppId( void )
+{
+	if( cl_steam_appid.value > 0 )
+		return (int)cl_steam_appid.value;
+
+	const char *gamefolder = GI->gamefolder;
+
+	if( !Q_stricmp( gamefolder, "svencoop" ))
+		return 225840;
+	if( !Q_stricmp( gamefolder, "gearbox" ))
+		return 50;
+	if( !Q_stricmp( gamefolder, "bshift" ))
+		return 130;
+	if( !Q_stricmp( gamefolder, "tfc" ))
+		return 20;
+	if( !Q_stricmp( gamefolder, "dod" ))
+		return 30;
+	if( !Q_stricmp( gamefolder, "dmc" ))
+		return 40;
+	if( !Q_stricmp( gamefolder, "ricochet" ))
+		return 60;
+
+	return 10; // valve, cstrike (Counter-Strike 1.6), hldm and other GoldSrc mods
+}
+
 qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 {
 	// only ipv4 supported
@@ -477,11 +503,12 @@ qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 	broker.challenge = challenge;
 	broker.serveradr = serveradr;
 
-	// sb_connect <ip:port> <server_steamid> <secure> <challenge>
+	// sb_connect <ip:port> <server_steamid> <secure> <challenge> <appid>
 	char buf[512];
-	int len = Q_snprintf( buf, sizeof( buf ), "sb_connect %s %"PRIu64" %d %d", NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge );
+	int appid = SteamBroker_GetGoldSrcAppId();
+	int len = Q_snprintf( buf, sizeof( buf ), "sb_connect %s %"PRIu64" %d %d %d", NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge, appid );
 
-	Con_DPrintf( "%s: requesting ticket (server %s, steamid %"PRIu64", secure %d, challenge %d)\n", __func__, NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge );
+	Con_DPrintf( "%s: requesting ticket (server %s, steamid %"PRIu64", secure %d, challenge %d, appid %d)\n", __func__, NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge, appid );
 
 	if( !SteamBroker_SendFrame( buf, len ))
 		return false;
@@ -548,6 +575,7 @@ void SteamBroker_Init( void )
 	broker.rx_buffer_pos = 0;
 	broker.tx_buffer_pos = 0;
 	Cvar_RegisterVariable( &cl_steam_broker_addr );
+	Cvar_RegisterVariable( &cl_steam_appid );
 	NET_NetadrSetType( &broker.adr, NA_UNDEFINED );
 }
 
