@@ -256,6 +256,7 @@ void Netchan_Setup( netsrc_t sock, netchan_t *chan, netadr_t adr, int qport, voi
 	chan->client = client;
 	chan->pfnBlockSize = pfnBlockSize;
 	chan->use_munge = FBitSet( flags, NETCHAN_USE_MUNGE ) ? true : false;
+	chan->munge_tx_only = FBitSet( flags, NETCHAN_USE_MUNGE_TX ) ? true : false;
 	chan->use_bz2 = FBitSet( flags, NETCHAN_USE_BZIP2 ) ? true : false;
 	chan->use_lzss = FBitSet( flags, NETCHAN_USE_LZSS ) ? true : false;
 	chan->gs_netchan = FBitSet( flags, NETCHAN_GOLDSRC ) ? true : false;
@@ -1859,7 +1860,7 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 	uint sequence = MSG_ReadLong( msg );
 	uint sequence_ack = MSG_ReadLong( msg );
 
-	if( chan->use_munge && MSG_GetMaxBytes( msg ) >= 8 )
+	if( chan->use_munge && !chan->munge_tx_only && MSG_GetMaxBytes( msg ) >= 8 )
 		COM_UnMunge2( msg->pData + 8, MSG_GetMaxBytes( msg ) - 8, sequence & 0xFF );
 
 	// read the qport if we are a server; serves as a NAT-stable

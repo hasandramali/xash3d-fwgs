@@ -101,7 +101,7 @@ static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FI
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
-static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "enable goldsrc netchan packet munge (required for vanilla/ReHLDS servers, required to be off for Sven Coop dedicated servers)" );
+static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "goldSrc netchan packet munge: 0=off, 1=both directions (vanilla/ReHLDS servers), 2=outgoing only (Sven Coop dedicated servers unmunge inbound but send plain outbound)" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -1719,8 +1719,16 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 	case PROTO_GOLDSRC:
 		SetBits( flags, NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
 
-		if( cl_goldsrc_munge.value )
+		if( cl_goldsrc_munge.value == 1 )
+		{
 			SetBits( flags, NETCHAN_USE_MUNGE );
+			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (both directions)^7\n" );
+		}
+		else if( cl_goldsrc_munge.value == 2 )
+		{
+			SetBits( flags, NETCHAN_USE_MUNGE | NETCHAN_USE_MUNGE_TX );
+			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (outgoing only, Sven Coop mode)^7\n" );
+		}
 
 		pfnBlockSize = CL_GetGoldSrcFragmentSize;
 		break;
