@@ -101,6 +101,7 @@ static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FI
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
+static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "enable goldsrc netchan packet munge (required for vanilla/ReHLDS servers, required to be off for Sven Coop dedicated servers)" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -1716,7 +1717,11 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 	switch( proto )
 	{
 	case PROTO_GOLDSRC:
-		SetBits( flags, NETCHAN_USE_MUNGE | NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
+		SetBits( flags, NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
+
+		if( cl_goldsrc_munge.value )
+			SetBits( flags, NETCHAN_USE_MUNGE );
+
 		pfnBlockSize = CL_GetGoldSrcFragmentSize;
 		break;
 	default:
@@ -3702,6 +3707,7 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_resend );
 	Cvar_RegisterVariable( &cl_allow_upload );
 	Cvar_RegisterVariable( &cl_allow_download );
+	Cvar_RegisterVariable( &cl_goldsrc_munge );
 	Cvar_RegisterVariable( &cl_download_ingame );
 	Cvar_RegisterVariable( &cl_logofile );
 	Cvar_RegisterVariable( &cl_logocolor );
