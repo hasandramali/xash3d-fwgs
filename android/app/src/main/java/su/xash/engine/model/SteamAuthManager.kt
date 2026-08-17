@@ -498,8 +498,11 @@ class SteamAuthManager(private val ctx: Context) {
      * 3. build the raw auth session ticket
      * 4. send ClientAuthList (5432) and await the ack (5575)
      * 5. return authTicket + int32LE(appTicket.size) + appTicket
+     *
+     * [serverSteamId] is the game server's SteamID from the engine's sb_connect frame;
+     * when non-zero it is bound into the ticket via a SteamNetworkingIdentity (Option B).
      */
-    suspend fun getSessionTicket(appid: Int = APPID): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L): ByteArray = withContext(Dispatchers.IO) {
         if (!connected) throw Exception("Not connected to Steam")
 
         val appTicket = requestAppOwnershipTicket(appid)
@@ -507,7 +510,7 @@ class SteamAuthManager(private val ctx: Context) {
         val token = gameConnectTokens.poll()
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
 
-        val authTicket = buildAuthTicket(token)
+        val authTicket = buildAuthTicket(token, serverSteamId)
 
         val crc = crc32(authTicket)
         synchronized(ticketChangeLock) {
@@ -573,9 +576,12 @@ class SteamAuthManager(private val ctx: Context) {
                     val command = String(payload, Charsets.UTF_8)
                     if (command.startsWith("sb_connect")) {
                         val parts = command.split(" ")
-                        val challenge = if (parts.size > 4) parts[4].toInt() else 0
-                        Log.i(TAG, "sb_connect challenge=$challenge")
-                        val ticket = kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(APPID) }
+                        val serverAddr = if (parts.size > 1) parts[1] else ""
+                        val serverSteamId = if (parts.size > 2) parts[2].toLongOrNull() ?: 0L else 0L
+                        val secure = if (parts.size > 3) parts[3] != "0" else false
+                        val challenge = if (parts.size > 4) parts[4].toIntOrNull() ?: 0 else 0
+                        Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge")
+                        val ticket = kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(APPID, serverSteamId) }
                         val steamId = currentSteamId
                         Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId")
                         Log.i(TAG, "Ticket hex: ${ticket.joinToString(" ") { "%02x".format(it) }}")
@@ -1273,8 +1279,9 @@ class SteamAuthManager(private val ctx: Context) {
         return ticket
     }
 
-    private fun buildAuthTicket(gameConnectToken: ByteArray): ByteArray {
-        val sessionSize = 24 // 4+4+4+4+4+4 (unknown=1, type=2, 8 random, timestamp, sequence)
+    private fun buildAuthTicket(gameConnectToken: ByteArray, serverSteamId: Long = 0L): ByteArray {
+        val serverIdentity = if (serverSteamId != 0L) buildServerIdentity(serverSteamId) else null
+        val sessionSize = 24 + (serverIdentity?.size ?: 0) // 4+4+4+4+4+4 (+ 16 for server identity)
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size))
         stream.write(gameConnectToken)
@@ -1286,7 +1293,20 @@ class SteamAuthManager(private val ctx: Context) {
         stream.write(randomBytes)
         stream.write(Proto.packInt32(System.nanoTime().toInt()))
         stream.write(Proto.packInt32(ticketSequence.incrementAndGet()))
+        serverIdentity?.let { stream.write(it) }
         return stream.toByteArray()
+    }
+
+    /**
+     * 16-byte SteamNetworkingIdentity binding a ticket to the game server
+     * (k_ESteamNetworkingIdentityType_SteamID=16): int32 type, int32 size, uint64 steamid64.
+     */
+    private fun buildServerIdentity(serverSteamId: Long): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Proto.packInt32(16)) // ESteamNetworkingIdentityType.SteamID
+        out.write(Proto.packInt32(8))  // union size (uint64)
+        out.write(Proto.packInt64(serverSteamId))
+        return out.toByteArray()
     }
 
     private suspend fun sendAuthList(appid: Int): ByteArray {

@@ -1,8 +1,40 @@
 # Steam Auth Implementation Plan (Sven Co-op / GoldSrc ticket broker)
 
 Status: MODERN TOKEN AUTH IMPLEMENTED in `SteamAuthManager.kt` (unified-message flow mirroring
-Pluvia/JavaSteam). Needs device testing/CI build. Classic password logon (5514 with field 51) is
-kept only as a fallback; the UI now drives the token flow.
+Pluvia/JavaSteam). Classic password logon (5514 with field 51) is kept only as a fallback; the
+UI now drives the token flow.
+
+## CURRENT STATUS (paused — awaiting real-ticket capture)
+
+GoldSrc connect is BLOCKED by the legacy-vs-modern ticket format mismatch (see ROOT CAUSE below).
+Fix requires a real `InitiateGameConnection` blob as ground truth. **Decision: we wait** for PC /
+Steam access (or the friend to become available), then run the capture procedure below. No
+Android-side CI experiments are being burned meanwhile.
+
+When Android-side testing resumes, **Option B is tried FIRST** (cheapest, most likely if the
+modern steamclient's deprecated `InitiateGameConnection` still emits a modern-format blob that is
+merely missing the server-identity binding):
+- **Option B**: embed the 16-byte `SteamNetworkingIdentity` (`type=16` SteamID, `size`, `steamid64`
+  of the *game server*, NOT the client) into the modern session block of `buildAuthTicket`
+  (`SteamAuthManager.kt` ~1275), parse `ip:port`/`server_steamid`/`secure`/`challenge` from
+  `sb_connect` (~574), and retest on `148.251.68.215:27017`.
+- **Option A** (if B fails): old-format wrapper blob (`0x14 00 00 00 | ticket# | steamid | ...`)
+  per goldberg `getTicketData` / gbe_fork notes, reusing the Steam-signed ownership ticket +
+  CM-registered session. Exact tail layout undocumented → only empirical tuning, or a captured
+  real blob, can settle it.
+
+### CAPTURE PROCEDURE — run when a PC with Steam desktop client is available
+1. PC: install Steam, log in (any account; Sven Co-op is free on Steam).
+2. Copy `/data/data/com.termux/files/usr/tmp/opencode/steam-broker` (already patched with
+   `TICKETHEX`/`TICKETDEC` dump lines in `src/broker.rs` ~327) to the PC; `cargo build`.
+3. Run the broker on the PC (real Steam login via its init), note its IP.
+4. On Android Xash: set `cl_ticket_generator "steam"` + `cl_steam_broker_addr <pc-ip>` so the
+   engine asks the PC broker for the ticket instead of the local Android broker.
+5. Connect to the Sven/HL server → broker prints `TICKETHEX: ...` (the real
+   `InitiateGameConnection` blob, expected ~206 bytes).
+6. Send back the full `TICKETHEX` hexdump + `TICKETDEC` list. We diff it against our modern
+   246-byte blob and implement the exact layout in `SteamAuthManager.kt` (Option A), or identify
+   that it's still modern-format (Option B is then the correct fix).
 
 ## Goal
 Embed real Steam account login in the Android app, produce a real app ownership ticket + game
@@ -226,13 +258,34 @@ Current downloader sends raw "JavaSteam-SerialNumber" for anon — works for ano
     `[appTicketSize][ticketDataLen][version][steamid][AppID][...][signature]`. JavaSteam's
     20-byte GameConnectToken layout matches (CM token = GCToken+SteamID+genDate).
   - AppID is embedded at **blob offset 0x48** (4-byte LE). For Sven Co-op (225840 = 0x370d0) the
-    bytes at 0x48 should read `d0 70 03 00`. Confirm this in the new hex logs; if present, the
-    mismatch is server-side (server's `steam_appid.txt`/launch AppID ≠ 225840).
+    bytes at 0x48 should read `d0 70 03 00`. **CONFIRMED in live logs** against two independent
+    servers (secure=0 and secure=1): offset 0x48 = `30 72 03 00` = 225840. Both still rejected
+    with `9STEAM validation rejected` → server misconfig is ruled out.
+  - **ROOT CAUSE (format, not AppID/server)**: GoldSrc servers validate via
+    `steamclient::SendUserConnectAndAuthenticate`, whose `pvAuthBlob` must be the blob from
+    `ISteamUser::InitiateGameConnection` (legacy, server-bound). Our broker emits the modern
+    `GetAuthSessionTicket` (CM GameConnectTokens) blob — accepted only via `BeginAuthSession`,
+    NOT `SendUserConnectAndAuthenticate`. That's why even a byte-perfect ticket with the correct
+    AppID is rejected instantly and identically on every server (server-side basic check returns
+    false before contacting Steam).
+  - Action: obtain a real legacy `InitiateGameConnection` blob as ground truth. Since Sven Co-op
+    is free on Steam, run the patched FWGS `steam-broker` on a PC (real Steam login), which calls
+    `initiate_game_connection(server_steamid, serveradr, secure)` and now hex-dumps the ticket
+    (`TICKETHEX`/`TICKETDEC` lines). Reverse that layout to reproduce legacy server-bound blob
+    on Android from the CM game-connect token + app ownership ticket.
 
-### TODO
+### TODO (blocked — awaiting PC/Steam capture; friend inactive)
+- **CAPTURE REAL LEGACY TICKET (blocker)**: per the "CAPTURE PROCEDURE" section above — run the
+  patched FWGS steam-broker on a PC with real Steam, capture `TICKETHEX`, send it back for layout
+  reversal. This unblocks the whole fix.
+- **Option B experiment** (when resuming Android-only testing): embed the game-server
+  `SteamNetworkingIdentity` (16 bytes, type=16) into the modern session block in
+  `SteamAuthManager.kt`; retest on `148.251.68.215:27017` (server_steamid `90290548092175375`).
+- **Option A** (if B rejected; or if capture yields a 206-byte legacy blob): implement the
+  old-format server-bound layout in `SteamAuthManager.kt`.
 - CI build + device test: sign in, watch logcat `SteamAuth` for `begin auth` /
   `guard needed` / `logon response eresult=1`, then Sven Co-op connect
-  (`148.251.68.215:27017`, server_steamid `90290412949884943`) with a real ticket.
+  (`148.251.68.215:27017`) with a real ticket.
 - Verify refresh-token restore path (`loginWithStoredRefreshToken`) on a cold start
   now that it correctly flips `loggedIn` (UI should show "Logged as" after restore).
 - DONE (verified against JavaSteam): Steam's `interval` is float seconds (typically 5.0); we use
