@@ -478,7 +478,9 @@ class SteamAuthManager(private val ctx: Context) {
      * still gets tickets.
      */
     fun ensureSessionAsync() {
+        Log.i(TAG, "ensureSessionAsync: isLoggedIn=$isLoggedIn hasStoredKey=$hasStoredKey")
         if (isLoggedIn) {
+            Log.i(TAG, "ensureSessionAsync: already logged in, starting broker")
             startBroker()
             return
         }
@@ -486,7 +488,13 @@ class SteamAuthManager(private val ctx: Context) {
         Thread {
             kotlinx.coroutines.runBlocking {
                 val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
-                if (state is LoginState.Success) startBroker()
+                Log.i(TAG, "ensureSessionAsync: restore result=$state")
+                if (state is LoginState.Success) {
+                    Log.i(TAG, "ensureSessionAsync: restore OK, starting broker")
+                    startBroker()
+                } else {
+                    Log.e(TAG, "ensureSessionAsync: restore FAILED, broker NOT started")
+                }
             }
         }.apply { isDaemon = true; start() }
     }
@@ -504,15 +512,20 @@ class SteamAuthManager(private val ctx: Context) {
      */
     suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L): ByteArray = withContext(Dispatchers.IO) {
         if (!connected) throw Exception("Not connected to Steam")
+        Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
         val appTicket = requestAppOwnershipTicket(appid)
+        Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${appTicket.size}")
 
         val token = gameConnectTokens.poll()
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
+        Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
         val authTicket = buildAuthTicket(token, serverSteamId)
+        Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
 
         val crc = crc32(authTicket)
+        Log.i(TAG, "getSessionTicket: auth crc=$crc")
         synchronized(ticketChangeLock) {
             ticketsByGame.getOrPut(appid) { ArrayList() }.add(
                 CMsgAuthTicket(
@@ -524,12 +537,16 @@ class SteamAuthManager(private val ctx: Context) {
         }
 
         val ackBody = sendAuthList(appid)
+        Log.i(TAG, "getSessionTicket: auth list sent, ack body size=${ackBody.size}")
         val ackCrcs = readRepeatedVarints(ackBody, 1)
+        Log.i(TAG, "getSessionTicket: ack crcs=${ackCrcs.joinToString()} our=$crc")
         if (ackCrcs.none { it == crc }) {
             Log.w(TAG, "AuthList ack did not contain our crc $crc (got ${ackCrcs.joinToString()})")
         }
 
-        combineTickets(authTicket, appTicket)
+        val combined = combineTickets(authTicket, appTicket)
+        Log.i(TAG, "getSessionTicket: DONE combined ticket size=${combined.size}")
+        combined
     }
 
     // ------------------------------------------------------------------
@@ -538,54 +555,73 @@ class SteamAuthManager(private val ctx: Context) {
 
     fun startBroker() {
         if (brokerServer != null) return
+        Log.i(TAG, "startBroker: creating ServerSocket on 127.0.0.1:$BROKER_PORT")
         brokerThread = Thread {
             try {
                 val server = ServerSocket(BROKER_PORT, 4, InetAddress.getByName("127.0.0.1"))
                 brokerServer = server
-                Log.i(TAG, "SteamBroker listening on 127.0.0.1:$BROKER_PORT")
+                Log.i(TAG, "SteamBroker listening on 127.0.0.1:$BROKER_PORT (thread=${Thread.currentThread().name})")
                 while (!server.isClosed) {
                     try {
+                        Log.d(TAG, "broker: waiting for accept()")
                         val client = server.accept()
+                        Log.i(TAG, "broker: ACCEPTED client from ${client.inetAddress.hostAddress}:${client.port}")
                         client.soTimeout = 30000
                         Thread { handleBrokerClient(client) }.apply { isDaemon = true; start() }
                     } catch (e: Exception) {
                         if (server.isClosed) break
-                        Log.w(TAG, "broker accept error: ${e.message}")
+                        Log.w(TAG, "broker accept error: ${e.message}", e)
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "broker error: ${e.message}")
+                Log.e(TAG, "broker thread FAILED: ${e.message}", e)
             }
-        }.apply { isDaemon = true; start() }
+            Log.i(TAG, "broker: accept loop exited (isClosed=${brokerServer?.isClosed})")
+        }.apply { isDaemon = true; name = "sbrk-broker"; start() }
     }
 
     fun stopBroker() {
-        try { brokerServer?.close() } catch (_: Exception) { }
+        Log.i(TAG, "stopBroker: closing broker")
+        try { brokerServer?.close() } catch (e: Exception) { Log.w(TAG, "stopBroker close: ${e.message}", e) }
         brokerServer = null
         brokerThread?.interrupt()
         brokerThread = null
     }
 
     private fun handleBrokerClient(client: Socket) {
+        val tag = "sbrk-client-${client.port}"
         try {
             client.use { c ->
                 val ins = c.getInputStream()
                 val outs = c.getOutputStream()
+                Log.i(TAG, "$tag: handler started")
                 while (true) {
-                    val payload = readSbrkFrame(ins) ?: break
+                    Log.d(TAG, "$tag: waiting for SBRK frame")
+                    val payload = readSbrkFrame(ins, tag) ?: run {
+                        Log.w(TAG, "$tag: readSbrkFrame returned null (EOF/bad header), closing client")
+                        break
+                    }
                     val command = String(payload, Charsets.UTF_8)
+                    Log.i(TAG, "$tag: frame payload(${payload.size}): \"$command\" hex=${payload.joinToString(" ") { "%02x".format(it) }}")
                     if (command.startsWith("sb_connect")) {
                         val parts = command.split(" ")
                         val serverAddr = if (parts.size > 1) parts[1] else ""
                         val serverSteamId = if (parts.size > 2) parts[2].toLongOrNull() ?: 0L else 0L
                         val secure = if (parts.size > 3) parts[3] != "0" else false
                         val challenge = if (parts.size > 4) parts[4].toIntOrNull() ?: 0 else 0
-                        Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge")
-                        val ticket = kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(APPID, serverSteamId) }
+                        Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge parts=${parts.toList()}")
+                        Log.d(TAG, "$tag: connected=${connected} loggedIn=$loggedIn tokens=${gameConnectTokens.size} steamId=$currentSteamId")
+                        val ticket = try {
+                            kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(APPID, serverSteamId) }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "$tag: getSessionTicket FAILED: ${e.message}", e)
+                            throw e
+                        }
                         val steamId = currentSteamId
                         Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId")
                         Log.i(TAG, "Ticket hex: ${ticket.joinToString(" ") { "%02x".format(it) }}")
                         writeSbrkResponse(outs, challenge, steamId, ticket)
+                        Log.i(TAG, "$tag: response written")
                     } else if (command.startsWith("sb_disconnect")) {
                         Log.i(TAG, "sb_disconnect ignored")
                         break
@@ -595,11 +631,12 @@ class SteamAuthManager(private val ctx: Context) {
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "broker client error: ${e.message}")
+            Log.e(TAG, "$tag: broker client error: ${e.message}", e)
         }
+        Log.i(TAG, "$tag: handler exiting")
     }
 
-    private fun readSbrkFrame(ins: InputStream): ByteArray? {
+    private fun readSbrkFrame(ins: InputStream, tag: String = "sbrk"): ByteArray? {
         val header = ByteArray(4)
         var off = 0
         while (off < 4) {
@@ -607,6 +644,7 @@ class SteamAuthManager(private val ctx: Context) {
             if (r == -1) return null
             off += r
         }
+        Log.d(TAG, "$tag: frame header=${String(header, Charsets.US_ASCII)} bytes=${header.joinToString(" ") { "%02x".format(it) }}")
         if (String(header, Charsets.US_ASCII) != "SBRK") {
             Log.w(TAG, "bad SBRK header: ${String(header, Charsets.US_ASCII)}")
             return null
@@ -619,6 +657,7 @@ class SteamAuthManager(private val ctx: Context) {
             off += r
         }
         val size = (lenBytes[0].toInt() and 0xFF) or ((lenBytes[1].toInt() and 0xFF) shl 8)
+        Log.d(TAG, "$tag: frame size=$size")
         if (size <= 0 || size > 8192) return null
         val payload = ByteArray(size)
         off = 0
@@ -643,6 +682,8 @@ class SteamAuthManager(private val ctx: Context) {
         frame.write("SBRK".toByteArray(Charsets.US_ASCII))
         frame.write(byteArrayOf((body.size and 0xFF).toByte(), ((body.size shr 8) and 0xFF).toByte()))
         frame.write(body)
+        Log.i(TAG, "writeSbrkResponse: header=${String(responseHeader, Charsets.UTF_8).trim()} challenge=$challenge steamId=$steamId ticketSize=${ticket.size} bodySize=${body.size} frameSize=${body.size + 6}")
+        Log.i(TAG, "writeSbrkResponse frame hex: ${frame.toByteArray().joinToString(" ") { "%02x".format(it) }}")
         outs.write(frame.toByteArray())
         outs.flush()
     }
@@ -732,6 +773,7 @@ class SteamAuthManager(private val ctx: Context) {
     private fun startReader() {
         if (readerThread?.isAlive == true) return
         readerThread = Thread {
+            Log.i(TAG, "reader: thread started (name=${Thread.currentThread().name})")
             try {
                 while (!Thread.interrupted()) {
                     try {
@@ -743,19 +785,22 @@ class SteamAuthManager(private val ctx: Context) {
                 }
             } catch (e: Exception) {
                 if (Thread.interrupted()) return@Thread
-                Log.w(TAG, "reader stopped: ${e.message}")
+                Log.w(TAG, "reader stopped: ${e.message}", e)
             } finally {
                 readerThread = null
                 if (!expectDisconnect) {
+                    Log.e(TAG, "reader: UNEXPECTED STOP — marking disconnected (was connected=$connected loggedIn=$loggedIn)")
                     connected = false
                     loggedIn = false
                     prefs.edit().putBoolean("logged_in", false).apply()
                     try { heartbeatJob?.interrupt() } catch (_: Exception) { }
                     try { socket?.close() } catch (_: Exception) { }
                     logonFuture?.completeExceptionally(Exception("Connection lost"))
+                } else {
+                    Log.i(TAG, "reader: stopped after expected disconnect")
                 }
             }
-        }.apply { isDaemon = true; start() }
+        }.apply { isDaemon = true; name = "sbrk-reader"; start() }
     }
 
     private fun handlePacket(packet: Packet) {
@@ -1260,8 +1305,10 @@ class SteamAuthManager(private val ctx: Context) {
         val body = ByteArrayOutputStream()
         body.write(Proto.packVarint(1 shl 3 or 0)); body.write(Proto.packVarint(appid))
         sendProtobufMsg(857, body.toByteArray(), buildProtoHeader(currentSteamId, currentSessionId, jobId))
+        Log.i(TAG, "requestAppOwnershipTicket: sent emsg=857 jobId=$jobId steamId=$currentSteamId sessionId=$currentSessionId")
 
         val resp = awaitJob(future, "GetAppOwnershipTicket")
+        Log.i(TAG, "requestAppOwnershipTicket: response emsg=${resp.emsg} bodySize=${resp.body.size} bodyHex=${resp.body.joinToString(" ") { "%02x".format(it) }}")
         val rdr = ProtoReader(resp.body)
         var eresult = 2
         var ticket: ByteArray? = null
@@ -1273,6 +1320,7 @@ class SteamAuthManager(private val ctx: Context) {
                 else -> rdr.skipField(tag)
             }
         }
+        Log.i(TAG, "requestAppOwnershipTicket: eresult=$eresult ticket=${ticket?.size?.let { "${it} bytes" } ?: "null"}")
         if (eresult != ER_OK || ticket == null) {
             throw Exception("Failed to obtain app ownership ticket: eresult=$eresult")
         }
@@ -1294,6 +1342,7 @@ class SteamAuthManager(private val ctx: Context) {
         stream.write(Proto.packInt32(System.nanoTime().toInt()))
         stream.write(Proto.packInt32(ticketSequence.incrementAndGet()))
         serverIdentity?.let { stream.write(it) }
+        Log.i(TAG, "buildAuthTicket: serverSteamId=$serverSteamId identity=${serverIdentity?.let { it.joinToString(" ") { "%02x".format(it) } } ?: "none"} sessionSize=$sessionSize authTicketSize=${stream.size}")
         return stream.toByteArray()
     }
 
@@ -1330,7 +1379,9 @@ class SteamAuthManager(private val ctx: Context) {
         }
 
         sendProtobufMsg(5432, body.toByteArray(), buildProtoHeader(currentSteamId, currentSessionId, jobId))
+        Log.i(TAG, "sendAuthList: sent emsg=5432 jobId=$jobId tokensLeft=${gameConnectTokens.size} appid=$appid tickets=${tickets.size}")
         val resp = awaitJob(future, "ClientAuthListAck")
+        Log.i(TAG, "sendAuthList: ack emsg=${resp.emsg} bodySize=${resp.body.size} bodyHex=${resp.body.joinToString(" ") { "%02x".format(it) }}")
         return resp.body
     }
 
@@ -1339,6 +1390,7 @@ class SteamAuthManager(private val ctx: Context) {
         out.write(authTicket)
         out.write(Proto.packInt32(appTicket.size))
         out.write(appTicket)
+        Log.i(TAG, "combineTickets: authTicket=${authTicket.size}B appTicket=${appTicket.size}B combined=${out.size}B")
         return out.toByteArray()
     }
 
@@ -1449,6 +1501,7 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private fun sendRaw(data: ByteArray) {
+        Log.d(TAG, "sendRaw: ${data.size} bytes chunks...")
         val final = ByteArray(data.size + 8)
         Proto.packInt32(data.size).copyInto(final, 0)
         Proto.packInt32(TCP_MAGIC).copyInto(final, 4)
