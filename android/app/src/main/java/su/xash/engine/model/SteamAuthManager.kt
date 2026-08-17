@@ -19,7 +19,6 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.CRC32
 import java.util.zip.GZIPInputStream
@@ -208,7 +207,6 @@ class SteamAuthManager(private val ctx: Context) {
     // ticket state
     private val gameConnectTokens = LinkedBlockingQueue<ByteArray>()
     private val ticketsByGame = ConcurrentHashMap<Int, MutableList<CMsgAuthTicket>>()
-    private val ticketSequence = AtomicInteger(0)
     private val ticketChangeLock = Any()
 
     // broker
@@ -1328,34 +1326,13 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private fun buildAuthTicket(gameConnectToken: ByteArray, serverSteamId: Long = 0L): ByteArray {
-        val serverIdentity = if (serverSteamId != 0L) buildServerIdentity(serverSteamId) else null
-        val sessionSize = 24 + (serverIdentity?.size ?: 0) // 4+4+4+4+4+4 (+ 16 for server identity)
+        // Legacy GoldSrc layout (ISteamUser::InitiateGameConnection): [uint32 token size][token].
+        // The server's Steam validation rejects the modern session-block layout.
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size))
         stream.write(gameConnectToken)
-        stream.write(Proto.packInt32(sessionSize))
-        stream.write(Proto.packInt32(1))
-        stream.write(Proto.packInt32(2)) // TicketType.AuthSession
-        val randomBytes = ByteArray(8)
-        SecureRandom().nextBytes(randomBytes)
-        stream.write(randomBytes)
-        stream.write(Proto.packInt32(System.nanoTime().toInt()))
-        stream.write(Proto.packInt32(ticketSequence.incrementAndGet()))
-        serverIdentity?.let { stream.write(it) }
-        Log.i(TAG, "buildAuthTicket: serverSteamId=$serverSteamId identity=${serverIdentity?.let { it.joinToString(" ") { "%02x".format(it) } } ?: "none"} sessionSize=$sessionSize authTicketSize=${stream.size}")
+        Log.i(TAG, "buildAuthTicket: serverSteamId=$serverSteamId legacy authTicketSize=${stream.size}")
         return stream.toByteArray()
-    }
-
-    /**
-     * 16-byte SteamNetworkingIdentity binding a ticket to the game server
-     * (k_ESteamNetworkingIdentityType_SteamID=16): int32 type, int32 size, uint64 steamid64.
-     */
-    private fun buildServerIdentity(serverSteamId: Long): ByteArray {
-        val out = ByteArrayOutputStream()
-        out.write(Proto.packInt32(16)) // ESteamNetworkingIdentityType.SteamID
-        out.write(Proto.packInt32(8))  // union size (uint64)
-        out.write(Proto.packInt64(serverSteamId))
-        return out.toByteArray()
     }
 
     private suspend fun sendAuthList(appid: Int): ByteArray {
