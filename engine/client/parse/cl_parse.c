@@ -2233,6 +2233,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	if( svc_num <= svc_lastmsg || svc_num > ( MAX_USER_MESSAGES + svc_lastmsg ))
 	{
 		// out or range
+		CL_DumpBadMessage( msg, svc_num, MSG_GetNumBytesRead( msg ) - 1 );
 		Host_Error( "%s: illegible server message %d\n", __func__, svc_num );
 		return;
 	}
@@ -2410,6 +2411,7 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 	switch( svc_num )
 	{
 	case svc_bad:
+		CL_DumpBadMessage( msg, svc_num, startoffset );
 		Host_Error( "svc_bad\n" );
 		break;
 	case svc_time:

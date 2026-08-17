@@ -15,6 +15,7 @@ GNU General Public License for more details.
 
 #include "common.h"
 #include "client.h"
+#include "xash3d_mathlib.h"
 #include "net_encode.h"
 #include "cl_tent.h"
 #include "shake.h"
@@ -106,6 +107,9 @@ void CL_Parse_RecordCommand( int cmd, int startoffset )
 {
 	if( cmd == svc_nop ) return;
 
+	if( cl_trace_messages.value )
+		Con_Reportf( "^3svc %04i %s\n", startoffset, CL_MsgInfo( cmd ));
+
 	int	slot = ( cls_message_debug.currentcmd++ & MSG_MASK );
 	cls_message_debug.oldcmd[slot].command = cmd;
 	cls_message_debug.oldcmd[slot].starting_offset = startoffset;
@@ -125,6 +129,74 @@ void CL_ResetFrame( frame_t *frame )
 	frame->choked = false;
 	frame->latency = 0.0;
 	frame->time = cl.mtime[0];
+}
+
+/*
+=====================
+CL_DumpAnnotatedMessageBytes
+
+print bytes from the message, each byte interpreted as a potential
+server command so an offset mismatch is easy to spot
+=====================
+*/
+static void CL_DumpAnnotatedMessageBytes( sizebuf_t *msg, int start, int end, int highlight_offset )
+{
+	byte *p = (byte *)MSG_GetData( msg );
+	int size = MSG_GetMaxBytes( msg );
+	int i;
+
+	start = bound( 0, start, size );
+	end = bound( start, end, size );
+
+	for( i = start; i < end; i++ )
+	{
+		if( i == highlight_offset )
+			Con_Printf( S_RED "%04i: 0x%02x <%s> <-- parse failed here\n" S_DEFAULT, i, p[i], CL_MsgInfo( p[i] ));
+		else Con_Printf( "%04i: 0x%02x <%s>\n", i, p[i], CL_MsgInfo( p[i] ));
+	}
+}
+
+/*
+=====================
+CL_DumpBadMessage
+
+maximum-verbosity dump of the message that failed to parse; called right
+before Host_Error to give as much context as possible about the bad command
+=====================
+*/
+void CL_DumpBadMessage( sizebuf_t *msg, int svc_num, int startoffset )
+{
+	int i;
+	int size = MSG_GetMaxBytes( msg );
+
+	Con_Printf( "\n" S_RED "== Parse error: %s (0x%02x) ==\n" S_DEFAULT, CL_MsgInfo( svc_num ), svc_num );
+	Con_Printf( "protocol: %s, state: %d, signon: %d, incoming seq: %u, ack: %u, reliable ack: %u\n",
+		cls.net_protocol == PROTO_GOLDSRC ? "GOLDSRC" : ( cls.net_protocol == PROTO_QUAKE ? "QUAKE" : "CURRENT" ),
+		cls.state, cls.signon, cls.netchan.incoming_sequence, cls.netchan.incoming_acknowledged, cls.netchan.incoming_reliable_acknowledged );
+	Con_Printf( "message \"%s\": size %d bytes, read pos %d bits (%d bytes), bad command byte at offset %d\n",
+		MSG_GetName( msg ), size, MSG_GetNumBitsRead( msg ), MSG_GetNumBytesRead( msg ), startoffset );
+
+	if( size <= 0 )
+		return;
+
+	// for huge reassembled fragments limit the annotated dump to a sane window
+	if( size <= 1024 )
+	{
+		Con_Printf( "annotated byte dump (each byte shown as if it were a server command):\n" );
+		CL_DumpAnnotatedMessageBytes( msg, 0, size, startoffset );
+	}
+	else
+	{
+		Con_Printf( "annotated byte dump around the failing command (message is %d bytes):\n", size );
+		CL_DumpAnnotatedMessageBytes( msg, startoffset - 16, startoffset + 256, startoffset );
+	}
+
+	Con_Printf( "\nlast %i parsed commands:\n", MSG_COUNT );
+	for( i = 0; i < MSG_COUNT; i++ )
+	{
+		oldcmd_t *old = &cls_message_debug.oldcmd[i];
+		Con_Printf( "%08i %04i %s\n", old->frame_number, old->starting_offset, CL_MsgInfo( old->command ));
+	}
 }
 
 /*
@@ -188,6 +260,10 @@ void CL_WriteMessageHistory( void )
 
 	old = &cls_message_debug.oldcmd[thecmd];
 	Con_Printf( S_RED "BAD: " S_DEFAULT "%i %04i %s\n", old->frame_number, old->starting_offset, CL_MsgInfo( old->command ));
+
+	Con_Printf( "\nannotated bytes around the failing command (each byte shown as if it were a server command):\n" );
+	CL_DumpAnnotatedMessageBytes( msg, old->starting_offset - 8, old->starting_offset + 16, old->starting_offset );
+
 	CL_WriteErrorMessage( old->starting_offset, msg );
 	cls_message_debug.parsing = false;
 }

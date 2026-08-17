@@ -795,6 +795,7 @@ void SV_ExecLoadLevel( void );
 void SV_ExecLoadGame( void );
 void SV_ExecChangeLevel( void );
 void CL_WriteMessageHistory( void );
+void CL_DumpBadMessage( sizebuf_t *msg, int svc_num, int startoffset );
 void CL_Disconnect( void );
 void CL_ClearEdicts( void );
 void CL_Crashed( void );
