@@ -776,12 +776,12 @@ void GAME_EXPORT Key_Event( int key, int down )
 				Cvar_DirectSet( &r_showtextures, "0" );
 				return;
 			}
-			else if( host.mouse_visible && cls.state != ca_cinematic )
-			{
-				clgame.dllFuncs.pfnKey_Event( down, key, keys[key].binding );
-				return; // handled in client.dll
-			}
-			break;
+			// Note: we don't offer the client key handling here since reaching this line proves the client already declined handling it.
+			// this prevents accidentally declining a key the client asked the engine to handle. For more context, see https://github.com/FWGS/xash3d-fwgs/issues/1943
+			
+			// call escape immediately within the engine, since the client may not handle it (Natural Selection doesn't. See https://github.com/FWGS/xash3d-fwgs/issues/528)
+			CL_Escape_f();
+			return;
 		default:
 			break;
 		}
@@ -905,15 +905,16 @@ void GAME_EXPORT Key_ClearStates( void )
 
 	for( int i = 0; i < ARRAYSIZE( keys ); i++ )
 	{
-		if( i >= K_MOUSE1 && i <= K_MOUSE5 )
-			IN_MouseEvent( i - K_MOUSE1, false );
-		else
-			Key_Event( i, false );
+		if( i < K_MOUSE1 || i > K_MOUSE5 )
+			Key_Event( i, false ); // checks internally whether a key has been pressed or not
 
 		keys[i].down = 0;
 		keys[i].repeats = 0;
 		keys[i].gamedown = 0;
 	}
+
+	// ensure that only actual mouse buttons are released
+	IN_ClearMouseState();
 
 	if( clgame.hInstance )
 		clgame.dllFuncs.IN_ClearStates();
