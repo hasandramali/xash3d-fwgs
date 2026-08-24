@@ -23,8 +23,8 @@ GNU General Public License for more details.
 #include "input.h"
 #include "utflib.h"
 
-static CVAR_DEFINE_AUTO( scr_conspeed, "600", FCVAR_ARCHIVE, "console moving speed" );
-static CVAR_DEFINE_AUTO( con_notifytime, "3", FCVAR_ARCHIVE, "notify time to live" );
+static CVAR_DEFINE_AUTO( scr_conspeed, "800", FCVAR_ARCHIVE, "console moving speed" );
+static CVAR_DEFINE_AUTO( con_notifytime, "-1", FCVAR_ARCHIVE, "notify time to live" );
 CVAR_DEFINE_AUTO( con_fontsize, "1", FCVAR_ARCHIVE, "console font number (0, 1 or 2)" );
 static CVAR_DEFINE_AUTO( con_fontrender, "2", FCVAR_ARCHIVE, "console font render mode (0: additive, 1: holes, 2: trans)" );
 static CVAR_DEFINE_AUTO( con_charset, "cp1251", FCVAR_ARCHIVE, "console font charset (only cp1251 supported now)" );
@@ -33,6 +33,8 @@ static CVAR_DEFINE_AUTO( con_fontnum, "-1", FCVAR_ARCHIVE, "console font number 
 static CVAR_DEFINE_AUTO( con_color, "240 180 24", FCVAR_ARCHIVE, "set a custom console color" );
 static CVAR_DEFINE_AUTO( scr_drawversion, "1", FCVAR_ARCHIVE, "draw version in menu or screenshots, doesn't affect console" );
 static CVAR_DEFINE_AUTO( con_oldfont, "0", 0, "use legacy font from gfx.wad, might be missing or broken" );
+static CVAR_DEFINE_AUTO( con_fixfont, "0", 0, "force con_oldfont 0 and fix con_fontscale behavior" );
+static CVAR_DEFINE_AUTO( con_noresize, "0", 0, "prevent window resize and use half-screen console in game" );
 static CVAR_DEFINE_AUTO( con_showcompletion, "1", FCVAR_ARCHIVE, "perform simplified autocompletion while typing" );
 
 static int g_codepage = 0;
@@ -790,7 +792,15 @@ void Con_Init( void )
 	Cvar_RegisterVariable( &con_color );
 	Cvar_RegisterVariable( &scr_drawversion );
 	Cvar_RegisterVariable( &con_oldfont );
+	Cvar_RegisterVariable( &con_fixfont );
+	Cvar_RegisterVariable( &con_noresize );
 	Cvar_RegisterVariable( &con_showcompletion );
+
+	if( Sys_CheckParm( "-fixfont" ))
+		Cvar_DirectSet( &con_fixfont, "1" );
+
+	if( Sys_CheckParm( "-noresize" ))
+		Cvar_DirectSet( &con_noresize, "1" );
 
 	// init the console buffer
 	con.bufsize = CON_TEXTSIZE;
@@ -1930,12 +1940,7 @@ static void Con_DrawSolidConsole( int lines )
 	fraction = lines / (float)refState.height;
 	color[3] = Q_min( fraction * 2.0f, 1.0f ) * 255; // fadeout version number
 
-#if XASH_MOBILE_PLATFORM
-	// the top of the screen might be hidden by the on-screen keyboard panning
-	Con_DrawString( start, lines - charH, curbuild, color );
-#else
 	Con_DrawString( start, 0, curbuild, color );
-#endif
 
 	// draw the text
 	if( CON_LINES_COUNT > 0 )
@@ -2169,6 +2174,67 @@ void Con_RunConsole( void )
 {
 	Con_SetColor( );
 
+	if( con_fixfont.value )
+	{
+		static float last_intended_oldfont = -999.0f;
+		static qboolean first_run = true;
+
+		if( first_run )
+		{
+			if( con_oldfont.value >= 1.0f )
+			{
+				Cbuf_AddText( "con_oldfont 2; wait; con_oldfont 1\n" );
+				last_intended_oldfont = 1.0f;
+			}
+			else
+			{
+				Cbuf_AddText( "con_oldfont -1; wait; con_oldfont 0\n" );
+				last_intended_oldfont = 0.0f;
+			}
+			first_run = false;
+		}
+
+		if( FBitSet( con_fontscale.flags, FCVAR_CHANGED ))
+		{
+			if( con_oldfont.value >= 1.0f )
+			{
+				Cbuf_AddText( "con_oldfont 2; wait; con_oldfont 1\n" );
+				last_intended_oldfont = 1.0f;
+			}
+			else
+			{
+				Cbuf_AddText( "con_oldfont -1; wait; con_oldfont 0\n" );
+				last_intended_oldfont = 0.0f;
+			}
+		}
+
+		if( FBitSet( con_oldfont.flags, FCVAR_CHANGED ))
+		{
+			float val = con_oldfont.value;
+			if( val == 2.0f || val == -1.0f )
+			{
+				// ignore temporary values
+			}
+			else if( val == last_intended_oldfont )
+			{
+				last_intended_oldfont = -999.0f;
+			}
+			else
+			{
+				if( val >= 1.0f )
+				{
+					Cbuf_AddText( "con_oldfont 2; wait; con_oldfont 1\n" );
+					last_intended_oldfont = 1.0f;
+				}
+				else
+				{
+					Cbuf_AddText( "con_oldfont -1; wait; con_oldfont 0\n" );
+					last_intended_oldfont = 0.0f;
+				}
+			}
+		}
+	}
+
 	con.showlines = Con_DestHeight();
 
 	float lines_per_frame = fabs( scr_conspeed.value ) * host.realframetime;
@@ -2390,7 +2456,7 @@ void Con_DefaultColor( int r, int g, int b, qboolean gameui )
 	if( gameui && ( g_color_table[7][0] != r || g_color_table[7][1] != g || g_color_table[7][2] != b ))
 	{
 		// yes, different from default orange, disable con_color
-		SetBits( con_color.flags, FCVAR_READ_ONLY );
+		SetBits( con_color.flags, FCVAR_ARCHIVE );
 		ClearBits( con_color.flags, FCVAR_CHANGED );
 	}
 
