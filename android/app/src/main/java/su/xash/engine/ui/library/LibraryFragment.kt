@@ -27,7 +27,6 @@ import su.xash.engine.BuildConfig
 import su.xash.engine.R
 import su.xash.engine.adapters.GameAdapter
 import su.xash.engine.databinding.FragmentLibraryBinding
-import su.xash.engine.model.GameDataDownloader
 
 
 class LibraryFragment : Fragment(), MenuProvider {
@@ -35,12 +34,9 @@ class LibraryFragment : Fragment(), MenuProvider {
 	private val binding get() = _binding!!
 
 	private val libraryViewModel: LibraryViewModel by activityViewModels()
-	private var isPermissionRequested = false
-	private var hasShownFirstRunDialog = false
 
 	private val startActivityForResult =
 		registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-			isPermissionRequested = false
 			if (checkStoragePermissions()) {
 				libraryViewModel.reloadGames(requireContext())
 			}
@@ -57,14 +53,14 @@ class LibraryFragment : Fragment(), MenuProvider {
 		val granted = permissions.entries.all { it.value }
 		if (granted) {
 			libraryViewModel.reloadGames(requireContext())
+		} else {
+			checkStoragePermissions()
 		}
 	}
 
 	private fun checkStoragePermissions(): Boolean {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
 			if (!Environment.isExternalStorageManager()) {
-				if (isPermissionRequested) return false
-				isPermissionRequested = true
 				MaterialAlertDialogBuilder(requireContext()).apply {
 					setTitle(R.string.file_access_required)
 					setMessage(R.string.file_access_message)
@@ -75,7 +71,9 @@ class LibraryFragment : Fragment(), MenuProvider {
 							)
 						)
 					}
-					setNeutralButton(android.R.string.cancel, null)
+					setNeutralButton(R.string.done_check_permissions) { dialog, _ ->
+						checkStoragePermissions()
+					}
 					setCancelable(false)
 					show()
 
@@ -93,8 +91,6 @@ class LibraryFragment : Fragment(), MenuProvider {
 			}.toTypedArray()
 
 			if (!permissionsNeeded.isEmpty()) {
-				if (isPermissionRequested) return false
-				isPermissionRequested = true
 				val showRationale = permissionsNeeded.any {
 					ActivityCompat.shouldShowRequestPermissionRationale(requireActivity(), it)
 				}
@@ -114,7 +110,9 @@ class LibraryFragment : Fragment(), MenuProvider {
 							startActivity(intent)
 						}
 					}
-					setNeutralButton(android.R.string.cancel, null)
+					setNeutralButton(R.string.done_check_permissions) { _, _ ->
+						checkStoragePermissions()
+					}
 					setCancelable(false)
 					show()
 				}
@@ -150,41 +148,11 @@ class LibraryFragment : Fragment(), MenuProvider {
 
 		libraryViewModel.installedGames.observe(viewLifecycleOwner) {
 			(binding.gamesList.adapter as GameAdapter).submitList(it)
-			if (it.isEmpty()) {
-				checkFirstRunGameData()
-			}
 		}
 
 		if (checkStoragePermissions()) {
 			libraryViewModel.reloadGames(requireContext())
 		}
-	}
-
-	private fun checkFirstRunGameData() {
-		val downloader = GameDataDownloader(requireContext())
-		if (downloader.hasCheckedFirstRun()) return
-		if (hasShownFirstRunDialog) return
-		if (!checkStoragePermissions()) return
-
-		val basedir = libraryViewModel.getBaseDir()
-		if (downloader.hasAnyGameData(basedir)) {
-			downloader.setFirstRunChecked()
-			return
-		}
-
-		hasShownFirstRunDialog = true
-		MaterialAlertDialogBuilder(requireContext())
-			.setTitle(R.string.no_game_data_found)
-			.setMessage(R.string.no_game_data_message)
-			.setPositiveButton(R.string.download_now) { _, _ ->
-				downloader.setFirstRunChecked()
-				findNavController().navigate(R.id.action_libraryFragment_to_gameDataDownloaderFragment)
-			}
-			.setNegativeButton(R.string.no_thanks) { _, _ ->
-				downloader.setFirstRunChecked()
-			}
-			.setCancelable(false)
-			.show()
 	}
 
 	override fun onDestroyView() {
@@ -200,9 +168,6 @@ class LibraryFragment : Fragment(), MenuProvider {
 		when (menuItem.itemId) {
 			R.id.action_settings -> {
 				findNavController().navigate(R.id.action_libraryFragment_to_appSettingsFragment)
-			}
-			R.id.action_download -> {
-				findNavController().navigate(R.id.action_libraryFragment_to_gameDataDownloaderFragment)
 			}
 		}
 

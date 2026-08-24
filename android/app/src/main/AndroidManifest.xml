@@ -48,7 +48,6 @@
 	<uses-permission android:name="android.permission.INTERNET" />
 	<!-- Dedicated server -->
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 	<!-- Self-update: install downloaded APK -->
 	<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -89,6 +88,7 @@
 			</intent-filter>
 		</receiver>
 
+		<!-- the window is always fullscreen, so the system ignores windowSoftInputMode and SoftKeyboardPan pans the view on its own -->
 		<activity
 			android:name=".XashActivity"
 			android:alwaysRetainTaskState="true"
@@ -96,16 +96,11 @@
 			android:exported="true"
 			android:launchMode="singleTask"
 			android:preferMinimalPostProcessing="true"
-			android:windowSoftInputMode="adjustResize">
+			android:windowSoftInputMode="adjustPan">
 			<intent-filter>
 				<action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
 			</intent-filter>
 		</activity>
-
-		<service
-			android:name=".model.DownloadService"
-			android:exported="false"
-			android:foregroundServiceType="dataSync" />
 	</application>
 	<queries>
 		<intent>
