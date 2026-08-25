@@ -1037,6 +1037,11 @@ static void CL_WritePacket( void )
 
 	// update download/upload slider.
 	Netchan_UpdateProgress( &cls.netchan );
+
+	// STEAM/SIGNON DEBUG: confirm the reliable "new" command actually leaves
+	// the client. reliable_length>0 means a reliable msg is queued/unsent.
+	Con_DPrintf( "%s: OUTBOUND state=%d signon=%d reliable_bits=%d seq=%d\n",
+		__func__, cls.state, cls.signon, cls.netchan.reliable_length, cls.netchan.outgoing_sequence );
 }
 
 /*
@@ -3077,6 +3082,11 @@ static void CL_ReadNetMessage( void )
 
 			if( !Netchan_Process( &cls.netchan, &net_message ))
 				continue;	// wasn't accepted for some reason
+
+			// STEAM/SIGNON DEBUG: log inbound server packet size so we can tell
+			// whether the server is actually sending signon data or just ACKs.
+			Con_DPrintf( "%s: INBOUND from %s bytes=%zu signon=%d state=%d\n",
+				__func__, NET_AdrToString( net_from ), curSize, cls.signon, cls.state );
 		}
 
 		if( cls.state == ca_active )

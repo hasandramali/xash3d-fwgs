@@ -569,6 +569,9 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 
 		cmd = MSG_ReadServerCmd( msg );
 
+		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
+		Con_DPrintf( "%s: svc cmd=%d signon=%d state=%d msgbits=%d\n", __func__, cmd, cls.signon, cls.state, MSG_GetNumBitsLeft( msg ) );
+
 		// record command for debugging spew on parse problem
 		CL_Parse_RecordCommand( cmd, bufStart );
 

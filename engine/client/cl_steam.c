@@ -133,12 +133,15 @@ static void SteamBroker_DumpLegacyTicket( const char *name, const uint8_t *ticke
 		return;
 	}
 
-	steamid = (uint64_t)session[8] | ( (uint64_t)session[9] << 8 ) | ( (uint64_t)session[10] << 16 ) | ( (uint64_t)session[11] << 24 ) |
-	          ( (uint64_t)session[12] << 32 ) | ( (uint64_t)session[13] << 40 ) | ( (uint64_t)session[14] << 48 ) | ( (uint64_t)session[15] << 56 );
-	appid = session[16] | ( session[17] << 8 ) | ( session[18] << 16 ) | ( (uint32_t)session[19] << 24 );
-	timestamp = session[20] | ( session[21] << 8 ) | ( session[22] << 16 ) | ( (uint32_t)session[23] << 24 );
-	clientIP = session[24] | ( session[25] << 8 ) | ( session[26] << 16 ) | ( (uint32_t)session[27] << 24 );
-	serverIP = session[28] | ( session[29] << 8 ) | ( session[30] << 16 ) | ( (uint32_t)session[31] << 24 );
+	// session data starts AFTER the 4-byte sessionSize field
+	{
+		const uint8_t *s = session + 4;
+		steamid = (uint64_t)s[8] | ( (uint64_t)s[9] << 8 ) | ( (uint64_t)s[10] << 16 ) | ( (uint64_t)s[11] << 24 ) |
+		          ( (uint64_t)s[12] << 32 ) | ( (uint64_t)s[13] << 40 ) | ( (uint64_t)s[14] << 48 ) | ( (uint64_t)s[15] << 56 );
+		appid = s[16] | ( s[17] << 8 ) | ( s[18] << 16 ) | ( (uint32_t)s[19] << 24 );
+		timestamp = s[20] | ( s[21] << 8 ) | ( s[22] << 16 ) | ( (uint32_t)s[23] << 24 );
+		clientIP = s[24] | ( s[25] << 8 ) | ( s[26] << 16 ) | ( (uint32_t)s[27] << 24 );
+		serverIP = s[28] | ( s[29] << 8 ) | ( s[30] << 16 ) | ( (uint32_t)s[31] << 24 );
 
 	for( i = 0; i < 4; i++ )
 	{
@@ -148,7 +151,8 @@ static void SteamBroker_DumpLegacyTicket( const char *name, const uint8_t *ticke
 
 	Con_Printf( S_NOTE "%s: legacy GoldSrc ticket decode:\n", name );
 	Con_Printf( "    tokenLen=%u sessionSize=%u total=%zu\n", tokenLen, sessionSize, size );
-	Con_Printf( "    version=0x%02x count=%u\n", session[0], session[4] );
+	Con_Printf( "    version=0x%02x count=%u\n", session[4], session[8] );
+	}
 	Con_Printf( "    steamid=%"PRIu64" appid=%u timestamp=%u\n", steamid, appid, timestamp );
 	Con_Printf( "    clientIP=%s serverIP=%u.%u.%u.%u sigLen=%u\n",
 		ipbuf, serverIP & 0xff, ( serverIP >> 8 ) & 0xff, ( serverIP >> 16 ) & 0xff, ( serverIP >> 24 ) & 0xff,
