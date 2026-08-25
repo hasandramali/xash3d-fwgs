@@ -518,7 +518,7 @@ class SteamAuthManager(private val ctx: Context) {
      * [serverSteamId] is the game server's SteamID from the engine's sb_connect frame;
      * when non-zero it is bound into the ticket via a SteamNetworkingIdentity (Option B).
      */
-    suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L, serverIp: String = ""): ByteArray = withContext(Dispatchers.IO) {
         if (!connected) throw Exception("Not connected to Steam")
         Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
@@ -534,7 +534,7 @@ class SteamAuthManager(private val ctx: Context) {
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
-        val authTicket = buildAuthTicket(token, 2)
+        val authTicket = buildAuthTicket(token, 2, serverIp)
         Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
 
         // Register the auth ticket with the Steam backend via ClientAuthList (EMsg 5432) BEFORE the
@@ -615,6 +615,7 @@ class SteamAuthManager(private val ctx: Context) {
                     if (command.startsWith("sb_connect")) {
                         val parts = command.split(" ")
                         val serverAddr = if (parts.size > 1) parts[1] else ""
+                        val serverIp = serverAddr.substringBefore(':')
                         val serverSteamId = if (parts.size > 2) parts[2].toLongOrNull() ?: 0L else 0L
                         val secure = if (parts.size > 3) parts[3] != "0" else false
                         val challenge = if (parts.size > 4) parts[4].toIntOrNull() ?: 0 else 0
@@ -623,7 +624,7 @@ class SteamAuthManager(private val ctx: Context) {
                         Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge reqAppid=$reqAppid effectiveAppid=$effectiveAppid gamedir=$currentGameDir parts=${parts.toList()}")
                         Log.d(TAG, "$tag: connected=${connected} loggedIn=$loggedIn tokens=${gameConnectTokens.size} steamId=$currentSteamId")
                         val ticket = try {
-                            kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(effectiveAppid, serverSteamId) }
+                            kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(effectiveAppid, serverSteamId, serverIp) }
                         } catch (e: Exception) {
                             Log.e(TAG, "$tag: getSessionTicket FAILED: ${e.message}", e)
                             throw e
@@ -1359,24 +1360,40 @@ class SteamAuthManager(private val ctx: Context) {
     // from InitiateGameConnection. The previous legacy 218-byte "app ticket embedded as session"
     // format is REJECTED by the server => it accepts connect then NOPs forever (signon never starts).
     // Layout: int32 tokenLen | token[tokenLen] | int32 sessionSize(=24) |
-    //         int32 1 | int32 ticketType | 8B random ip | int32 timestamp | int32 seq
+    //         int32 1 | int32 ticketType | int32 externalIP | int32 internalIP |
+    //         int32 timestamp(epoch s) | int32 seq
+    // The externalIP/internalIP fields are what Steam's InitiateGameConnection binds to the
+    // TARGET GAME SERVER: externalIP = server IP, internalIP = 0. SteamGameServer_BeginAuthSession
+    // then refuses the ticket unless these match the server it is validated for, so we must embed
+    // the real server IP here (and a real epoch timestamp) instead of random/garbage bytes.
     private val authTicketSequence = AtomicInteger(0)
 
-    private fun buildAuthTicket(gameConnectToken: ByteArray, ticketType: Int = 2): ByteArray {
-        val sessionSize = 4 + 4 + 4 + 4 + 4 + 4 // = 24: int1 + ticketType + pubIP + privIP + ts + seq
+    private fun ipToUint32(ip: String): Int {
+        val p = ip.split('.')
+        if (p.size != 4) return 0
+        return try {
+            ((p[0].toInt() and 0xFF) shl 24) or
+            ((p[1].toInt() and 0xFF) shl 16) or
+            ((p[2].toInt() and 0xFF) shl 8) or
+            (p[3].toInt() and 0xFF)
+        } catch (_: Exception) { 0 }
+    }
+
+    private fun buildAuthTicket(gameConnectToken: ByteArray, ticketType: Int = 2, serverIp: String = ""): ByteArray {
+        val sessionSize = 4 + 4 + 4 + 4 + 4 + 4 // = 24: int1 + ticketType + externalIP + internalIP + ts + seq
+        val externalIp = ipToUint32(serverIp)   // server IP bound into the ticket (InitiateGameConnection)
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size)) // tokenLen = 20
         stream.write(gameConnectToken)                        // 20-byte game connect token (EMsg 779)
         stream.write(Proto.packInt32(sessionSize))            // sessionSize = 24
         stream.write(Proto.packInt32(1))                      // unknown, always 1
         stream.write(Proto.packInt32(ticketType))             // 2 = AuthSession (5 = WebApi)
-        val randomBytes = ByteArray(8)
-        SecureRandom().nextBytes(randomBytes)                 // public + private IP (random)
-        stream.write(randomBytes)
-        stream.write(Proto.packInt32((System.nanoTime() and 0xFFFFFFFFL).toInt())) // timestamp
+        stream.write(Proto.packInt32(externalIp))             // externalIP = server IP (binding)
+        stream.write(Proto.packInt32(0))                      // internalIP = 0
+        stream.write(Proto.packInt32((System.currentTimeMillis() / 1000).toInt())) // timestamp (epoch s)
         stream.write(Proto.packInt32(authTicketSequence.incrementAndGet()))        // sequence
         val bytes = stream.toByteArray()
-        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize)")
+        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize externalIp=${String.format("%08x", externalIp)})")
         return bytes
     }
 
