@@ -1411,11 +1411,6 @@ class SteamAuthManager(private val ctx: Context) {
         val sessionBytes = legacySession.toByteArray()
         Log.i(TAG, "buildAuthTicket(legacy): session=${sessionBytes.size}B blob=${appTicket.size}B (expected 190 / 158)")
 
-        val sessionBytes = legacySession.toByteArray()
-        if (sessionBytes.size != 190) {
-            Log.w(TAG, "Legacy session size mismatch: ${sessionBytes.size} != 190")
-        }
-
         val sessionSize = sessionBytes.size
         stream.write(Proto.packInt32(sessionSize))
         stream.write(sessionBytes)
