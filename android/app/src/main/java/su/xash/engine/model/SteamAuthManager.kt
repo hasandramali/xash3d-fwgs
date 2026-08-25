@@ -537,8 +537,24 @@ class SteamAuthManager(private val ctx: Context) {
 
         if (isGoldSrc) {
             // Legacy format: authTicket IS the complete ticket (218 bytes for Sven Coop).
-            // No ClientAuthList, no app ownership combine.
-            Log.i(TAG, "getSessionTicket: LEGACY mode - returning authTicket directly (${authTicket.size} bytes)")
+            // BUT the Steam backend still requires the ticket to be registered via ClientAuthList
+            // (EMsg 5432) before a server's SteamGameServer_BeginAuthSession can validate it.
+            // A real PC Steam client always registers the ticket; without it the server's async
+            // Steam auth callback never returns OK and it just NOPs the client forever (connect
+            // accepted, signon never starts). Mirror the modern path: register + await ack.
+            val crc = crc32(authTicket)
+            synchronized(ticketChangeLock) {
+                ticketsByGame.getOrPut(appid) { ArrayList() }.add(
+                    CMsgAuthTicket(gameid = appid.toLong(), ticket = authTicket, ticketCrc = crc)
+                )
+            }
+            val ackBody = sendAuthList(appid)
+            val ackCrcs = readRepeatedVarints(ackBody, 1)
+            Log.i(TAG, "getSessionTicket(GoldSrc): auth list sent, ack crcs=${ackCrcs.joinToString()} our=$crc")
+            if (ackCrcs.none { it == crc }) {
+                Log.w(TAG, "getSessionTicket(GoldSrc): AuthList ack did not contain our crc $crc (got ${ackCrcs.joinToString()})")
+            }
+            Log.i(TAG, "getSessionTicket: LEGACY mode - returning authTicket (${authTicket.size} bytes) after ClientAuthList")
             return@withContext authTicket
         }
 
