@@ -91,6 +91,72 @@ static void SteamBroker_DumpHex( const char *name, const void *data, size_t size
 	}
 }
 
+/*
+ * Decode a legacy GoldSrc (InitiateGameConnection) Steam auth ticket and
+ * print its fields. This is the single most useful diagnostic when a server
+ * rejects a ticket: compare these fields against a known-good reference.
+ *
+ * Layout: uint32 tokenLen | token[tokenLen] | uint32 sessionSize | session[sessionSize]
+ *   session: uint8 version | uint8 count | uint16 reserved | uint64 steamid |
+ *            uint32 appid | uint32 timestamp | uint32 clientIP | uint32 serverIP |
+ *            uint8 signature[sessionSize - 32]
+ */
+static void SteamBroker_DumpLegacyTicket( const char *name, const uint8_t *ticket, size_t size )
+{
+	uint32_t tokenLen, sessionSize;
+	const uint8_t *token, *session;
+	uint64_t steamid;
+	uint32_t appid, timestamp, clientIP, serverIP;
+	char ipbuf[32];
+	int i;
+
+	if( size < 8 )
+	{
+		Con_Printf( S_ERROR "%s: ticket too small (%zu bytes) to decode\n", __func__, size );
+		return;
+	}
+
+	tokenLen = ticket[0] | ( ticket[1] << 8 ) | ( ticket[2] << 16 ) | ( (uint32_t)ticket[3] << 24 );
+	if( tokenLen > 64 || ( size_t)tokenLen + 8 > size )
+	{
+		Con_Printf( S_ERROR "%s: bad tokenLen %u (ticket size %zu)\n", __func__, tokenLen, size );
+		return;
+	}
+
+	token = ticket + 4;
+	session = ticket + 4 + tokenLen;
+	sessionSize = session[0] | ( session[1] << 8 ) | ( session[2] << 16 ) | ( (uint32_t)session[3] << 24 );
+
+	if( (size_t)sessionSize + 4 + tokenLen + 4 > size )
+	{
+		Con_Printf( S_ERROR "%s: bad sessionSize %u (ticket size %zu)\n", __func__, sessionSize, size );
+		return;
+	}
+
+	steamid = (uint64_t)session[8] | ( (uint64_t)session[9] << 8 ) | ( (uint64_t)session[10] << 16 ) | ( (uint64_t)session[11] << 24 ) |
+	          ( (uint64_t)session[12] << 32 ) | ( (uint64_t)session[13] << 40 ) | ( (uint64_t)session[14] << 48 ) | ( (uint64_t)session[15] << 56 );
+	appid = session[16] | ( session[17] << 8 ) | ( session[18] << 16 ) | ( (uint32_t)session[19] << 24 );
+	timestamp = session[20] | ( session[21] << 8 ) | ( session[22] << 16 ) | ( (uint32_t)session[23] << 24 );
+	clientIP = session[24] | ( session[25] << 8 ) | ( session[26] << 16 ) | ( (uint32_t)session[27] << 24 );
+	serverIP = session[28] | ( session[29] << 8 ) | ( session[30] << 16 ) | ( (uint32_t)session[31] << 24 );
+
+	for( i = 0; i < 4; i++ )
+	{
+		uint8_t b = ( i == 0 ) ? ( clientIP & 0xff ) : ( i == 1 ) ? ( ( clientIP >> 8 ) & 0xff ) : ( i == 2 ) ? ( ( clientIP >> 16 ) & 0xff ) : ( ( clientIP >> 24 ) & 0xff );
+		Q_snprintf( ipbuf + ( i ? Q_strlen( ipbuf ) + 1 : 0 ), sizeof( ipbuf ) - Q_strlen( ipbuf ), "%u%s", b, i < 3 ? "." : "" );
+	}
+
+	Con_Printf( S_NOTE "%s: legacy GoldSrc ticket decode:\n", name );
+	Con_Printf( "    tokenLen=%u sessionSize=%u total=%zu\n", tokenLen, sessionSize, size );
+	Con_Printf( "    version=0x%02x count=%u\n", session[0], session[4] );
+	Con_Printf( "    steamid=%"PRIu64" appid=%u timestamp=%u\n", steamid, appid, timestamp );
+	Con_Printf( "    clientIP=%s serverIP=%u.%u.%u.%u sigLen=%u\n",
+		ipbuf, serverIP & 0xff, ( serverIP >> 8 ) & 0xff, ( serverIP >> 16 ) & 0xff, ( serverIP >> 24 ) & 0xff,
+		(uint32_t)( sessionSize > 32 ? sessionSize - 32 : 0 ));
+	Con_Printf( "    token=%02x%02x%02x%02x...%02x%02x%02x%02x\n",
+		token[0], token[1], token[2], token[3], token[tokenLen-4], token[tokenLen-3], token[tokenLen-2], token[tokenLen-1] );
+}
+
 static void SteamBroker_SetState( sbrk_state_t new_state )
 {
 	if( broker.state != new_state )
@@ -281,6 +347,7 @@ static qboolean SteamBroker_ProcessFrame( void )
 					Con_Printf( "%s: SteamID: %"PRIu64", ticket: [%d, %d, %d, %d...]\n", __func__, steam_id, ticket_data[0], ticket_data[1], ticket_data[2], ticket_data[3] );
 					Con_DPrintf( "%s: server %s, challenge=%d, steam_id=%"PRIu64", ticket_size=%u\n", __func__, NET_AdrToString( broker.serveradr ), challenge, steam_id, ticket_size );
 					SteamBroker_DumpHex( "ticket", ticket_data, ticket_size );
+					SteamBroker_DumpLegacyTicket( "SteamBroker", ticket_data, ticket_size );
 
 					memcpy( cls.steamid, &steam_id, sizeof( cls.steamid ));
 					CL_SendGoldSrcConnectPacket( broker.serveradr, broker.challenge, ticket_data, ticket_size );
@@ -509,6 +576,8 @@ qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 	int len = Q_snprintf( buf, sizeof( buf ), "sb_connect %s %"PRIu64" %d %d %d", NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge, appid );
 
 	Con_DPrintf( "%s: requesting ticket (server %s, steamid %"PRIu64", secure %d, challenge %d, appid %d)\n", __func__, NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge, appid );
+	Con_DPrintf( "%s: sb_connect request: %s\n", __func__, buf );
+	SteamBroker_DumpHex( "sb_connect", (const uint8_t *)buf, (size_t)len );
 
 	if( !SteamBroker_SendFrame( buf, len ))
 		return false;

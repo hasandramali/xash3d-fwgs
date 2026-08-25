@@ -505,11 +505,14 @@ class SteamAuthManager(private val ctx: Context) {
 
     /**
      * Generates the combined Steam auth session ticket for [appid]:
-     * 1. GetAppOwnershipTicket (857 -> 858)
+     * 1. GetAppOwnershipTicket (857 -> 858) - the real Valve-issued encrypted app ticket.
+     *    For GoldSrc legacy this IS the trailing blob of the InitiateGameConnection ticket.
      * 2. consume a game connect token (779, buffered by reader)
-     * 3. build the raw auth session ticket
-     * 4. send ClientAuthList (5432) and await the ack (5575)
-     * 5. return authTicket + int32LE(appTicket.size) + appTicket
+     * 3. build the raw auth session ticket (legacy for GoldSrc, modern for others)
+     * 4. send ClientAuthList (5432) and await the ack (5575)  [SKIPPED for GoldSrc legacy]
+     * 5. for modern: return authTicket + int32LE(appTicket.size) + appTicket.
+     *    For GoldSrc legacy: the app ticket is already embedded inside buildAuthTicket, so
+     *    buildAuthTicket's output is returned directly.
      *
      * [serverSteamId] is the game server's SteamID from the engine's sb_connect frame;
      * when non-zero it is bound into the ticket via a SteamNetworkingIdentity (Option B).
@@ -518,15 +521,26 @@ class SteamAuthManager(private val ctx: Context) {
         if (!connected) throw Exception("Not connected to Steam")
         Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
+        // GoldSrc games (Half-Life, CS 1.6, Sven Coop, etc.) use legacy InitiateGameConnection format.
+        // The legacy auth ticket already includes app ownership; no separate app ticket or ClientAuthList needed.
+        val isGoldSrc = isGoldSrcAppId(appid)
+
         val appTicket = requestAppOwnershipTicket(appid)
-        Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${appTicket.size}")
+            .also { Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${it.size} (isGoldSrc=$isGoldSrc)") }
 
         val token = gameConnectTokens.poll()
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
-        val authTicket = buildAuthTicket(token, serverSteamId)
+        val authTicket = buildAuthTicket(token, serverSteamId, appTicket)
         Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
+
+        if (isGoldSrc) {
+            // Legacy format: authTicket IS the complete ticket (218 bytes for Sven Coop).
+            // No ClientAuthList, no app ownership combine.
+            Log.i(TAG, "getSessionTicket: LEGACY mode - returning authTicket directly (${authTicket.size} bytes)")
+            return@withContext authTicket
+        }
 
         val crc = crc32(authTicket)
         Log.i(TAG, "getSessionTicket: auth crc=$crc")
@@ -551,6 +565,13 @@ class SteamAuthManager(private val ctx: Context) {
         val combined = combineTickets(authTicket, appTicket)
         Log.i(TAG, "getSessionTicket: DONE combined ticket size=${combined.size}")
         combined
+    }
+
+    private fun isGoldSrcAppId(appid: Int): Boolean {
+        return when (appid) {
+            10, 20, 30, 40, 50, 60, 70, 80, 100, 130, 150, 225840 -> true
+            else -> false
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1348,27 +1369,60 @@ class SteamAuthManager(private val ctx: Context) {
         return ticket
     }
 
-    private fun buildAuthTicket(gameConnectToken: ByteArray, serverSteamId: Long = 0L): ByteArray {
-        // SteamKit2 SteamAuthTicket.BuildAuthTicket (verified Steam session ticket) layout:
-        //   int32 tokenLen | token | int32 sessionSize(24) | int32 1 | int32 ticketType(AuthSession=2)
-        //   | 4B pub IP + 4B priv IP (random) | int32 timestamp | int32 sequence
-        // The game server's steamclient parses this block to validate the connection; without it
-        // SendUserConnectAndAuthenticate fails its basic checks ("STEAM validation rejected").
+    private fun buildAuthTicket(gameConnectToken: ByteArray, serverSteamId: Long = 0L, appTicket: ByteArray): ByteArray {
+        // Legacy GoldSrc/InitiateGameConnection ticket format:
+        //   [0..4)   tokenLen
+        //   [4..4+tokenLen) 20-byte game-connect token from CM
+        //   [..)     sessionSize
+        //   session:
+        //     [0..4)   version/type = 0x3E
+        //     [4..8)   field_count  = 0x04
+        //     [8..16)  clientSteamID (LE)
+        //     [16..20) appID (LE)
+        //     [20..24) timestamp (LE)
+        //     [24..28) clientIP (LE)
+        //     [28..32) serverIP (LE) - 0
+        //     [32..)   blob = the REAL Valve-issued app-ownership ticket
+        //
+        // IMPORTANT: the trailing blob is NOT a locally computed HMAC. Verified against a real
+        // Steam capture (steam-refs/sven/scop.pcap) and the PC steamclient ticket: the 158-byte
+        // blob is byte-identical between two connections with DIFFERENT clientIPs/timestamps,
+        // i.e. it is the static per-account encrypted app ticket issued by Valve. We must embed
+        // the real ticket from requestAppOwnershipTicket, never a faked signature.
         val stream = ByteArrayOutputStream()
-        stream.write(Proto.packInt32(gameConnectToken.size))
-        stream.write(gameConnectToken)
-        val sessionSize = 24 // 6 x uint32: 1, ticketType, publicIp, privateIp, timestamp, sequence
+        stream.write(Proto.packInt32(gameConnectToken.size)) // tokenLen = 20
+        stream.write(gameConnectToken)                        // 20-byte game connect token from CM
+
+        // Legacy session block
+        val legacySession = ByteArrayOutputStream()
+        legacySession.write(Proto.packInt32(0x3E))           // version/type
+        legacySession.write(Proto.packInt32(0x04))           // field count
+        legacySession.write(Proto.packInt64(currentSteamId)) // client SteamID (LE)
+        legacySession.write(Proto.packInt32(225840))         // appID (Sven Coop)
+        legacySession.write(Proto.packInt32((System.currentTimeMillis() / 1000).toInt())) // unix timestamp
+        legacySession.write(Proto.packInt32(0))              // clientIP - 0 (blob is IP-independent)
+        legacySession.write(Proto.packInt32(0))              // serverIP - 0 (matches PC output)
+
+        // Trailing blob = the real Valve-issued app-ownership ticket. For Sven Coop this is the
+        // 158-byte encrypted app ticket; if the CM returns a different size we still embed it
+        // verbatim and log, so the server-side rejection (if any) reveals the expected length.
+        legacySession.write(appTicket)
+
+        val sessionBytes = legacySession.toByteArray()
+        Log.i(TAG, "buildAuthTicket(legacy): session=${sessionBytes.size}B blob=${appTicket.size}B (expected 190 / 158)")
+
+        val sessionBytes = legacySession.toByteArray()
+        if (sessionBytes.size != 190) {
+            Log.w(TAG, "Legacy session size mismatch: ${sessionBytes.size} != 190")
+        }
+
+        val sessionSize = sessionBytes.size
         stream.write(Proto.packInt32(sessionSize))
-        stream.write(Proto.packInt32(1)) // unknown, always 1
-        stream.write(Proto.packInt32(TICKET_TYPE_AUTH_SESSION))
-        val randBytes = ByteArray(8) // public/private IP fields, any value is accepted by Steam
-        SecureRandom().nextBytes(randBytes)
-        stream.write(randBytes)
-        val ts = (System.nanoTime() and 0xFFFFFFFFL).toInt()
-        stream.write(Proto.packInt32(ts))
-        stream.write(Proto.packInt32(ticketSequence.incrementAndGet().toInt()))
+        stream.write(sessionBytes)
+
         val bytes = stream.toByteArray()
-        Log.i(TAG, "buildAuthTicket: serverSteamId=$serverSteamId session ticket size=${bytes.size}")
+        Log.i(TAG, "buildAuthTicket(legacy): serverSteamId=$serverSteamId ticket=${bytes.size}B session=${sessionSize}B")
+        Log.d(TAG, "  tokenLen=${gameConnectToken.size} sessionSize=$sessionSize authTicket=${bytes.size}B")
         return bytes
     }
 
