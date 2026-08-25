@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.CRC32
 import java.util.zip.GZIPInputStream
@@ -521,61 +522,34 @@ class SteamAuthManager(private val ctx: Context) {
         if (!connected) throw Exception("Not connected to Steam")
         Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
-        // GoldSrc games (Half-Life, CS 1.6, Sven Coop, etc.) use legacy InitiateGameConnection format.
-        // The legacy auth ticket already includes app ownership; no separate app ticket or ClientAuthList needed.
-        val isGoldSrc = isGoldSrcAppId(appid)
-
+        // Steam's GetAuthSessionTicket / InitiateGameConnection ALWAYS returns the modern combined
+        // ticket (authTicket + int32 appTicketSize + appTicket); there is no separate legacy path.
+        // This is what SteamGameServer_BeginAuthSession validates for Source-era games (Sven Co-op).
+        // If we sent the old legacy 218-byte "app ticket embedded as session" format, the server's
+        // BeginAuthSession mis-parses and rejects it => it accepts connect then NOPs forever.
         val appTicket = requestAppOwnershipTicket(appid)
-            .also { Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${it.size} (isGoldSrc=$isGoldSrc)") }
+            .also { Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${it.size}") }
 
         val token = gameConnectTokens.poll()
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
-        val authTicket = buildAuthTicket(token, serverSteamId, appTicket)
+        val authTicket = buildAuthTicket(token, 2)
         Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
 
-        if (isGoldSrc) {
-            // Legacy format: authTicket IS the complete ticket (218 bytes for Sven Coop).
-            // BUT the Steam backend still requires the ticket to be registered via ClientAuthList
-            // (EMsg 5432) before a server's SteamGameServer_BeginAuthSession can validate it.
-            // A real PC Steam client always registers the ticket; without it the server's async
-            // Steam auth callback never returns OK and it just NOPs the client forever (connect
-            // accepted, signon never starts). Mirror the modern path: register + await ack.
-            val crc = crc32(authTicket)
-            synchronized(ticketChangeLock) {
-                ticketsByGame.getOrPut(appid) { ArrayList() }.add(
-                    CMsgAuthTicket(gameid = appid.toLong(), ticket = authTicket, ticketCrc = crc)
-                )
-            }
-            val ackBody = sendAuthList(appid)
-            val ackCrcs = readRepeatedVarints(ackBody, 1)
-            Log.i(TAG, "getSessionTicket(GoldSrc): auth list sent, ack crcs=${ackCrcs.joinToString()} our=$crc")
-            if (ackCrcs.none { it == crc }) {
-                Log.w(TAG, "getSessionTicket(GoldSrc): AuthList ack did not contain our crc $crc (got ${ackCrcs.joinToString()})")
-            }
-            Log.i(TAG, "getSessionTicket: LEGACY mode - returning authTicket (${authTicket.size} bytes) after ClientAuthList")
-            return@withContext authTicket
-        }
-
+        // Register the auth ticket with the Steam backend via ClientAuthList (EMsg 5432) BEFORE the
+        // server calls BeginAuthSession, otherwise validation fails and the server NOPs forever.
         val crc = crc32(authTicket)
-        Log.i(TAG, "getSessionTicket: auth crc=$crc")
         synchronized(ticketChangeLock) {
             ticketsByGame.getOrPut(appid) { ArrayList() }.add(
-                CMsgAuthTicket(
-                    gameid = appid.toLong(),
-                    ticket = authTicket,
-                    ticketCrc = crc
-                )
+                CMsgAuthTicket(gameid = appid.toLong(), ticket = authTicket, ticketCrc = crc)
             )
         }
-
         val ackBody = sendAuthList(appid)
-        Log.i(TAG, "getSessionTicket: auth list sent, ack body size=${ackBody.size}")
         val ackCrcs = readRepeatedVarints(ackBody, 1)
-        Log.i(TAG, "getSessionTicket: ack crcs=${ackCrcs.joinToString()} our=$crc")
+        Log.i(TAG, "getSessionTicket: auth list sent, ack crcs=${ackCrcs.joinToString()} our=$crc")
         if (ackCrcs.none { it == crc }) {
-            Log.w(TAG, "AuthList ack did not contain our crc $crc (got ${ackCrcs.joinToString()})")
+            Log.w(TAG, "getSessionTicket: AuthList ack did not contain our crc $crc (got ${ackCrcs.joinToString()})")
         }
 
         val combined = combineTickets(authTicket, appTicket)
@@ -583,12 +557,6 @@ class SteamAuthManager(private val ctx: Context) {
         combined
     }
 
-    private fun isGoldSrcAppId(appid: Int): Boolean {
-        return when (appid) {
-            10, 20, 30, 40, 50, 60, 70, 80, 100, 130, 150, 225840 -> true
-            else -> false
-        }
-    }
 
     // ------------------------------------------------------------------
     // Broker server (SBRK protocol for cl_steam.c)
@@ -1385,34 +1353,30 @@ class SteamAuthManager(private val ctx: Context) {
         return ticket
     }
 
-    private fun buildAuthTicket(gameConnectToken: ByteArray, serverSteamId: Long = 0L, appTicket: ByteArray): ByteArray {
-        // Legacy GoldSrc/InitiateGameConnection ticket format:
-        //   [0..4)   tokenLen
-        //   [4..4+tokenLen) 20-byte game-connect token from CM
-        //   [4+tokenLen..+4) sessionSize
-        //   session(= appTicket verbatim):
-        //     [0..4)   version/type = 0x3E
-        //     [4..8)   field_count  = 0x04
-        //     [8..16)  clientSteamID (LE)
-        //     [16..20) appID (LE)
-        //     [20..24) timestamp (LE)
-        //     [24..28) clientIP (LE)
-        //     [28..32) serverIP (LE) - 0
-        //     [32..)   158-byte Valve-signed encrypted app ticket
-        //
-        // The CM app-ownership ticket (EMsg 858, requestAppOwnershipTicket) ALREADY IS the complete
-        // legacy session block (it begins with 3e 00 00 00 04 00 00 00 ... and ends with the 158-byte
-        // signature). Verified against a real Steam capture (steam-refs/sven/scop.pcap) and the PC
-        // steamclient ticket: byte-identical 158-byte blob, static per account/app. We embed it
-        // VERBATIM — do NOT add another header (that double-wraps and fails Steam validation).
+    // Modern Steam auth session ticket (matches JavaSteam SteamAuthTicket.buildAuthTicket /
+    // SteamKit2 GetAuthSessionTicket). This is what SteamGameServer_BeginAuthSession expects for
+    // Source-era games (Sven Co-op, appid 225840) and is exactly what the real Steam client returns
+    // from InitiateGameConnection. The previous legacy 218-byte "app ticket embedded as session"
+    // format is REJECTED by the server => it accepts connect then NOPs forever (signon never starts).
+    // Layout: int32 tokenLen | token[tokenLen] | int32 sessionSize(=24) |
+    //         int32 1 | int32 ticketType | 8B random ip | int32 timestamp | int32 seq
+    private val authTicketSequence = AtomicInteger(0)
+
+    private fun buildAuthTicket(gameConnectToken: ByteArray, ticketType: Int = 2): ByteArray {
+        val sessionSize = 4 + 4 + 4 + 4 + 4 + 4 // = 24: int1 + ticketType + pubIP + privIP + ts + seq
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size)) // tokenLen = 20
-        stream.write(gameConnectToken)                        // 20-byte game connect token from CM
-        stream.write(Proto.packInt32(appTicket.size))          // sessionSize (190 for Sven Coop)
-        stream.write(appTicket)                               // the session block, verbatim
-
+        stream.write(gameConnectToken)                        // 20-byte game connect token (EMsg 779)
+        stream.write(Proto.packInt32(sessionSize))            // sessionSize = 24
+        stream.write(Proto.packInt32(1))                      // unknown, always 1
+        stream.write(Proto.packInt32(ticketType))             // 2 = AuthSession (5 = WebApi)
+        val randomBytes = ByteArray(8)
+        SecureRandom().nextBytes(randomBytes)                 // public + private IP (random)
+        stream.write(randomBytes)
+        stream.write(Proto.packInt32((System.nanoTime() and 0xFFFFFFFFL).toInt())) // timestamp
+        stream.write(Proto.packInt32(authTicketSequence.incrementAndGet()))        // sequence
         val bytes = stream.toByteArray()
-        Log.i(TAG, "buildAuthTicket(legacy): serverSteamId=$serverSteamId ticket=${bytes.size}B session=${appTicket.size}B (expected 218 / 190)")
+        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize)")
         return bytes
     }
 
