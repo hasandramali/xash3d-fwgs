@@ -1373,8 +1373,8 @@ class SteamAuthManager(private val ctx: Context) {
         // Legacy GoldSrc/InitiateGameConnection ticket format:
         //   [0..4)   tokenLen
         //   [4..4+tokenLen) 20-byte game-connect token from CM
-        //   [..)     sessionSize
-        //   session:
+        //   [4+tokenLen..+4) sessionSize
+        //   session(= appTicket verbatim):
         //     [0..4)   version/type = 0x3E
         //     [4..8)   field_count  = 0x04
         //     [8..16)  clientSteamID (LE)
@@ -1382,42 +1382,21 @@ class SteamAuthManager(private val ctx: Context) {
         //     [20..24) timestamp (LE)
         //     [24..28) clientIP (LE)
         //     [28..32) serverIP (LE) - 0
-        //     [32..)   blob = the REAL Valve-issued app-ownership ticket
+        //     [32..)   158-byte Valve-signed encrypted app ticket
         //
-        // IMPORTANT: the trailing blob is NOT a locally computed HMAC. Verified against a real
-        // Steam capture (steam-refs/sven/scop.pcap) and the PC steamclient ticket: the 158-byte
-        // blob is byte-identical between two connections with DIFFERENT clientIPs/timestamps,
-        // i.e. it is the static per-account encrypted app ticket issued by Valve. We must embed
-        // the real ticket from requestAppOwnershipTicket, never a faked signature.
+        // The CM app-ownership ticket (EMsg 858, requestAppOwnershipTicket) ALREADY IS the complete
+        // legacy session block (it begins with 3e 00 00 00 04 00 00 00 ... and ends with the 158-byte
+        // signature). Verified against a real Steam capture (steam-refs/sven/scop.pcap) and the PC
+        // steamclient ticket: byte-identical 158-byte blob, static per account/app. We embed it
+        // VERBATIM — do NOT add another header (that double-wraps and fails Steam validation).
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size)) // tokenLen = 20
         stream.write(gameConnectToken)                        // 20-byte game connect token from CM
-
-        // Legacy session block
-        val legacySession = ByteArrayOutputStream()
-        legacySession.write(Proto.packInt32(0x3E))           // version/type
-        legacySession.write(Proto.packInt32(0x04))           // field count
-        legacySession.write(Proto.packInt64(currentSteamId)) // client SteamID (LE)
-        legacySession.write(Proto.packInt32(225840))         // appID (Sven Coop)
-        legacySession.write(Proto.packInt32((System.currentTimeMillis() / 1000).toInt())) // unix timestamp
-        legacySession.write(Proto.packInt32(0))              // clientIP - 0 (blob is IP-independent)
-        legacySession.write(Proto.packInt32(0))              // serverIP - 0 (matches PC output)
-
-        // Trailing blob = the real Valve-issued app-ownership ticket. For Sven Coop this is the
-        // 158-byte encrypted app ticket; if the CM returns a different size we still embed it
-        // verbatim and log, so the server-side rejection (if any) reveals the expected length.
-        legacySession.write(appTicket)
-
-        val sessionBytes = legacySession.toByteArray()
-        Log.i(TAG, "buildAuthTicket(legacy): session=${sessionBytes.size}B blob=${appTicket.size}B (expected 190 / 158)")
-
-        val sessionSize = sessionBytes.size
-        stream.write(Proto.packInt32(sessionSize))
-        stream.write(sessionBytes)
+        stream.write(Proto.packInt32(appTicket.size))          // sessionSize (190 for Sven Coop)
+        stream.write(appTicket)                               // the session block, verbatim
 
         val bytes = stream.toByteArray()
-        Log.i(TAG, "buildAuthTicket(legacy): serverSteamId=$serverSteamId ticket=${bytes.size}B session=${sessionSize}B")
-        Log.d(TAG, "  tokenLen=${gameConnectToken.size} sessionSize=$sessionSize authTicket=${bytes.size}B")
+        Log.i(TAG, "buildAuthTicket(legacy): serverSteamId=$serverSteamId ticket=${bytes.size}B session=${appTicket.size}B (expected 218 / 190)")
         return bytes
     }
 
