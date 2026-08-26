@@ -534,7 +534,7 @@ class SteamAuthManager(private val ctx: Context) {
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
-        val authTicket = buildAuthTicket(token, 2, serverIp)
+        val authTicket = buildAuthTicket(token, 2)
         Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
 
         // Register the auth ticket with the Steam backend via ClientAuthList (EMsg 5432) BEFORE the
@@ -1355,45 +1355,29 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     // Modern Steam auth session ticket (matches JavaSteam SteamAuthTicket.buildAuthTicket /
-    // SteamKit2 GetAuthSessionTicket). This is what SteamGameServer_BeginAuthSession expects for
-    // Source-era games (Sven Co-op, appid 225840) and is exactly what the real Steam client returns
-    // from InitiateGameConnection. The previous legacy 218-byte "app ticket embedded as session"
-    // format is REJECTED by the server => it accepts connect then NOPs forever (signon never starts).
+    // SteamKit2 GetAuthSessionTicket). This is what SteamGameServer_BeginAuthSession expects.
     // Layout: int32 tokenLen | token[tokenLen] | int32 sessionSize(=24) |
-    //         int32 1 | int32 ticketType | int32 externalIP | int32 internalIP |
-    //         int32 timestamp(epoch s) | int32 seq
-    // The externalIP/internalIP fields are what Steam's InitiateGameConnection binds to the
-    // TARGET GAME SERVER: externalIP = server IP, internalIP = 0. SteamGameServer_BeginAuthSession
-    // then refuses the ticket unless these match the server it is validated for, so we must embed
-    // the real server IP here (and a real epoch timestamp) instead of random/garbage bytes.
+    //         int32 1 | int32 ticketType | 8 bytes (externalIP+internalIP, random) |
+    //         int32 timestamp(nonce) | int32 seq
+    // The externalIP/internalIP fields are filled with random bytes by the real Steam client and
+    // are NOT validated by BeginAuthSession, so the server IP must not be embedded here.
     private val authTicketSequence = AtomicInteger(0)
 
-    private fun ipToUint32(ip: String): Int {
-        val p = ip.split('.')
-        if (p.size != 4) return 0
-        return try {
-            ((p[0].toInt() and 0xFF) shl 24) or
-            ((p[1].toInt() and 0xFF) shl 16) or
-            ((p[2].toInt() and 0xFF) shl 8) or
-            (p[3].toInt() and 0xFF)
-        } catch (_: Exception) { 0 }
-    }
-
-    private fun buildAuthTicket(gameConnectToken: ByteArray, ticketType: Int = 2, serverIp: String = ""): ByteArray {
-        val sessionSize = 4 + 4 + 4 + 4 + 4 + 4 // = 24: int1 + ticketType + externalIP + internalIP + ts + seq
-        val externalIp = ipToUint32(serverIp)   // server IP bound into the ticket (InitiateGameConnection)
+    private fun buildAuthTicket(gameConnectToken: ByteArray, ticketType: Int = 2): ByteArray {
+        val sessionSize = 4 + 4 + 4 + 4 + 4 + 4 // = 24
+        val ipFields = ByteArray(8)
+        SecureRandom().nextBytes(ipFields)
         val stream = ByteArrayOutputStream()
-        stream.write(Proto.packInt32(gameConnectToken.size)) // tokenLen = 20
-        stream.write(gameConnectToken)                        // 20-byte game connect token (EMsg 779)
-        stream.write(Proto.packInt32(sessionSize))            // sessionSize = 24
-        stream.write(Proto.packInt32(1))                      // unknown, always 1
-        stream.write(Proto.packInt32(ticketType))             // 2 = AuthSession (5 = WebApi)
-        stream.write(Proto.packInt32(externalIp))             // externalIP = server IP (binding)
-        stream.write(Proto.packInt32(0))                      // internalIP = 0
-        stream.write(Proto.packInt32((System.currentTimeMillis() / 1000).toInt())) // timestamp (epoch s)
-        stream.write(Proto.packInt32(authTicketSequence.incrementAndGet()))        // sequence
+        stream.write(Proto.packInt32(gameConnectToken.size))
+        stream.write(gameConnectToken)
+        stream.write(Proto.packInt32(sessionSize))
+        stream.write(Proto.packInt32(1))
+        stream.write(Proto.packInt32(ticketType))
+        stream.write(ipFields)
+        stream.write(Proto.packInt32(System.nanoTime().toInt()))
+        stream.write(Proto.packInt32(authTicketSequence.incrementAndGet()))
         val bytes = stream.toByteArray()
-        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize externalIp=${String.format("%08x", externalIp)})")
+        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize)")
         return bytes
     }
 
