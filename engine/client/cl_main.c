@@ -102,6 +102,7 @@ CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, 
 CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "goldSrc netchan packet munge: 0=off, 1=both directions (vanilla/ReHLDS servers), 2=outgoing only (Sven Coop dedicated servers unmunge inbound but send plain outbound)" );
+static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -896,6 +897,8 @@ static void CL_WritePacket( void )
 
 	if( cls.state < min_state )
 	{
+		if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC )
+			Con_DPrintf( "%s: OUT pre-signon empty ack (state=%d signon=%d)\n", __func__, cls.state, cls.signon );
 		Netchan_TransmitBits( &cls.netchan, 0, "" );
 		return;
 	}
@@ -1029,6 +1032,21 @@ static void CL_WritePacket( void )
 		MSG_Clear( &cls.datagram );
 
 		Netchan_TransmitBits( &cls.netchan, MSG_GetNumBitsWritten( &buf ), MSG_GetData( &buf ));
+
+		if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
+		{
+			size_t rlbytes = ( cls.netchan.reliable_length + 7 ) / 8;
+			Con_DPrintf( "%s: OUT seq=%d unreliable_bits=%d reliable_bits=%d\n",
+				__func__, cls.netchan.outgoing_sequence - 1,
+				MSG_GetNumBitsWritten( &buf ), cls.netchan.reliable_length );
+			if( rlbytes > 0 )
+			{
+				Con_DPrintf( "%s: DUMP reliable (queued cmds)\n", __func__ );
+				CL_DumpHex( "reliable", cls.netchan.reliable_buf, rlbytes );
+			}
+			Con_DPrintf( "%s: DUMP unreliable (move/stringcmd)\n", __func__ );
+			CL_DumpHex( "unreliable", MSG_GetData( &buf ), MSG_GetNumBytesWritten( &buf ));
+		}
 	}
 	else
 	{
@@ -1040,8 +1058,9 @@ static void CL_WritePacket( void )
 
 	// STEAM/SIGNON DEBUG: confirm the reliable "new" command actually leaves
 	// the client. reliable_length>0 means a reliable msg is queued/unsent.
-	Con_DPrintf( "%s: OUTBOUND state=%d signon=%d reliable_bits=%d seq=%d\n",
-		__func__, cls.state, cls.signon, cls.netchan.reliable_length, cls.netchan.outgoing_sequence );
+	if( cl_goldsrc_debug.value >= 1 )
+		Con_DPrintf( "%s: OUTBOUND state=%d signon=%d reliable_bits=%d seq=%d\n",
+			__func__, cls.state, cls.signon, cls.netchan.reliable_length, cls.netchan.outgoing_sequence );
 }
 
 /*
@@ -1170,7 +1189,7 @@ static void CL_GetCDKey( char *protinfo, size_t protinfosize )
 	Info_SetValueForKey( protinfo, "cdkey", key, protinfosize );
 }
 
-static void CL_DumpHex( const char *name, const void *data, size_t size )
+void CL_DumpHex( const char *name, const void *data, size_t size )
 {
 	const uint8_t *bytes = (const uint8_t *)data;
 	char line[80];
@@ -1245,6 +1264,13 @@ void CL_SendGoldSrcConnectPacket( netadr_t adr, int challenge, const void *ticke
 	{
 		Con_DPrintf( "%s: ticket_len=%zu\n", __func__, ticketlen );
 		CL_DumpHex( "ticket", ticket, ticketlen );
+	}
+
+	if( cl_goldsrc_debug.value >= 2 )
+	{
+		Con_DPrintf( "%s: DUMP connect packet (%zu bytes)\n", __func__, MSG_GetNumBytesWritten( &send ));
+		CL_DumpHex( "connect_packet", MSG_GetData( &send ), MSG_GetNumBytesWritten( &send ));
+		Con_DPrintf( "%s: protinfo=\"%s\" userinfo=\"%s\"\n", __func__, protinfo, cls.userinfo );
 	}
 
 	if( MSG_CheckOverflow( &send ))
@@ -3085,8 +3111,15 @@ static void CL_ReadNetMessage( void )
 
 			// STEAM/SIGNON DEBUG: log inbound server packet size so we can tell
 			// whether the server is actually sending signon data or just ACKs.
-			Con_DPrintf( "%s: INBOUND from %s bytes=%zu signon=%d state=%d\n",
-				__func__, NET_AdrToString( net_from ), curSize, cls.signon, cls.state );
+			if( cl_goldsrc_debug.value >= 1 )
+				Con_DPrintf( "%s: INBOUND from %s bytes=%zu signon=%d state=%d\n",
+					__func__, NET_AdrToString( net_from ), curSize, cls.signon, cls.state );
+
+			if( cl_goldsrc_debug.value >= 3 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
+			{
+				Con_DPrintf( "%s: DUMP inbound packet\n", __func__ );
+				CL_DumpHex( "inbound", MSG_GetData( &net_message ), curSize );
+			}
 		}
 
 		if( cls.state == ca_active )
@@ -3388,6 +3421,9 @@ void CL_ServerCommand( qboolean reliable, const char *fmt, ... )
 		MSG_BeginClientCmd( &cls.datagram, clc_stringcmd );
 		MSG_WriteString( &cls.datagram, string );
 	}
+
+	if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC )
+		Con_DPrintf( "%s: QUEUE %s stringcmd: \"%s\"\n", __func__, reliable ? "reliable" : "datagram", string );
 }
 
 /*
@@ -3726,6 +3762,7 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_allow_upload );
 	Cvar_RegisterVariable( &cl_allow_download );
 	Cvar_RegisterVariable( &cl_goldsrc_munge );
+	Cvar_RegisterVariable( &cl_goldsrc_debug );
 	Cvar_RegisterVariable( &cl_download_ingame );
 	Cvar_RegisterVariable( &cl_logofile );
 	Cvar_RegisterVariable( &cl_logocolor );

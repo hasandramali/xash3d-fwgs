@@ -767,6 +767,7 @@ void CL_AddToResourceList( resource_t *pResource, resource_t *pList );
 void CL_RemoveFromResourceList( resource_t *pResource );
 void CL_MoveToOnHandList( resource_t *pResource );
 void CL_ClearResourceLists( void );
+void CL_DumpHex( const char *name, const void *data, size_t size );
 void CL_SendResourceList( const resource_t *list, int count );
 
 //

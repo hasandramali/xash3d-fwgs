@@ -570,7 +570,20 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 		cmd = MSG_ReadServerCmd( msg );
 
 		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
-		Con_DPrintf( "%s: svc cmd=%d signon=%d state=%d msgbits=%d\n", __func__, cmd, cls.signon, cls.state, MSG_GetNumBitsLeft( msg ) );
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+			Con_DPrintf( "%s: svc cmd=%d signon=%d state=%d msgbits=%d\n", __func__, cmd, cls.signon, cls.state, MSG_GetNumBitsLeft( msg ) );
+
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 3 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
+		{
+			int startByte = MSG_GetNumBitsWritten( msg ) >> 3;
+			int maxBytes = MSG_GetMaxBytes( msg );
+			int rem = maxBytes > startByte ? maxBytes - startByte : 0;
+			if( rem > 0 )
+			{
+				Con_DPrintf( "%s: DUMP svc payload (svc cmd %d, %d bytes from offset %d)\n", __func__, cmd, rem, startByte );
+				CL_DumpHex( "svc_pay", MSG_GetData( msg ) + startByte, rem );
+			}
+		}
 
 		// record command for debugging spew on parse problem
 		CL_Parse_RecordCommand( cmd, bufStart );
