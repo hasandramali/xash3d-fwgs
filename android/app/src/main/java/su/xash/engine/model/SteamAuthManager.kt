@@ -505,35 +505,40 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     /**
-     * Generates the combined Steam auth session ticket for [appid]:
-     * 1. GetAppOwnershipTicket (857 -> 858) - the real Valve-issued encrypted app ticket.
-     *    For GoldSrc legacy this IS the trailing blob of the InitiateGameConnection ticket.
-     * 2. consume a game connect token (779, buffered by reader)
-     * 3. build the raw auth session ticket (legacy for GoldSrc, modern for others)
-     * 4. send ClientAuthList (5432) and await the ack (5575)  [SKIPPED for GoldSrc legacy]
-     * 5. for modern: return authTicket + int32LE(appTicket.size) + appTicket.
-     *    For GoldSrc legacy: the app ticket is already embedded inside buildAuthTicket, so
-     *    buildAuthTicket's output is returned directly.
+     * Generates the Steam auth session ticket for [appid].
      *
-     * [serverSteamId] is the game server's SteamID from the engine's sb_connect frame;
-     * when non-zero it is bound into the ticket via a SteamNetworkingIdentity (Option B).
+     * GoldSrc-era servers (Sven Co-op and other HL1 games) expect the LEGACY
+     * InitiateGameConnection ticket, which is exactly:
+     *   [int32 tokenLen=20][token(20)][int32 sessionSize=190][appOwnershipTicket(190)]  (218 bytes)
+     * The 857 app-ownership ticket IS the legacy session blob verbatim (version=62, count=4,
+     * steamid, appid, timestamp, clientIP, serverIP, signature). We must NOT wrap it in the modern
+     * [authTicket][int32 appTicketSize][appTicket] framing, or SteamGameServer_BeginAuthSession
+     * mis-parses and rejects with "9STEAM validation rejected". ClientAuthList is skipped for legacy.
+     *
+     * Source-era games use the modern combined ticket (authTicket + int32LE(appTicketSize) + appTicket).
      */
     suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L, serverIp: String = ""): ByteArray = withContext(Dispatchers.IO) {
         if (!connected) throw Exception("Not connected to Steam")
         Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
-        // Steam's GetAuthSessionTicket / InitiateGameConnection ALWAYS returns the modern combined
-        // ticket (authTicket + int32 appTicketSize + appTicket); there is no separate legacy path.
-        // This is what SteamGameServer_BeginAuthSession validates for Source-era games (Sven Co-op).
-        // If we sent the old legacy 218-byte "app ticket embedded as session" format, the server's
-        // BeginAuthSession mis-parses and rejects it => it accepts connect then NOPs forever.
-        val appTicket = requestAppOwnershipTicket(appid)
-            .also { Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${it.size}") }
-
         val token = gameConnectTokens.poll()
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
+        if (isGoldSrcAppId(appid)) {
+            val appTicket = requestAppOwnershipTicket(appid)
+                .also { Log.i(TAG, "getSessionTicket: legacy app ownership ticket OK size=${it.size}") }
+            val out = ByteArrayOutputStream()
+            out.write(Proto.packInt32(token.size))
+            out.write(token)
+            out.write(Proto.packInt32(appTicket.size))
+            out.write(appTicket)
+            Log.i(TAG, "getSessionTicket: DONE legacy ticket size=${out.size}")
+            return@withContext out.toByteArray()
+        }
+
+        val appTicket = requestAppOwnershipTicket(appid)
+            .also { Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${it.size}") }
         val authTicket = buildAuthTicket(token, 2)
         Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
 
@@ -661,6 +666,11 @@ class SteamAuthManager(private val ctx: Context) {
         "dmc" -> 40
         "ricochet" -> 60
         else -> 10 // valve, cstrike, hldm and other GoldSrc mods
+    }
+
+    private fun isGoldSrcAppId(appid: Int): Boolean = when (appid) {
+        10, 20, 30, 40, 50, 60, 130, 225840 -> true
+        else -> false
     }
 
     private fun readSbrkFrame(ins: InputStream, tag: String = "sbrk"): ByteArray? {
