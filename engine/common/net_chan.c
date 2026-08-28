@@ -296,6 +296,30 @@ qboolean Netchan_IncomingReady( netchan_t *chan )
 }
 
 /*
+============
+Netchan_DumpHex
+
+debug helper: hexdump an outgoing/incoming packet
+================
+*/
+static void Netchan_DumpHex( const char *name, const byte *data, size_t size )
+{
+	char line[80];
+	int pos = 0;
+	size_t i;
+
+	for( i = 0; i < size; i++ )
+	{
+		pos += Q_snprintf( line + pos, sizeof( line ) - pos, "%02x ", data[i] );
+		if( ( i % 16 ) == 15 || i == size - 1 )
+		{
+			Con_DPrintf( "%s [%zu/%zu]: %s\n", name, i + 1, size, line );
+			pos = 0;
+		}
+	}
+}
+
+/*
 ===============
 Netchan_CanPacket
 
@@ -1719,7 +1743,12 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 		MSG_WriteWord( &send, (int)net_qport.value );
 	}
 
-	if( send_reliable && send_reliable_fragment )
+	// GoldSrc/HLDS servers expect the per-stream reliable header bytes to be
+	// present on EVERY reliable message (even when there are no actual
+	// fragments), so the server can read the fragment-present flag per stream.
+	// Xash's own protocol only emits the header when fragments exist; keep that
+	// for compatibility but always emit it for gs_netchan to match GoldSrc.
+	if( send_reliable && ( chan->gs_netchan || send_reliable_fragment ))
 	{
 		for( i = 0; i < MAX_STREAMS; i++ )
 		{
@@ -1789,6 +1818,17 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	if( !CL_IsPlaybackDemo( ))
 	{
 		int splitsize = chan->pfnBlockSize( chan->client, FRAGSIZE_SPLIT );
+
+		// STEAM/SIGNON DEBUG: dump the exact outgoing bytes the server will
+		// read AFTER unmunge (i.e. dump BEFORE we munge them). Limit to small
+		// signon-size packets to avoid gameplay spam.
+		if( chan->sock == NS_CLIENT && Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 2 &&
+			MSG_GetNumBytesWritten( &send ) <= 256 )
+		{
+			Con_DPrintf( "Netchan_Transmit: DUMP outgoing (%d bytes) seq=%d munge=%d\n",
+				MSG_GetNumBytesWritten( &send ), chan->outgoing_sequence - 1, chan->use_munge );
+			Netchan_DumpHex( "TX", MSG_GetData( &send ), MSG_GetNumBytesWritten( &send ));
+		}
 
 		if( chan->use_munge )
 			COM_Munge2( send.pData + 8, MSG_GetNumBytesWritten( &send ) - 8, (byte)( chan->outgoing_sequence - 1 ));
@@ -1876,7 +1916,14 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 
 	qboolean message_contains_fragments = FBitSet( sequence, BIT( 30 )) ? true : false;
 
-	if( message_contains_fragments )
+	// GoldSrc/HLDS: the per-stream reliable header is present on EVERY reliable
+	// message (not just fragmented ones). Read it whenever there's a reliable
+	// message for gs_netchan; for Xash's own protocol keep the fragment-bit gate.
+	qboolean read_frag_header = message_contains_fragments;
+	if( chan->gs_netchan && reliable_message )
+		read_frag_header = true;
+
+	if( read_frag_header )
 	{
 		for( int i = 0; i < MAX_STREAMS; i++ )
 		{
