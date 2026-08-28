@@ -657,9 +657,17 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 			cl.paused = ( MSG_ReadByte( msg ) != 0 );
 			break;
 		case svc_goldsrc_killedmonster:
-		case svc_goldsrc_foundsecret:
-			// this does nothing
+			// does nothing in Sven Co-op
 			break;
+		case svc_goldsrc_foundsecret:
+		{
+			// Sven Co-op sends a one-byte payload length, then that many bytes.
+			// Without consuming it the parser treats the next byte as a command (svc_bad).
+			int len = MSG_ReadByte( msg );
+			while( len-- > 0 )
+				MSG_ReadByte( msg );
+			break;
+		}
 		case svc_goldsrc_spawnstaticsound:
 			CL_ParseSpawnStaticSound( msg );
 			break;
