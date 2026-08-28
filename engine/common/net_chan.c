@@ -1757,8 +1757,11 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 				MSG_WriteLong( &send, chan->reliable_fragid[i] );
 				if( chan->gs_netchan )
 				{
-					MSG_WriteShort( &send, chan->frag_startpos[i] >> 3 );
-					MSG_WriteShort( &send, chan->frag_length[i] >> 3 );
+					// Mirror the server: flag(1) + fragid(long) + fragStart(long) +
+					// fragLength(long). Xash tracks offsets/lengths in bits, so
+					// convert to bytes (>> 3) before writing as 4-byte longs.
+					MSG_WriteLong( &send, chan->frag_startpos[i] >> 3 );
+					MSG_WriteLong( &send, chan->frag_length[i] >> 3 );
 				}
 				else
 				{
@@ -1929,8 +1932,12 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 				fragid[i] = MSG_ReadLong( msg );
 				if( chan->gs_netchan )
 				{
-					frag_offset[i] = MSG_ReadShort( msg ) << 3;
-					frag_length[i] = MSG_ReadShort( msg ) << 3;
+					// GoldSrc/Sven servers emit the per-stream fragment header as
+					// flag(1) + fragid(long) + fragStart(long) + fragLength(long).
+					// (Verified against a real Sven DS pcap: scop.pcap.) The BYTE
+					// values are converted to Xash's internal BIT units via << 3.
+					frag_offset[i] = MSG_ReadLong( msg ) << 3;
+					frag_length[i] = MSG_ReadLong( msg ) << 3;
 				}
 				else
 				{
