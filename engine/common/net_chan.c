@@ -1833,7 +1833,15 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 		}
 
 		if( chan->use_munge )
-			COM_Munge2( send.pData + 8, MSG_GetNumBytesWritten( &send ) - 8, (byte)( chan->outgoing_sequence - 1 ));
+		{
+			// GoldSrc/Sven (Config B): the client appends a plain 2-byte qport
+			// after the 8-byte seq/ack header, so the munged data starts at
+			// offset 10. Keeping the qport outside the munged region is required
+			// for the server's unmunge (also from offset 10) to realign the
+			// 4-byte munge blocks and recover the commands correctly.
+			int header = ( chan->sock == NS_CLIENT && chan->gs_netchan ) ? 10 : 8;
+			COM_Munge2( send.pData + header, MSG_GetNumBytesWritten( &send ) - header, (byte)( chan->outgoing_sequence - 1 ));
+		}
 
 		NET_SendPacketEx( chan->sock, MSG_GetNumBytesWritten( &send ), MSG_GetData( &send ), chan->remote_address, splitsize );
 	}
@@ -1902,8 +1910,13 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 	uint sequence = MSG_ReadLong( msg );
 	uint sequence_ack = MSG_ReadLong( msg );
 
-	if( chan->use_munge && !chan->munge_tx_only && MSG_GetMaxBytes( msg ) >= 8 )
-		COM_UnMunge2( msg->pData + 8, MSG_GetMaxBytes( msg ) - 8, sequence & 0xFF );
+	// GoldSrc/Sven (Config B): the server reads a plain 2-byte qport from the
+	// client right after the 8-byte seq/ack header, so the munged data portion
+	// starts at offset 10. This realigns the 4-byte munge blocks with what the
+	// server unmunges, recovering the reliable commands intact.
+	int header = ( chan->sock == NS_SERVER && chan->gs_netchan ) ? 10 : 8;
+	if( chan->use_munge && !chan->munge_tx_only && MSG_GetMaxBytes( msg ) >= header )
+		COM_UnMunge2( msg->pData + header, MSG_GetMaxBytes( msg ) - header, sequence & 0xFF );
 
 	// read the qport if we are a server; serves as a NAT-stable
 	// connection demultiplexer and rejects packets for the wrong client
