@@ -871,15 +871,23 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 	}
 
 	Q_snprintf( mapfile, sizeof( mapfile ), "maps/%s.bsp", clgame.mapname );
-	if( CRC32_MapFile( &cl.worldmapCRC, mapfile, cl.maxclients > 1 ))
+	if( !CRC32_MapFile( &cl.worldmapCRC, mapfile, cl.maxclients > 1 ))
+		cl.worldmapCRC = cl.checksum;
+
+	if( cls.protocol != PROTO_GOLDSRC )
 	{
-		// validate map checksum
 		if( cl.worldmapCRC != cl.checksum )
 		{
-			Con_Printf( S_ERROR "Your map [%s] differs from the server's.\n", clgame.mapname );
-			CL_Disconnect_f(); // for local game, call EndGame
-			Host_AbortCurrentFrame(); // to avoid svc_bad
+			Con_Printf( S_ERROR "Your map [%s] differs from the server's (client CRC %08X, server CRC %08X, file '%s', gamedir '%s', maxclients %d).\n",
+				clgame.mapname, cl.worldmapCRC, cl.checksum, mapfile, gamefolder, cl.maxclients );
+			CL_Disconnect_f();
+			Host_AbortCurrentFrame();
 		}
+	}
+	else if( cl.worldmapCRC != cl.checksum )
+	{
+		Con_Printf( S_WARN "Map CRC differs (client %08X, server %08X) but continuing for GoldSrc server.\n",
+			cl.worldmapCRC, cl.checksum );
 	}
 
 	if( clgame.maxModels > MAX_MODELS )
