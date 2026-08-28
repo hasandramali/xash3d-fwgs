@@ -874,7 +874,7 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 	if( !CRC32_MapFile( &cl.worldmapCRC, mapfile, cl.maxclients > 1 ))
 		cl.worldmapCRC = cl.checksum;
 
-	if( cls.protocol != PROTO_GOLDSRC )
+	if( proto != PROTO_GOLDSRC )
 	{
 		if( cl.worldmapCRC != cl.checksum )
 		{
