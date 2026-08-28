@@ -1743,12 +1743,11 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 		MSG_WriteWord( &send, (int)net_qport.value );
 	}
 
-	// GoldSrc/HLDS servers expect the per-stream reliable header bytes to be
-	// present on EVERY reliable message (even when there are no actual
-	// fragments), so the server can read the fragment-present flag per stream.
-	// Xash's own protocol only emits the header when fragments exist; keep that
-	// for compatibility but always emit it for gs_netchan to match GoldSrc.
-	if( send_reliable && ( chan->gs_netchan || send_reliable_fragment ))
+	// Match reference GoldSrc (net_chan.cpp:458): the per-stream fragment
+	// header is emitted ONLY when there are actual fragments in flight.
+	// Unfragmented reliable messages (e.g. the "new" command) are written
+	// directly with no stream header, exactly like the real HLDS client.
+	if( send_reliable && send_reliable_fragment )
 	{
 		for( i = 0; i < MAX_STREAMS; i++ )
 		{
@@ -1916,12 +1915,9 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 
 	qboolean message_contains_fragments = FBitSet( sequence, BIT( 30 )) ? true : false;
 
-	// GoldSrc/HLDS: the per-stream reliable header is present on EVERY reliable
-	// message (not just fragmented ones). Read it whenever there's a reliable
-	// message for gs_netchan; for Xash's own protocol keep the fragment-bit gate.
+	// Match reference GoldSrc (net_chan.cpp:702): the per-stream fragment
+	// header is read ONLY when the packet actually carries fragments.
 	qboolean read_frag_header = message_contains_fragments;
-	if( chan->gs_netchan && reliable_message )
-		read_frag_header = true;
 
 	if( read_frag_header )
 	{
