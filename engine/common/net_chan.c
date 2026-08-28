@@ -1737,8 +1737,11 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	MSG_WriteLong( &send, w1 );
 	MSG_WriteLong( &send, w2 );
 
-	// send the qport if we are a client
-	if( chan->sock == NS_CLIENT && !chan->gs_netchan )
+	// send the qport if we are a client (GoldSrc/Quake protocol: a 16-bit
+	// qport follows the 8-byte seq/ack header and the server reads it back as
+	// a NAT-stable demultiplexer). Real HLDS/Sven servers REQUIRE this field,
+	// so gs_netchan clients must send it too.
+	if( chan->sock == NS_CLIENT )
 	{
 		MSG_WriteWord( &send, (int)net_qport.value );
 	}
