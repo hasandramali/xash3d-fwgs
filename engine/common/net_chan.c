@@ -1945,7 +1945,12 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 		}
 
 		if( !Netchan_Validate( chan, msg, frag_message, fragid, frag_offset, frag_length ))
+		{
+			Con_DPrintf( "%s: Netchan_Validate FAILED (gs_netchan=%d frag=%d) from %s\n",
+				__func__, chan->gs_netchan, message_contains_fragments,
+				NET_AdrToString( chan->remote_address ) );
 			return false;
+		}
 	}
 
 	sequence &= ~BIT( 31 );

@@ -3106,8 +3106,22 @@ static void CL_ReadNetMessage( void )
 				continue;
 			}
 
+			// STEAM/SIGNON DEBUG: dump RAW server bytes BEFORE Netchan_Process,
+			// which may silently drop them. Without this we're blind to signon
+			// packets the server sends but we reject.
+			if( cl_goldsrc_debug.value >= 3 && cls.net_protocol == PROTO_GOLDSRC )
+			{
+				Con_DPrintf( "%s: RAW inbound from %s bytes=%zu inseq=%d\n", __func__,
+					NET_AdrToString( net_from ), curSize, cls.netchan.incoming_sequence );
+				CL_DumpHex( "raw-in", MSG_GetData( &net_message ), curSize );
+			}
+
 			if( !Netchan_Process( &cls.netchan, &net_message ))
+			{
+				Con_DPrintf( "%s: Netchan_Process REJECTED packet from %s bytes=%zu inseq=%d\n",
+					__func__, NET_AdrToString( net_from ), curSize, cls.netchan.incoming_sequence );
 				continue;	// wasn't accepted for some reason
+			}
 
 			// STEAM/SIGNON DEBUG: log inbound server packet size so we can tell
 			// whether the server is actually sending signon data or just ACKs.
