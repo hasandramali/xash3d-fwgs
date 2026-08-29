@@ -52,6 +52,7 @@ typedef struct
 	const char	*name;
 	const int		offset;
 	const int		size;
+	int		flags;	// DT_INTEGER, DT_FLOAT etc (from local struct type)
 } delta_field_t;
 
 // one field

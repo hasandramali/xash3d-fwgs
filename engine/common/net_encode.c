@@ -38,16 +38,39 @@ GNU General Public License for more details.
 #define DT_SIGNED_GS	BIT( 31 ) // GoldSrc-specific sign modificator
 
 // helper macroses
-#define UCMD_DEF_( name, x )	#name, offsetof( usercmd_t, x ), sizeof( ((usercmd_t *)0)->x )
-#define PHYS_DEF_( name, x )	#name, offsetof( movevars_t, x ), sizeof( ((movevars_t *)0)->x )
+#define UCMD_DEF_( name, x )	#name, offsetof( usercmd_t, x ), sizeof( ((usercmd_t *)0)->x ), UCMD_FLAGS( x )
+#define PHYS_DEF_( name, x )	#name, offsetof( movevars_t, x ), sizeof( ((movevars_t *)0)->x ), PHYS_FLAGS( x )
 
-#define ENTS_DEF( x )	#x, offsetof( entity_state_t, x ), sizeof( ((entity_state_t *)0)->x )
+#define ENTS_DEF( x )	#x, offsetof( entity_state_t, x ), sizeof( ((entity_state_t *)0)->x ), ENTS_FLAGS( x )
 #define UCMD_DEF( x )	UCMD_DEF_( x, x )
-#define EVNT_DEF( x )	#x, offsetof( event_args_t, x ), sizeof( ((event_args_t *)0)->x )
+#define EVNT_DEF( x )	#x, offsetof( event_args_t, x ), sizeof( ((event_args_t *)0)->x ), EVNT_FLAGS( x )
 #define PHYS_DEF( x )	PHYS_DEF_( x, x )
-#define CLDT_DEF( x )	#x, offsetof( clientdata_t, x ), sizeof( ((clientdata_t *)0)->x )
-#define WPDT_DEF( x )	#x, offsetof( weapon_data_t, x ), sizeof( ((weapon_data_t *)0)->x )
-#define DESC_DEF( x )	#x, offsetof( goldsrc_delta_t, x ), sizeof( ((goldsrc_delta_t *)0)->x )
+#define CLDT_DEF( x )	#x, offsetof( clientdata_t, x ), sizeof( ((clientdata_t *)0)->x ), CLDT_FLAGS( x )
+#define WPDT_DEF( x )	#x, offsetof( weapon_data_t, x ), sizeof( ((weapon_data_t *)0)->x ), WPDT_FLAGS( x )
+#define DESC_DEF( x )	#x, offsetof( goldsrc_delta_t, x ), sizeof( ((goldsrc_delta_t *)0)->x ), DESC_FLAGS( x )
+
+// The GoldSrc/Sven wire does not carry per-field type flags, so derive them
+// from the local (binary-compatible) struct members. The controlling
+// expression is never evaluated (_Generic), only its C type is inspected.
+#define GS_FIELD_FLAGS( expr )	_Generic( (expr), \
+			float: DT_FLOAT|DT_SIGNED, \
+			double: DT_FLOAT|DT_SIGNED, \
+			int: DT_INTEGER|DT_SIGNED, \
+			unsigned int: DT_INTEGER, \
+			short: DT_SHORT|DT_SIGNED, \
+			unsigned short: DT_SHORT, \
+			char: DT_BYTE, \
+			signed char: DT_BYTE|DT_SIGNED, \
+			unsigned char: DT_BYTE, \
+			default: DT_STRING )
+
+#define UCMD_FLAGS( x )	GS_FIELD_FLAGS( ((usercmd_t *)0)->x )
+#define PHYS_FLAGS( x )	GS_FIELD_FLAGS( ((movevars_t *)0)->x )
+#define ENTS_FLAGS( x )	GS_FIELD_FLAGS( ((entity_state_t *)0)->x )
+#define EVNT_FLAGS( x )	GS_FIELD_FLAGS( ((event_args_t *)0)->x )
+#define CLDT_FLAGS( x )	GS_FIELD_FLAGS( ((clientdata_t *)0)->x )
+#define WPDT_FLAGS( x )	GS_FIELD_FLAGS( ((weapon_data_t *)0)->x )
+#define DESC_FLAGS( x )	GS_FIELD_FLAGS( ((goldsrc_delta_t *)0)->x )
 
 static qboolean		delta_init = false;
 
@@ -2075,9 +2098,18 @@ Each table is:
 	then  count/2 records, each:
 	       [data blob]      opaque junk, skipped by token scan
 	       [name\0]         field name
-	       [12-byte descriptor] = u16 offset | u8 flags | u8 sigbits
-	                             | u32 premultiply | u32 postmultiply
-	                             (fixed point, 4000 == 1.0)
+	       [descriptor]     variable length (see below)
+	                         - u16  offset, ONLY present if nonzero
+	                         - u8   marker byte (0x01 in captures)
+	                         - u8   significant_bits
+	                         - u32  premultiply   (fixed point, 4000 == 1.0)
+	                         - u32  postmultiply  (fixed point, 4000 == 1.0)
+
+The descriptor is what the server's DELTA_WriteDelta emits for the field
+description against a zeroed record (g_MetaDelta): meta fields whose value
+is zero (e.g. fieldOffset == 0) are omitted on the wire, which is why the
+offset u16 disappears for the first struct member. There is NO flags byte:
+type flags are taken from the local struct layout (see GS_FIELD_FLAGS).
 
 After the last table comes a usermsg id->name registration array plus
 other Sven payload, which is simply consumed up to the end of the message.
@@ -2182,15 +2214,23 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 
 			const delta_field_t *pInfo = Delta_FindFieldInfo( dt->pInfo, name, dt->maxFields );
 
-			int fOffset = MSG_ReadShort( msg );
-			int fFlags = MSG_ReadByte( msg );
-			int fBits = MSG_ReadByte( msg );
-			uint fPre = MSG_ReadUBitLong( msg, 32 );
-			uint fPost = MSG_ReadUBitLong( msg, 32 );
+			int fOffset = 0;
+			int fBits = 1;
+			uint fPre = 0, fPost = 0;
+
+			// the server omits the u16 offset when the field offset is zero
+			if( !pInfo || pInfo->offset != 0 )
+			{
+				fOffset = MSG_ReadShort( msg );
+			}
+			MSG_ReadByte( msg ); // constant marker byte
+			fBits = MSG_ReadByte( msg );
+			fPre = MSG_ReadUBitLong( msg, 32 );
+			fPost = MSG_ReadUBitLong( msg, 32 );
 
 			if( dbg >= 2 )
-				Con_DPrintf( "  [%d] bit=%d name='%s' offset=%d flags=0x%x sigbits=%d pre=%u post=%u\n",
-					i, bitBefore, name, fOffset, fFlags, fBits, fPre, fPost );
+				Con_DPrintf( "  [%d] bit=%d name='%s' offset=%d sigbits=%d pre=%u post=%u\n",
+					i, bitBefore, name, fOffset, fBits, fPre, fPost );
 
 			if( !pInfo )
 			{
