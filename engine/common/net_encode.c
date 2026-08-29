@@ -2062,55 +2062,169 @@ static void Delta_GSDumpPayload( const char *label, const sizebuf_t *msg, int st
 	}
 }
 
+/*
+===================================
+GoldSrc/Sven Co-op delta description
+
+The Sven engine sends ALL table descriptions in ONE svc_deltatable message.
+Each table is:
+
+	name\0
+	u16   count   (number of slots; real field records == count / 2,
+	               each field is a (data-blob, name+descriptor) pair)
+	then  count/2 records, each:
+	       [data blob]      opaque junk, skipped by token scan
+	       [name\0]         field name
+	       [12-byte descriptor] = u16 offset | u8 flags | u8 sigbits
+	                             | u32 premultiply | u32 postmultiply
+	                             (fixed point, 4000 == 1.0)
+
+After the last table comes a usermsg id->name registration array plus
+other Sven payload, which is simply consumed up to the end of the message.
+===================================
+*/
+static qboolean Delta_ReadGSToken( sizebuf_t *msg, char *buf, size_t maxlen )
+{
+	// skip non-printable data until a NUL-terminated printable run of
+	// at least 3 chars is found; consumes the trailing NUL as well
+	while( MSG_GetNumBitsLeft( msg ) >= 8 )
+	{
+		int c = MSG_ReadByte( msg );
+
+		if( c < 32 || c > 126 )
+			continue; // junk byte
+
+		size_t len = 0;
+		while( c >= 32 && c <= 126 )
+		{
+			if( len < maxlen - 1 )
+				buf[len] = (char)c;
+			len++;
+
+			if( MSG_GetNumBitsLeft( msg ) < 8 )
+			{
+				buf[0] = 0;
+				return false;
+			}
+			c = MSG_ReadByte( msg );
+		}
+
+		if( len >= 3 && c == 0 )
+		{
+			if( len > maxlen - 1 )
+				len = maxlen - 1;
+			buf[len] = 0;
+			return true;
+		}
+		// not a usable token, keep scanning
+	}
+
+	buf[0] = 0;
+	return false;
+}
+
 void Delta_ParseTableField_GS( sizebuf_t *msg )
 {
-	const char *s = MSG_ReadString( msg );
-	delta_info_t *dt = Delta_FindStruct( s );
-	goldsrc_delta_t null = { 0 };
+	char name[32], pending[32] = "";
+	delta_info_t *dt;
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
 
 	// delta encoders it's already initialized on this machine (local game)
 	if( delta_init )
 		Delta_Shutdown();
 
-	if( !dt )
-		Host_Error( "%s: not initialized", __func__ );
-
-	int num_fields = MSG_ReadShort( msg );
-	if( num_fields > dt->maxFields )
-		Host_Error( "%s: numFields > maxFields", __func__ );
-
-	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
-	if( dbg >= 2 )
-	{
-		Con_Printf( "GS-DELTA: table='%s' num_fields=%d maxFields=%d bitpos=%d\n",
-			s, num_fields, dt->maxFields, msg->iCurBit );
-		Delta_GSDumpPayload( "GS-DELTA-PAYLOAD", msg, msg->iCurBit );
-	}
-
 	MSG_StartBitWriting( msg );
 
-	for( int i = 0; i < num_fields; i++ )
+	while( MSG_GetNumBitsLeft( msg ) >= 8 )
 	{
-		goldsrc_delta_t to;
-		int bitBefore = msg->iCurBit;
+		const char *s = name;
 
-		Delta_ParseGSFields( msg, &dt_goldsrc_meta, &null, &to, 0.0f );
+		if( pending[0] )
+		{
+			// next table name was already read while parsing the previous one
+			Q_strncpy( name, pending, sizeof( name ));
+			pending[0] = 0;
+		}
+		else if( !Delta_ReadGSToken( msg, name, sizeof( name )))
+		{
+			break;
+		}
+
+		dt = Delta_FindStruct( s );
+		if( !dt )
+		{
+			// reached the usermsg registration array / trailing payload
+			if( dbg >= 1 )
+				Con_DPrintf( "GS-DELTA: tail '%s' bitpos=%d bitsleft=%d\n", s, msg->iCurBit, MSG_GetNumBitsLeft( msg ));
+			break;
+		}
+
+		int num_fields = MSG_ReadShort( msg );
+		int pairs = Q_min( num_fields / 2, 512 ); // blob+name pairs
 
 		if( dbg >= 2 )
-			Con_Printf( "  [%d] bit=%d name='%s' type=0x%x sigbits=%d pre=%g post=%g\n",
-				i, bitBefore, to.fieldName, to.fieldType, to.significant_bits, to.premultiply, to.postmultiply );
+			Con_DPrintf( "GS-DELTA: table='%s' num_fields=%d pairs=%d maxFields=%d bitpos=%d\n",
+				s, num_fields, pairs, dt->maxFields, msg->iCurBit );
 
-		// patch our DT_SIGNED flag
-		if( FBitSet( to.fieldType, DT_SIGNED_GS ))
+		for( int i = 0; i < pairs; i++ )
 		{
-			ClearBits( to.fieldType, DT_SIGNED_GS );
-			SetBits( to.fieldType, DT_SIGNED );
+			int bitBefore = msg->iCurBit;
+
+			if( !Delta_ReadGSToken( msg, name, sizeof( name )))
+				break;
+
+			if( Delta_FindStruct( name ))
+			{
+				// field list done, next table name is already consumed
+				Q_strncpy( pending, name, sizeof( pending ));
+				break;
+			}
+
+			const delta_field_t *pInfo = Delta_FindFieldInfo( dt->pInfo, name, dt->maxFields );
+
+			int fOffset = MSG_ReadShort( msg );
+			int fFlags = MSG_ReadByte( msg );
+			int fBits = MSG_ReadByte( msg );
+			uint fPre = MSG_ReadUBitLong( msg, 32 );
+			uint fPost = MSG_ReadUBitLong( msg, 32 );
+
+			if( dbg >= 2 )
+				Con_DPrintf( "  [%d] bit=%d name='%s' offset=%d flags=0x%x sigbits=%d pre=%u post=%u\n",
+					i, bitBefore, name, fOffset, fFlags, fBits, fPre, fPost );
+
+			if( !pInfo )
+			{
+				// Sven-specific field this engine doesn't know; consume in wire but skip
+				if( dbg >= 2 )
+					Con_DPrintf( S_WARN "%s: %s->%s: unknown wire field, skipped\n", __func__, dt->pName, name );
+				continue;
+			}
+
+			if( pInfo->offset != fOffset )
+			{
+				Con_DPrintf( S_WARN "%s: %s->%s: offset mismatch wire=%d local=%d\n", __func__, dt->pName, name, fOffset, pInfo->offset );
+			}
+
+			// premultiply/postmultiply are fixed point with 4000 == 1.0
+			float mul = ( fPre != 0 ) ? (float)fPre / 4000.0f : 1.0f;
+			float post_mul = ( fPost != 0 ) ? (float)fPost / 4000.0f : 1.0f;
+
+			Delta_AddField( dt, name, pInfo->flags, fBits, mul, post_mul );
 		}
-		Delta_AddField( dt, to.fieldName, to.fieldType, to.significant_bits, to.premultiply, to.postmultiply );
+
+		dt->bInitialized = true;
 	}
 
+	if( dbg >= 3 )
+		Delta_GSDumpPayload( "GS-DELTA-TAIL", msg, msg->iCurBit );
+
+	// consume the remaining payload (usermsg registrations etc.) to reach
+	// the exact end of the message, so no leftover bytes are parsed as svc
+	while( MSG_GetNumBitsLeft( msg ) >= 8 )
+		MSG_ReadByte( msg );
+
 	if( dbg >= 2 )
-		Con_Printf( "GS-DELTA: done table='%s' numFields=%d bitpos=%d\n", s, dt->numFields, msg->iCurBit );
+		Con_DPrintf( "GS-DELTA: done bitpos=%d bitsleft=%d\n", msg->iCurBit, MSG_GetNumBitsLeft( msg ));
 
 	MSG_EndBitWriting( msg );
 }
