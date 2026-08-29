@@ -2038,6 +2038,7 @@ qboolean MSG_ReadDeltaEntity( sizebuf_t *msg, const entity_state_t *from, entity
 
 static void Delta_GSDumpPayload( const char *label, const sizebuf_t *msg, int startBit )
 {
+	static const char hexd[] = "0123456789abcdef";
 	int start = startBit >> 3;
 	int end = msg->nDataBits >> 3;
 	int len = end - start;
@@ -2047,10 +2048,16 @@ static void Delta_GSDumpPayload( const char *label, const sizebuf_t *msg, int st
 
 	for( int i = 0; i < len; i += 16 )
 	{
-		char hex[64] = { 0 };
+		char hex[64];
 		int n = Q_min( 16, len - i );
 		for( int j = 0; j < n; j++ )
-			Com_sprintf( hex + j * 3, sizeof( hex ) - j * 3, "%02x ", msg->pData[start + i + j] );
+		{
+			byte b = msg->pData[start + i + j];
+			hex[j * 3] = hexd[b >> 4];
+			hex[j * 3 + 1] = hexd[b & 15];
+			hex[j * 3 + 2] = ' ';
+		}
+		hex[n * 3] = 0;
 		Con_Printf( "%s %04x: %s\n", label, start + i, hex );
 	}
 }
