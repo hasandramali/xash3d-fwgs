@@ -552,7 +552,8 @@ static qboolean Delta_AddField( delta_info_t *dt, const char *pName, int flags, 
 	const delta_field_t *pFieldInfo = Delta_FindFieldInfo( dt->pInfo, pName, dt->maxFields );
 	if( !pFieldInfo )
 	{
-		Con_DPrintf( S_ERROR "%s: couldn't find description for %s->%s\n", __func__, dt->pName, pName );
+		Con_Printf( S_ERROR "%s: couldn't find description for %s->%s (numFields=%d maxFields=%d)\n",
+			__func__, dt->pName, pName ? pName : "(null)", dt->numFields, dt->maxFields );
 		return false;
 	}
 
@@ -2035,6 +2036,25 @@ qboolean MSG_ReadDeltaEntity( sizebuf_t *msg, const entity_state_t *from, entity
 	return true;
 }
 
+static void Delta_GSDumpPayload( const char *label, const sizebuf_t *msg, int startBit )
+{
+	int start = startBit >> 3;
+	int end = msg->nDataBits >> 3;
+	int len = end - start;
+
+	if( len > 256 ) len = 256;
+	if( len <= 0 ) return;
+
+	for( int i = 0; i < len; i += 16 )
+	{
+		char hex[64] = { 0 };
+		int n = Q_min( 16, len - i );
+		for( int j = 0; j < n; j++ )
+			Com_sprintf( hex + j * 3, sizeof( hex ) - j * 3, "%02x ", msg->pData[start + i + j] );
+		Con_Printf( "%s %04x: %s\n", label, start + i, hex );
+	}
+}
+
 void Delta_ParseTableField_GS( sizebuf_t *msg )
 {
 	const char *s = MSG_ReadString( msg );
@@ -2052,13 +2072,26 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 	if( num_fields > dt->maxFields )
 		Host_Error( "%s: numFields > maxFields", __func__ );
 
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
+	if( dbg >= 2 )
+	{
+		Con_Printf( "GS-DELTA: table='%s' num_fields=%d maxFields=%d bitpos=%d\n",
+			s, num_fields, dt->maxFields, msg->iCurBit );
+		Delta_GSDumpPayload( "GS-DELTA-PAYLOAD", msg, msg->iCurBit );
+	}
+
 	MSG_StartBitWriting( msg );
 
 	for( int i = 0; i < num_fields; i++ )
 	{
 		goldsrc_delta_t to;
+		int bitBefore = msg->iCurBit;
 
 		Delta_ParseGSFields( msg, &dt_goldsrc_meta, &null, &to, 0.0f );
+
+		if( dbg >= 2 )
+			Con_Printf( "  [%d] bit=%d name='%s' type=0x%x sigbits=%d pre=%g post=%g\n",
+				i, bitBefore, to.fieldName, to.fieldType, to.significant_bits, to.premultiply, to.postmultiply );
 
 		// patch our DT_SIGNED flag
 		if( FBitSet( to.fieldType, DT_SIGNED_GS ))
@@ -2068,6 +2101,9 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 		}
 		Delta_AddField( dt, to.fieldName, to.fieldType, to.significant_bits, to.premultiply, to.postmultiply );
 	}
+
+	if( dbg >= 2 )
+		Con_Printf( "GS-DELTA: done table='%s' numFields=%d bitpos=%d\n", s, dt->numFields, msg->iCurBit );
 
 	MSG_EndBitWriting( msg );
 }
