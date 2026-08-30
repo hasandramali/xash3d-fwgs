@@ -307,7 +307,7 @@ extern const char *const svc_goldsrc_strings[svc_lastmsg+1];
 #define MAX_GOLDSRC_TOTAL_CMDS    16
 #define MAX_GOLDSRC_EXTENDED_TOTAL_CMDS 62
 #define MAX_GOLDSRC_MODEL_BITS    10
-#define MAX_GOLDSRC_RESOURCE_BITS 12
+#define MAX_GOLDSRC_RESOURCE_BITS 16
 #define MAX_GOLDSRC_ENTITY_BITS   11
 // #define MAX_GOLDSRC_EDICTS        BIT( MAX_ENTITY_BITS )
 #define MAX_GOLDSRC_EDICTS        ( BIT( MAX_ENTITY_BITS ) + ( MAX_CLIENTS * 15 ))
