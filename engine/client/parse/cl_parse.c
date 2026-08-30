@@ -460,7 +460,8 @@ void CL_BatchResourceRequest( qboolean initialize )
 			CL_MoveToOnHandList( p );
 			break;
 		case t_world:
-			ASSERT( 0 );
+			// Sven Co-op sends world/check resources with this type;
+			// GoldSrc client ignores them (world model arrives as t_model idx 1)
 			break;
 		}
 	}
@@ -516,7 +517,7 @@ int CL_EstimateNeededResources( void )
 			}
 			break;
 		case t_world:
-			ASSERT( 0 );
+			// never a to-download resource (Sven Co-op map/check entries)
 			break;
 		}
 	}
