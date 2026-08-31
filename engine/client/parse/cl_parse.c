@@ -2274,7 +2274,13 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	// message with variable sizes receive an actual size as first byte
 	if( iSize == -1 )
 	{
-		if( proto == PROTO_GOLDSRC )
+		// Sven Co-op writes variable-size user messages with a 16-bit size
+		// prefix (wire-verified: svc122 "ServerName" == [u16 len]["Sven Co-op
+		// 5.0 server\0"], and the following svc147 == [u16 len][payload]).
+		// Vanilla GoldSrc uses a 1-byte size. Match Sven only in its mode.
+		if( proto == PROTO_GOLDSRC && Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
+			iSize = MSG_ReadWord( msg );
+		else if( proto == PROTO_GOLDSRC )
 			iSize = MSG_ReadByte( msg );
 		else iSize = MSG_ReadWord( msg );
 	}
