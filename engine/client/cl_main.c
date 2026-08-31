@@ -993,7 +993,14 @@ static void CL_WritePacket( void )
 
 			buf.pData[key - 1] = Q_min( size, 255 );
 			buf.pData[key] = CRC32_BlockSequence( &buf.pData[key + 1], size, cls.netchan.outgoing_sequence );
-			COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
+
+			// Sven Co-op's SV_ParseMove reads loss/backup/newcmds directly as
+			// plain bytes (no COM_UnMunge on the move body, verified in hw.dll
+			// @0x1db9f50). Vanilla GoldSrc/ReHLDS DO unmunge (munge1, key=seq).
+			// Gate the move-body munge1 on cl_goldsrc_munge: mode 0 (Sven) sends
+			// plain, modes 1/2 (vanilla) keep the munge.
+			if( cl_goldsrc_munge.value != 0 )
+				COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
 		}
 		else if( !Host_IsLocalClient( ))
 		{
