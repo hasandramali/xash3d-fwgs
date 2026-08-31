@@ -685,27 +685,25 @@ CL_ParseResourceRequest
 */
 void CL_SendResourceList( const resource_t *list, int count )
 {
-	byte buffer[MAX_INIT_MSG];
-	sizebuf_t sbuf;
-
-	MSG_Init( &sbuf, "ResourceBlock", buffer, sizeof( buffer ));
-	MSG_BeginClientCmd( &sbuf, clc_resourcelist );
-	MSG_WriteShort( &sbuf, count );
+	// Sven reads the client resource-list reply as a plain reliable message.
+	// Send it on the direct reliable channel instead of the fragment framework:
+	// a small (single-packet) reply must not carry the fragment flag, otherwise
+	// Sven's SV_ReadClientMessage despairs on the fragment reassembly and keeps
+	// returning "badread", never acknowledging the reply (reliable deadlock).
+	MSG_BeginClientCmd( &cls.netchan.message, clc_resourcelist );
+	MSG_WriteShort( &cls.netchan.message, count );
 
 	for( int i = 0; i < count; i++ )
 	{
-		MSG_WriteString( &sbuf, list[i].szFileName );
-		MSG_WriteByte( &sbuf, list[i].type );
-		MSG_WriteShort( &sbuf, list[i].nIndex );
-		MSG_WriteLong( &sbuf, list[i].nDownloadSize );
-		MSG_WriteByte( &sbuf, list[i].ucFlags );
+		MSG_WriteString( &cls.netchan.message, list[i].szFileName );
+		MSG_WriteByte( &cls.netchan.message, list[i].type );
+		MSG_WriteShort( &cls.netchan.message, list[i].nIndex );
+		MSG_WriteLong( &cls.netchan.message, list[i].nDownloadSize );
+		MSG_WriteByte( &cls.netchan.message, list[i].ucFlags );
 
 		if( FBitSet( list[i].ucFlags, RES_CUSTOM ))
-			MSG_WriteBytes( &sbuf, list[i].rgucMD5_hash, 16 );
+			MSG_WriteBytes( &cls.netchan.message, list[i].rgucMD5_hash, 16 );
 	}
-
-	Netchan_CreateFragments( &cls.netchan, &sbuf );
-	Netchan_FragSend( &cls.netchan );
 }
 
 static void CL_ParseResourceRequest( sizebuf_t *msg )
