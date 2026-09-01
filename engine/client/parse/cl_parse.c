@@ -2237,11 +2237,22 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	int	i, iSize;
 
 	// NOTE: any user message is really parse at engine, not in client.dll
+	// TEMP-TRACE: print entry and constants so we know exactly which branch fires.
+	// Read the next byte without consuming it (peek at current read offset).
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+	{
+		int nReg = 0;
+		for( int t = 0; t < MAX_USER_MESSAGES && clgame.msg[t].name[0]; t++ )
+			if( clgame.msg[t].number == svc_num ) nReg++;
+		Con_Printf( "USRMSG-TRACE: svc_num=%d proto=%d rng[%d..%d] registered_match=%d curbits=%d\n",
+			svc_num, proto, svc_lastmsg, svc_lastmsg + MAX_USER_MESSAGES, nReg,
+			( int )MSG_GetNumBitsRead( msg ) );
+	}
 	if( svc_num <= svc_lastmsg || svc_num > ( MAX_USER_MESSAGES + svc_lastmsg ))
 	{
 		// out or range
 		CL_DumpBadMessage( msg, svc_num, MSG_GetNumBytesRead( msg ) - 1 );
-		Host_Error( "%s: illegible server message %d\n", __func__, svc_num );
+		Host_Error( "%s: illegible server message %d (RANGE)\n", __func__, svc_num );
 		return;
 	}
 
@@ -2253,7 +2264,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	}
 
 	if( i == MAX_USER_MESSAGES ) // probably unregistered
-		Host_Error( "%s: illegible server message %d\n", __func__, svc_num );
+		Host_Error( "%s: illegible server message %d (UNREGISTERED)\n", __func__, svc_num );
 
 	// NOTE: some user messages handled into engine
 	if( !Q_strcmp( clgame.msg[i].name, "ScreenShake" ))
