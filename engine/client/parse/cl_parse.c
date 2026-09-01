@@ -2263,8 +2263,28 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			break;
 	}
 
+	// probably unregistered. Under GoldSrc (Sven Co-op) the server sends
+	// engine-level user messages (e.g. "ServerName" at 122, serverinfo at 147)
+	// directly as a raw svc byte, WITHOUT a preceding svc_usermessage (39)
+	// registration record, so they never land in clgame.msg[]. Don't die on
+	// such an unknown optional message: consume its variable-size payload
+	// (size prefix matches the variable-size branch below) and keep parsing.
 	if( i == MAX_USER_MESSAGES ) // probably unregistered
-		Host_Error( "%s: illegible server message %d (UNREGISTERED)\n", __func__, svc_num );
+	{
+		if( proto == PROTO_GOLDSRC )
+		{
+			int skipSize = ( Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
+				? MSG_ReadWord( msg ) : MSG_ReadByte( msg );
+			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH )
+				Host_Error( "%s: unregistered msg %d bogus size %d\n", __func__, svc_num, skipSize );
+			while( skipSize-- > 0 )
+				MSG_ReadByte( msg );
+			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+				Con_Printf( "USRMSG-SKIP: svc_num=%d (unregistered GoldSrc msg skipped)\n", svc_num );
+			return;
+		}
+		Host_Error( "%s: illegible server message %d\n", __func__, svc_num );
+	}
 
 	// NOTE: some user messages handled into engine
 	if( !Q_strcmp( clgame.msg[i].name, "ScreenShake" ))
