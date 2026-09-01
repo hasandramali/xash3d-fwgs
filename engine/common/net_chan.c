@@ -754,35 +754,42 @@ Netchan_CreateFragments
 */
 void Netchan_CreateFragments( netchan_t *chan, sizebuf_t *msg )
 {
-	// always queue any pending reliable data ahead of the fragmentation buffer
-	if( MSG_GetNumBytesWritten( &chan->message ) > 0 )
+	// AGSBYPASS: Sven ONLY understands a fragment header for genuinely
+	// multi-packet payloads. A small reliable command (e.g. the ~41-byte
+	// clc_resourcelist reply or a ~21-byte clc_stringcmd "spawn") must leave as
+	// PLAIN reliable message. If we route it through the fragment streams, Sven's
+	// SV_ReadClientMessage rejects it with "badread" and never acks it (reliable
+	// deadlock). So for a GoldSrc client, FOLD any pending reliable data
+	// (chan->message + the msg argument) together when the whole pending reliable
+	// payload fits one packet; only fall back to real fragmentation when it would
+	// not fit.
+	if( chan->sock == NS_CLIENT )
 	{
-		// AGSBYPASS: Sven ONLY understands a fragment header for genuinely
-		// multi-packet payloads. A small reliable command (e.g. the ~41-byte
-		// clc_resourcelist reply written directly into chan->message by
-		// CL_SendResourceList) must leave as a PLAIN reliable message. If we
-		// sweep it into the fragment streams, Sven's SV_ReadClientMessage
-		// rejects it with "badread" and never acks it (reliable deadlock).
-		// So only fragment chan->message when it cannot fit a single packet
-		// AND no earlier reliable data is already queued.
-		int msgsize	= MSG_GetNumBytesWritten( &chan->message );
 		int maxsplit	= ( chan->pfnBlockSize && chan->pfnBlockSize( chan->client, FRAGSIZE_SPLIT ))
 				  ? chan->pfnBlockSize( chan->client, FRAGSIZE_SPLIT ) : MAX_RELIABLE_PAYLOAD;
+		int relbytes	= ( chan->reliable_length + 7 ) >> 3;
+		int msgsize	= MSG_GetNumBytesWritten( &chan->message );
+		int msglen	= MSG_GetNumBytesWritten( msg );
+		int total	= relbytes + msgsize + msglen;
 
-		if( !chan->reliable_length && maxsplit > 0 && msgsize <= maxsplit )
+		if( maxsplit > 0 && total <= maxsplit )
 		{
-			// keep it plain; Netchan_TransmitBits will send it as a regular
-			// reliable message. loud + searchable in engine.log:
-			Con_DPrintf( "gs-frag: KEEP %d-byte chan->message PLAIN (split=%d)\n", msgsize, maxsplit );
+			if( msglen > 0 )
+			{
+				Con_DPrintf( "gs-frag: FOLD %d-byte msg -> chan->message (total %d <= split %d) PLAIN\n", msglen, total, maxsplit );
+				MSG_WriteBytes( &chan->message, MSG_GetData( msg ), msglen );
+			}
+			return; // stays staged; Netchan_TransmitBits sends it as one plain reliable message
 		}
-		else
-		{
-			if( chan->sock == NS_CLIENT )
-				Con_DPrintf( "gs-frag: FRAGMENT %d-byte chan->message (rel=%d split=%d)\n", msgsize, chan->reliable_length, maxsplit );
 
-			Netchan_CreateFragments_( chan, &chan->message );
-			MSG_Clear( &chan->message );
-		}
+		Con_DPrintf( "gs-frag: FRAGMENT %d-byte msg (total %d > split %d)\n", msglen, total, maxsplit );
+	}
+
+	// legacy path: always queue any pending reliable data ahead of the fragment
+	if( MSG_GetNumBytesWritten( &chan->message ) > 0 )
+	{
+		Netchan_CreateFragments_( chan, &chan->message );
+		MSG_Clear( &chan->message );
 	}
 
 	Netchan_CreateFragments_( chan, msg );
