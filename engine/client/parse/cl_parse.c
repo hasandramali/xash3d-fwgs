@@ -2273,6 +2273,46 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	{
 		if( proto == PROTO_GOLDSRC )
 		{
+			// Sven Co-op sends these engine/game user messages as plain svc
+			// bytes without a preceding svc_usermessage (39) registration, so
+			// they never land in clgame.msg[] and are "unregistered" here.
+			// hw.dll (Sven engine, VA 0x1D2BD50) parse rule (reverse-verified):
+			//   - registered size == -1  -> a u16 length prefix precedes payload
+			//   - registered size >= 0   -> FIXED size, NO length in the stream
+			// Two of Sven's messages (ServerName=122, ClServerInfo=147) are
+			// variable-size, but InvRemove=133, ScoreInfo=83, CustWeapon=77,
+			// WeapPickup=89 and AmmoPickup=88 are FIXED-size. Xash must consume
+			// those fixed amounts (wire-verified against buffer.dat) instead of
+			// reading a u16 length, otherwise 133's payload low bytes are misread
+			// as a length=0 and the following svc_bad(0x00) kills the connection.
+			switch( svc_num )
+			{
+			case 133: // InvRemove (long item_inventory index + byte onrespawn)
+			case 77:  // CustWeapon
+			case 88:  // AmmoPickup
+				for( int k = 0; k < 5; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 5-byte msg)\n", svc_num );
+				return;
+			case 89: // WeapPickup
+				for( int k = 0; k < 4; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 4-byte msg)\n", svc_num );
+				return;
+			case 83: // ScoreInfo (Sven build: 30 bytes, not the HL1 9)
+				for( int k = 0; k < 30; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 30-byte msg)\n", svc_num );
+				return;
+			default:
+				break;
+			}
+
+			// variable-size (or unknown) unregistered user message: a size
+			// prefix precedes the payload (u16 for Sven, u8 otherwise), eat it.
 			int skipSize = ( Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
 				? MSG_ReadWord( msg ) : MSG_ReadByte( msg );
 			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH )
