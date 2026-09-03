@@ -14,4 +14,4 @@ git clone https://github.com/fgsfdsfgs/libsolder.git --depth=1 || exit 1
 echo "Downloading HLSDK..."
 
 rm -rf hlsdk-xash3d hlsdk-portable
-git clone --recursive https://github.com/FWGS/hlsdk-portable || exit 1
+git clone --recursive --depth 1 https://github.com/hasandramali/ReSvenCoop hlsdk-portable || exit 1
