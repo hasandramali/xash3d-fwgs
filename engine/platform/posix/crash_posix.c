@@ -319,6 +319,8 @@ static void Sys_DumpFaultingModules( char *message, int *lenp, size_t max_len, i
 	*lenp = len;
 }
 #endif // XASH_ANDROID || XASH_LINUX || XASH_APPLE
+
+static void Sys_Crash( int signal, siginfo_t *si, void *context )
 {
 	// safe actions first, stack and memory may be corrupted
 	int len = Q_snprintf( crash_message, sizeof( crash_message ), "Ver: " XASH_ENGINE_NAME " " XASH_VERSION " (build %i-%s-%s, %s-%s)\n",
