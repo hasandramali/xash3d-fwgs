@@ -20,10 +20,10 @@ GNU General Public License for more details.
 #include <sys/mman.h>
 #include <ucontext.h>
 #include <stdarg.h>
-#if defined( XASH_ANDROID ) || defined( XASH_APPLE )
-#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#if defined( XASH_ANDROID ) || defined( XASH_APPLE )
+#include <sys/stat.h>
 #endif
 #if XASH_ANDROID
 #include <android/log.h>
@@ -142,9 +142,10 @@ static void Sys_DumpRegisters( void *context, char *message, int *lenp, size_t m
 		const char *regnames[31] = {
 			"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9",
 			"x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19",
-			"x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29" };
+			"x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29",
+			"x30" };
 
-		for( int i = 0; i < 30; i += 4 )
+		for( int i = 0; i < 28; i += 4 )
 		{
 			len = Sys_CrashAppend( message, len, max_len, logfd, "  %-3s=%016llx  %-3s=%016llx  %-3s=%016llx  %-3s=%016llx\n",
 				regnames[i], (unsigned long long)uc->uc_mcontext.regs[i],
@@ -152,7 +153,9 @@ static void Sys_DumpRegisters( void *context, char *message, int *lenp, size_t m
 				regnames[i+2], (unsigned long long)uc->uc_mcontext.regs[i+2],
 				regnames[i+3], (unsigned long long)uc->uc_mcontext.regs[i+3] );
 		}
-		len = Sys_CrashAppend( message, len, max_len, logfd, "  x30 (lr)=%016llx\n",
+		len = Sys_CrashAppend( message, len, max_len, logfd, "  x28=%016llx  x29=%016llx  x30(lr)=%016llx\n",
+			(unsigned long long)uc->uc_mcontext.regs[28],
+			(unsigned long long)uc->uc_mcontext.regs[29],
 			(unsigned long long)uc->uc_mcontext.regs[30] );
 		len = Sys_CrashAppend( message, len, max_len, logfd, "  sp   =%016llx  pc    =%016llx  pstate=%016llx\n",
 			(unsigned long long)uc->uc_mcontext.sp,
@@ -205,7 +208,118 @@ static void Sys_DumpRegisters( void *context, char *message, int *lenp, size_t m
 }
 #endif // XASH_ANDROID || XASH_LINUX || XASH_APPLE
 
-static void Sys_Crash( int signal, siginfo_t *si, void *context ){
+#if XASH_ANDROID || XASH_LINUX || XASH_APPLE
+// Print the /proc/self/maps lines that cover pc/lr/sp/fault, so we can see which
+// .so a crashing address belongs to (e.g. is it in libclient / freevgui / ART?).
+// Only open/read/write/memchr-style safe calls, so it is signal-handler friendly.
+static void Sys_DumpFaultingModules( char *message, int *lenp, size_t max_len, int logfd,
+	uintptr_t pc, uintptr_t lr, uintptr_t sp, uintptr_t fault )
+{
+	uintptr_t addrs[4];
+	int i, naddrs = 0;
+	uintptr_t probe[4];
+	probe[0] = pc; probe[1] = lr; probe[2] = sp; probe[3] = fault;
+
+	for( i = 0; i < 4; i++ )
+	{
+		if( probe[i] == 0 )
+			continue;
+		int j;
+		for( j = 0; j < naddrs; j++ )
+		{
+			if( addrs[j] == probe[i] )
+				break;
+		}
+		if( j == naddrs && naddrs < 4 )
+			addrs[naddrs++] = probe[i];
+	}
+	if( naddrs == 0 )
+		return;
+
+	int fd = open( "/proc/self/maps", O_RDONLY );
+	if( fd < 0 )
+		return;
+
+	int len = *lenp;
+	len = Sys_CrashAppend( message, len, max_len, logfd, "Faulting modules (pc/lr/sp/fault):\n" );
+
+	char buf[512];
+	size_t got;
+	int buflen = 0;
+
+	while( 1 )
+	{
+		got = read( fd, buf + buflen, sizeof( buf ) - buflen - 1 );
+		if( got <= 0 )
+			break;
+		buflen += (int)got;
+		buf[buflen] = 0;
+
+		int pos = 0;
+		while( pos < buflen )
+		{
+			char *nl = (char *)memchr( buf + pos, '\n', buflen - pos );
+			if( !nl )
+			{
+				// keep the incomplete tail for the next read
+				int rem = buflen - pos;
+				if( rem > 0 )
+					memmove( buf, buf + pos, rem );
+				buflen = rem;
+				break;
+			}
+
+			int line = pos;
+			pos = (int)( nl - buf ) + 1;
+
+			uintptr_t lo = 0, hi = 0;
+			const char *p = buf + line;
+			const char *end = nl;
+
+			// parse "lo-hi" manually with no locale-dependent formatting
+			uintptr_t v = 0;
+			const char *q = p;
+			while( q < end && *q != '-' )
+			{
+				v = v * 16 + ( (*q >= '0' && *q <= '9') ? (uintptr_t)(*q - '0') : (*q >= 'a' && *q <= 'f') ? (uintptr_t)(*q - 'a' + 10) : 0 );
+				q++;
+			}
+			lo = v;
+			if( q < end && *q == '-' )
+			{
+				v = 0;
+				q++;
+				while( q < end && *q != ' ' )
+				{
+					v = v * 16 + ( (*q >= '0' && *q <= '9') ? (uintptr_t)(*q - '0') : (*q >= 'a' && *q <= 'f') ? (uintptr_t)(*q - 'a' + 10) : 0 );
+					q++;
+				}
+				hi = v;
+			}
+
+			if( hi > lo )
+			{
+				for( i = 0; i < naddrs; i++ )
+				{
+					if( addrs[i] >= lo && addrs[i] < hi )
+					{
+						// print the raw map line (address range, perms, path)
+						len = Sys_CrashAppend( message, len, max_len, logfd, "  0x%016llx -> %.*s\n",
+							(unsigned long long)addrs[i], (int)( end - p ), p );
+					}
+				}
+			}
+		}
+
+		if( buflen == (int)sizeof( buf ) )
+			break;
+	}
+	close( fd );
+
+	*lenp = len;
+}
+#endif // XASH_ANDROID || XASH_LINUX || XASH_APPLE
+{
 	// safe actions first, stack and memory may be corrupted
 	int len = Q_snprintf( crash_message, sizeof( crash_message ), "Ver: " XASH_ENGINE_NAME " " XASH_VERSION " (build %i-%s-%s, %s-%s)\n",
 		Q_buildnum(), g_buildcommit, g_buildbranch, Q_buildos(), Q_buildarch() );
@@ -239,6 +353,30 @@ static void Sys_Crash( int signal, siginfo_t *si, void *context ){
 			len = Sys_CrashAppend( crash_message, len, sizeof( crash_message ), logfd, "  code: %s\n", codename );
 
 		Sys_DumpRegisters( context, crash_message, &len, sizeof( crash_message ), logfd );
+
+		// figure out which module pc/lr/sp/fault belong to (is this freevgui/ART?)
+		{
+			ucontext_t *uc = (ucontext_t *)context;
+			uintptr_t pc = 0, lr = 0, sp = 0;
+			if( uc )
+			{
+#if defined( __aarch64__ )
+				pc = (uintptr_t)uc->uc_mcontext.pc;
+				lr = (uintptr_t)uc->uc_mcontext.regs[30];
+				sp = (uintptr_t)uc->uc_mcontext.sp;
+#elif defined( __arm__ )
+				pc = (uintptr_t)uc->uc_mcontext.arm_pc;
+				lr = (uintptr_t)uc->uc_mcontext.arm_lr;
+				sp = (uintptr_t)uc->uc_mcontext.arm_sp;
+#elif defined( __x86_64__ )
+				pc = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+				lr = 0;
+				sp = (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+#endif
+			}
+			Sys_DumpFaultingModules( crash_message, &len, sizeof( crash_message ), logfd,
+				pc, lr, sp, (uintptr_t)si->si_addr );
+		}
 
 #if XASH_ANDROID
 		__android_log_write( ANDROID_LOG_FATAL, "Xash", crash_message );
