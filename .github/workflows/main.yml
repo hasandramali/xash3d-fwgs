@@ -48,9 +48,9 @@ jobs:
 #          - os: macos-14
 #            targetos: apple
 #            targetarch: arm64
-#          - os: macos-latest
-#            targetos: ios
-#            targetarch: arm64
+          - os: macos-latest
+            targetos: ios
+            targetarch: arm64
 #          - os: macos-15-intel
 #            targetos: apple
 #            targetarch: amd64
