@@ -231,6 +231,8 @@ int CL_DrawCharacter( float x, float y, int number, const rgba_t color, cl_font_
 
 	if( FBitSet( flags, FONT_DRAW_HUD ))
 		SPR_AdjustSize( &x, &y, &w, &h );
+	else if( FBitSet( flags, FONT_DRAW_SAYTEXT ))
+		SayText_AdjustSize( &x, &y, &w, &h );
 
 	if( !FBitSet( flags, FONT_DRAW_NORENDERMODE ))
 		CL_SetFontRendermode( font );

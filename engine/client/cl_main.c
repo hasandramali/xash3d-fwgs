@@ -69,6 +69,7 @@ CVAR_DEFINE_AUTO( hud_fontscale, "1.0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud fo
 CVAR_DEFINE_AUTO( hud_fontrender, "0", FCVAR_ARCHIVE, "hud font render mode (0: additive, 1: holes, 2: trans)" );
 CVAR_DEFINE_AUTO( hud_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud at current resolution" );
 CVAR_DEFINE_AUTO( hud_scale_minimal_width, "640", FCVAR_ARCHIVE|FCVAR_LATCH, "if hud_scale results in a HUD virtual screen smaller than this value, it won't be applied" );
+CVAR_DEFINE_AUTO( hud_saytext_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale saytext at current resolution; 0 = disabled (not scaled)" );
 CVAR_DEFINE_AUTO( cl_solid_players, "1", 0, "Make all players not solid (can't traceline them)" );
 CVAR_DEFINE_AUTO( cl_updaterate, "101", FCVAR_USERINFO|FCVAR_ARCHIVE, "refresh rate of server messages" );
 CVAR_DEFINE_AUTO( cl_showevents, "0", FCVAR_ARCHIVE, "show events playback" );
@@ -3851,6 +3852,7 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &hud_fontrender );
 	Cvar_RegisterVariable( &hud_scale );
 	Cvar_RegisterVariable( &hud_scale_minimal_width );
+	Cvar_RegisterVariable( &hud_saytext_scale );
 	Cvar_RegisterVariable( &cl_showevents );
 	Cvar_Get( "lastdemo", "", FCVAR_ARCHIVE, "last played demo" );
 	Cvar_RegisterVariable( &ui_renderworld );
