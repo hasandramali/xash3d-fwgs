@@ -36,7 +36,6 @@ jobs:
             targetos: android
             targetarch: multiarch
 
-
 #          # Windows builds
 #          - os: windows-latest
 #            targetos: win32
