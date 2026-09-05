@@ -13,9 +13,9 @@ jobs:
 #          - os: ubuntu-22.04
 #            targetos: linux
 #            targetarch: amd64
-#          - os: ubuntu-22.04
-#            targetos: linux
-#            targetarch: i386
+          - os: ubuntu-22.04
+            targetos: linux
+            targetarch: i386
 #         - os: ubuntu-22.04-arm
 #           targetos: linux
 #           targetarch: arm64
