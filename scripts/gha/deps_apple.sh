@@ -6,4 +6,4 @@ wget "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/S
 hdiutil mount SDL2.dmg
 sudo cp -vr /Volumes/SDL2/SDL2.framework /Library/Frameworks
 
-git clone --depth 1 https://github.com/hasandramali/ReSvenCoop hlsdk
+git clone --depth 1 https://github.com/hasandramali/hlsdk-portable -b svencoop hlsdk

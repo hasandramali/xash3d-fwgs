@@ -33,7 +33,7 @@ fi
 rm -fr ${build_dir}/{BUILD,SRPMS}
 mkdir -p ${build_dir}/SOURCES
 pack_sources ${build_dir}/SOURCES/${name}.tar
-git clone https://github.com/hasandramali/ReSvenCoop
+git clone https://github.com/hasandramali/hlsdk-portable -b svencoop
 pushd hlsdk-portable
 pack_sources ../${build_dir}/SOURCES/hlsdk-portable.tar
 popd

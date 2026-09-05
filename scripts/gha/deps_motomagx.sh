@@ -12,4 +12,4 @@ pushd /opt/toolchains/ || exit 1
 sudo git clone https://github.com/a1batross/motomagx_toolchain motomagx --depth=1
 popd || exit 1
 
-git clone --depth 1 https://github.com/hasandramali/ReSvenCoop hlsdk
+git clone --depth 1 https://github.com/hasandramali/hlsdk-portable -b svencoop hlsdk

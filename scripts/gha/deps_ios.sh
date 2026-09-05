@@ -10,4 +10,4 @@ sudo cp -vr Products/SDL2.xcframework/ios-arm64/SDL2.framework /Library/Framewor
 
 cd "$GITHUB_WORKSPACE" || exit 1
 
-git clone --depth 1 https://github.com/hasandramali/ReSvenCoop hlsdk
+git clone --depth 1 https://github.com/hasandramali/hlsdk-portable -b svencoop hlsdk

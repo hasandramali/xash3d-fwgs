@@ -17,7 +17,7 @@ export JAVA_HOME=$GITHUB_WORKSPACE/java
 export PATH=$PATH:$JAVA_HOME/bin
 
 echo "Download hlsdk-portable"
-git clone --depth 1 --recursive https://github.com/hasandramali/ReSvenCoop 3rdparty/hlsdk-portable || exit 1
+git clone --depth 1 --recursive https://github.com/hasandramali/hlsdk-portable -b svencoop 3rdparty/hlsdk-portable || exit 1
 
 echo "Download SDL"
 pushd 3rdparty || exit 1
