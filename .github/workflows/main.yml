@@ -35,7 +35,6 @@ jobs:
           - os: ubuntu-latest
             targetos: android
             targetarch: multiarch
-
 #          # Windows builds
 #          - os: windows-latest
 #            targetos: win32
