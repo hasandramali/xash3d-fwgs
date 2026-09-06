@@ -1736,6 +1736,8 @@ void CL_RegisterResources( sizebuf_t *msg, connprotocol_t proto )
 				int32_t crc = cl.worldmapCRC;
 				COM_Munge2((byte*)&crc, sizeof( crc ), ( 0xff - cl.servercount ) & 0xff );
 				MSG_WriteStringf( msg, "spawn %i %i", cl.servercount, crc );
+				MSG_BeginClientCmd( msg, clc_stringcmd );
+				MSG_WriteString( msg, "sendents" );
 			}
 			else MSG_WriteStringf( msg, "spawn %i", cl.servercount );
 		}
