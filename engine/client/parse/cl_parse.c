@@ -2276,36 +2276,37 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			// Sven Co-op sends these engine/game user messages as plain svc
 			// bytes without a preceding svc_usermessage (39) registration, so
 			// they never land in clgame.msg[] and are "unregistered" here.
-			// hw.dll (Sven engine, VA 0x1D2BD50) parse rule (reverse-verified):
+			// hw.dll (Sven engine) parse rule (reverse-verified against the
+			// server.dll REG_USER_MSG table, steam-refs/sven/server.dll):
 			//   - registered size == -1  -> a u16 length prefix precedes payload
 			//   - registered size >= 0   -> FIXED size, NO length in the stream
-			// Two of Sven's messages (ServerName=122, ClServerInfo=147) are
-			// variable-size, but InvRemove=133, ScoreInfo=83, CustWeapon=77,
-			// WeapPickup=89 and AmmoPickup=88 are FIXED-size. Xash must consume
-			// those fixed amounts (wire-verified against buffer.dat) instead of
-			// reading a u16 length, otherwise 133's payload low bytes are misread
-			// as a length=0 and the following svc_bad(0x00) kills the connection.
+			// Small fixed-size ones (ClassicMode=137 @1, ScoreInfo=83 @20,
+			// InvRemove=133 @5, AmmoPickup=88 @5) must be consumed inline
+			// (wire-verified perfect alignment for 137 against buffer.dat).
+			// CustWeapon=77, WeapPickup=89, ServerName=122 and ClServerInfo=147
+			// are VARIABLE (-1), so they fall through to the u16-length path.
+			// Xash must consume those fixed amounts instead of reading a u16
+			// length, otherwise 133's payload low bytes are misread as a
+			// length=0 and the following svc_bad(0x00) kills the connection.
 			switch( svc_num )
 			{
+			case 137: // ClassicMode (Sven, fixed 1-byte payload, no length)
+				MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 1-byte msg)\n", svc_num );
+				return;
+			case 83: // ScoreInfo (Sven registered size 20, not the HL1 9)
+				for( int k = 0; k < 20; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 20-byte msg)\n", svc_num );
+				return;
 			case 133: // InvRemove (long item_inventory index + byte onrespawn)
-			case 77:  // CustWeapon
 			case 88:  // AmmoPickup
 				for( int k = 0; k < 5; k++ )
 					MSG_ReadByte( msg );
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 5-byte msg)\n", svc_num );
-				return;
-			case 89: // WeapPickup
-				for( int k = 0; k < 4; k++ )
-					MSG_ReadByte( msg );
-				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 4-byte msg)\n", svc_num );
-				return;
-			case 83: // ScoreInfo (Sven build: 30 bytes, not the HL1 9)
-				for( int k = 0; k < 30; k++ )
-					MSG_ReadByte( msg );
-				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 30-byte msg)\n", svc_num );
 				return;
 			default:
 				break;
