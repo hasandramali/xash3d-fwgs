@@ -2162,8 +2162,9 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
 
 	// delta encoders it's already initialized on this machine (local game)
+	// re-initialize and load delta.lst before applying server overrides
 	if( delta_init )
-		Delta_Shutdown();
+		Delta_Init();
 
 	MSG_StartBitWriting( msg );
 
