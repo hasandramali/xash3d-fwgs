@@ -755,6 +755,9 @@ extern convar_t r_large_lightmaps;
 //
 #include "crtlib.h"
 
-
+//
+// Trinity water shader (OpenGL ES compatible)
+//
+#include "gl_watershader.h"
 
 #endif // GL_LOCAL_H
