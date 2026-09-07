@@ -777,7 +777,7 @@ void CL_SendResourceList( const resource_t *list, int count );
 //
 void CL_ReplayBufferDat_f( void );
 void CL_Parse_Debug( qboolean enable );
-void CL_Parse_RecordCommand( int cmd, int startoffset );
+void CL_Parse_RecordCommand( int cmd, int startoffset, int startbit );
 void CL_ResetFrame( frame_t *frame );
 
 //

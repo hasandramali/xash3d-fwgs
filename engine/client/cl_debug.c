@@ -28,6 +28,7 @@ typedef struct
 {
 	int	command;
 	int	starting_offset;
+	int	starting_bit;	// bit position where this command started
 	int	frame_number;
 } oldcmd_t;
 
@@ -103,7 +104,7 @@ CL_Parse_RecordCommand
 record new message params into debug buffer
 =====================
 */
-void CL_Parse_RecordCommand( int cmd, int startoffset )
+void CL_Parse_RecordCommand( int cmd, int startoffset, int startbit )
 {
 	if( cmd == svc_nop ) return;
 
@@ -113,6 +114,7 @@ void CL_Parse_RecordCommand( int cmd, int startoffset )
 	int	slot = ( cls_message_debug.currentcmd++ & MSG_MASK );
 	cls_message_debug.oldcmd[slot].command = cmd;
 	cls_message_debug.oldcmd[slot].starting_offset = startoffset;
+	cls_message_debug.oldcmd[slot].starting_bit = startbit;
 	cls_message_debug.oldcmd[slot].frame_number = host.framecount;
 }
 
@@ -191,11 +193,23 @@ void CL_DumpBadMessage( sizebuf_t *msg, int svc_num, int startoffset )
 		CL_DumpAnnotatedMessageBytes( msg, startoffset - 16, startoffset + 256, startoffset );
 	}
 
-	Con_Printf( "\nlast %i parsed commands:\n", MSG_COUNT );
+	Con_Printf( "\nlast %i parsed commands (bit spans):\n", MSG_COUNT );
 	for( i = 0; i < MSG_COUNT; i++ )
 	{
 		oldcmd_t *old = &cls_message_debug.oldcmd[i];
-		Con_Printf( "%08i %04i %s\n", old->frame_number, old->starting_offset, CL_MsgInfo( old->command ));
+		Con_Printf( "%08i %04i bit=%05d %s\n", old->frame_number, old->starting_offset, old->starting_bit, CL_MsgInfo( old->command ));
+	}
+
+	// for GoldSrc the delta layout is the usual suspect: dump the tables as
+	// configured right now so a 17 vs 34 field mismatch can't hide.
+	if( cls.net_protocol == PROTO_GOLDSRC )
+	{
+		Con_Printf( "\nGoldSrc delta tables at failure:\n" );
+		Delta_DebugDumpTable( msg, DT_CLIENTDATA_T, "clientdata_t" );
+		Delta_DebugDumpTable( msg, DT_WEAPONDATA_T, "weapon_data_t" );
+		Delta_DebugDumpTable( msg, DT_ENTITY_STATE_T, "entity_state_t" );
+		Delta_DebugDumpTable( msg, DT_ENTITY_STATE_PLAYER_T, "entity_state_player_t" );
+		Delta_DebugDumpTable( msg, DT_CUSTOM_ENTITY_STATE_T, "custom_entity_state_t" );
 	}
 }
 
@@ -254,12 +268,12 @@ void CL_WriteMessageHistory( void )
 	{
 		thecmd &= MSG_MASK;
 		old = &cls_message_debug.oldcmd[thecmd];
-		Con_Printf( "%i %04i %s\n", old->frame_number, old->starting_offset, CL_MsgInfo( old->command ));
+		Con_Printf( "%i %04i bit=%05d %s\n", old->frame_number, old->starting_offset, old->starting_bit, CL_MsgInfo( old->command ));
 		thecmd++;
 	}
 
 	old = &cls_message_debug.oldcmd[thecmd];
-	Con_Printf( S_RED "BAD: " S_DEFAULT "%i %04i %s\n", old->frame_number, old->starting_offset, CL_MsgInfo( old->command ));
+	Con_Printf( S_RED "BAD: " S_DEFAULT "%i %04i bit=%05d %s\n", old->frame_number, old->starting_offset, old->starting_bit, CL_MsgInfo( old->command ));
 
 	Con_Printf( "\nannotated bytes around the failing command (each byte shown as if it were a server command):\n" );
 	CL_DumpAnnotatedMessageBytes( msg, old->starting_offset - 8, old->starting_offset + 16, old->starting_offset );

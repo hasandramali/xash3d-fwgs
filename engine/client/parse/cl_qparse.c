@@ -908,7 +908,7 @@ void CL_ParseQuakeMessage( sizebuf_t *msg )
 		}
 
 		// record command for debugging spew on parse problem
-		CL_Parse_RecordCommand( cmd, bufStart );
+		CL_Parse_RecordCommand( cmd, bufStart, MSG_GetNumBitsWritten( msg ) );
 
 		if( CL_ParseCommonMessage( msg, PROTO_QUAKE, cmd, bufStart ))
 			continue;

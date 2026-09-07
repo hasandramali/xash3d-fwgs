@@ -571,7 +571,7 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 
 		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
 		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-			Con_DPrintf( "%s: svc cmd=%d signon=%d state=%d msgbits=%d\n", __func__, cmd, cls.signon, cls.state, MSG_GetNumBitsLeft( msg ) );
+			Con_DPrintf( "%s: svc cmd=%d signon=%d state=%d msgbits=%d byte=%d bit=%d\n", __func__, cmd, cls.signon, cls.state, MSG_GetNumBitsLeft( msg ), (int)bufStart, MSG_GetNumBitsRead( msg ) );
 
 		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 3 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
 		{
@@ -586,7 +586,7 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 		}
 
 		// record command for debugging spew on parse problem
-		CL_Parse_RecordCommand( cmd, bufStart );
+		CL_Parse_RecordCommand( cmd, bufStart, MSG_GetNumBitsWritten( msg ) );
 
 		if( CL_ParseCommonMessage( msg, PROTO_GOLDSRC, cmd, bufStart ))
 			continue;

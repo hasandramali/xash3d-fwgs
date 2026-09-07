@@ -2654,7 +2654,7 @@ void CL_ParseServerMessage( sizebuf_t *msg )
 		cmd = MSG_ReadServerCmd( msg );
 
 		// record command for debugging spew on parse problem
-		CL_Parse_RecordCommand( cmd, bufStart );
+		CL_Parse_RecordCommand( cmd, bufStart, MSG_GetNumBitsWritten( msg ) );
 
 		if( CL_ParseCommonMessage( msg, PROTO_CURRENT, cmd, bufStart ))
 			continue;

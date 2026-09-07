@@ -138,5 +138,7 @@ qboolean MSG_ReadDeltaEntity( sizebuf_t *msg, const struct entity_state_s *from,
 int Delta_TestBaseline( const struct entity_state_s *from, const struct entity_state_s *to, qboolean player, double timebase );
 void Delta_ReadGSFields( sizebuf_t *msg, int index, const void *from, void *to, double timebase );
 void Delta_WriteGSFields( sizebuf_t *msg, int index, const void *from, const void *to, double timebase );
+void Delta_DebugDumpTable( sizebuf_t *msg, int index, const char *context );
+void Delta_DebugDumpAllTables( const char *context );
 
 #endif//NET_ENCODE_H

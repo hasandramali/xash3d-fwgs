@@ -1481,22 +1481,91 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 {
 	uint8_t bits[8] = { 0 };
 	delta_t *pField;
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
+	int entryBit;
 	int i;
+
+	entryBit = MSG_GetNumBitsRead( msg );
 
 	byte c = MSG_ReadUBitLong( msg, 3 );
 
 	for( i = 0; i < c; i++ )
 		bits[i] = MSG_ReadByte( msg );
 
+	// field-level bit ledger: reconstruct exactly which fields the client
+	// consumed and where each field landed in the bitstream. Together with
+	// the table dump on parse error this makes table/layout mismatches
+	// visible in a single engine.log.
+	if( dbg >= 4 )
+	{
+		char flags[8 * 3 + 1];
+		int nflags = Q_min( c, (int)sizeof( bits ));
+		for( i = 0; i < nflags; i++ )
+			Q_snprintf( flags + i * 3, sizeof( flags ) - i * 3, "%02x%s", bits[i], i + 1 < nflags ? " " : "" );
+		Con_DPrintf( "GSDELTA-READ: table=%s c=%d bitflags=%s startbit=%d\n",
+			dt->pName, c, flags, entryBit );
+	}
+
 	for( i = 0, pField = dt->pFields; i < dt->numFields; i++, pField++ )
 	{
 		int b = Q_min( i >> 3, (int)sizeof( bits ) - 1 );
 		int n = 1 << ( i & 7 );
+		int bitBefore = MSG_GetNumBitsRead( msg );
 
 		if( FBitSet( bits[b], n ))
+		{
 			Delta_ReadField_( msg, pField, to, timebase );
+			if( dbg >= 4 )
+				Con_DPrintf( "GSDELTA-FIELD: table=%s idx=%d name='%s' bits=%d read_at_bit=%d consumed_bits=%d\n",
+					dt->pName, i, pField->name ? pField->name : "?", pField->bits, bitBefore, MSG_GetNumBitsRead( msg ) - bitBefore );
+		}
 		else Delta_CopyField( pField, from, to, timebase );
 	}
+
+	if( dbg >= 4 )
+		Con_DPrintf( "GSDELTA-READ: table=%s done endbit=%d total_bits=%d\n",
+			dt->pName, MSG_GetNumBitsRead( msg ), MSG_GetNumBitsRead( msg ) - entryBit );
+}
+
+/*
+=====================
+Delta_DebugDumpTable
+
+dump the *current* state of a delta table (field list, widths, offsets)
+as seen by the client right now. Called on parse errors so a table/layout
+mismatch (e.g. 17 vs 34 fields) is visible in a single engine.log.
+=====================
+*/
+void Delta_DebugDumpTable( sizebuf_t *msg, int index, const char *context )
+{
+	const delta_info_t *dt = Delta_FindStructByIndex( index );
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
+
+	if( !dt )
+	{
+		Con_Printf( "GSDELTA-TABLE %s: index=%d not found\n", context, index );
+		return;
+	}
+
+	Con_Printf( "GSDELTA-TABLE %s: name=%s numFields=%d maxFields=%d initialized=%d\n",
+		context, dt->pName, dt->numFields, dt->maxFields, dt->bInitialized );
+
+	if( !dt->bInitialized || !dt->pFields || dbg < 5 )
+		return;
+
+	for( int i = 0; i < dt->numFields; i++ )
+	{
+		const delta_t *p = &dt->pFields[i];
+		Con_Printf( "  [%3d] name='%s' offset=%d size=%d flags=0x%x bits=%d\n",
+			i, p->name ? p->name : "?", p->offset, p->size, p->flags, p->bits );
+	}
+}
+
+void Delta_DebugDumpAllTables( const char *context )
+{
+	Con_Printf( "GSDELTA-ALL %s: numTables=%d\n", context, Delta_NumTables() );
+	for( int i = 0; i < Delta_NumTables(); i++ )
+		Delta_DebugDumpTable( NULL, i, context );
 }
 
 void Delta_ReadGSFields( sizebuf_t *msg, int index, const void *from, void *to, double timebase )
@@ -2255,6 +2324,12 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 
 		dt->bInitialized = true;
 	}
+
+	// after applying the server overrides, dump the resulting layout so a
+	// wire/local field-count mismatch (Sven's 17 vs delta.lst's 34) can be
+	// caught in the same log that shows the rest of the parse.
+	if( dbg >= 5 )
+		Delta_DebugDumpAllTables( "after-deltatable" );
 
 	if( dbg >= 3 )
 		Delta_GSDumpPayload( "GS-DELTA-TAIL", msg, msg->iCurBit );
