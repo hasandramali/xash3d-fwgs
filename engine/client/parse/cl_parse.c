@@ -1108,7 +1108,12 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	// clear to old value before delta parsing
 	if( MSG_ReadOneBit( msg ))
 	{
-		int	delta_sequence = MSG_ReadByte( msg );
+		int	delta_sequence;
+
+		if( proto == PROTO_GOLDSRC )
+			delta_sequence = MSG_ReadWord( msg );
+		else
+			delta_sequence = MSG_ReadByte( msg );
 
 		from_cd = &cl.frames[delta_sequence & CL_UPDATE_MASK].clientdata;
 		from_wd = cl.frames[delta_sequence & CL_UPDATE_MASK].weapondata;
@@ -1125,15 +1130,21 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 		Delta_ReadGSFields( msg, DT_CLIENTDATA_T, from_cd, to_cd, cl.mtime[0] );
 	else MSG_ReadClientData( msg, from_cd, to_cd, cl.mtime[0] );
 
-	for( i = 0; i < 64; i++ )
+	for( i = 0; i < ( proto == PROTO_GOLDSRC ? 256 : MAX_LOCAL_WEAPONS ); i++ )
 	{
 		// check for end of weapondata (and clientdata_t message)
 		if( !MSG_ReadOneBit( msg )) break;
 
 		// read the weapon idx
-		idx = MSG_ReadUBitLong( msg, MAX_WEAPON_BITS );
+		idx = MSG_ReadUBitLong( msg, proto == PROTO_GOLDSRC ? 8 : MAX_WEAPON_BITS );
 
-		if( proto == PROTO_GOLDSRC )
+		// GoldSrc weapon slots are 8-bit (up to 256) but the local
+		// weapon_data_t arrays only have MAX_LOCAL_WEAPONS entries.
+		// Consume the delta into a scratch slot to keep the bit cursor
+		// aligned without overflowing the frame's weapon array.
+		if( proto == PROTO_GOLDSRC && idx >= MAX_LOCAL_WEAPONS )
+			Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &nullwd[0], &nullwd[0], cl.mtime[0] );
+		else if( proto == PROTO_GOLDSRC )
 			Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
 		else MSG_ReadWeaponData( msg, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
 	}

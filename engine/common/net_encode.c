@@ -1487,7 +1487,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 
 	entryBit = MSG_GetNumBitsRead( msg );
 
-	byte c = MSG_ReadUBitLong( msg, 3 );
+	byte c = MSG_ReadUBitLong( msg, 4 );
 
 	for( i = 0; i < c; i++ )
 		bits[i] = MSG_ReadByte( msg );
@@ -1596,7 +1596,7 @@ void Delta_WriteGSFields( sizebuf_t *msg, int index, const void *from, const voi
 		}
 	}
 
-	MSG_WriteUBitLong( msg, c, 3 );
+	MSG_WriteUBitLong( msg, c, 4 );
 	for( i = 0; i < c; i++ )
 		MSG_WriteByte( msg, bits[i] );
 
@@ -2268,14 +2268,6 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 			Con_DPrintf( "GS-DELTA: table='%s' num_fields=%d pairs=%d maxFields=%d bitpos=%d\n",
 				s, num_fields, pairs, dt->maxFields, msg->iCurBit );
 
-		// Track field names in server declaration order so we can reorder
-		// the local field array after parsing.  The server writes flag bits
-		// and values in its own declaration order (WIRE), but Delta_AddField
-		// keeps each field at its LOCAL position.  Without reordering,
-		// Delta_ParseGSFields reads values in the wrong sequence.
-		char wireOrderBuf[512][32];
-		int wireOrderCount = 0;
-
 		for( int i = 0; i < pairs; i++ )
 		{
 			int bitBefore = msg->iCurBit;
@@ -2310,14 +2302,6 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 				Con_DPrintf( "  [%d] bit=%d name='%s' offset=%d sigbits=%d pre=%u post=%u\n",
 					i, bitBefore, name, fOffset, fBits, fPre, fPost );
 
-			// Record field name in wire declaration order (before AddField
-			// which may skip unknown fields — we still need their position)
-			if( wireOrderCount < 512 )
-			{
-				Q_strncpy( wireOrderBuf[wireOrderCount], name, sizeof( wireOrderBuf[0] ));
-				wireOrderCount++;
-			}
-
 			if( !pInfo )
 			{
 				// Sven-specific field this engine doesn't know; consume in wire but skip
@@ -2336,40 +2320,6 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 			float post_mul = ( fPost != 0 ) ? (float)fPost / 4000.0f : 1.0f;
 
 			Delta_AddField( dt, name, pInfo->flags, fBits, mul, post_mul );
-		}
-
-		// Reorder dt->pFields so server-declared fields come first (in wire
-		// declaration order), then drop all non-declared fields.  The server
-		// writes flag bits and values only for the fields it declared via
-		// svc_deltatable; undeclared positions in the flag bytes belong to
-		// the server's own local field order which the client cannot map.
-		// Keeping non-declared fields would cause the client to consume
-		// garbage values and desync the weapon loop + subsequent svc bytes.
-		if( wireOrderCount > 0 && dt->numFields > 0 )
-		{
-			delta_t *newFields = Z_Malloc( wireOrderCount * sizeof( delta_t ));
-			int newIdx = 0;
-
-			// server-declared fields in wire declaration order
-			for( int w = 0; w < wireOrderCount; w++ )
-			{
-				for( int i = 0; i < dt->numFields; i++ )
-				{
-					if( dt->pFields[i].name && !Q_strcmp( dt->pFields[i].name, wireOrderBuf[w] ))
-					{
-						newFields[newIdx++] = dt->pFields[i];
-						break;
-					}
-				}
-			}
-
-			if( dbg >= 2 )
-				Con_DPrintf( "GS-DELTA: %s reordered %d→%d fields (wire %d declared)\n",
-					dt->pName, dt->numFields, newIdx, wireOrderCount );
-
-			Z_Free( dt->pFields );
-			dt->pFields = newFields;
-			dt->numFields = wireOrderCount;
 		}
 
 		dt->bInitialized = true;
