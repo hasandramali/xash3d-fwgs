@@ -446,7 +446,7 @@ static float MSG_ReadGSBitCoord( sizebuf_t *sb )
 		int sign = MSG_ReadOneBit( sb );
 
 		if( ival )
-			ival = MSG_ReadUBitLong( sb, 12 );
+			ival = MSG_ReadUBitLong( sb, 24 );
 		if( fval )
 			fval = MSG_ReadUBitLong( sb, 3 );
 
