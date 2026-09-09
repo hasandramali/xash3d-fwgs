@@ -334,7 +334,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	{
 		int bufstart, newnum;
 		qboolean player;
-		const char *srcMark;
+		const char *srcMark = "?";
 		delta_header_t hdr;
 		int entStartBit = MSG_GetNumBitsRead( msg );
 		int val = MSG_ReadWord( msg );
@@ -369,12 +369,14 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 				Con_Printf( S_WARN "%s: delta entity on non-delta update (%d)\n", __func__, oldnum );
 
 			// from delta
+			srcMark = "old-delta";
 			CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent );
 			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 		else if( oldnum > newnum )
 		{
 			// from baseline
+			srcMark = "baseline";
 			CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL );
 		}
 
