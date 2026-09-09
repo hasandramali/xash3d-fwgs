@@ -288,6 +288,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	frame_t *oldframe;
 	int numbase = 0;
 	int playerbytes = 0;
+	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
 
 	// save first uncompressed packet as timestamp
 	if( cls.changelevel && !delta && cls.demorecording )
@@ -333,7 +334,9 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	{
 		int bufstart, newnum;
 		qboolean player;
+		const char *srcMark;
 		delta_header_t hdr;
+		int entStartBit = MSG_GetNumBitsRead( msg );
 		int val = MSG_ReadWord( msg );
 
 		if( val )
@@ -375,7 +378,24 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 			CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL );
 		}
 
-		if( player ) playerbytes += MSG_GetNumBytesRead( msg ) - bufstart;
+		// entity-level wire ledger: decode the delta packet header so the
+		// packed "who/what" info (remove/custom/instanced flags, table, and
+		// the exact bit span each entity consumed) is readable without any
+		// offline re-assembly of the hex stream.
+		if( dbg >= 4 && !hdr.remove )
+		{
+			const char *tbl = hdr.custom ? "custom" : ( player ? "player" : "normal" );
+			Con_DPrintf( "GS-ENT: delta=%d eindex=%d custom=%d inst=%d off=%d table=%s src=%s bits=%d..%d (%d bits)\n",
+				delta, newnum, hdr.custom, hdr.instanced, hdr.offset, tbl, srcMark,
+				entStartBit, MSG_GetNumBitsRead( msg ), MSG_GetNumBitsRead( msg ) - entStartBit );
+		}
+		else if( dbg >= 4 )
+		{
+			Con_DPrintf( "GS-ENT: delta=%d eindex=%d REMOVE bits=%d..%d\n",
+				delta, newnum, entStartBit, MSG_GetNumBitsRead( msg ));
+		}
+
+		if( player ) playerbytes += MSG_GetNumBitsRead( msg ) - bufstart;
 	}
 
 	if( MSG_CheckOverflow( msg ))
@@ -571,7 +591,7 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 
 		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
 		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-			Con_DPrintf( "%s: svc cmd=%d signon=%d state=%d msgbits=%d byte=%d bit=%d\n", __func__, cmd, cls.signon, cls.state, MSG_GetNumBitsLeft( msg ), (int)bufStart, MSG_GetNumBitsRead( msg ) );
+			Con_DPrintf( "%s: svc cmd=%d (%s) signon=%d state=%d msgbits=%d byte=%d bit=%d\n", __func__, cmd, CL_MsgInfo( cmd ), cls.signon, cls.state, MSG_GetNumBitsLeft( msg ), (int)bufStart, MSG_GetNumBitsRead( msg ) );
 
 		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 3 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
 		{

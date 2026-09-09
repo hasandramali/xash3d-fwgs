@@ -1442,7 +1442,7 @@ static void Delta_ReadField_( sizebuf_t *msg, delta_t *pField, void *to, double 
 	}
 	else if( pField->flags & DT_ANGLE )
 	{
-		flAngle = MSG_ReadBitAngle( msg, pField->bits );
+		flAngle = MSG_ReadUBitLong( msg, pField->bits ) * ( 360.0f / (float)( 1 << pField->bits ));
 		*(float *)((byte *)to + pField->offset ) = flAngle;
 	}
 	else if( pField->flags & DT_TIMEWINDOW_8 )
@@ -1475,6 +1475,37 @@ static qboolean Delta_ReadField( sizebuf_t *msg, delta_t *pField, const void *fr
 
 	Delta_ReadField_( msg, pField, to, timebase );
 	return true;
+}
+
+/*
+=====================
+Delta_DebugFieldValue
+
+Render the already-decoded value of a delta field that Delta_ReadField_
+just wrote into `to`. This is what makes the GSDELTA ledger self-contained:
+floats/times are printed post-multiplier, angles in degrees, ints raw — so
+a single engine.log line carries the FINAL value and no offline re-compute
+is needed to read the trace.
+=====================
+*/
+static void Delta_DebugFieldValue( const delta_t *pField, const void *to, char *buf, size_t bufsize )
+{
+	const void *pv = (const uint8_t *)to + pField->offset;
+
+	if( pField->flags & DT_FLOAT )
+		Q_snprintf( buf, bufsize, "%.6g", *(const float *)pv );
+	else if( pField->flags & DT_ANGLE )
+		Q_snprintf( buf, bufsize, "%.3fdeg", *(const float *)pv );
+	else if( pField->flags & DT_TIMEWINDOW_8 || pField->flags & DT_TIMEWINDOW_BIG )
+		Q_snprintf( buf, bufsize, "%.5f", *(const float *)pv );
+	else if( pField->flags & DT_STRING )
+		Q_snprintf( buf, bufsize, "\"%s\"", (const char *)pv );
+	else if( pField->flags & DT_BYTE )
+		Q_snprintf( buf, bufsize, "%d", ( pField->flags & DT_SIGNED ) ? *(const int8_t *)pv : *(const uint8_t *)pv );
+	else if( pField->flags & DT_SHORT )
+		Q_snprintf( buf, bufsize, "%d", ( pField->flags & DT_SIGNED ) ? *(const int16_t *)pv : *(const uint16_t *)pv );
+	else
+		Q_snprintf( buf, bufsize, "%d", ( pField->flags & DT_SIGNED ) ? *(const int32_t *)pv : *(const uint32_t *)pv );
 }
 
 static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const void *from, void *to, double timebase )
@@ -1516,10 +1547,25 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 		{
 			Delta_ReadField_( msg, pField, to, timebase );
 			if( dbg >= 4 )
-				Con_DPrintf( "GSDELTA-FIELD: table=%s idx=%d name='%s' bits=%d read_at_bit=%d consumed_bits=%d\n",
-					dt->pName, i, pField->name ? pField->name : "?", pField->bits, bitBefore, MSG_GetNumBitsRead( msg ) - bitBefore );
+			{
+				char valbuf[64];
+				Delta_DebugFieldValue( pField, to, valbuf, sizeof( valbuf ));
+				Con_DPrintf( "GSDELTA-FIELD: table=%s idx=%d name='%s' bits=%d types=0x%x pre=%.5g post=%.5g read_at_bit=%d consumed_bits=%d value=%s\n",
+					dt->pName, i, pField->name ? pField->name : "?", pField->bits, pField->flags,
+					pField->multiplier, pField->post_multiplier, bitBefore, MSG_GetNumBitsRead( msg ) - bitBefore, valbuf );
+			}
 		}
-		else Delta_CopyField( pField, from, to, timebase );
+		else
+		{
+			Delta_CopyField( pField, from, to, timebase );
+			if( dbg >= 5 )
+			{
+				char valbuf[64];
+				Delta_DebugFieldValue( pField, to, valbuf, sizeof( valbuf ));
+				Con_DPrintf( "GSDELTA-COPY: table=%s idx=%d name='%s' bits=%d value=%s\n",
+					dt->pName, i, pField->name ? pField->name : "?", pField->bits, valbuf );
+			}
+		}
 	}
 
 	if( dbg >= 4 )
