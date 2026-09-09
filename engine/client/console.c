@@ -2301,6 +2301,13 @@ void Con_CharEvent( int key )
 	// distribute the key down event to the apropriate handler
 	if( cls.key_dest == key_console )
 	{
+		// no tilda or backtick in console is supported
+		if( key == '`' || key == '~' )
+		{
+			Con_ToggleConsole_f();
+			return;
+		}
+
 		Field_CharEvent( &con.input, key );
 		Con_InputCompletion();
 	}

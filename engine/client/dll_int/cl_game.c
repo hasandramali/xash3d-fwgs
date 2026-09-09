@@ -3038,15 +3038,14 @@ pfnIndexFromTrace
 */
 static int GAME_EXPORT pfnIndexFromTrace( struct pmtrace_s *pTrace )
 {
-#if 0 // Velaron: breaks compatibility with mods that call the function after CL_PopPMStates
-	if( pTrace->ent >= 0 && pTrace->ent < clgame.pmove->numphysent )
+	// Velaron: pTrace->ent < clgame.pmove->numphysent breaks compatibility with mods that call the function after CL_PopPMStates
+	if( pTrace->ent >= 0 && pTrace->ent < ARRAYSIZE( clgame.pmove->physents ))
 	{
 		// return cl.entities number
 		return clgame.pmove->physents[pTrace->ent].info;
 	}
+
 	return -1;
-#endif
-	return clgame.pmove->physents[pTrace->ent].info;
 }
 
 /*
@@ -4493,7 +4492,9 @@ void CL_UnloadProgs( void )
 	if( Q_stricmp( GI->gamefolder, "hlfx" ) || GI->version != 0.5f )
 		clgame.dllFuncs.pfnShutdown();
 
-	if( GI->internal_vgui_support )
+	// if vgui_support API was provided by the client library, it must be
+	// shut down before the library is unloaded, regardless of what gameinfo says
+	if( VGui_IsProvidedByClientDll( ))
 		VGui_Shutdown();
 
 	Cvar_DirectFullSet( &cl_background, "0", FCVAR_READ_ONLY );
