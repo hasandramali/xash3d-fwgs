@@ -74,7 +74,7 @@ static CVAR_DEFINE_AUTO( host_serverstate, "0", FCVAR_READ_ONLY, "displays curre
 static CVAR_DEFINE_AUTO( host_gameloaded, "0", FCVAR_READ_ONLY, "inidcates a loaded game.dll" );
 static CVAR_DEFINE_AUTO( host_clientloaded, "0", FCVAR_READ_ONLY, "inidcates a loaded client.dll" );
 CVAR_DEFINE_AUTO( host_limitlocal, "0", 0, "apply cl_cmdrate and rate to loopback connection" );
-CVAR_DEFINE( host_maxfps, "max_fps", "72", FCVAR_ARCHIVE|FCVAR_PROTECTED, "host fps upper limit" );
+CVAR_DEFINE( host_maxfps, "fps_max", "72", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "host fps upper limit" );
 CVAR_DEFINE_AUTO( fps_override, "0", FCVAR_FILTERABLE, "unlock higher framerate values, not supported" );
 static CVAR_DEFINE_AUTO( host_framerate, "0", FCVAR_FILTERABLE, "locks frame timing to this value in seconds" );
 static CVAR_DEFINE( host_sleeptime, "sleeptime", "1", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "milliseconds to sleep for each frame. higher values reduce fps accuracy" );
@@ -96,7 +96,8 @@ static const feature_message_t bugcomp_features[] =
 { BUGCOMP_PENTITYOFENTINDEX_FLAG, "pfnPEntityOfEntIndex bugfix revert", "peoei" },
 { BUGCOMP_MESSAGE_REWRITE_FACILITY_FLAG, "GoldSrc Message Rewrite Facility", "gsmrf" },
 { BUGCOMP_SPATIALIZE_SOUND_WITH_ATTN_NONE, "spatialize sounds with zero attenuation", "sp_attn_none" },
-{ BUGCOMP_GET_GAME_DIR_FULL_PATH, "Return full path in GET_GAME_DIR()", "get_game_dir_full" }
+{ BUGCOMP_GET_GAME_DIR_FULL_PATH, "Return full path in GET_GAME_DIR()", "get_game_dir_full" },
+{ BUGCOMP_SPAWNFLAG_NOT_DEATHMATCH, "Inhibit entities with \"Not in Deathmatch\" spawnflag", "sf_notdm" },
 };
 
 static const feature_message_t engine_features[] =
@@ -507,8 +508,9 @@ static double Host_CalcFPS( void )
 	}
 	else if( Host_IsSinglePlayerGame( ))
 	{
-		if( !gl_vsync.value )
-			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
+		// vsync is expected to limit the framerate, but some drivers
+		// ignore it, so never let the game run completely unlimited
+		fps = gl_vsync.value ? MAX_FPS_HARD : host_maxfps.value;
 	}
 	else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
 	{
@@ -516,12 +518,16 @@ static double Host_CalcFPS( void )
 	}
 	else
 	{
-		if( !gl_vsync.value )
-		{
-			double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
+		const double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
 
-			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
-			if( fps == 0.0 ) fps = max_fps;
+		if( gl_vsync.value )
+			fps = max_fps;
+		else
+		{
+			fps = host_maxfps.value;
+			if( fps == 0.0 )
+				fps = max_fps;
+
 			fps = bound( MIN_FPS, fps, max_fps );
 		}
 	}
@@ -632,7 +638,7 @@ static qboolean Host_FilterTime( double time )
 	oldtime = host.realtime;
 
 	// NOTE: allow only in singleplayer while demos are not active
-	if( host_framerate.value > 0.0f )
+	if( host_framerate.value > 0.0f && Host_IsSinglePlayerGame() && !CL_IsPlaybackDemo() && !CL_IsRecordDemo( ))
 		host.frametime = bound( MIN_FRAMETIME, host_framerate.value * scale, MAX_FRAMETIME );
 	else
 		host.frametime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
@@ -1039,7 +1045,7 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 		developer = DEV_NORMAL;
 
 		if( Sys_GetIntFromCmdLine( "-dev", &developer ))
-			developer = bound( DEV_NONE, developer, 9 );
+			developer = bound( DEV_NONE, developer, DEV_EXTENDED );
 	}
 
 #if XASH_ENGINE_TESTS
@@ -1155,7 +1161,7 @@ static void Host_FreeCommon( void )
 
 static void Sys_Quit_f( void )
 {
-	Sys_Quit( "command" );
+	Sys_Quit( Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "command" );
 }
 
 /*
