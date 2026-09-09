@@ -308,7 +308,10 @@ extern const char *const svc_goldsrc_strings[svc_lastmsg+1];
 #define MAX_GOLDSRC_EXTENDED_TOTAL_CMDS 62
 #define MAX_GOLDSRC_MODEL_BITS    10
 #define MAX_GOLDSRC_RESOURCE_BITS 16
-#define MAX_GOLDSRC_ENTITY_BITS   11
+#define MAX_GOLDSRC_ENTITY_BITS   13 // Svengine widened the on-wire entity index from 11 bits (stock HL protocol 48) to 13
+#define MAX_GOLDSRC_SOUND_BITS    13 // svc_sound entity field, same widening as the delta packet entity numbers
+#define MAX_GOLDSRC_EVENT_BITS    10 // Svengine event packet_index: 10 bits on the wire (Sven took a bit from HL's 11)
+#define MAX_GOLDSRC_CONSISTENCY_BITS 16 // svc_resourcelist consistency indices are 16 bits in the Sven dialect
 // #define MAX_GOLDSRC_EDICTS        BIT( MAX_ENTITY_BITS )
 #define MAX_GOLDSRC_EDICTS        ( BIT( MAX_ENTITY_BITS ) + ( MAX_CLIENTS * 15 ))
 #define LAST_GOLDSRC_EDICT        ( BIT( MAX_ENTITY_BITS ) - 1 )

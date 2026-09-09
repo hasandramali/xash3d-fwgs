@@ -304,7 +304,9 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 
 	if( delta )
 	{
-		uint oldpacket = MSG_ReadByte( msg );
+		// Svengine writes the delta sequence number in 16 bits; the clientdata
+		// path (CL_ParseClientData) already reads a WORD for PROTO_GOLDSRC.
+		uint oldpacket = MSG_ReadWord( msg );
 		oldframe = &cl.frames[oldpacket & CL_UPDATE_MASK];
 
 		if( !CL_ValidateDeltaPacket( oldpacket, oldframe ))
@@ -490,7 +492,7 @@ static void CL_ParseSoundPacketGS( sizebuf_t *msg )
 	else attn = 1.0f;
 
 	int chan = MSG_ReadUBitLong( msg, 3 );
-	int entnum = MSG_ReadUBitLong( msg, MAX_GOLDSRC_ENTITY_BITS );
+	int entnum = MSG_ReadUBitLong( msg, MAX_GOLDSRC_SOUND_BITS );
 	int sound;
 	if( FBitSet( flags, SND_GOLDSRC_LARGE_INDEX ))
 		sound = MSG_ReadWord( msg );
