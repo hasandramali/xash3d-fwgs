@@ -2128,8 +2128,8 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 				frag_offset[j] -= frag_length[i];
 		}
 
-		// is there anything left to process?
-		if( MSG_GetNumBitsLeft( msg ) <= 0 )
+		// is there anything left to process? (rehlds parity: net_message.cursize <= 16)
+		if( MSG_GetNumBytesWritten( msg ) <= 16 )
 		{
 			return false;
 		}
