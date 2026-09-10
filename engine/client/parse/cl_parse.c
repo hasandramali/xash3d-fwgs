@@ -2301,12 +2301,85 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			// Xash must consume those fixed amounts instead of reading a u16
 			// length, otherwise 133's payload low bytes are misread as a
 			// length=0 and the following svc_bad(0x00) kills the connection.
+			// Sven's own REG_USER_MSG table (binary-verified against
+			// steam-refs/sven/server.dll REG_USER_MSG=0x1011E190 call-sites,
+			// index = svc_num - svc_lastmsg). size >= 0 is FIXED payload with
+			// NO length prefix in the stream; size 0xFFFFFFFF(-1) is variable
+			// (u16 length precedes). Handled here inline so a fixed-size one is
+			// never mis-read as a bogus huge u16 length (svc78 ResetHUD 1 byte
+			// used to be misparsed as 0x4f00 == 20224 and crashed the client).
 			switch( svc_num )
 			{
-			case 137: // ClassicMode (Sven, fixed 1-byte payload, no length)
+			case 64: case 69: case 101: // SelAmmo, Health, TimeEnd
+				for( int k = 0; k < 4; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 70:                    // Damage
+				for( int k = 0; k < 18; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 66: case 68: case 72: case 78: // Geiger, FlashBat, Train, ResetHUD
+			case 80: case 81: case 86:   // CdAudio, GameTitle, GameMode
+			case 92: case 103:           // SetFOV, CbElec
+			case 117: case 121:          // SRPrimedOff, VGUIMenu
+			case 134: case 136: case 137: // ViewMode, ClassicMode (+/-1 ambiguity tail)
 				MSG_ReadByte( msg );
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 1-byte msg)\n", svc_num );
+				return;
+			case 67: case 71: case 91:   // Flashlight, Battery, HideHUD
+			case 98: case 138:           // Spectator, ToggleElem
+				for( int k = 0; k < 2; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 2-byte msg)\n", svc_num );
+				return;
+			case 113:                    // SporeTrail
+				for( int k = 0; k < 3; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 96: case 116: case 141: // AmmoX, SRPrimed, UpdateNum
+			case 133: case 88:           // InvRemove, AmmoPickup
+				for( int k = 0; k < 5; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 5-byte msg)\n", svc_num );
+				return;
+			case 143:                    // UpdateTime
+				for( int k = 0; k < 9; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 9-byte msg)\n", svc_num );
+				return;
+			case 148:                    // VoiceMask
+				for( int k = 0; k < 8; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 94:                     // ScreenShake
+				for( int k = 0; k < 6; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 6-byte msg)\n", svc_num );
+				return;
+			case 95:                     // ScreenFade
+				for( int k = 0; k < 10; k++ )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 10-byte msg)\n", svc_num );
+				return;
+			case 104: case 149:          // EndVote, ReqState (zero-size, no payload)
+				return;
+			case 119: case 112:          // ShieldRic, GargSplash
+				for( int k = 0; k < 12; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 110: case 115:          // ShkFlash, SRDetonate
+				for( int k = 0; k < 13; k++ )
+					MSG_ReadByte( msg );
+				return;
+			case 111:                    // CreateBlood
+				for( int k = 0; k < 14; k++ )
+					MSG_ReadByte( msg );
 				return;
 			case 83: // ScoreInfo (Sven registered size 20, not the HL1 9)
 				for( int k = 0; k < 20; k++ )
@@ -2314,12 +2387,13 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 20-byte msg)\n", svc_num );
 				return;
-			case 133: // InvRemove (long item_inventory index + byte onrespawn)
-			case 88:  // AmmoPickup
-				for( int k = 0; k < 5; k++ )
+			case 128:                    // Fog
+				for( int k = 0; k < 24; k++ )
 					MSG_ReadByte( msg );
-				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 5-byte msg)\n", svc_num );
+				return;
+			case 126:                    // WeatherFX
+				for( int k = 0; k < 68; k++ )
+					MSG_ReadByte( msg );
 				return;
 			default:
 				break;
