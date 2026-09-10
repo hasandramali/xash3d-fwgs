@@ -1582,6 +1582,26 @@ void NET_SendPacket( netsrc_t sock, size_t length, const void *data, netadr_t to
 
 /*
 ====================
+NET_SetSocketBuffers
+
+Increase kernel socket buffers, otherwise bursts of
+datagrams (e.g. sign-on) overflow default SO_RCVBUF and
+reliable packets get dropped before Netchan even sees them.
+====================
+*/
+static void NET_SetSocketBuffers( int net_socket )
+{
+	int bufsize = 512 * 1024; // 512KB
+
+	if( NET_IsSocketError( setsockopt( net_socket, SOL_SOCKET, SO_SNDBUF, (const char *)&bufsize, sizeof( bufsize ))))
+		Con_DPrintf( S_WARN "%s: setsockopt SO_SNDBUF: %s\n", __func__, NET_ErrorString( ));
+
+	if( NET_IsSocketError( setsockopt( net_socket, SOL_SOCKET, SO_RCVBUF, (const char *)&bufsize, sizeof( bufsize ))))
+		Con_DPrintf( S_WARN "%s: setsockopt SO_RCVBUF: %s\n", __func__, NET_ErrorString( ));
+}
+
+/*
+====================
 NET_IPSocket
 ====================
 */
@@ -1613,6 +1633,9 @@ static int NET_IPSocket( const char *net_iface, int port, int family )
 		timeout.tv_sec = timeout.tv_usec = 0;
 		setsockopt( net_socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
 	}
+
+	// make the buffers big enough for datagram bursts
+	NET_SetSocketBuffers( net_socket );
 
 	// make it broadcast capable
 	if( NET_IsSocketError( setsockopt( net_socket, SOL_SOCKET, SO_BROADCAST, (char *)&_true, sizeof( _true ))))
