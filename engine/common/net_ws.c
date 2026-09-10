@@ -34,7 +34,6 @@ GNU General Public License for more details.
 #define SPLITPACKET_MIN_SIZE      508   // RFC 791: 576(min ip packet) - 60 (ip header) - 8 (udp header)
 #define SPLITPACKET_MAX_SIZE      64000
 #define NET_MAX_FRAGMENTS         ( NET_MAX_FRAGMENT / (SPLITPACKET_MIN_SIZE - sizeof( SPLITPACKET )))
-#define NET_MAX_GOLDSRC_FRAGMENTS 5 // magic number
 
 // ff02:1
 static const uint8_t k_ipv6Bytes_LinkLocalAllNodes[16] =
@@ -79,13 +78,6 @@ typedef struct
 	int            sequence_number;
 	unsigned short packet_id;
 } SPLITPACKET;
-
-typedef struct
-{
-	int           net_id;
-	int           sequence_number;
-	unsigned char packet_id;
-} SPLITPACKETGS;
 #pragma pack(pop)
 
 typedef struct
@@ -1225,7 +1217,16 @@ receive long packet from network
 */
 static qboolean NET_GetLong( byte *pData, size_t size, size_t *outSize, size_t splitsize, connprotocol_t proto )
 {
-	const size_t header_size = proto == PROTO_GOLDSRC ? sizeof( SPLITPACKETGS ) : sizeof( SPLITPACKET );
+	// SC-proto: rehlds Sven and real Sven Co-op servers always split with the
+	// byte-packed 10-byte header (fragment count in the low byte of a 16-bit
+	// packet_id, fragment number in the high byte), regardless of the protocol
+	// negotiated. The stock Half-Life nibble layout is not supported anymore.
+	const size_t header_size = sizeof( SPLITPACKET );
+	SPLITPACKET *pHeader = (SPLITPACKET *)pData;
+	int sequence_number, packet_count, packet_number, max_splits;
+	unsigned short packet_id;
+
+	(void)proto; // Sven header layout does not depend on the negotiated protocol
 
 	if( splitsize < header_size )
 		return false;
@@ -1236,30 +1237,12 @@ static qboolean NET_GetLong( byte *pData, size_t size, size_t *outSize, size_t s
 		return false;
 	}
 
-	int sequence_number, packet_count, packet_number, max_splits;
-	unsigned short packet_id;
-	if( proto == PROTO_GOLDSRC )
-	{
-		SPLITPACKETGS *pHeader = (SPLITPACKETGS *)pData;
+	sequence_number = pHeader->sequence_number;
+	packet_id = pHeader->packet_id;
+	packet_count = ( packet_id & 0xFF );
+	packet_number = ( packet_id >> 8 );
 
-		sequence_number = pHeader->sequence_number;
-		packet_id = pHeader->packet_id;
-		packet_count = ( packet_id & 0xF );
-		packet_number = ( packet_id >> 4 );
-
-		max_splits = NET_MAX_GOLDSRC_FRAGMENTS;
-	}
-	else
-	{
-		SPLITPACKET *pHeader = (SPLITPACKET *)pData;
-
-		sequence_number = pHeader->sequence_number;
-		packet_id = pHeader->packet_id;
-		packet_count = ( packet_id & 0xFF );
-		packet_number = ( packet_id >> 8 );
-
-		max_splits = ARRAYSIZE( net.split_flags );
-	}
+	max_splits = ARRAYSIZE( net.split_flags );
 
 	if( packet_number < 0 || packet_count <= 0 || packet_number >= max_splits || packet_count > max_splits || packet_number >= packet_count )
 	{
