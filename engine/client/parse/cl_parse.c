@@ -1130,23 +1130,36 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 		Delta_ReadGSFields( msg, DT_CLIENTDATA_T, from_cd, to_cd, cl.mtime[0] );
 	else MSG_ReadClientData( msg, from_cd, to_cd, cl.mtime[0] );
 
-	for( i = 0; i < ( proto == PROTO_GOLDSRC ? 256 : MAX_LOCAL_WEAPONS ); i++ )
+	// Sven Co-op enumerates all 256 weapon slots (8-bit index) and closes the
+	// section with a clear present bit; consume that trailing bit as well, else
+	// the byte holding it is read as a command (0x00 -> svc_bad). GoldSrc slots
+	// above MAX_LOCAL_WEAPONS are drained into a scratch slot to keep the bit
+	// cursor aligned without overflowing the frame's weapon array.
+	if( proto == PROTO_GOLDSRC )
 	{
-		// check for end of weapondata (and clientdata_t message)
-		if( !MSG_ReadOneBit( msg )) break;
+		for( i = 0; ; i++ )
+		{
+			if( !MSG_ReadOneBit( msg )) break;
 
-		// read the weapon idx
-		idx = MSG_ReadUBitLong( msg, proto == PROTO_GOLDSRC ? 8 : MAX_WEAPON_BITS );
+			idx = MSG_ReadUBitLong( msg, 8 );
 
-		// GoldSrc weapon slots are 8-bit (up to 256) but the local
-		// weapon_data_t arrays only have MAX_LOCAL_WEAPONS entries.
-		// Consume the delta into a scratch slot to keep the bit cursor
-		// aligned without overflowing the frame's weapon array.
-		if( proto == PROTO_GOLDSRC && idx >= MAX_LOCAL_WEAPONS )
-			Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &nullwd[0], &nullwd[0], cl.mtime[0] );
-		else if( proto == PROTO_GOLDSRC )
-			Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
-		else MSG_ReadWeaponData( msg, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
+			if( idx < MAX_LOCAL_WEAPONS )
+				Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
+			else Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &nullwd[0], &nullwd[0], cl.mtime[0] );
+		}
+	}
+	else
+	{
+		for( i = 0; i < MAX_LOCAL_WEAPONS; i++ )
+		{
+			// check for end of weapondata (and clientdata_t message)
+			if( !MSG_ReadOneBit( msg )) break;
+
+			// read the weapon idx
+			idx = MSG_ReadUBitLong( msg, MAX_WEAPON_BITS );
+
+			MSG_ReadWeaponData( msg, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
+		}
 	}
 
 	// make a local copy of physinfo
