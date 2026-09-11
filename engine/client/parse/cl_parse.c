@@ -2412,16 +2412,32 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				break;
 			}
 
-			// variable-size (or unknown) unregistered user message: a size
-			// prefix precedes the payload (u16 for Sven, u8 otherwise), eat it.
+			// variable-size (or unknown) unregistered user message:
+			//   - Sven registered variable (-1) msgs (CustWeapon 77, WeapPickup
+			//     89, ServerName 122, ClServerInfo 147) carry a u16 length.
+			//   - Observed Sven engine "consume-the-rest" msgs (150 @bit64 + 407
+			//     bytes, 192 @bit3328 + 376 bytes in buffer.dat) carry NO length
+			//     prefix -- the payload runs to the next svc / end of message.
+			//     Reading a "size" there swallows payload bytes (0x0e 0xe8 ==>
+			//     59406) and Host_Errors the client.
+			// Try the length prefix first; a size that cannot fit the remaining
+			// bytes means the prefix is absent -> consume the remainder instead.
 			int skipSize = ( Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
 				? MSG_ReadWord( msg ) : MSG_ReadByte( msg );
-			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH )
-				Host_Error( "%s: unregistered msg %d bogus size %d\n", __func__, svc_num, skipSize );
-			while( skipSize-- > 0 )
-				MSG_ReadByte( msg );
-			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-				Con_Printf( "USRMSG-SKIP: svc_num=%d (unregistered GoldSrc msg skipped)\n", svc_num );
+			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH || skipSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
+			{
+				Con_Printf( S_WARN "%s: unregistered msg %d has no size prefix: skipping to end of message\n", __func__, svc_num );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (size-less GoldSrc msg, consumed to end)\n", svc_num );
+				MSG_SeekToBit( msg, 0, SEEK_END );
+			}
+			else
+			{
+				while( skipSize-- > 0 )
+					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (unregistered GoldSrc msg skipped)\n", svc_num );
+			}
 			return;
 		}
 		Host_Error( "%s: illegible server message %d\n", __func__, svc_num );
