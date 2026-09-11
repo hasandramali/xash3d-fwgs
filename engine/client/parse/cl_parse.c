@@ -2341,7 +2341,13 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 1-byte msg)\n", svc_num );
 				return;
 			case 67: case 71: case 91:   // Flashlight, Battery, HideHUD
-			case 98: case 138:           // Spectator, ToggleElem
+			case 98:                     // Spectator (ToggleElem 138 is VARIABLE on
+			                             // live Sven 5.0: u16 len + payload pairs like
+			                             // weapon records [u16 id][classname z]; a captured
+			                             // server.dll sample registered it fixed-2, but the
+			                             // live wire (buffer.dat 138 @834: 8a 0d 00 11 00
+			                             // "weapon_uzi\0") proves u16-length. So keep it out
+			                             // of this fixed-2 bucket -> variable path below.)
 				for( int k = 0; k < 2; k++ )
 					MSG_ReadByte( msg );
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
