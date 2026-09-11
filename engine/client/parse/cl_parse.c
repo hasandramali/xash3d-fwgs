@@ -2370,9 +2370,15 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 9-byte msg)\n", svc_num );
 				return;
-			case 148:                    // VoiceMask
+			case 148: case 149:          // VoiceMask (Sven 5.0 live server registers it at
+			                             // 149 on the wire, 148 in the server.dll sample; both
+			                             // are the 64-bit voice mask, wire-verified against
+			                             // buffer.dat: cmd 0x95 followed by 01 00 00 00 00
+			                             // 00 00 00 then svc_roomtype(37) + u16 room)
 				for( int k = 0; k < 8; k++ )
 					MSG_ReadByte( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven VoiceMask fixed 8-byte msg)\n", svc_num );
 				return;
 			case 94:                     // ScreenShake
 				for( int k = 0; k < 6; k++ )
@@ -2386,7 +2392,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 10-byte msg)\n", svc_num );
 				return;
-			case 104: case 149:          // EndVote, ReqState (zero-size, no payload)
+			case 104:                    // EndVote (zero-size, no payload)
 				return;
 			case 119: case 112:          // ShieldRic, GargSplash
 				for( int k = 0; k < 12; k++ )
@@ -2428,6 +2434,22 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			//     59406) and Host_Errors the client.
 			// Try the length prefix first; a size that cannot fit the remaining
 			// bytes means the prefix is absent -> consume the remainder instead.
+			// HEX TRACE: record the raw leading payload bytes of any message the
+			// fixed-size switch did not know, so an unknown usermsg stays
+			// identifiable in the log (matches svc_pay dump from cl_parse_gs.c).
+			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 2 )
+			{
+				char hexbuf[65];
+				int avail = MSG_GetNumBitsLeft( msg ) >> 3;
+				int show = Q_min( avail, 16 );
+				byte pb[16];
+				MSG_ReadBytes( msg, pb, sizeof( pb ), show );
+				MSG_SeekToBit( msg, ( MSG_GetNumBitsRead( msg ) - ( show << 3 )), SEEK_SET );
+				Q_snprintf( hexbuf, sizeof( hexbuf ), "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+					pb[0], pb[1], pb[2], pb[3], pb[4], pb[5], pb[6], pb[7],
+					pb[8], pb[9], pb[10], pb[11], pb[12], pb[13], pb[14], pb[15] );
+				Con_Printf( "USRMSG-HEX: svc_num=%d payload[0..%d]=%s\n", svc_num, show - 1, hexbuf );
+			}
 			int skipSize = ( Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
 				? MSG_ReadWord( msg ) : MSG_ReadByte( msg );
 			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH || skipSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
