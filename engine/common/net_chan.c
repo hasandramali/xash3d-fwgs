@@ -1905,12 +1905,15 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 
 	if( net_showpackets.value && net_showpackets.value != 2.0f )
 	{
-		Con_Printf( " %s --> sz=%i seq=%i ack=%i rel=%i tm=%f\n"
+		// unmasked (30-bit, matching the peer's normalized view): seq/ack are
+		// the exact wire fields the server's s <-- print will show
+		Con_Printf( " %s --> sz=%i seq=%u ack=%u rel=%i frag=%i tm=%f\n"
 			, ns_strings[chan->sock]
 			, MSG_GetNumBytesWritten( &send )
-			, ( chan->outgoing_sequence - 1 ) & 63
-			, chan->incoming_sequence & 63
+			, ( chan->outgoing_sequence - 1 ) & 0x3FFFFFFF
+			, chan->incoming_sequence
 			, send_reliable ? 1 : 0
+			, send_reliable_fragment ? 1 : 0
 			, (float)host.realtime );
 	}
 }
