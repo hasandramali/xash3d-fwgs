@@ -1499,6 +1499,45 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 	SOCKET		net_socket = 0;
 	netadrtype_t type = NET_NetadrType( &to );
 
+	// TXPROBE: prove whether client datagrams actually reach the local wire
+	// and from which source port (catches silent socket rebinds / ring drops)
+	static int txprobe_port = 0;
+	if( net_showpackets.value == 3.0f && sock == NS_CLIENT )
+	{
+		int srcport = 0;
+		const char *state = "UNKNOWN";
+
+		if( !net.initialized || type == NA_LOOPBACK )
+		{
+			state = "LOOPBACK-RING";
+		}
+		else if( type == NA_IP || type == NA_BROADCAST )
+		{
+			if( !NET_IsSocketValid( net.ip_sockets[sock] ))
+			{
+				state = "INVALID-SOCKET";
+			}
+			else
+			{
+				struct sockaddr_storage laddr = { 0 };
+				WSAsize_t llen = sizeof( laddr );
+
+				state = "UDP";
+
+				if( !NET_IsSocketError( getsockname( net.ip_sockets[sock], (struct sockaddr *)&laddr, &llen )))
+					srcport = ntohs( ((struct sockaddr_in *)&laddr )->sin_port );
+
+				if( txprobe_port && srcport != txprobe_port )
+					Con_Printf( "TXPROBE PORT-CHANGED %u -> %u\n", txprobe_port, srcport );
+				if( srcport )
+					txprobe_port = srcport;
+			}
+		}
+
+		Con_Printf( "TXPROBE NS_CLIENT state=%s type=%d remote=%s srcport=%d len=%u\n",
+			state, type, NET_AdrToString( to ), srcport, (unsigned)length );
+	}
+
 	if( !net.initialized || type == NA_LOOPBACK )
 	{
 		NET_SendLoopPacket( sock, length, data, to );
@@ -1525,13 +1564,20 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 
 	int ret = NET_SendLong( sock, net_socket, data, length, 0, &addr, NET_SockAddrLen( &addr ), splitsize );
 
+	if( net_showpackets.value == 3.0f && sock == NS_CLIENT )
+		Con_Printf( "TXPROBE sendto ret=%d (expected %u)\n", ret, (unsigned)length );
+
 	if( NET_IsSocketError( ret ))
 	{
 		int err = WSAGetLastError();
 
 		// WSAEWOULDBLOCK is silent
 		if( err == WSAEWOULDBLOCK )
+		{
+			if( net_showpackets.value == 3.0f && sock == NS_CLIENT )
+				Con_Printf( "TXPROBE WSAEWOULDBLOCK (send postponed)\n" );
 			return;
+		}
 
 		// some PPP links don't allow broadcasts
 		if( err == WSAEADDRNOTAVAIL && ( type == NA_BROADCAST || type == NA_MULTICAST_IP6 ))
