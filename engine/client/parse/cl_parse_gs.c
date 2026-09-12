@@ -593,6 +593,22 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 
 		cmd = MSG_ReadServerCmd( msg );
 
+		// Sven Co-op dedicated servers pad the reliable stream with 0x00 bytes
+		// directly after fixed-size user messages (buffer.dat shows the exact
+		// pattern twice: cmd 148 VoiceMask, 8-byte mask, then 00 00 before the
+		// next payload). Under the GoldSrc wire format 0x00 is svc_bad, which
+		// Host_Error()s the client mid-signon. The Sven client engine tolerates
+		// this padding, so skip the stray byte and keep parsing instead of
+		// aborting. Harmless on vanilla GoldSrc too: mid-message 0x00 is never a
+		// valid command, so consuming it is strictly more robust (the tail is
+		// still guarded by the overflow check and the sizeof-left sanity skip).
+		if( cmd == svc_bad && cls.net_protocol == PROTO_GOLDSRC )
+		{
+			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+				Con_Printf( "SVC-PAD: skipping svc_bad(0x00) pad byte at offset %d (Sven stream padding)\n", bufStart );
+			continue;
+		}
+
 		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
 		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 			Con_DPrintf( "%s: svc cmd=%d (%s) signon=%d state=%d msgbits=%d byte=%d bit=%d\n", __func__, cmd, CL_MsgInfo( cmd ), cls.signon, cls.state, MSG_GetNumBitsLeft( msg ), (int)bufStart, MSG_GetNumBitsRead( msg ) );
