@@ -1565,6 +1565,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	byte	send_buf[NET_MAX_MESSAGE];
 	qboolean	send_reliable_fragment;
 	qboolean	send_reliable;
+	qboolean	reliable_fresh = false;
 	sizebuf_t	send;
 	int	i;
 	float	fRate;
@@ -1658,6 +1659,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 			memcpy( chan->reliable_buf, chan->message_buf, MSG_GetNumBytesWritten( &chan->message ));
 			chan->reliable_length = MSG_GetNumBitsWritten( &chan->message );
 			MSG_Clear( &chan->message );
+			reliable_fresh = true;
 
 			// if we send fragments, this is where they'll start
 			for( i = 0; i < MAX_STREAMS; i++ )
@@ -1721,6 +1723,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 				MSG_WriteBits( &temp, MSG_GetData( &pbuf->frag_message ), MSG_GetNumBitsWritten( &pbuf->frag_message ));
 				chan->reliable_length += MSG_GetNumBitsWritten( &pbuf->frag_message );
 				chan->frag_length[i] = MSG_GetNumBitsWritten( &pbuf->frag_message );
+				reliable_fresh = true;
 
 				// unlink pbuf
 				Netchan_UnlinkFragment( pbuf, &chan->fragbufs[i] );
@@ -1732,6 +1735,17 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 					chan->frag_startpos[j] += chan->frag_length[i];
 			}
 		}
+	}
+
+	// TEMP DEBUG: a pending reliable queue that does NOT get (re)sent this
+	// packet is the lock signature we are chasing
+	if( net_showpackets.value == 3.0f && chan->sock == NS_CLIENT && chan->gs_netchan
+		&& chan->reliable_length > 0 && !send_reliable )
+	{
+		Con_Printf( "%s: TXDROP rlen=%d sendrel=%d iack=%u lastrel=%u irack=%u relseq=%u seq=%u\n",
+			__func__, chan->reliable_length, send_reliable,
+			chan->incoming_acknowledged, chan->last_reliable_sequence,
+			chan->incoming_reliable_acknowledged, chan->reliable_sequence, chan->outgoing_sequence );
 	}
 
 	memset( send_buf, 0, sizeof( send_buf ));
@@ -1819,7 +1833,10 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	if( send_reliable )
 	{
 		MSG_WriteBits( &send, chan->reliable_buf, chan->reliable_length );
-		chan->last_reliable_sequence = chan->outgoing_sequence - 1;
+		// anchor the confirmation gate to the FIRST transmission of this
+		// reliable payload; retransmits must not race the peer's acknowledgements
+		if( reliable_fresh )
+			chan->last_reliable_sequence = chan->outgoing_sequence - 1;
 	}
 
 	if( length )
@@ -2049,6 +2066,16 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 	net_drop = sequence - ( chan->incoming_sequence + 1 );
 	if( net_drop > 0 && net_showdrop.value )
 		Con_Printf( "%s:dropped %i packets at %i\n", NET_AdrToString( chan->remote_address ), net_drop, sequence );
+
+	// TEMP DEBUG: capture ack-gate tuple while the outgoing reliable queue is
+	// pending; reveals the exact gate that fails to clear reliable_length
+	if( net_showpackets.value == 3.0f && chan->reliable_length > 0
+		&& chan->sock == NS_CLIENT && chan->gs_netchan )
+	{
+		int will_clear = ( reliable_ack == (uint)chan->reliable_sequence ) && ( sequence_ack >= (uint)chan->last_reliable_sequence );
+		Con_Printf( "%s: ACKGATE relack=%u relseq=%u seqack=%u lastrel=%u rlen=%d clr=%d\n",
+			__func__, reliable_ack, chan->reliable_sequence, sequence_ack, chan->last_reliable_sequence, chan->reliable_length, will_clear );
+	}
 
 	// if the current outgoing reliable message has been acknowledged
 	// clear the buffer to make way for the next
