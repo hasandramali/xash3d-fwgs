@@ -1527,7 +1527,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 	// consumed and where each field landed in the bitstream. Together with
 	// the table dump on parse error this makes table/layout mismatches
 	// visible in a single engine.log.
-	if( dbg >= 4 )
+	if( dbg >= 6 )
 	{
 		char flags[8 * 3 + 1];
 		int nflags = Q_min( c, (int)sizeof( bits ));
@@ -1546,7 +1546,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 		if( FBitSet( bits[b], n ))
 		{
 			Delta_ReadField_( msg, pField, to, timebase );
-			if( dbg >= 4 )
+			if( dbg >= 6 )
 			{
 				char valbuf[64];
 				Delta_DebugFieldValue( pField, to, valbuf, sizeof( valbuf ));
@@ -1558,7 +1558,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 		else
 		{
 			Delta_CopyField( pField, from, to, timebase );
-			if( dbg >= 5 )
+			if( dbg >= 6 )
 			{
 				char valbuf[64];
 				Delta_DebugFieldValue( pField, to, valbuf, sizeof( valbuf ));
@@ -1568,7 +1568,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 		}
 	}
 
-	if( dbg >= 4 )
+	if( dbg >= 6 )
 		Con_DPrintf( "GSDELTA-READ: table=%s done endbit=%d total_bits=%d\n",
 			dt->pName, MSG_GetNumBitsRead( msg ), MSG_GetNumBitsRead( msg ) - entryBit );
 }

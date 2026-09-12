@@ -3158,21 +3158,21 @@ static void CL_ReadNetMessage( void )
 			CL_ResetFrame( &cl.frames[cls.netchan.incoming_sequence & CL_UPDATE_MASK] );
 		}
 
-		CL_ParseNetMessage( &net_message, parsefn );
-
-		// STEAM/SIGNON ACK: a whole burst of signon packets is drained inside
-		// this single loop and CL_WritePacket won't run until the next
-		// Host_ClientFrame. If parsing the baseline takes a while (big GoldSrc
-		// baseline, slow device) the server's reliable window sits unacked and
-		// overflows into "Reliable channel overflowed". Acknowledge in-band so
-		// the server can keep streaming. Matches the pre-signon empty ack path
-		// CL_WritePacket already uses every frame (cl_main.c:903).
+		// STEAM/SIGNON ACK: acknowledge on RECEIPT right after Netchan_Process,
+		// before parsing. Netchan_Process already bumped incoming_sequence to
+		// "received" — the signal the server's reliable window waits on. Parsing
+		// a big GoldSrc baseline can take tens/hundreds of ms on a slow device;
+		// acking after the parse lets the server's unacked reliable data
+		// (ReHLDS/Sven MAX_MSGLEN ~3990B) fill with ~1500B spawn messages and
+		// overflow into "Reliable channel overflowed".
 		if( cls.net_protocol == PROTO_GOLDSRC && cls.state >= ca_connected && cls.state < ca_active )
 		{
 			if( cl_goldsrc_debug.value >= 2 )
 				Con_DPrintf( "%s: in-band signon ack (unacked reliable=%d)\n", __func__, cls.netchan.incoming_reliable_sequence );
 			Netchan_TransmitBits( &cls.netchan, 0, "" );
 		}
+
+		CL_ParseNetMessage( &net_message, parsefn );
 	}
 
 	// build list of all solid entities per next frame (exclude clients)
