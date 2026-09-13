@@ -266,6 +266,8 @@ typedef struct
 	resource_t	resourcesneeded;
 	resource_t	resourcelist[MAX_RESOURCES];
 	int		num_resources;
+	int		num_sent_resources;
+	byte		sent_resources_hash[16];
 
 	short		sound_index[MAX_SOUNDS];
 	short		decal_index[MAX_DECALS];
@@ -716,6 +718,7 @@ extern convar_t hud_fontrender;
 extern convar_t	hud_scale;
 extern convar_t hud_scale_minimal_width;
 extern convar_t	r_showtextures;
+extern convar_t	r_showtextures_zoom;
 extern convar_t	cl_bmodelinterp;
 extern convar_t	cl_lw;		// local weapons
 extern convar_t	cl_charset;
@@ -748,8 +751,10 @@ extern client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS];
 // cl_cmds.c
 //
 void CL_Quit_f( void );
+void CL_RequestQuit( const char *reason );
 void CL_GenericShot_f( void );
-void CL_PlayCDTrack_f( void );
+void CL_CD_f( void );
+void CL_MP3_f( void );
 void CL_LevelShot_f( void );
 void CL_SetSky_f( void );
 void SCR_Viewpos_f( void );
@@ -1207,6 +1212,8 @@ char **GAME_EXPORT CL_GetFilesList( const char *pattern, int *numFiles, int game
 //
 qboolean Mobile_Init( void );
 void Mobile_Shutdown( void );
+void Mobile_ShakeVibrate( float amplitude, float frequency, float time );
+void Mobile_StopVibration( void );
 
 //
 // cl_securedstub.c

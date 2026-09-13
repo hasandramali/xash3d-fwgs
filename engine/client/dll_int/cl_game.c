@@ -2780,6 +2780,7 @@ static void GAME_EXPORT pfnCalcShake( void )
 			shake->time = 0;
 			shake->applied_angle = 0;
 			VectorClear( shake->applied_offset );
+			Mobile_StopVibration();
 		}
 
 		return;
@@ -2801,6 +2802,9 @@ static void GAME_EXPORT pfnCalcShake( void )
 	// get initial fraction and frequency values over the duration
 	float fraction = ((float)cl.time - shake->time ) / shake->duration;
 	float freq = fraction != 0.0f ? ( shake->frequency / fraction ) * shake->frequency : 0.0f;
+
+	// keep motors running slightly past the frame so they stop by themselves if the shake is never updated again
+	Mobile_ShakeVibrate( shake->amplitude * fraction * fraction, shake->frequency, 100.0f );
 
 	// quickly approach zero but apply time over sine wave
 	fraction *= fraction * sin( cl.time * freq );
@@ -3038,15 +3042,14 @@ pfnIndexFromTrace
 */
 static int GAME_EXPORT pfnIndexFromTrace( struct pmtrace_s *pTrace )
 {
-#if 0 // Velaron: breaks compatibility with mods that call the function after CL_PopPMStates
-	if( pTrace->ent >= 0 && pTrace->ent < clgame.pmove->numphysent )
+	// Velaron: pTrace->ent < clgame.pmove->numphysent breaks compatibility with mods that call the function after CL_PopPMStates
+	if( pTrace->ent >= 0 && pTrace->ent < ARRAYSIZE( clgame.pmove->physents ))
 	{
 		// return cl.entities number
 		return clgame.pmove->physents[pTrace->ent].info;
 	}
+
 	return -1;
-#endif
-	return clgame.pmove->physents[pTrace->ent].info;
 }
 
 /*
@@ -4493,7 +4496,9 @@ void CL_UnloadProgs( void )
 	if( Q_stricmp( GI->gamefolder, "hlfx" ) || GI->version != 0.5f )
 		clgame.dllFuncs.pfnShutdown();
 
-	if( GI->internal_vgui_support )
+	// if vgui_support API was provided by the client library, it must be
+	// shut down before the library is unloaded, regardless of what gameinfo says
+	if( VGui_IsProvidedByClientDll( ))
 		VGui_Shutdown();
 
 	Cvar_DirectFullSet( &cl_background, "0", FCVAR_READ_ONLY );
