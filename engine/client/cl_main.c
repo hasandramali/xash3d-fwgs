@@ -292,6 +292,9 @@ static void CL_UpdateLogo( void )
 			Con_Printf( "Unable to create custom decal\n" );
 	}
 
+	if( cl.num_resources == cl.num_sent_resources && !memcmp( cl.sent_resources_hash, cl.resourcelist[0].rgucMD5_hash, sizeof( cl.sent_resources_hash )))
+		return;
+
 	CL_SendResourceList( cl.resourcelist, cl.num_resources );
 }
 
@@ -652,6 +655,10 @@ static qboolean CL_ProcessShowTexturesCmds( usercmd_t *cmd )
 		Cvar_SetValue( "r_showtextures", r_showtextures.value + 1 );
 	if( released & ( IN_LEFT|IN_MOVELEFT ))
 		Cvar_SetValue( "r_showtextures", Q_max( 1, r_showtextures.value - 1 ));
+	if( released & IN_FORWARD )
+		Cvar_SetValue( "r_showtextures_zoom", Q_min( SHOWTEXTURES_ZOOM_MAX, r_showtextures_zoom.value + SHOWTEXTURES_ZOOM_STEP ));
+	if( released & IN_BACK )
+		Cvar_SetValue( "r_showtextures_zoom", Q_max( SHOWTEXTURES_ZOOM_MIN, r_showtextures_zoom.value - SHOWTEXTURES_ZOOM_STEP ));
 	oldbuttons = cmd->buttons;
 
 	return true;
