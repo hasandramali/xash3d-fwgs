@@ -74,7 +74,7 @@ static CVAR_DEFINE_AUTO( host_serverstate, "0", FCVAR_READ_ONLY, "displays curre
 static CVAR_DEFINE_AUTO( host_gameloaded, "0", FCVAR_READ_ONLY, "inidcates a loaded game.dll" );
 static CVAR_DEFINE_AUTO( host_clientloaded, "0", FCVAR_READ_ONLY, "inidcates a loaded client.dll" );
 CVAR_DEFINE_AUTO( host_limitlocal, "0", 0, "apply cl_cmdrate and rate to loopback connection" );
-CVAR_DEFINE( host_maxfps, "fps_max", "72", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "host fps upper limit" );
+CVAR_DEFINE( host_maxfps, "max_fps", "72", FCVAR_ARCHIVE|FCVAR_PROTECTED, "host fps upper limit" );
 CVAR_DEFINE_AUTO( fps_override, "0", FCVAR_FILTERABLE, "unlock higher framerate values, not supported" );
 static CVAR_DEFINE_AUTO( host_framerate, "0", FCVAR_FILTERABLE, "locks frame timing to this value in seconds" );
 static CVAR_DEFINE( host_sleeptime, "sleeptime", "1", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "milliseconds to sleep for each frame. higher values reduce fps accuracy" );
@@ -98,7 +98,6 @@ static const feature_message_t bugcomp_features[] =
 { BUGCOMP_SPATIALIZE_SOUND_WITH_ATTN_NONE, "spatialize sounds with zero attenuation", "sp_attn_none" },
 { BUGCOMP_GET_GAME_DIR_FULL_PATH, "Return full path in GET_GAME_DIR()", "get_game_dir_full" },
 { BUGCOMP_SPAWNFLAG_NOT_DEATHMATCH, "Inhibit entities with \"Not in Deathmatch\" spawnflag", "sf_notdm" },
-{ BUGCOMP_ALWAYS_ENABLE_TEXT_INPUT, "Always enable text input during gameplay", "always_textinput" },
 };
 
 static const feature_message_t engine_features[] =
@@ -510,9 +509,8 @@ static double Host_CalcFPS( void )
 	}
 	else if( Host_IsSinglePlayerGame( ))
 	{
-		// vsync is expected to limit the framerate, but some drivers
-		// ignore it, so never let the game run completely unlimited
-		fps = gl_vsync.value ? MAX_FPS_HARD : host_maxfps.value;
+		if( !gl_vsync.value )
+			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
 	}
 	else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
 	{
@@ -520,16 +518,12 @@ static double Host_CalcFPS( void )
 	}
 	else
 	{
-		const double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
-
-		if( gl_vsync.value )
-			fps = max_fps;
-		else
+		if( !gl_vsync.value )
 		{
-			fps = host_maxfps.value;
-			if( fps == 0.0 )
-				fps = max_fps;
+			double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
 
+			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
+			if( fps == 0.0 ) fps = max_fps;
 			fps = bound( MIN_FPS, fps, max_fps );
 		}
 	}
@@ -641,7 +635,6 @@ static qboolean Host_FilterTime( double time )
 
 	// NOTE: allow only in singleplayer while demos are not active
 	if( host_framerate.value > 0.0f && Host_IsSinglePlayerGame() && !CL_IsPlaybackDemo() && !CL_IsRecordDemo( ))
-		// dont bound host framerate here, as it makes sped-up time progression significantly slower than Goldsrc. This is used in some mods like CoF to skip cinematics faster (for more context, see https://github.com/FWGS/xash3d-fwgs/issues/2706)
 		host.frametime = host_framerate.value * scale;
 	else
 		host.frametime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
@@ -697,7 +690,8 @@ void GAME_EXPORT Host_Error( const char *error, ... )
 
 	if( host.framecount < 3 )
 	{
-		Sys_Error( "%sInit: %s", __func__, hosterror1 );
+		Con_Printf( S_ERROR "%sInit: %s", __func__, hosterror1 );
+		Host_AbortCurrentFrame();
 		return;
 	}
 
@@ -1047,7 +1041,7 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 		developer = DEV_NORMAL;
 
 		if( Sys_GetIntFromCmdLine( "-dev", &developer ))
-			developer = bound( DEV_NONE, developer, DEV_EXTENDED );
+			developer = bound( DEV_NONE, developer, 9 );
 	}
 
 #if XASH_ENGINE_TESTS

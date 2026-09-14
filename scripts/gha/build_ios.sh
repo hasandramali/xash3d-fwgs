@@ -8,11 +8,32 @@ cd "$GITHUB_WORKSPACE" || die
 
 cp -vr /Library/Frameworks/SDL2.framework ./build
 
+mkdir -p build/ios/libs
+LIBSDIR=$(realpath build/ios/libs)
+
+# Build valve from local hlsdk submodule
 pushd hlsdk || die
-mkdir -p ../build/ios/libs || die
-cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_INSTALL_PREFIX=$(realpath ../build/ios/libs) -DCMAKE_BUILD_TYPE=Debug -B build -S .
+cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_INSTALL_PREFIX="$LIBSDIR" -DCMAKE_BUILD_TYPE=Debug -B build -S .
 cmake --build build --target install || die
 popd || die
+
+# Rename valve dylibs to arch suffix (engine expects _arm64)
+find "$LIBSDIR" -name "*.dylib" -type f | while read f; do
+    dir=$(dirname "$f")
+    base=$(basename "$f" .dylib)
+    if [[ "$base" != *_arm64 ]] && [[ "$base" != *_x86* ]] && [[ "$base" != *_i386 ]]; then
+        mv "$f" "$dir/${base}_arm64.dylib"
+    fi
+done
+
+# Build CS16 client
+bash scripts/ios/buildcs16.sh || echo "Warning: cs16 build failed, continuing"
+
+# Build bot10 (goes to valve/dlls)
+bash scripts/ios/buildhlsdk.sh bot10 valve || echo "Warning: bot10 build failed, continuing"
+
+# Build opfor (goes to gearbox)
+bash scripts/ios/buildhlsdk.sh opfor gearbox || echo "Warning: opfor build failed, continuing"
 
 ./scripts/ios/createipa.sh
 

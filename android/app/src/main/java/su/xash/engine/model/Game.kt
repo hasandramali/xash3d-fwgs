@@ -6,19 +6,23 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.view.LayoutInflater
+import android.widget.TextView
 import androidx.core.net.toUri
+import androidx.preference.PreferenceManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import su.xash.engine.R
 import su.xash.engine.XashActivity
-import su.xash.engine.util.showDownloadProgressDialog
 import java.io.File
 import java.io.FileInputStream
 
-class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
+
+class Game(val ctx: Context, val basedir: File) {
 	private var iconName = "game.ico"
 	var title = "Unknown Game"
 	var icon: Bitmap? = null
@@ -28,17 +32,18 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 		"hl_urbicide", "induction", "redempt", "secret",
 		"sewer_beta", "tot", "valve", "vendetta")
 
-	// a1ba: follow the behavior of Xash3D's game_launch.
-	// for hl mods we put `valve` as game directory
-	// for any other game that's not hl this string must be replaced with your
-	// main game directory
-	// mods always use -game command line parameter
 	var defaultGameDir = "valve"
 
 	private val pref = ctx.getSharedPreferences(basedir.name, Context.MODE_PRIVATE)
 
 	init {
-		parseGameInfo(gameInfoFile)
+		val gameInfo = File(basedir, "gameinfo.txt")
+		if (gameInfo.exists()) {
+			parseGameInfo(gameInfo)
+		} else {
+			val libListGam = File(basedir, "liblist.gam")
+			if (libListGam.exists()) parseGameInfo(libListGam)
+		}
 
 		val iconFile = File(basedir, iconName)
 		if (iconFile.exists()) {
@@ -64,7 +69,8 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 			if (packageNames.contains("su.xash.engine")) {
 				commandLineArgs += "-dll @hl "
 			} else if (packageNames.contains("su.xash.cs16client")) {
-				if (pref.getBoolean("enable_yapb_bots", true)) {
+				val appPref = PreferenceManager.getDefaultSharedPreferences(ctx)
+				if (appPref.getBoolean("enable_yapb_bots", true)) {
 					commandLineArgs += "-dll @yapb "
 				}
 				externalGame = true
@@ -112,48 +118,33 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 		}
 
 		if (packageNames == null) {
-			// Unknown game — try to use downloaded libraries from hlsdk-mega-build
-			val downloader = GameLibDownloader(ctx)
-			val args = commandLineArgs
+			val appPref = PreferenceManager.getDefaultSharedPreferences(ctx)
+			val downloaderEnabled = appPref.getBoolean("enable_downloader", false)
 
-			if (downloader.isDownloaded(basedir.name)) {
-				downloader.logExistingLibs(basedir.name)
-				launchEngine(ctx, args)
+			if (downloaderEnabled) {
+				val downloader = GameLibDownloader(ctx)
+				if (downloader.isDownloaded(basedir.name)) {
+					downloader.logExistingLibs(basedir.name)
+					launchEngine(ctx, commandLineArgs)
+					return
+				}
+
+				val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+				scope.launch {
+					when (val r = downloader.lookupBuild(basedir.name)) {
+						is GameLibDownloader.Lookup.Available -> showDownloadDialog(ctx, downloader, commandLineArgs)
+						is GameLibDownloader.Lookup.NotInManifest -> launchEngine(ctx, commandLineArgs)
+						is GameLibDownloader.Lookup.Error -> showManifestErrorDialog(ctx, commandLineArgs, r.cause)
+					}
+				}
 				return
 			}
 
-			val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-			scope.launch {
-				when (val r = downloader.lookupBuild(basedir.name)) {
-					is GameLibDownloader.Lookup.Available -> showDownloadDialog(ctx, downloader, args)
-					is GameLibDownloader.Lookup.NotInManifest -> launchEngine(ctx, args)
-					is GameLibDownloader.Lookup.Error -> showManifestErrorDialog(ctx, args, r.cause)
-				}
-			}
+			launchEngine(ctx, commandLineArgs)
 			return
 		}
 
 		launchEngine(ctx, commandLineArgs)
-	}
-
-	private fun showDownloadDialog(ctx: Context, downloader: GameLibDownloader, commandLineArgs: String) {
-		showDownloadProgressDialog(
-			ctx = ctx,
-			titleRes = R.string.downloading_game_libs,
-			cancelable = true,
-			scope = CoroutineScope(Dispatchers.Main + SupervisorJob()),
-			download = { onProgress -> downloader.download(basedir.name, onProgress) },
-			onSuccess = { launchEngine(ctx, commandLineArgs) },
-		)
-	}
-
-	private fun showManifestErrorDialog(ctx: Context, commandLineArgs: String, cause: Throwable) {
-		MaterialAlertDialogBuilder(ctx)
-			.setTitle(R.string.manifest_error_title)
-			.setMessage(ctx.getString(R.string.manifest_error_message, cause.message ?: cause.javaClass.simpleName))
-			.setPositiveButton(R.string.launch_anyway) { _, _ -> launchEngine(ctx, commandLineArgs) }
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
 	}
 
 	private fun launchEngine(
@@ -164,15 +155,63 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 	) {
 		ctx.startActivity(Intent(ctx, XashActivity::class.java).apply {
 			flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-
 			putExtra("gamedir", defaultGameDir)
 			putExtra("argv", commandLineArgs)
 			putExtra("usevolume", pref.getBoolean("use_volume_buttons", false))
 			putExtra("basedir", basedir.parent)
-
 			if (gameLibDir != null) putExtra("gamelibdir", gameLibDir)
 			if (packageName != null) putExtra("package", packageName)
 		})
+	}
+
+	private fun showDownloadDialog(ctx: Context, downloader: GameLibDownloader, commandLineArgs: String) {
+		val view = LayoutInflater.from(ctx).inflate(R.layout.dialog_download_progress, null)
+		val progressBar = view.findViewById<LinearProgressIndicator>(R.id.downloadProgress)
+		val statusText = view.findViewById<TextView>(R.id.downloadStatus)
+
+		val dialog = MaterialAlertDialogBuilder(ctx)
+			.setTitle(R.string.downloading_game_libs)
+			.setView(view)
+			.setCancelable(true)
+			.setNegativeButton(android.R.string.cancel) { d, _ -> d.dismiss() }
+			.create()
+
+		dialog.show()
+
+		val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+		val job = scope.launch {
+			val result = downloader.download(basedir.name) { progress ->
+				progressBar.isIndeterminate = false
+				progressBar.progress = (progress * 100).toInt()
+				statusText.text = ctx.getString(R.string.download_progress, (progress * 100).toInt())
+			}
+
+			if (!dialog.isShowing) return@launch
+
+			dialog.dismiss()
+
+			if (result.isSuccess) {
+				launchEngine(ctx, commandLineArgs)
+			} else {
+				MaterialAlertDialogBuilder(ctx)
+					.setTitle(R.string.download_failed)
+					.setMessage(result.exceptionOrNull()?.message
+						?: ctx.getString(R.string.download_error))
+					.setPositiveButton(android.R.string.ok, null)
+					.show()
+			}
+		}
+
+		dialog.setOnDismissListener { job.cancel() }
+	}
+
+	private fun showManifestErrorDialog(ctx: Context, commandLineArgs: String, cause: Throwable) {
+		MaterialAlertDialogBuilder(ctx)
+			.setTitle(R.string.manifest_error_title)
+			.setMessage(ctx.getString(R.string.manifest_error_message, cause.message ?: cause.javaClass.simpleName))
+			.setPositiveButton(R.string.launch_anyway) { _, _ -> launchEngine(ctx, commandLineArgs) }
+			.setNegativeButton(android.R.string.cancel, null)
+			.show()
 	}
 
 	private fun parseGameInfo(file: File) {
@@ -200,7 +239,6 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 		if (gamedir.equals("tfc", ignoreCase = true))
 			return arrayOf("su.xash.tf15client.test", "su.xash.tf15client")
 
-		// mobile_hacks hlsdk-portable branch allows us to have few more mods out of the box
 		if (mobileHacksGames.any { it.equals(gamedir, ignoreCase = true) })
 			return arrayOf("su.xash.engine")
 
@@ -215,7 +253,6 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 		if (gamedir.equals("tfc", ignoreCase = true))
 			return "https://github.com/Velaron/tf15-client/releases/download/continuous/TF15Client-Android.apk"
 
-		// just so we don't return null
 		return "https://github.com/FWGS/xash3d-fwgs/releases/download/continuous/xash3d-fwgs-android.apk"
 	}
 
@@ -225,14 +262,17 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 	}
 
 	companion object {
-		fun getGames(ctx: Context, root: File): List<Game> {
+		fun getGames(ctx: Context, file: File): List<Game> {
 			val games = mutableListOf<Game>()
 
-			root.listFiles()?.forEach {
-				if (it.isDirectory) {
-					val subDirGameInfoFile = checkIfGamedir(it)
-					if (subDirGameInfoFile != null) {
-						games.add(Game(ctx, it, subDirGameInfoFile))
+			if (checkIfGamedir(file)) {
+				games.add(Game(ctx, file))
+			} else {
+				file.listFiles()?.forEach {
+					if (it.isDirectory) {
+						if (checkIfGamedir(it)) {
+							games.add(Game(ctx, it))
+						}
 					}
 				}
 			}
@@ -240,18 +280,11 @@ class Game(val ctx: Context, val basedir: File, val gameInfoFile: File) {
 			return games
 		}
 
-		fun checkIfGamedir(gamedir: File): File? {
-			gamedir.listFiles()?.forEach {
-				if (it.isFile) {
-					if (it.name.equals("liblist.gam", ignoreCase = true))
-						return it
+		fun checkIfGamedir(file: File): Boolean {
+			if (File(file, "liblist.gam").exists()) return true
+			if (File(file, "gameinfo.txt").exists()) return true
 
-					if (it.name.equals("gameinfo.txt", ignoreCase = true))
-						return it
-				}
-			}
-
-			return null
+			return false
 		}
 	}
 }
