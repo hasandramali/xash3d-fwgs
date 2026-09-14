@@ -2385,6 +2385,58 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 		return 0;
 	}
 
+	// Sven Co-op servers never send svc_usermessage(39) registrations: they
+	// stream user messages as raw svc bytes (REG_USER_MSG counter starts at
+	// svc_lastmsg=63). Without a registration, clgame.msg[].number stays 0 and
+	// CL_ParseUserMessage's number lookup can never match -> every message fell
+	// into the "unregistered" skip branch and the client DLL handlers (health,
+	// ammo, HUD, MOTD...) were never called. Backfill number/size from the
+	// binary-verified Sven REG_USER_MSG table (steam-refs/sven/server.dll,
+	// wire-anchored in engine.log / buffer.dat decodes) so a hooked message
+	// dispatches to its registered handler. Numbers here are the absolute
+	// svc_num values Sven assigns (index == svc_num - svc_lastmsg); sizes
+	// follow the server table (-1 == variable, u16 length prefix).
+	{
+		static const struct { const char *name; int number; int size; } svenUsrMsgs[] =
+		{
+			{ "Geiger",      66,  1 },
+			{ "Flashlight",  67,  2 },
+			{ "FlashBat",    68,  1 },
+			{ "Health",      69,  4 },
+			{ "Damage",      70, 18 },
+			{ "Battery",     71,  2 },
+			{ "Train",       72,  1 },
+			{ "ResetHUD",    78,  1 },
+			{ "CdAudio",     80,  1 },
+			{ "GameTitle",   81,  1 },
+			{ "ScoreInfo",   83, 20 },
+			{ "GameMode",    86,  1 },
+			{ "AmmoPickup",  88,  5 },
+			{ "WeapPickup",  89, -1 },
+			{ "SetFOV",      92,  1 },
+			{ "ScreenShake", 94,  6 },
+			{ "ScreenFade",  95, 10 },
+			{ "AmmoX",       96,  5 },
+			{ "Spectator",   98,  2 },
+			{ "TimeEnd",    101,  4 },
+			{ "VGUIMenu",   121,  1 },
+			{ "ServerName", 122, -1 },
+			{ "ViewMode",   134,  1 },
+			{ "ClassicMode", 137, 1 },
+			{ "VoiceMask",  148,  8 },
+		};
+
+		for( int t = 0; t < ARRAYSIZE( svenUsrMsgs ); t++ )
+		{
+			if( !Q_stricmp( svenUsrMsgs[t].name, pszName ))
+			{
+				clgame.msg[i].number = svenUsrMsgs[t].number;
+				clgame.msg[i].size   = svenUsrMsgs[t].size;
+				break;
+			}
+		}
+	}
+
 	// hook new message
 	Q_strncpy( clgame.msg[i].name, pszName, sizeof( clgame.msg[i].name ));
 	clgame.msg[i].func = pfn;

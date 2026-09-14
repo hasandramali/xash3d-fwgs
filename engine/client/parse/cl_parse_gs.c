@@ -578,6 +578,20 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 	// parse the message
 	while( 1 )
 	{
+		// A disconnect/reset handler (svc_signonnum received with a value <=
+		// current, svc_disconnect, ...) leaves the client state torn down
+		// (clgame.entities == NULL). hw.dll exits its parse loop on signon
+		// regression instead of draining the rest of the datagram (reverse
+		// verified: svc_signonnum <= current is an error/reset path, not a
+		// normal round restart). Parsing the remaining svc commands of this
+		// same sizebuf (e.g. svc_spawnbaseline) would dereference freed
+		// entity state and crash the client.
+		if( cls.state == ca_disconnected )
+		{
+			MSG_Clear( msg );
+			return;
+		}
+
 		if( MSG_CheckOverflow( msg ))
 		{
 			Host_Error( "%s: overflow!\n", __func__ );
