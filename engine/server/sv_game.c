@@ -3274,11 +3274,11 @@ void SV_PrintStr64Stats_f( void )
 	Con_Printf( "====================\n" );
 	Con_Printf( "64 bit string pool statistics\n" );
 	Con_Printf( "====================\n" );
-	Con_Printf( "string array size: %lu\n", str64.maxstringarray );
-	Con_Printf( "total alloc %lu\n", str64.totalalloc );
-	Con_Printf( "maximum array usage: %lu\n", str64.maxalloc );
-	Con_Printf( "overflow counter: %lu\n", str64.numoverflows );
-	Con_Printf( "dup string counter: %lu\n", str64.numdups );
+	Con_Printf( "string array size: %zu\n", str64.maxstringarray );
+	Con_Printf( "total alloc %zu\n", str64.totalalloc );
+	Con_Printf( "maximum array usage: %zu\n", str64.maxalloc );
+	Con_Printf( "overflow counter: %zu\n", str64.numoverflows );
+	Con_Printf( "dup string counter: %zu\n", str64.numdups );
 #else // !XASH_64BIT
 	Con_Printf( "Not implemented\n" );
 #endif // !XASH_64BIT
@@ -5081,6 +5081,13 @@ static void SV_LoadFromFile( const char *mapname, char *entities )
 
 			if( !SV_ParseEdict( &entities, ent ))
 				continue;
+
+			if( deathmatch.value && FBitSet( host.bugcomp, BUGCOMP_SPAWNFLAG_NOT_DEATHMATCH ) && FBitSet( ent->v.spawnflags, SF_NOT_DEATHMATCH ))
+			{
+				SV_FreeEdict( ent );
+				inhibited++;
+				continue;
+			}
 
 			if( svgame.dllFuncs.pfnSpawn( ent ) == -1 )
 			{

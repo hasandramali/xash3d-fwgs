@@ -2127,6 +2127,7 @@ static qboolean SV_Begin_f( sv_client_t *cl )
 	// now client is spawned
 	cl->state = cs_spawned;
 	cl->connecttime = host.realtime;
+	SetBits( cl->flags, FCL_HOLD_FIRST_DATAGRAM );
 
 	return true;
 }
@@ -2526,7 +2527,7 @@ static qboolean SV_EntFire_f( sv_client_t *cl )
 		return false;
 	}
 
-	if( ( single = Q_isdigit( Cmd_Argv( 1 ) ) ) )
+	if(( single = Q_isdigit( Cmd_Argv( 1 ))))
 	{
 		i = Q_atoi( Cmd_Argv( 1 ) );
 
@@ -2535,7 +2536,7 @@ static qboolean SV_EntFire_f( sv_client_t *cl )
 
 		ent = SV_EdictNum( i );
 	}
-	else if( ( single = !Q_stricmp( Cmd_Argv( 1 ), "!cross" ) ) )
+	else if(( single = !Q_stricmp( Cmd_Argv( 1 ), "!cross" )))
 	{
 		ent = SV_GetCrossEnt( cl->edict );
 
@@ -2544,7 +2545,7 @@ static qboolean SV_EntFire_f( sv_client_t *cl )
 
 		i = NUM_FOR_EDICT( ent );
 	}
-	else if( ( single = ( Cmd_Argv( 1 )[0] == '!') ) ) // check for correct instance with !(num)_(serial)
+	else if(( single = ( Cmd_Argv( 1 )[0] == '!' ))) // check for correct instance with !(num)_(serial)
 	{
 		const char *cmd = Cmd_Argv( 1 ) + 1;
 		i = Q_atoi( cmd );

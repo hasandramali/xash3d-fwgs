@@ -72,10 +72,11 @@ class Subproject:
 		return True
 
 class RefDll:
-	def __init__(self, name, default, key = None):
+	def __init__(self, name, default, key = None, all_renderers = True):
 		self.name = name
 		self.default = default
 		self.dest = key if key else name.upper()
+		self.all_renderers = all_renderers
 
 	def register_option(self, opt):
 		kw = dict()
@@ -95,7 +96,7 @@ class RefDll:
 		opt.add_option(key, **kw)
 
 	def register_env(self, env, opts, force):
-		env[self.dest] = force or opts.__dict__[self.dest]
+		env[self.dest] = (force and self.all_renderers) or opts.__dict__[self.dest]
 
 	def register_define(self, conf):
 		conf.define_cond('XASH_REF_%s_ENABLED' % self.dest, conf.env[self.dest])
@@ -127,9 +128,12 @@ SUBDIRS = [
 	Subproject('3rdparty/opusfile',     lambda x: x.env.CLIENT and not x.env.HAVE_SYSTEM_OPUSFILE),
 	Subproject('3rdparty/maintui',      lambda x: x.env.CLIENT and x.env.TUI),
 	Subproject('3rdparty/mainui',       lambda x: x.env.CLIENT and x.env.DEST_OS != 'android'),
-	Subproject('3rdparty/vgui_support', lambda x: x.env.CLIENT),
+
+	# engine is obligated to provide VGUI interface in 32-bit builds on Windows/Linux/Mac as shared library
+	# on platforms supported only by Xash3D FWGS, freevgui can be linked statically into client library
+	Subproject('3rdparty/freevgui',     lambda x: x.env.CLIENT and x.env.DEST_OS in ['win32', 'linux', 'darwin'] and x.env.DEST_CPU == 'x86'),
+
 	Subproject('3rdparty/MultiEmulator',lambda x: x.env.CLIENT),
-#	Subproject('3rdparty/freevgui',     lambda x: x.env.CLIENT),
 	Subproject('stub/client',           lambda x: x.env.CLIENT),
 	Subproject('game_launch',           lambda x: x.env.LAUNCHER),
 	Subproject('engine'), # keep latest for static linking
@@ -144,7 +148,7 @@ SUBDIRS = [
 ]
 
 REFDLLS = [
-	RefDll('soft', True),
+	RefDll('soft', False, all_renderers = False),
 	RefDll('gl', True),
 	RefDll('gles1', False, 'NANOGL'),
 	RefDll('gles2', False, 'GLWES'),
@@ -287,10 +291,8 @@ def configure(conf):
 		conf.options.GL               = False
 		conf.options.LOW_MEMORY       = 1
 		enforce_pic = False
-	elif conf.env.DEST_OS == 'emscripten':
+	elif conf.env.MSVC_WINE:
 		conf.options.BUILD_BUNDLED_DEPS = True
-		conf.options.GLES3COMPAT      = True
-		conf.options.GL               = False
 
 	# psvita needs -fPIC set manually and static builds are incompatible with -fPIC
 	enforce_pic = conf.env.DEST_OS != 'psvita' and not conf.env.STATIC_LINKING
@@ -436,6 +438,7 @@ def configure(conf):
 	conf.env.ENABLE_UTILS  = conf.options.ENABLE_UTILS
 	conf.env.ENABLE_XAR    = conf.options.ENABLE_XAR
 	conf.env.ENABLE_FUZZER = conf.options.ENABLE_FUZZER
+	conf.env.FREEVGUI_XASH_SUPPORT = True
 
 	if not conf.options.DEDICATED:
 		conf.env.SERVER = conf.options.ENABLE_DEDICATED
@@ -491,12 +494,22 @@ def configure(conf):
 			conf.check_cc(lib='m')
 		# otherwise LIB_M is defined by xcompile (as it might be libm_hard, depending on NDK configuration)
 	elif conf.env.DEST_OS == 'win32':
+		# MinGW defaults to msvcrt stdio, which lacks C99 conversions like %zu
+		# this also switches GCC format checking from ms_printf to gnu_printf
+		if conf.env.COMPILER_CC != 'msvc':
+			conf.env.append_unique('CFLAGS', '-D__USE_MINGW_ANSI_STDIO=1')
+			conf.env.append_unique('CXXFLAGS', '-D__USE_MINGW_ANSI_STDIO=1')
+
 		# Common Win32 libraries
 		# Don't check them more than once, to save time
 		# Usually, they are always available
 		# but we need them in uselib
 		a = [ 'user32', 'shell32', 'gdi32', 'advapi32', 'dbghelp', 'psapi', 'ws2_32', 'bcrypt' ]
-		if conf.env.COMPILER_CC == 'msvc':
+		if conf.env.MSVC_WINE:
+			# no LIBPATH under msvc-wine, the wrapper resolves libraries itself
+			for i in a:
+				conf.env['LIB_' + i.upper()] = [i]
+		elif conf.env.COMPILER_CC == 'msvc':
 			for i in a:
 				conf.start_msg('Checking for MSVC library')
 				conf.check_lib_msvc(i)

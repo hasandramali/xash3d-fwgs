@@ -2039,10 +2039,12 @@ static void Mod_SetupHull( dbspmodel_t *bmod, model_t *mod, int headnode, int hu
 
 static qboolean Mod_LoadLitfile( model_t *mod, const char *ext, size_t expected_size, color24 **out, size_t *outsize )
 {
-	char        modelname[64], path[64];
+	char        basename[sizeof( mod->name )], path[sizeof( mod->name ) + 8];
 
-	COM_FileBase( mod->name, modelname, sizeof( modelname ));
-	Q_snprintf( path, sizeof( path ), "maps/%s.%s", modelname, ext );
+	// keep the directory part, so maps in subdirectories look up their lit files next to the bsp
+	Q_strncpy( basename, mod->name, sizeof( basename ));
+	COM_StripExtension( basename );
+	Q_snprintf( path, sizeof( path ), "%s.%s", basename, ext );
 
 	int iCompare;
 	if( !pfnCompareFileTime( path, mod->name, &iCompare ))
@@ -2263,6 +2265,7 @@ static void Mod_LoadSubmodels( model_t *mod, dbspmodel_t *bmod )
 static int Mod_LoadEntities_splitstr_handler( char *prev, char *next, void *userdata )
 {
 	world_static_t *w = userdata;
+	string normalizedWadName;
 
 	*next = '\0';
 
@@ -2270,20 +2273,23 @@ static int Mod_LoadEntities_splitstr_handler( char *prev, char *next, void *user
 		return 0;
 
 	COM_FixSlashes( prev );
-	const char *wad = COM_FileWithoutPath( prev );
+	const char *rawWadName = COM_FileWithoutPath( prev );
 
-	if( Q_stricmp( COM_FileExtension( wad ), "wad" ))
+	Q_strncpy( normalizedWadName, rawWadName, sizeof( normalizedWadName ));
+	COM_DefaultExtension( normalizedWadName, ".wad", sizeof( normalizedWadName ));
+
+	if( Q_stricmp( COM_FileExtension( normalizedWadName ), "wad" ))
 		return 0;
 
 	// make sure that wad does really exists
-	if( FS_FileExists( wad, false ))
+	if( FS_FileExists( normalizedWadName, false ))
 	{
 		int num = w->wadcount++;
 
 		// FIXME: that's right, it goes into host.mempool!
 		w->wadlist = Mem_Realloc( host.mempool, w->wadlist, w->wadcount * sizeof( *w->wadlist ));
 
-		Q_strncpy( w->wadlist[num].name, wad, sizeof( w->wadlist[num].name ));
+		Q_strncpy( w->wadlist[num].name, normalizedWadName, sizeof( w->wadlist[num].name ));
 		w->wadlist[num].usage = 0;
 	}
 

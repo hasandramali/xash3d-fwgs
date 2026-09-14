@@ -299,10 +299,21 @@ static inline void Platform_MouseMove( float *x, float *y )
 }
 #endif
 
+// rect is the area where the text is edited, in render coordinates, so the platform
+// might keep it visible when it shows the on-screen keyboard over the game
 #if XASH_SDL >= 2 || XASH_PSVITA || XASH_DOS || XASH_USE_EVDEV
-void Platform_EnableTextInput( qboolean enable );
+void Platform_EnableTextInput( qboolean enable, int x, int y, int w, int h );
 #else
-static inline void Platform_EnableTextInput( qboolean enable ) { }
+static inline void Platform_EnableTextInput( qboolean enable, int x, int y, int w, int h ) { }
+#endif
+
+// engine keynums are scancodes in SDL terminology
+// This asks the platform what character the user's keyboard layout puts on that physical key and returns it as an engine keynum,
+// or returns keynum unchanged when the layout produces nothing the engine has a keynum for
+#if XASH_SDL >= 2
+int Platform_TranslateKeyLayout( int keynum );
+#else
+static inline int Platform_TranslateKeyLayout( int keynum ) { return keynum; }
 #endif
 
 #if XASH_SDL >= 2

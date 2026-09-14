@@ -266,6 +266,8 @@ typedef struct
 	resource_t	resourcesneeded;
 	resource_t	resourcelist[MAX_RESOURCES];
 	int		num_resources;
+	int		num_sent_resources;
+	byte		sent_resources_hash[16];
 
 	short		sound_index[MAX_SOUNDS];
 	short		decal_index[MAX_DECALS];
@@ -718,6 +720,7 @@ extern convar_t	hud_scale;
 extern convar_t hud_scale_minimal_width;
 extern convar_t hud_saytext_scale;
 extern convar_t	r_showtextures;
+extern convar_t	r_showtextures_zoom;
 extern convar_t	cl_bmodelinterp;
 extern convar_t	cl_lw;		// local weapons
 extern convar_t	cl_charset;
@@ -750,8 +753,10 @@ extern client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS];
 // cl_cmds.c
 //
 void CL_Quit_f( void );
+void CL_RequestQuit( const char *reason );
 void CL_GenericShot_f( void );
-void CL_PlayCDTrack_f( void );
+void CL_CD_f( void );
+void CL_MP3_f( void );
 void CL_LevelShot_f( void );
 void CL_SetSky_f( void );
 void SCR_Viewpos_f( void );
@@ -803,6 +808,7 @@ void CL_SetCheatState( qboolean multiplayer, qboolean allow_cheats );
 void CL_SendGoldSrcConnectPacket( netadr_t adr, int challenge, const void *ticket, size_t ticketlen );
 void CL_NotifyServerListResponse( void );
 qboolean CL_NetRequestSend( net_request_t *nr );
+void CL_Escape_f( void );
 
 //
 // cl_demo.c
@@ -1128,6 +1134,7 @@ void Con_ToggleConsole_f( void );
 void Con_ClearNotify( void );
 void Con_DrawDebug( void );
 void Con_RunConsole( void );
+qboolean Con_GetInputRect( int *x, int *y, int *w, int *h );
 void Con_DrawConsole( void );
 void Con_DrawVersion( void );
 int Con_UtfProcessChar( int in );
@@ -1209,6 +1216,8 @@ char **GAME_EXPORT CL_GetFilesList( const char *pattern, int *numFiles, int game
 //
 qboolean Mobile_Init( void );
 void Mobile_Shutdown( void );
+void Mobile_ShakeVibrate( float amplitude, float frequency, float time );
+void Mobile_StopVibration( void );
 
 //
 // cl_securedstub.c
@@ -1253,6 +1262,7 @@ const char *Key_KeynumToString( int keynum );
 void Key_EnumCmds_f( void );
 void Key_SetKeyDest( int key_dest );
 void Key_EnableTextInput( qboolean enable, qboolean force );
+void Key_SetTextInputRect( int x, int y, int w, int h );
 int Key_ToUpper( int key );
 qboolean Cmd_GetKeysList( const char *s, char *completedname, int length, qboolean print_suggestions );
 
