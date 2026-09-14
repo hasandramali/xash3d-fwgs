@@ -26,6 +26,9 @@ def check_repo(name, branch, url, path):
 		git_exec = ["git", "clone", "--branch", branch, url, path]
 		git_process = subprocess.Popen(git_exec)
 		git_process.communicate()
+		if git_process.returncode != 0:
+			print("ERROR: git clone {} failed with exit code {}".format(name, git_process.returncode))
+			sys.exit(1)
 
 
 def run_cmake(root, out, toolchain, abi, build_type, ndk_root, min_sdk, *args):
@@ -43,6 +46,9 @@ def run_cmake(root, out, toolchain, abi, build_type, ndk_root, min_sdk, *args):
 	cmake_exec.extend(args)
 	cmake_process = subprocess.Popen(cmake_exec)
 	cmake_process.communicate()
+	if cmake_process.returncode != 0:
+		print("ERROR: cmake configure for {} failed with exit code {}".format(root, cmake_process.returncode))
+		sys.exit(1)
 
 
 def main():
@@ -102,13 +108,22 @@ def main():
 
 	waf_exec = [sys.executable, waf_path, "configure", "-t", args.wscript_path, "-o", out_path,
 				"-T", waf_build_type, "--android={},,{}".format(abi, args.min_sdk_version), "-s",
-				sdl_path, "--skip-sdl2-sanity-check", "--enable-bundled-deps", "--disable-soft", "ninja"]
+				sdl_path, "--skip-sdl2-sanity-check", "--enable-bundled-deps", "ninja"]
 
 	process = subprocess.Popen(waf_exec, env=env)
 	process.communicate()
 
+	if process.returncode != 0:
+		print("ERROR: waf configure failed with exit code {}".format(process.returncode))
+		sys.exit(1)
+
+	build_ninja_path = os.path.join(out_path, "build.ninja")
+	if not os.path.exists(build_ninja_path):
+		print("ERROR: waf configure succeeded but {} was not created".format(build_ninja_path))
+		sys.exit(1)
+
 	with io.open(os.path.join(args.configuration_dir, "build.ninja.txt"), "w", encoding="utf-8") as f:
-		f.write(os.path.join(out_path, "build.ninja"))
+		f.write(build_ninja_path)
 
 	# required for Android Studio
 	return 0
