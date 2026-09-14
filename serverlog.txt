@@ -1,0 +1,807 @@
+L 14/09/2026 - 23:36:18: "plaer<1><STEAM_0:1:394236866><>" connected, address "192.168.192.236:39011"
+ s <-- sz=16 seq=1 ack=0 rel=1 tm=36.128239
+L 14/09/2026 - 23:36:18: [META] (debug:3) Calling amxmodx_mm_i386.so:ClientConnect()
+L 14/09/2026 - 23:36:18: [META] (debug:3) Calling engine_amxx_i386.so:ClientConnect()
+L 14/09/2026 - 23:36:18: [META] (debug:3) Calling server.so:ClientConnect()
+L 14/09/2026 - 23:36:18: [META] (debug:3) Calling amxmodx_mm_i386.so:ClientConnect_Post()
+L 14/09/2026 - 23:36:18: [META] (debug:3) Calling fakemeta_amxx_i386.so:ClientConnect_Post()
+[CONNECT][id=1] ===== CONNECT =====
+[CONNECT][id=1] name='name='%s' ip='%s' bot=%d userinfo_len=%d' ip='plaer' bot=49 userinfo_len=0
+[CONNECT][id=1] userinfo_raw='userinfo_raw='%s''
+[CONNECT][id=1] time=116
+ s --> sz=44 seq=1 ack=1 rel=1 tm=36.139225
+ s <-- sz=16 seq=2 ack=0 rel=0 tm=36.139225
+ s --> sz=16 seq=2 ack=2 rel=0 tm=36.149128
+ s <-- sz=16 seq=3 ack=0 rel=0 tm=36.149128
+ s --> sz=16 seq=3 ack=3 rel=0 tm=36.159698
+ s <-- sz=16 seq=4 ack=0 rel=0 tm=36.159698
+ s --> sz=16 seq=4 ack=4 rel=0 tm=36.170681
+ s <-- sz=16 seq=5 ack=0 rel=0 tm=36.170681
+ s <-- sz=16 seq=6 ack=0 rel=0 tm=36.170681
+ s --> sz=16 seq=5 ack=6 rel=0 tm=36.180820
+ s <-- sz=16 seq=7 ack=0 rel=0 tm=36.190773
+ s --> sz=16 seq=6 ack=7 rel=0 tm=36.201622
+ s <-- sz=16 seq=8 ack=0 rel=0 tm=36.201622
+ s <-- sz=16 seq=9 ack=1 rel=0 tm=36.201622
+ s <-- sz=16 seq=10 ack=2 rel=0 tm=36.201622
+ s --> sz=1046 seq=7 ack=10 rel=1 tm=36.211662
+ s <-- sz=16 seq=11 ack=2 rel=0 tm=36.211662
+ s <-- sz=16 seq=12 ack=3 rel=0 tm=36.211662
+ s <-- sz=16 seq=13 ack=3 rel=0 tm=36.222740
+ s <-- sz=16 seq=14 ack=4 rel=0 tm=36.222740
+ s <-- sz=16 seq=15 ack=4 rel=0 tm=36.232906
+ s <-- sz=16 seq=16 ack=5 rel=0 tm=36.232906
+ s --> sz=16 seq=8 ack=16 rel=0 tm=36.243092
+ s <-- sz=16 seq=17 ack=5 rel=0 tm=36.243092
+ s <-- sz=16 seq=18 ack=5 rel=0 tm=36.243092
+ s <-- sz=16 seq=19 ack=6 rel=0 tm=36.243092
+ s --> sz=16 seq=9 ack=19 rel=0 tm=36.253124
+ s <-- sz=16 seq=20 ack=6 rel=0 tm=36.253124
+ s --> sz=16 seq=10 ack=20 rel=0 tm=36.263382
+ s <-- sz=16 seq=21 ack=6 rel=0 tm=36.263382
+ s <-- sz=16 seq=22 ack=7 rel=0 tm=36.263382
+ s --> sz=1046 seq=11 ack=22 rel=1 tm=36.273964
+ s <-- sz=16 seq=23 ack=7 rel=0 tm=36.273964
+ s <-- sz=16 seq=24 ack=7 rel=0 tm=36.294613
+ s --> sz=16 seq=12 ack=24 rel=0 tm=36.304806
+ s <-- sz=16 seq=25 ack=7 rel=0 tm=36.304806
+ s <-- sz=16 seq=26 ack=8 rel=0 tm=36.304806
+ s <-- sz=16 seq=27 ack=9 rel=0 tm=36.304806
+ s <-- sz=16 seq=28 ack=9 rel=0 tm=36.304806
+ s --> sz=16 seq=13 ack=28 rel=0 tm=36.315617
+ s <-- sz=16 seq=29 ack=9 rel=0 tm=36.315617
+ s <-- sz=16 seq=30 ack=10 rel=0 tm=36.315617
+ s --> sz=16 seq=14 ack=30 rel=0 tm=36.325825
+ s <-- sz=16 seq=31 ack=10 rel=0 tm=36.325825
+ s <-- sz=16 seq=32 ack=11 rel=0 tm=36.325825
+ s --> sz=1046 seq=15 ack=32 rel=1 tm=36.335953
+ s <-- sz=16 seq=33 ack=11 rel=0 tm=36.335953
+ s <-- sz=16 seq=34 ack=11 rel=0 tm=36.346050
+ s <-- sz=16 seq=35 ack=11 rel=0 tm=36.356987
+ s <-- sz=16 seq=36 ack=12 rel=0 tm=36.356987
+ s --> sz=16 seq=16 ack=36 rel=0 tm=36.367947
+ s <-- sz=16 seq=37 ack=12 rel=0 tm=36.378010
+ s <-- sz=16 seq=38 ack=13 rel=0 tm=36.378010
+ s <-- sz=16 seq=39 ack=13 rel=0 tm=36.378010
+ s <-- sz=16 seq=40 ack=14 rel=0 tm=36.378010
+ s --> sz=16 seq=17 ack=40 rel=0 tm=36.388973
+ s <-- sz=16 seq=41 ack=14 rel=0 tm=36.388973
+ s <-- sz=16 seq=42 ack=15 rel=0 tm=36.388973
+ s --> sz=647 seq=18 ack=42 rel=1 tm=36.399265
+ s <-- sz=16 seq=43 ack=15 rel=0 tm=36.399265
+ s <-- sz=16 seq=44 ack=15 rel=0 tm=36.409328
+ s --> sz=16 seq=19 ack=44 rel=0 tm=36.420094
+ s <-- sz=16 seq=45 ack=15 rel=0 tm=36.420094
+ s <-- sz=16 seq=46 ack=16 rel=0 tm=36.420094
+ s --> sz=16 seq=20 ack=46 rel=0 tm=36.430874
+ s <-- sz=16 seq=47 ack=16 rel=0 tm=36.430874
+ s --> sz=16 seq=21 ack=47 rel=0 tm=36.441845
+ s <-- sz=16 seq=48 ack=16 rel=0 tm=36.441845
+ s <-- sz=16 seq=49 ack=17 rel=0 tm=36.441845
+ s --> sz=16 seq=22 ack=49 rel=0 tm=36.452530
+ s <-- sz=16 seq=50 ack=17 rel=0 tm=36.452530
+ s <-- sz=16 seq=51 ack=18 rel=0 tm=36.452530
+ s --> sz=16 seq=23 ack=51 rel=0 tm=36.463337
+ s <-- sz=17 seq=52 ack=18 rel=1 tm=36.538380
+ s <-- sz=16 seq=53 ack=19 rel=0 tm=36.538380
+ s <-- sz=16 seq=54 ack=20 rel=0 tm=36.538380
+ s <-- sz=16 seq=55 ack=21 rel=0 tm=36.538380
+ s <-- sz=16 seq=56 ack=22 rel=0 tm=36.538380
+ s <-- sz=16 seq=57 ack=23 rel=0 tm=36.538380
+ s --> sz=1046 seq=24 ack=57 rel=1 tm=36.549107
+ s <-- sz=16 seq=58 ack=23 rel=0 tm=36.570202
+ s --> sz=16 seq=25 ack=58 rel=0 tm=36.580685
+ s <-- sz=16 seq=59 ack=23 rel=0 tm=36.601379
+ s --> sz=16 seq=26 ack=59 rel=0 tm=36.612041
+ s <-- sz=16 seq=60 ack=24 rel=0 tm=36.612041
+ s --> sz=1046 seq=27 ack=60 rel=1 tm=36.621967
+ s <-- sz=16 seq=61 ack=24 rel=0 tm=36.642941
+ s <-- sz=16 seq=62 ack=25 rel=0 tm=36.642941
+ s --> sz=16 seq=28 ack=62 rel=0 tm=36.653671
+ s <-- sz=16 seq=63 ack=25 rel=0 tm=36.674103
+ s <-- sz=16 seq=64 ack=26 rel=0 tm=36.674103
+ s <-- sz=16 seq=65 ack=27 rel=0 tm=36.674103
+ s --> sz=1046 seq=29 ack=65 rel=1 tm=36.684101
+ s <-- sz=16 seq=66 ack=27 rel=0 tm=36.704281
+ s <-- sz=16 seq=67 ack=28 rel=0 tm=36.704281
+ s --> sz=16 seq=30 ack=67 rel=0 tm=36.715076
+ s <-- sz=16 seq=68 ack=28 rel=0 tm=36.735714
+ s <-- sz=16 seq=69 ack=29 rel=0 tm=36.735714
+ s --> sz=1046 seq=31 ack=69 rel=1 tm=36.746750
+ s <-- sz=16 seq=70 ack=29 rel=0 tm=36.767780
+ s <-- sz=16 seq=71 ack=30 rel=0 tm=36.767780
+ s --> sz=16 seq=32 ack=71 rel=0 tm=36.778439
+ s <-- sz=16 seq=72 ack=30 rel=0 tm=36.799080
+ s <-- sz=16 seq=73 ack=31 rel=0 tm=36.799080
+ s --> sz=1046 seq=33 ack=73 rel=1 tm=36.809475
+ s <-- sz=16 seq=74 ack=31 rel=0 tm=36.830273
+ s <-- sz=16 seq=75 ack=32 rel=0 tm=36.830273
+ s --> sz=16 seq=34 ack=75 rel=0 tm=36.841156
+ s <-- sz=16 seq=76 ack=32 rel=0 tm=36.861820
+ s <-- sz=16 seq=77 ack=33 rel=0 tm=36.861820
+ s --> sz=1046 seq=35 ack=77 rel=1 tm=36.872368
+ s <-- sz=16 seq=78 ack=33 rel=0 tm=36.893990
+ s <-- sz=16 seq=79 ack=34 rel=0 tm=36.893990
+ s --> sz=16 seq=36 ack=79 rel=0 tm=36.904598
+ s <-- sz=16 seq=80 ack=34 rel=0 tm=36.925922
+ s <-- sz=16 seq=81 ack=35 rel=0 tm=36.925922
+ s --> sz=1046 seq=37 ack=81 rel=1 tm=36.936043
+ s <-- sz=16 seq=82 ack=35 rel=0 tm=36.957008
+ s <-- sz=16 seq=83 ack=36 rel=0 tm=36.957008
+ s --> sz=16 seq=38 ack=83 rel=0 tm=36.967873
+ s <-- sz=16 seq=84 ack=36 rel=0 tm=36.988533
+ s <-- sz=16 seq=85 ack=37 rel=0 tm=36.988533
+ s --> sz=1046 seq=39 ack=85 rel=1 tm=36.999500
+ s <-- sz=16 seq=86 ack=37 rel=0 tm=37.031464
+ s <-- sz=16 seq=87 ack=38 rel=0 tm=37.031464
+ s --> sz=16 seq=40 ack=87 rel=0 tm=37.042431
+ s <-- sz=16 seq=88 ack=38 rel=0 tm=37.052864
+ s <-- sz=16 seq=89 ack=39 rel=0 tm=37.052864
+ s --> sz=1046 seq=41 ack=89 rel=1 tm=37.062965
+ s <-- sz=16 seq=90 ack=39 rel=0 tm=37.094337
+ s --> sz=16 seq=42 ack=90 rel=0 tm=37.105225
+ s <-- sz=16 seq=91 ack=39 rel=0 tm=37.126884
+ s <-- sz=16 seq=92 ack=40 rel=0 tm=37.126884
+ s <-- sz=16 seq=93 ack=41 rel=0 tm=37.126884
+ s --> sz=1046 seq=43 ack=93 rel=1 tm=37.136921
+ s <-- sz=16 seq=94 ack=41 rel=0 tm=37.157837
+ s <-- sz=16 seq=95 ack=42 rel=0 tm=37.157837
+ s --> sz=16 seq=44 ack=95 rel=0 tm=37.168552
+ s <-- sz=16 seq=96 ack=42 rel=0 tm=37.189388
+ s <-- sz=16 seq=97 ack=43 rel=0 tm=37.189388
+ s --> sz=1046 seq=45 ack=97 rel=1 tm=37.199947
+ s <-- sz=16 seq=98 ack=43 rel=0 tm=37.220432
+ s <-- sz=16 seq=99 ack=44 rel=0 tm=37.220432
+ s --> sz=16 seq=46 ack=99 rel=0 tm=37.230396
+ s <-- sz=16 seq=100 ack=44 rel=0 tm=37.251415
+ s <-- sz=16 seq=101 ack=45 rel=0 tm=37.251415
+ s --> sz=1040 seq=47 ack=101 rel=1 tm=37.262375
+ s <-- sz=16 seq=102 ack=45 rel=0 tm=37.283482
+ s <-- sz=16 seq=103 ack=46 rel=0 tm=37.283482
+ s --> sz=16 seq=48 ack=103 rel=0 tm=37.294231
+ s <-- sz=16 seq=104 ack=46 rel=0 tm=37.314850
+ s <-- sz=16 seq=105 ack=47 rel=0 tm=37.314850
+ s --> sz=16 seq=49 ack=105 rel=0 tm=37.325565
+ s <-- sz=97 seq=106 ack=47 rel=1 tm=39.331665
+L 14/09/2026 - 23:36:21: [META] (debug:3) Calling server.so:ClientPutInServer()
+L 14/09/2026 - 23:36:21: Server is no longer empty, idle timer disabled.
+L 14/09/2026 - 23:36:21: "plaer<1><STEAM_0:1:394236866><player>" has entered the game
+**Graph Pointers Set!
+L 14/09/2026 - 23:36:21: [META] (debug:3) Calling amxmodx_mm_i386.so:ClientPutInServer_Post()
+L 14/09/2026 - 23:36:21: [META] (debug:3) Calling fakemeta_amxx_i386.so:ClientPutInServer_Post()
+[PUTINSERVER][id=1] ===== PUTINSERVER =====
+[PUTINSERVER][id=1] name='name='%s' ip='%s' authid='%s'' ip='plaer' authid='192.168.192.236:39011'
+[PUTINSERVER][id=1] connect->putin delta=99 sec
+[PUTINSERVER][id=1] %s = '%s' = 'name'
+[PUTINSERVER][id=1] %s = '%s' = 'model'
+[PUTINSERVER][id=1] %s = '%s' = 'topcolor'
+[PUTINSERVER][id=1] %s = '%s' = 'bottomcolor'
+[PUTINSERVER][id=1] %s = '%s' = 'rate'
+[PUTINSERVER][id=1] %s = '%s' = 'cl_updaterate'
+[PUTINSERVER][id=1] %s = '%s' = 'cl_lw'
+[PUTINSERVER][id=1] %s = '%s' = 'cl_lc'
+[PUTINSERVER][id=1] %s = '%s' = 'cl_dlmax'
+[PUTINSERVER][id=1] %s = '%s' = 'hud_classautokill'
+[PUTINSERVER][id=1] %s = '%s' = '*sid'
+[UCMD][id=1] #35 btns=0x00000001 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UMSG] id=1 dest=1 msg=78 name='msg_78' args=1 | a1{str='-sp_campaign_portal' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=79 name='msg_79' args=0 |
+[UMSG] id=1 dest=1 msg=86 name='msg_86' args=1 | a1{str='-sp_campaign_portal' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=83 name='msg_83' args=17 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00} a3{str='STEAM_0:1:394236866' int=0 float=0.00} a4{str='' int=0 float=0.00} a5{str='' int=0 float=0.00} a6{str='' int=0 float=0.00
+[UMSG] id=1 dest=1 msg=84 name='msg_84' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=99 name='msg_99' args=2 | a1{str='-sp_campaign_portal' int=3 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=83 name='msg_83' args=17 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00} a3{str='STEAM_0:1:394236866' int=0 float=0.00} a4{str='' int=0 float=0.00} a5{str='' int=0 float=0.00} a6{str='' int=0 float=0.00
+[UMSG] id=1 dest=1 msg=84 name='msg_84' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=98 name='msg_98' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=7 | a1{str='-sp_campaign_portal' int=0 float=0.00} a2{str='' int=41 float=0.00} a3{str='-sp_campaign_portal' int=0 float=0.00} a4{str='abandoned' int=0 float=0.00} a5{str='BlackMesaEPF' int=0 float=0.00} a6{
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=8 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=5 float=0.00} a3{str='-sp_campaign_portal' int=10 float=0.00} a4{str='ctf_warforts' int=0 float=0.00} a5{str='deadsimpleneo2' int=0 float=0.00
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=8 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=10 float=0.00} a3{str='-sp_campaign_portal' int=15 float=0.00} a4{str='incoming' int=0 float=0.00} a5{str='infested' int=0 float=0.00} a6{str=
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=8 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=15 float=0.00} a3{str='-sp_campaign_portal' int=20 float=0.00} a4{str='mommamesa' int=0 float=0.00} a5{str='mustard' int=0 float=0.00} a6{str=
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=8 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=20 float=0.00} a3{str='-sp_campaign_portal' int=25 float=0.00} a4{str='sandstone' int=0 float=0.00} a5{str='sc_another' int=0 float=0.00} a6{s
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=8 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=25 float=0.00} a3{str='-sp_campaign_portal' int=30 float=0.00} a4{str='sc_psyko' int=0 float=0.00} a5{str='sc_robination_revised' int=0 float=
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=8 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=30 float=0.00} a3{str='-sp_campaign_portal' int=35 float=0.00} a4{str='suspension' int=0 float=0.00} a5{str='svencoop1' int=0 float=0.00} a6{s
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=8 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=35 float=0.00} a3{str='-sp_campaign_portal' int=40 float=0.00} a4{str='th_escape' int=0 float=0.00} a5{str='toadsnatch' int=0 float=0.00} a6{s
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=4 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=40 float=0.00} a3{str='-sp_campaign_portal' int=41 float=0.00} a4{str='yabma' int=0 float=0.00}
+[UMSG] id=1 dest=8 msg=102 name='msg_102' args=1 | a1{str='-sp_campaign_portal' int=123 float=0.00}
+[UMSG] id=1 dest=1 msg=101 name='msg_101' args=1 | a1{str='-sp_campaign_portal' int=5900 float=0.00}
+[UMSG] id=1 dest=1 msg=124 name='msg_124' args=1 | a1{str='5.26' int=5900 float=0.00}
+[UMSG] id=1 dest=1 msg=125 name='msg_125' args=1 | a1{str='7913 (Dec  5 2024 at 20:54:16)' int=5900 float=0.00}
+[UMSG] id=1 dest=1 msg=122 name='msg_122' args=1 | a1{str='Sven Co-op 5.0 server' int=5900 float=0.00}
+[UMSG] id=1 dest=1 msg=106 name='msg_106' args=1 | a1{str='-sp_campaign_portal' int=5900 float=0.00}
+[UMSG] id=1 dest=1 msg=123 name='msg_123' args=21 | a1{str='-sp_campaign_portal' int=5 float=0.00} a2{str='' int=40 float=0.00} a3{str='-sp_campaign_portal' int=1120534528 float=100.99} a4{str='yabma' int=1124073472 float=127.99} a5{str='toadsnatch' int=
+[UMSG] id=1 dest=1 msg=87 name='msg_87' args=2 | a1{str='-sp_campaign_portal' int=0 float=0.00} a2{str='This server is running Sven Co-op.
+
+https://w' int=40 float=0.00}
+[UMSG] id=1 dest=1 msg=87 name='msg_87' args=2 | a1{str='-sp_campaign_portal' int=0 float=0.00} a2{str='ww.svencoop.com/
+
+--
+
+Need help?
+
+Check o' int=40 float=0.00}
+[UMSG] id=1 dest=1 msg=87 name='msg_87' args=2 | a1{str='-sp_campaign_portal' int=0 float=0.00} a2{str='ut the game docs at: https://www.svencoop.com/m' int=40 float=0.00}
+[UMSG] id=1 dest=1 msg=87 name='msg_87' args=2 | a1{str='-sp_campaign_portal' int=0 float=0.00} a2{str='anual/
+Talk to us on Discord at: https://disco' int=40 float=0.00}
+[UMSG] id=1 dest=1 msg=87 name='msg_87' args=2 | a1{str='-sp_campaign_portal' int=0 float=0.00} a2{str='rd.gg/svencoop/
+Write to us on our message boa' int=40 float=0.00}
+[UMSG] id=1 dest=1 msg=87 name='msg_87' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='rds at: https://forums.svencoop.com/
+' int=40 float=0.00}
+[UMSG] id=1 dest=1 msg=121 name='msg_121' args=1 | a1{str='-sp_campaign_portal' int=4 float=0.00}
+[UMSG] id=1 dest=1 msg=83 name='msg_83' args=17 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='rds at: https://forums.svencoop.com/
+' int=0 float=0.00} a3{str='-sp_campaign_portal' int=0 float=0.00} a4{str='yabma' int=0 float=0.00} a5{str='toa
+[UMSG] id=1 dest=1 msg=84 name='msg_84' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=83 name='msg_83' args=17 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00} a3{str='-sp_campaign_portal' int=0 float=0.00} a4{str='yabma' int=0 float=0.00} a5{str='toadsnatch' int=0 float=0.00} a6{str='Blu
+[UMSG] id=1 dest=1 msg=84 name='msg_84' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=69 name='msg_69' args=1 | a1{str='-sp_campaign_portal' int=100 float=0.00}
+[UMSG] id=1 dest=1 msg=91 name='msg_91' args=1 | a1{str='-sp_campaign_portal' int=2 float=0.00}
+[UMSG] id=1 dest=1 msg=92 name='msg_92' args=1 | a1{str='-sp_campaign_portal' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=71 name='msg_71' args=1 | a1{str='-sp_campaign_portal' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=70 name='msg_70' args=6 | a1{str='-sp_campaign_portal' int=0 float=0.00} a2{str='' int=0 float=0.00} a3{str='-sp_campaign_portal' int=0 float=0.00} a4{str='yabma' int=-987496448 float=-2623.99} a5{str='toadsnatch' int=-1009778688 f
+[UMSG] id=1 dest=1 msg=68 name='msg_68' args=1 | a1{str='-sp_campaign_portal' int=100 float=0.00}
+[UMSG] id=1 dest=1 msg=72 name='msg_72' args=1 | a1{str='-sp_campaign_portal' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_crowbar' int=0 float=0.00} a2{str='' int=-1 float=0.00} a3{str='-sp_campaign_portal' int=-1 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue'
+[UMSG] id=1 dest=1 msg=77 name='msg_77' args=2 | a1{str='weapon_crowbar' int=1 float=0.00} a2{str='' int=-1 float=0.00}
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_9mmhandgun' int=1 float=0.00} a2{str='' int=2 float=0.00} a3{str='-sp_campaign_portal' int=250 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Bl
+[UMSG] id=1 dest=1 msg=77 name='msg_77' args=2 | a1{str='weapon_9mmhandgun' int=2 float=0.00} a2{str='' int=2 float=0.00}
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_357' int=2 float=0.00} a2{str='' int=3 float=0.00} a3{str='-sp_campaign_portal' int=36 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' int=
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_9mmAR' int=2 float=0.00} a2{str='' int=2 float=0.00} a3{str='-sp_campaign_portal' int=250 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' i
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_crossbow' int=2 float=0.00} a2{str='' int=5 float=0.00} a3{str='-sp_campaign_portal' int=50 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue'
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_shotgun' int=2 float=0.00} a2{str='' int=4 float=0.00} a3{str='-sp_campaign_portal' int=125 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue'
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_rpg' int=2 float=0.00} a2{str='' int=8 float=0.00} a3{str='-sp_campaign_portal' int=5 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' int=3
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_gauss' int=2 float=0.00} a2{str='' int=9 float=0.00} a3{str='-sp_campaign_portal' int=100 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' i
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_egon' int=2 float=0.00} a2{str='' int=9 float=0.00} a3{str='-sp_campaign_portal' int=100 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' in
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_hornetgun' int=2 float=0.00} a2{str='' int=10 float=0.00} a3{str='-sp_campaign_portal' int=100 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Bl
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_handgrenade' int=2 float=0.00} a2{str='' int=11 float=0.00} a3{str='-sp_campaign_portal' int=10 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='B
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_tripmine' int=2 float=0.00} a2{str='' int=13 float=0.00} a3{str='-sp_campaign_portal' int=5 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue'
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_satchel' int=2 float=0.00} a2{str='' int=12 float=0.00} a3{str='-sp_campaign_portal' int=5 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' 
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_snark' int=2 float=0.00} a2{str='' int=14 float=0.00} a3{str='-sp_campaign_portal' int=15 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' i
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_uzi' int=2 float=0.00} a2{str='' int=2 float=0.00} a3{str='-sp_campaign_portal' int=250 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' int
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_medkit' int=2 float=0.00} a2{str='' int=1 float=0.00} a3{str='-sp_campaign_portal' int=100 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' 
+[UMSG] id=1 dest=1 msg=77 name='msg_77' args=2 | a1{str='weapon_medkit' int=18 float=0.00} a2{str='' int=1 float=0.00}
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_pipewrench' int=18 float=0.00} a2{str='' int=-1 float=0.00} a3{str='-sp_campaign_portal' int=-1 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='B
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_minigun' int=18 float=0.00} a2{str='' int=6 float=0.00} a3{str='-sp_campaign_portal' int=600 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_grapple' int=18 float=0.00} a2{str='' int=-1 float=0.00} a3{str='-sp_campaign_portal' int=-1 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_sniperrifle' int=18 float=0.00} a2{str='' int=15 float=0.00} a3{str='-sp_campaign_portal' int=15 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_m249' int=18 float=0.00} a2{str='' int=6 float=0.00} a3{str='-sp_campaign_portal' int=600 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' i
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_m16' int=18 float=0.00} a2{str='' int=6 float=0.00} a3{str='-sp_campaign_portal' int=600 float=0.00} a4{str='yabma' int=7 float=0.00} a5{str='toadsnatch' int=10 float=0.00} a6{str='Blue' int
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_sporelauncher' int=18 float=0.00} a2{str='' int=16 float=0.00} a3{str='-sp_campaign_portal' int=30 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_eagle' int=18 float=0.00} a2{str='' int=3 float=0.00} a3{str='-sp_campaign_portal' int=36 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Blue' i
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_shockrifle' int=18 float=0.00} a2{str='' int=17 float=0.00} a3{str='-sp_campaign_portal' int=100 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='
+[UMSG] id=1 dest=1 msg=76 name='msg_76' args=9 | a1{str='weapon_displacer' int=18 float=0.00} a2{str='' int=9 float=0.00} a3{str='-sp_campaign_portal' int=100 float=0.00} a4{str='yabma' int=-1 float=0.00} a5{str='toadsnatch' int=-1 float=0.00} a6{str='Bl
+[UMSG] id=1 dest=1 msg=96 name='msg_96' args=2 | a1{str='weapon_displacer' int=1 float=0.00} a2{str='' int=50 float=0.00}
+[UMSG] id=1 dest=1 msg=96 name='msg_96' args=2 | a1{str='weapon_displacer' int=2 float=0.00} a2{str='' int=17 float=0.00}
+[UMSG] id=1 dest=1 msg=65 name='msg_65' args=4 | a1{str='weapon_displacer' int=0 float=0.00} a2{str='' int=18 float=0.00} a3{str='-sp_campaign_portal' int=-1 float=0.00} a4{str='yabma' int=-1 float=0.00}
+[UMSG] id=1 dest=1 msg=65 name='msg_65' args=4 | a1{str='weapon_displacer' int=0 float=0.00} a2{str='' int=1 float=0.00} a3{str='-sp_campaign_portal' int=-1 float=0.00} a4{str='yabma' int=-1 float=0.00}
+[UMSG] id=1 dest=1 msg=65 name='msg_65' args=4 | a1{str='weapon_displacer' int=1 float=0.00} a2{str='' int=2 float=0.00} a3{str='-sp_campaign_portal' int=17 float=0.00} a4{str='yabma' int=-1 float=0.00}
+[UMSG] id=1 dest=1 msg=101 name='msg_101' args=1 | a1{str='weapon_displacer' int=5900 float=0.00}
+[UMSG] id=1 dest=1 msg=106 name='msg_106' args=1 | a1{str='-sp_campaign_portal' int=5900 float=0.00}
+[UCMD][id=1] #35 btns=0x00000002 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000003 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000004 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000005 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000006 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000007 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000008 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UMSG] id=1 dest=1 msg=68 name='msg_68' args=1 | a1{str='-sp_campaign_portal' int=100 float=0.00}
+ s <-- sz=16 seq=107 ack=48 rel=0 tm=39.331665
+ s <-- sz=16 seq=108 ack=49 rel=0 tm=39.331665
+ s <-- sz=35 seq=110 ack=49 rel=0 tm=39.331665
+192.168.192.236:39011:Dropped 1 packets at 110
+[UCMD][id=1] #35 btns=0x00000009 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000000A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000000B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000000C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UMSG] id=1 dest=1 msg=83 name='msg_83' args=17 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00} a3{str='-sp_campaign_portal' int=0 float=0.00} a4{str='yabma' int=0 float=0.00} a5{str='toadsnatch' int=0 float=0.00} a6{str='Blu
+[UMSG] id=1 dest=1 msg=84 name='msg_84' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[USERINFO_CHANGED][id=1] %s = '%s' = 'name'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'model'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'topcolor'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'bottomcolor'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'rate'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_updaterate'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_lw'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_lc'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_dlmax'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'hud_classautokill'
+[USERINFO_CHANGED][id=1] %s = '%s' = '*sid'
+ s --> sz=1415 seq=50 ack=110 rel=1 tm=39.341640
+[UMSG] id=1 dest=1 msg=83 name='msg_83' args=17 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00} a3{str='-sp_campaign_portal' int=0 float=0.00} a4{str='yabma' int=0 float=0.00} a5{str='toadsnatch' int=0 float=0.00} a6{str='Blu
+[UMSG] id=1 dest=1 msg=84 name='msg_84' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[USERINFO_CHANGED][id=1] %s = '%s' = 'name'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'model'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'topcolor'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'bottomcolor'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'rate'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_updaterate'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_lw'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_lc'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'cl_dlmax'
+[USERINFO_CHANGED][id=1] %s = '%s' = 'hud_classautokill'
+[USERINFO_CHANGED][id=1] %s = '%s' = '*sid'
+ s --> sz=602 seq=51 ack=110 rel=0 tm=39.379467
+ s <-- sz=33 seq=112 ack=49 rel=0 tm=39.379467
+192.168.192.236:39011:Dropped 1 packets at 112
+[UCMD][id=1] #35 btns=0x0000000D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000000E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=33 seq=114 ack=49 rel=0 tm=39.389633
+192.168.192.236:39011:Dropped 1 packets at 114
+[UCMD][id=1] #35 btns=0x0000000F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000010 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=27 seq=116 ack=49 rel=0 tm=39.410763
+192.168.192.236:39011:Dropped 1 packets at 116
+[UCMD][id=1] #35 btns=0x00000011 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000012 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=638 seq=52 ack=116 rel=0 tm=39.421230
+ s <-- sz=22 seq=118 ack=50 rel=1 tm=39.431900
+192.168.192.236:39011:Dropped 1 packets at 118
+[CMD][id=1] #35 
+ s <-- sz=16 seq=119 ack=51 rel=0 tm=39.442287
+ s <-- sz=38 seq=120 ack=51 rel=0 tm=39.442287
+[UCMD][id=1] #35 btns=0x00000013 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000014 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000015 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000016 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=1514 seq=53 ack=120 rel=1 tm=39.463337
+ s <-- sz=38 seq=122 ack=51 rel=0 tm=39.463337
+192.168.192.236:39011:Dropped 1 packets at 122
+[UCMD][id=1] #35 btns=0x00000017 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000018 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=124 ack=52 rel=0 tm=39.483891
+192.168.192.236:39011:Dropped 1 packets at 124
+ s <-- sz=45 seq=125 ack=52 rel=0 tm=39.483891
+[UCMD][id=1] #35 btns=0x00000019 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000001A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000001B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=476 seq=54 ack=125 rel=0 tm=39.505291
+ s <-- sz=38 seq=127 ack=52 rel=0 tm=39.515255
+192.168.192.236:39011:Dropped 1 packets at 127
+[UCMD][id=1] #35 btns=0x0000001C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000001D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=52 seq=129 ack=52 rel=1 tm=39.536503
+192.168.192.236:39011:Dropped 1 packets at 129
+[CMD][id=1] #35 
+[UCMD][id=1] #35 btns=0x0000001E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UMSG] id=1 dest=1 msg=99 name='msg_99' args=2 | a1{str='-sp_campaign_portal' int=3 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=148 name='msg_148' args=91 | a1{str='-sp_campaign_portal' int=31 float=0.00} a2{str='' int=12 float=0.00} a3{str='-sp_campaign_portal' int=123 float=0.00} a4{str='yabma' int=112 float=0.00} a5{str='toadsnatch' int=2 float=0.00} a6{
+[UCMD][id=1] #35 btns=0x0000001F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=130 ack=53 rel=0 tm=39.536503
+ s --> sz=1639 seq=55 ack=130 rel=1 tm=39.547344
+ s <-- sz=43 seq=132 ack=53 rel=0 tm=39.547344
+192.168.192.236:39011:Dropped 1 packets at 132
+[UCMD][id=1] #35 btns=0x00000020 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000021 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000022 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=134 ack=54 rel=0 tm=39.557812
+192.168.192.236:39011:Dropped 1 packets at 134
+ s <-- sz=43 seq=135 ack=54 rel=0 tm=39.567883
+[UCMD][id=1] #35 btns=0x00000023 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000024 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000025 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=42 seq=137 ack=54 rel=0 tm=39.588104
+192.168.192.236:39011:Dropped 1 packets at 137
+[UCMD][id=1] #35 btns=0x00000026 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000027 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=477 seq=56 ack=137 rel=0 tm=39.598473
+[UMSG] id=1 dest=1 msg=149 name='msg_149' args=2 | a1{str='-sp_campaign_portal' int=1 float=0.00} a2{str='' int=0 float=0.00}
+[UMSG] id=1 dest=1 msg=37 name='Radar' args=1 | a1{str='-sp_campaign_portal' int=0 float=0.00}
+ s <-- sz=36 seq=139 ack=54 rel=0 tm=39.619411
+192.168.192.236:39011:Dropped 1 packets at 139
+[UCMD][id=1] #35 btns=0x00000028 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000029 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=140 ack=55 rel=1 tm=39.619411
+ s <-- sz=43 seq=142 ack=55 rel=1 tm=39.629803
+192.168.192.236:39011:Dropped 1 packets at 142
+[UCMD][id=1] #35 btns=0x0000002A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000002B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000002C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=1514 seq=57 ack=142 rel=1 tm=39.640800
+ s <-- sz=40 seq=144 ack=55 rel=1 tm=39.650906
+192.168.192.236:39011:Dropped 1 packets at 144
+[UCMD][id=1] #35 btns=0x0000002D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000002E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=146 ack=56 rel=1 tm=39.650906
+192.168.192.236:39011:Dropped 1 packets at 146
+ s <-- sz=47 seq=147 ack=56 rel=1 tm=39.661930
+[UCMD][id=1] #35 btns=0x0000002F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000030 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000031 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=476 seq=58 ack=147 rel=0 tm=39.683075
+ s <-- sz=40 seq=149 ack=56 rel=1 tm=39.683075
+192.168.192.236:39011:Dropped 1 packets at 149
+[UCMD][id=1] #35 btns=0x00000032 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000033 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=40 seq=151 ack=56 rel=1 tm=39.715340
+192.168.192.236:39011:Dropped 1 packets at 151
+[UCMD][id=1] #35 btns=0x00000034 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000035 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=152 ack=57 rel=1 tm=39.715340
+ s --> sz=1639 seq=59 ack=152 rel=1 tm=39.726219
+ s <-- sz=43 seq=154 ack=57 rel=1 tm=39.726219
+192.168.192.236:39011:Dropped 1 packets at 154
+[UCMD][id=1] #35 btns=0x00000036 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000037 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000038 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=156 ack=58 rel=0 tm=39.737171
+192.168.192.236:39011:Dropped 1 packets at 156
+ s <-- sz=43 seq=157 ack=58 rel=0 tm=39.737171
+[UCMD][id=1] #35 btns=0x00000039 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000003A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000003B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=60 ack=157 rel=0 tm=39.768425
+ s <-- sz=42 seq=159 ack=58 rel=0 tm=39.768425
+192.168.192.236:39011:Dropped 1 packets at 159
+[UCMD][id=1] #35 btns=0x0000003C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000003D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=36 seq=161 ack=58 rel=0 tm=39.779346
+192.168.192.236:39011:Dropped 1 packets at 161
+[UCMD][id=1] #35 btns=0x0000003E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000003F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=162 ack=59 rel=1 tm=39.789761
+ s --> sz=1639 seq=61 ack=162 rel=1 tm=39.811089
+ s <-- sz=45 seq=164 ack=59 rel=1 tm=39.811089
+192.168.192.236:39011:Dropped 1 packets at 164
+[UCMD][id=1] #35 btns=0x00000040 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000041 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000042 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=166 ack=60 rel=0 tm=39.822021
+192.168.192.236:39011:Dropped 1 packets at 166
+ s <-- sz=45 seq=167 ack=60 rel=0 tm=39.832653
+[UCMD][id=1] #35 btns=0x00000043 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000044 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000045 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=475 seq=62 ack=167 rel=0 tm=39.853935
+ s <-- sz=44 seq=169 ack=60 rel=0 tm=39.853935
+192.168.192.236:39011:Dropped 1 packets at 169
+[UCMD][id=1] #35 btns=0x00000046 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000047 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=38 seq=171 ack=60 rel=0 tm=39.875824
+192.168.192.236:39011:Dropped 1 packets at 171
+[UCMD][id=1] #35 btns=0x00000048 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000049 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=173 ack=61 rel=1 tm=39.886322
+192.168.192.236:39011:Dropped 1 packets at 173
+ s --> sz=1639 seq=63 ack=173 rel=1 tm=39.896492
+ s <-- sz=37 seq=174 ack=61 rel=1 tm=39.896492
+[UCMD][id=1] #35 btns=0x0000004A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000004B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000004C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=32 seq=176 ack=61 rel=1 tm=39.917519
+192.168.192.236:39011:Dropped 1 packets at 176
+[UCMD][id=1] #35 btns=0x0000004D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000004E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=177 ack=62 rel=0 tm=39.917519
+ s <-- sz=35 seq=179 ack=62 rel=0 tm=39.937870
+192.168.192.236:39011:Dropped 1 packets at 179
+[UCMD][id=1] #35 btns=0x0000004F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000050 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000051 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=474 seq=64 ack=179 rel=0 tm=39.948437
+ s <-- sz=34 seq=181 ack=62 rel=0 tm=39.959255
+192.168.192.236:39011:Dropped 1 packets at 181
+[UCMD][id=1] #35 btns=0x00000052 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000053 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=182 ack=63 rel=1 tm=39.959255
+ s <-- sz=41 seq=184 ack=63 rel=1 tm=39.980488
+192.168.192.236:39011:Dropped 1 packets at 184
+[UCMD][id=1] #35 btns=0x00000054 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000055 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000056 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=1534 seq=65 ack=184 rel=1 tm=39.990967
+ s <-- sz=36 seq=186 ack=63 rel=1 tm=40.001244
+192.168.192.236:39011:Dropped 1 packets at 186
+[UCMD][id=1] #35 btns=0x00000057 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000058 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=188 ack=64 rel=1 tm=40.011726
+192.168.192.236:39011:Dropped 1 packets at 188
+ s <-- sz=43 seq=189 ack=64 rel=1 tm=40.011726
+[UCMD][id=1] #35 btns=0x00000059 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000005A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000005B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=66 ack=189 rel=0 tm=40.033417
+ s <-- sz=36 seq=191 ack=64 rel=1 tm=40.033417
+192.168.192.236:39011:Dropped 1 packets at 191
+[UCMD][id=1] #35 btns=0x0000005C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000005D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=36 seq=193 ack=64 rel=1 tm=40.064907
+192.168.192.236:39011:Dropped 1 packets at 193
+[UCMD][id=1] #35 btns=0x0000005E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000005F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=194 ack=65 rel=1 tm=40.064907
+ s --> sz=1338 seq=67 ack=194 rel=1 tm=40.075844
+ s <-- sz=45 seq=196 ack=65 rel=1 tm=40.085888
+192.168.192.236:39011:Dropped 1 packets at 196
+[UCMD][id=1] #35 btns=0x00000060 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000061 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000062 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=198 ack=66 rel=0 tm=40.096664
+192.168.192.236:39011:Dropped 1 packets at 198
+ s <-- sz=45 seq=199 ack=66 rel=0 tm=40.107231
+[UCMD][id=1] #35 btns=0x00000063 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000064 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000065 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=44 seq=201 ack=66 rel=0 tm=40.107231
+192.168.192.236:39011:Dropped 1 packets at 201
+[UCMD][id=1] #35 btns=0x00000066 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000067 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=475 seq=68 ack=201 rel=0 tm=40.118015
+ s <-- sz=16 seq=203 ack=67 rel=1 tm=40.139050
+192.168.192.236:39011:Dropped 1 packets at 203
+ s --> sz=1639 seq=69 ack=203 rel=1 tm=40.160522
+ s --> sz=602 seq=70 ack=203 rel=0 tm=40.212486
+ s --> sz=601 seq=71 ack=203 rel=0 tm=40.245457
+ s --> sz=601 seq=72 ack=203 rel=0 tm=40.287865
+ s --> sz=601 seq=73 ack=203 rel=0 tm=40.330845
+ s --> sz=601 seq=74 ack=203 rel=0 tm=40.372757
+ s --> sz=601 seq=75 ack=203 rel=0 tm=40.414215
+ s --> sz=601 seq=76 ack=203 rel=0 tm=40.456951
+ s --> sz=601 seq=77 ack=203 rel=0 tm=40.498909
+ s --> sz=601 seq=78 ack=203 rel=0 tm=40.540745
+ s --> sz=601 seq=79 ack=203 rel=0 tm=40.582417
+ s --> sz=601 seq=80 ack=203 rel=0 tm=40.625031
+ s <-- sz=51 seq=204 ack=67 rel=1 tm=40.656826
+[UCMD][id=1] #35 btns=0x00000068 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000069 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000006A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000006B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000006C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000006D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000006E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000006F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000070 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000071 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=16 seq=205 ack=68 rel=0 tm=40.656826
+ s --> sz=638 seq=81 ack=205 rel=0 tm=40.667332
+ s <-- sz=44 seq=207 ack=80 rel=0 tm=40.688389
+192.168.192.236:39011:Dropped 1 packets at 207
+[UCMD][id=1] #35 btns=0x00000072 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000073 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000074 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=593 seq=82 ack=207 rel=1 tm=40.709293
+ s <-- sz=39 seq=209 ack=80 rel=0 tm=40.709293
+192.168.192.236:39011:Dropped 1 packets at 209
+[UCMD][id=1] #35 btns=0x00000075 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000076 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=49 seq=211 ack=81 rel=1 tm=40.729839
+192.168.192.236:39011:Dropped 1 packets at 211
+[UCMD][id=1] #35 btns=0x00000077 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000078 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=83 ack=211 rel=0 tm=40.751156
+ s <-- sz=47 seq=213 ack=81 rel=1 tm=40.751156
+192.168.192.236:39011:Dropped 1 packets at 213
+[UCMD][id=1] #35 btns=0x00000079 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000007A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=47 seq=215 ack=82 rel=1 tm=40.771564
+192.168.192.236:39011:Dropped 1 packets at 215
+[UCMD][id=1] #35 btns=0x0000007B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000007C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=930 seq=84 ack=215 rel=1 tm=40.792362
+ s <-- sz=45 seq=217 ack=82 rel=1 tm=40.792362
+192.168.192.236:39011:Dropped 1 packets at 217
+[UCMD][id=1] #35 btns=0x0000007D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000007E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=168 seq=219 ack=83 rel=1 tm=40.813801
+192.168.192.236:39011:Dropped 1 packets at 219
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=175 float=0.00} a3{str='specmode' int=80 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=175 float=0.00} a3{str='specmode' int=80 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=175 float=0.00} a3{str='specmode' int=80 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=175 float=0.00} a3{str='specmode' int=80 float=0.00}
+[CMD][id=1] #35 
+[UCMD][id=1] #35 btns=0x0000007F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000080 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=85 ack=219 rel=0 tm=40.835114
+ s <-- sz=35 seq=221 ack=83 rel=0 tm=40.835114
+192.168.192.236:39011:Dropped 1 packets at 221
+[UCMD][id=1] #35 btns=0x00000081 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000082 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=35 seq=223 ack=84 rel=0 tm=40.856426
+192.168.192.236:39011:Dropped 1 packets at 223
+[UCMD][id=1] #35 btns=0x00000083 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000084 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=657 seq=86 ack=223 rel=1 tm=40.876934
+ s <-- sz=31 seq=225 ack=84 rel=0 tm=40.876934
+192.168.192.236:39011:Dropped 1 packets at 225
+[UCMD][id=1] #35 btns=0x00000085 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000086 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=31 seq=227 ack=85 rel=0 tm=40.896942
+192.168.192.236:39011:Dropped 1 packets at 227
+[UCMD][id=1] #35 btns=0x00000087 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000088 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=31 seq=229 ack=85 rel=0 tm=40.907875
+192.168.192.236:39011:Dropped 1 packets at 229
+[UCMD][id=1] #35 btns=0x00000089 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000008A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=87 ack=229 rel=0 tm=40.918484
+ s <-- sz=168 seq=231 ack=86 rel=1 tm=40.939358
+192.168.192.236:39011:Dropped 1 packets at 231
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 	
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+
+[UCMD][id=1] #35 btns=0x0000008B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000008C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=168 seq=233 ack=86 rel=1 tm=40.949989
+192.168.192.236:39011:Dropped 1 packets at 233
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UCMD][id=1] #35 btns=0x0000008D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000008E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=841 seq=88 ack=233 rel=1 tm=40.960911
+ s <-- sz=172 seq=235 ack=87 rel=1 tm=40.991688
+192.168.192.236:39011:Dropped 1 packets at 235
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UCMD][id=1] #35 btns=0x0000008F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000090 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=89 ack=235 rel=0 tm=41.002274
+ s <-- sz=172 seq=237 ack=87 rel=1 tm=41.002274
+192.168.192.236:39011:Dropped 1 packets at 237
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UCMD][id=1] #35 btns=0x00000091 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000092 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=170 seq=239 ack=88 rel=1 tm=41.034077
+192.168.192.236:39011:Dropped 1 packets at 239
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UCMD][id=1] #35 btns=0x00000093 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000094 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=1025 seq=90 ack=239 rel=1 tm=41.044643
+ s <-- sz=172 seq=241 ack=88 rel=1 tm=41.044643
+192.168.192.236:39011:Dropped 1 packets at 241
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UMSG] id=1 dest=1 msg=75 name='msg_75' args=3 | a1{str='-sp_campaign_portal' int=2 float=0.00} a2{str='Unknown command: %s
+' int=155 float=0.00} a3{str='specmode' int=70 float=0.00}
+[CMD][id=1] #35 
+[UCMD][id=1] #35 btns=0x00000095 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000096 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=91 ack=241 rel=0 tm=41.086384
+ s <-- sz=36 seq=246 ack=89 rel=0 tm=41.097122
+192.168.192.236:39011:Dropped 4 packets at 246
+[UCMD][id=1] #35 btns=0x00000097 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000098 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x00000099 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000009A impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000009B impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=37 seq=248 ack=90 rel=0 tm=41.118279
+192.168.192.236:39011:Dropped 1 packets at 248
+[UCMD][id=1] #35 btns=0x0000009C impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000009D impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=657 seq=92 ack=248 rel=1 tm=41.128616
+ s <-- sz=37 seq=250 ack=90 rel=0 tm=41.138550
+192.168.192.236:39011:Dropped 1 packets at 250
+[UCMD][id=1] #35 btns=0x0000009E impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x0000009F impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=39 seq=252 ack=91 rel=0 tm=41.159367
+192.168.192.236:39011:Dropped 1 packets at 252
+[UCMD][id=1] #35 btns=0x000000A0 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000A1 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=93 ack=252 rel=0 tm=41.169907
+ s <-- sz=39 seq=254 ack=91 rel=0 tm=41.180298
+192.168.192.236:39011:Dropped 1 packets at 254
+[UCMD][id=1] #35 btns=0x000000A2 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000A3 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=94 ack=254 rel=0 tm=41.212578
+ s <-- sz=36 seq=259 ack=93 rel=0 tm=41.233887
+192.168.192.236:39011:Dropped 4 packets at 259
+[UCMD][id=1] #35 btns=0x000000A4 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000A5 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000A6 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000A7 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000A8 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=496 seq=95 ack=259 rel=0 tm=41.255199
+ s <-- sz=33 seq=261 ack=93 rel=0 tm=41.265491
+192.168.192.236:39011:Dropped 1 packets at 261
+[UCMD][id=1] #35 btns=0x000000A9 impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000AA impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s <-- sz=35 seq=263 ack=94 rel=0 tm=41.265491
+192.168.192.236:39011:Dropped 1 packets at 263
+[UCMD][id=1] #35 btns=0x000000AB impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000AC impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=96 ack=263 rel=0 tm=41.296387
+ s <-- sz=35 seq=265 ack=94 rel=0 tm=41.296387
+192.168.192.236:39011:Dropped 1 packets at 265
+[UCMD][id=1] #35 btns=0x000000AD impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+[UCMD][id=1] #35 btns=0x000000AE impulse=0 fwd=0.00 side=0.00 up=0.00 va=(0.0,0.0,0.0)
+ s --> sz=473 seq=97 ack=265 rel=0 tm=41.337505
+ s --> sz=473 seq=98 ack=265 rel=0 tm=41.379360
+ s --> sz=473 seq=99 ack=265 rel=0 tm=41.420464
+ s --> sz=473 seq=100 ack=265 rel=0 tm=41.462955
+ s --> sz=473 seq=101 ack=265 rel=0 tm=41.504677
+ s --> sz=473 seq=102 ack=265 rel=0 tm=41.546749
+ s --> sz=473 seq=103 ack=265 rel=0 tm=41.589226
+ s --> sz=473 seq=104 ack=265 rel=0 tm=41.631275
+ s --> sz=496 seq=105 ack=265 rel=0 tm=41.673367
+ s --> sz=473 seq=106 ack=265 rel=0 tm=41.713882
+ s --> sz=473 seq=107 ack=265 rel=0 tm=41.755646
+ s --> sz=510 seq=108 ack=265 rel=0 tm=41.797188
+ s --> sz=473 seq=109 ack=265 rel=0 tm=41.839207
+ s --> sz=473 seq=110 ack=265 rel=0 tm=41.881569
+ s --> sz=473 seq=111 ack=265 rel=0 tm=41.923187
+WARNING: reliable overflow for plaer
+L 14/09/2026 - 23:36:24: [META] (debug:3) Calling amxmodx_mm_i386.so:ClientDisconnect()
+[DISCONNECT][id=1] ===== DISCONNECT =====
+[DISCONNECT][id=1] name='name='%s' ip='%s' session=%d sec drop=%d msg='%s'' ip='plaer' session=49 sec drop=6 msg=''
+[DISCONNECT][id=1] stats: msg=115 ucmd=116 cmd=174
+L 14/09/2026 - 23:36:24: [META] (debug:3) Calling engine_amxx_i386.so:ClientDisconnect()
+L 14/09/2026 - 23:36:24: [META] (debug:3) Calling server.so:ClientDisconnect()
+L 14/09/2026 - 23:36:24: Last player disconnected, map will end in 10.00 minute(s) if nobody connects.
+L 14/09/2026 - 23:36:24: "plaer<1><STEAM_0:1:394236866><player>" disconnected
+ s --> sz=120 seq=112 ack=265 rel=1 tm=41.954277
+ s --> sz=16 seq=113 ack=265 rel=0 tm=41.954277
+L 14/09/2026 - 23:36:32: [META] (debug:3) Calling amxmodx_mm_i386.so:ServerDeactivate()
+L 14/09/2026 - 23:36:32: [META] (debug:3) Calling engine_amxx_i386.so:ServerDeactivate()
+L 14/09/2026 - 23:36:32: [META] (debug:3) Calling server.so:ServerDeactivate()
+Angelscript: Clearing temporary directory './scripts/maps/temp'
+L 14/09/2026 - 23:36:32: [META] (debug:3) Calling amxmodx_mm_i386.so:ServerDeactivate_Post()
+L 14/09/2026 - 23:36:32: [META] (debug:3) Calling fakemeta_amxx_i386.so:ServerDeactivate_Post()
+L 14/09/2026 - 23:36:32: [META] ini: Begin re-reading plugins list: /root/svencoop-server/svencoop/addons/metamod/plugins.ini
+L 14/09/2026 - 23:36:32: [META] ini: Read plugin config for: AMX Mod X
+L 14/09/2026 - 23:36:32: [META] ini: Finished reading plugins list: /root/svencoop-server/svencoop/addons/metamod/plugins.ini; Found 1 plugins
+L 14/09/2026 - 23:36:32: [META] dll: Updating plugins...
+L 14/09/2026 - 23:36:32: [META] (debug:1) Keeping plugin 'AMX Mod X'
+L 14/09/2026 - 23:36:32: [META] dll: Finished updating 3 plugins; kept 1, loaded 0, unloaded 0, reloaded 0, delayed 0
+L 14/09/2026 - 23:36:33: Server shutdown

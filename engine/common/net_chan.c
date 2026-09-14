@@ -1585,8 +1585,20 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	// if the remote side dropped the last reliable message, resend it
 	send_reliable = false;
 
+	// GoldSrc reference gate: resend an unacked reliable payload as soon as
+	// the peer acknowledges a packet beyond it. On links with a small uplink
+	// MTU (mobile hotspot) a big payload (e.g. a large file-upload fragment)
+	// never fits into a single datagram: the gate then crams the full payload
+	// into EVERY outgoing packet, every frame, starving the acked
+	// small/unreliable packets until the peer declares a reliable overflow
+	// and disconnects us. Throttle retransmits to NETCHAN_RELIABLE_RESEND_TIME
+	// (same cadence as the lost-packet fallback below) so acks and movement
+	// packets keep flowing between retransmits.
 	if( chan->incoming_acknowledged > chan->last_reliable_sequence && chan->incoming_reliable_acknowledged != chan->reliable_sequence )
-		send_reliable = true;
+	{
+		if( host.realtime - chan->last_reliable_send_time >= NETCHAN_RELIABLE_RESEND_TIME )
+			send_reliable = true;
+	}
 
 	// Lost-packet fallback for asymmetric/lossy links (WiFi): the reference
 	// GoldSrc gate above requires the peer to cumulatively acknowledge a
