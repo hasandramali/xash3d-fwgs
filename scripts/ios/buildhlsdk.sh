@@ -7,9 +7,9 @@ cd "$SCRIPTDIR" || exit 1
 MODPATH=mod-build/$1
 if [ -z "$1" ]; then
     MODPATH=mod-build/hlsdk
-    git clone --recursive https://github.com/hasandramali/hlsdk-portable -b svencoop "$MODPATH"
+    git clone --recursive https://github.com/FWGS/hlsdk-portable -b mobile_hacks "$MODPATH"
 else
-    git clone --recursive https://github.com/hasandramali/hlsdk-portable -b "$1" "$MODPATH"
+    git clone --recursive https://github.com/FWGS/hlsdk-portable -b "$1" "$MODPATH"
 fi
 
 mkdir -p ../../build/ios/libs || exit 1
@@ -26,19 +26,8 @@ else
 fi
 cmake --build build --target install
 
-# Rename dylibs to include arch suffix (engine expects _arm64)
-find "$LIBSDIR" -name "*.dylib" -type f | while read f; do
-    dir=$(dirname "$f")
-    base=$(basename "$f" .dylib)
-    # Only rename if no arch suffix already
-    if [[ "$base" != *_arm64 ]] && [[ "$base" != *_x86* ]] && [[ "$base" != *_i386 ]]; then
-        mv "$f" "$dir/${base}_arm64.dylib"
-    fi
-done
-
-cd "$SCRIPTDIR"
-if [ -d "$MODPATH" ]; then
-    rm -rf "$MODPATH"
+if [ -d mod-build ]; then
+    rm -rf mod-build/
 fi
 
 exit 0

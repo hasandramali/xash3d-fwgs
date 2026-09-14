@@ -42,17 +42,14 @@ static CVAR_DEFINE_AUTO( cl_logoext, "bmp", FCVAR_ARCHIVE, "temporary cvar to te
 static CVAR_DEFINE( cl_logoupdate, "@cl_logoupdate", "0", 0, "set by menu to trigger clan logo update" );
 CVAR_DEFINE_AUTO( cl_logomaxdim, "96", FCVAR_ARCHIVE, "maximum decal dimension" );
 static CVAR_DEFINE_AUTO( cl_test_bandwidth, "1", FCVAR_ARCHIVE, "test network bandwith before connection" );
-CVAR_DEFINE_AUTO( fps_max, "61", 0, "fps limit" );
-CVAR_DEFINE_AUTO( cl_fpsfilter, "0", FCVAR_ARCHIVE, "FPS filter mode: 0=use fps_max, 1=use max_fps, 2=use max_fps+fake msec" );
 static CVAR_DEFINE_AUTO( cl_require_challenge_echo, "-1", FCVAR_ARCHIVE, "reject connect packets that don't echo challenge, protects against spoofed servers but breaks connection to old servers (-1 = engine default)" );
 
-CVAR_DEFINE_AUTO( fps_rate, "100", FCVAR_ARCHIVE, "fake FPS rate when cl_fpsfilter is 2" );
 CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_CHEAT, "render particles" );
 CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_CHEAT, "render tracers" );
 CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_CHEAT, "render beams" );
-CVAR_DEFINE_AUTO( cl_screenfade, "1", FCVAR_CHEAT, "toggle screenfade" );
+
 static CVAR_DEFINE_AUTO( rcon_address, "", FCVAR_PRIVILEGED, "remote control address" );
-CVAR_DEFINE_AUTO( cl_timeout, "999999", 0, "connect timeout (in-seconds)" );
+CVAR_DEFINE_AUTO( cl_timeout, "60", 0, "connect timeout (in-seconds)" );
 CVAR_DEFINE_AUTO( cl_nopred, "0", FCVAR_USERINFO, "disable client movement prediction" );
 static CVAR_DEFINE_AUTO( cl_nodelta, "0", 0, "disable delta-compression for server messages" );
 CVAR_DEFINE( cl_crosshair, "crosshair", "1", FCVAR_ARCHIVE, "show weapon chrosshair" );
@@ -69,27 +66,26 @@ CVAR_DEFINE_AUTO( hud_fontscale, "1.0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud fo
 CVAR_DEFINE_AUTO( hud_fontrender, "0", FCVAR_ARCHIVE, "hud font render mode (0: additive, 1: holes, 2: trans)" );
 CVAR_DEFINE_AUTO( hud_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud at current resolution" );
 CVAR_DEFINE_AUTO( hud_scale_minimal_width, "640", FCVAR_ARCHIVE|FCVAR_LATCH, "if hud_scale results in a HUD virtual screen smaller than this value, it won't be applied" );
-CVAR_DEFINE_AUTO( hud_saytext_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale saytext at current resolution; 0 = disabled (not scaled)" );
 CVAR_DEFINE_AUTO( cl_solid_players, "1", 0, "Make all players not solid (can't traceline them)" );
-CVAR_DEFINE_AUTO( cl_updaterate, "101", FCVAR_USERINFO|FCVAR_ARCHIVE, "refresh rate of server messages" );
+CVAR_DEFINE_AUTO( cl_updaterate, "20", FCVAR_USERINFO|FCVAR_ARCHIVE, "refresh rate of server messages" );
 CVAR_DEFINE_AUTO( cl_showevents, "0", FCVAR_ARCHIVE, "show events playback" );
-CVAR_DEFINE_AUTO( cl_cmdrate, "101", FCVAR_ARCHIVE, "Max number of command packets sent to server per second" );
-CVAR_DEFINE( cl_interp, "ex_interp", "0.01", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "Interpolate object positions starting this many seconds in past" );
+CVAR_DEFINE_AUTO( cl_cmdrate, "30", FCVAR_ARCHIVE, "Max number of command packets sent to server per second" );
+CVAR_DEFINE( cl_interp, "ex_interp", "0.1", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "Interpolate object positions starting this many seconds in past" );
 CVAR_DEFINE_AUTO( cl_nointerp, "0", 0, "disable interpolation of entities and players" );
-static CVAR_DEFINE_AUTO( cl_dlmax, "1024", FCVAR_USERINFO|FCVAR_ARCHIVE, "max allowed outcoming fragment size" );
-static CVAR_DEFINE_AUTO( cl_upmax, "512", FCVAR_ARCHIVE, "max allowed incoming fragment size" );
+static CVAR_DEFINE_AUTO( cl_dlmax, "0", FCVAR_USERINFO|FCVAR_ARCHIVE, "max allowed outcoming fragment size" );
+static CVAR_DEFINE_AUTO( cl_upmax, "508", FCVAR_ARCHIVE, "max allowed incoming fragment size" );
+
 CVAR_DEFINE_AUTO( cl_lw, "1", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapon predicting" );
 CVAR_DEFINE_AUTO( cl_charset, "utf-8", FCVAR_ARCHIVE, "1-byte charset to use (iconv style)" );
 CVAR_DEFINE_AUTO( cl_trace_consistency, "0", 0, "enable consistency info tracing (good for developers)" );
 CVAR_DEFINE_AUTO( cl_trace_stufftext, "0", 0, "enable stufftext (server-to-client console commands) tracing (good for developers)" );
-CVAR_DEFINE_AUTO( cl_trace_messages, "0", 0, "enable message names tracing (good for developers)" );
-CVAR_DEFINE_AUTO( cl_trace_events, "0", 0, "enable events tracing (good for developers)" );
+CVAR_DEFINE_AUTO( cl_trace_messages, "0", FCVAR_CHEAT, "enable message names tracing (good for developers)" );
+CVAR_DEFINE_AUTO( cl_trace_events, "0", FCVAR_CHEAT, "enable events tracing (good for developers)" );
 static CVAR_DEFINE_AUTO( cl_nat, "0", 0, "show servers running under NAT" );
 CVAR_DEFINE_AUTO( hud_utf8, "0", FCVAR_ARCHIVE, "Use utf-8 encoding for hud text" );
-CVAR_DEFINE_AUTO( ui_renderworld, "1", FCVAR_PROTECTED, "render world when UI is visible" );
+CVAR_DEFINE_AUTO( ui_renderworld, "0", FCVAR_ARCHIVE, "render world when UI is visible" );
 static CVAR_DEFINE_AUTO( cl_maxframetime, "0", 0, "set deadline timer for client rendering to catch freezes" );
 CVAR_DEFINE_AUTO( cl_fixmodelinterpolationartifacts, "1", 0, "try to fix up models interpolation on a moving platforms (monsters on trains for example)" );
-CVAR_DEFINE_AUTO( cl_weaponlistfix, "0", FCVAR_ARCHIVE, "0: off, 1: 5-slot fallback inventory, 2: 7-slot fallback inventory" );
 
 //
 // userinfo
@@ -100,10 +96,9 @@ static CVAR_DEFINE_AUTO( model, "", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABL
 static CVAR_DEFINE_AUTO( topcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player top color" );
 static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player bottom color" );
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
+
 CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
-static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
-static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "goldSrc netchan packet munge: 0=off, 1=both directions (vanilla/ReHLDS servers), 2=outgoing only (Sven Coop dedicated servers unmunge inbound but send plain outbound)" );
-static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
+static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "1", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "add [Xash3D] to the nickname when connecting to GoldSrc servers" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -297,6 +292,9 @@ static void CL_UpdateLogo( void )
 			Con_Printf( "Unable to create custom decal\n" );
 	}
 
+	if( cl.num_resources == cl.num_sent_resources && !memcmp( cl.sent_resources_hash, cl.resourcelist[0].rgucMD5_hash, sizeof( cl.sent_resources_hash )))
+		return;
+
 	CL_SendResourceList( cl.resourcelist, cl.num_resources );
 }
 
@@ -452,8 +450,8 @@ static float CL_LerpPoint( void )
 		return 1.0f;
 	}
 
-	/*if( cl_interp.value <= 0.001 )
-		return 1.0f;*/
+	if( cl_interp.value <= 0.001 )
+		return 1.0f;
 
 	double frac = ( cl.time - cl.mtime[0] ) / cl_interp.value;
 
@@ -495,37 +493,32 @@ Validate interpolation cvars, calc interpolation window
 static void CL_ComputeClientInterpolationAmount( usercmd_t *cmd )
 {
 	const float epsilon = 0.001f; // to avoid float invalid comparision
-	float min_interp;
-	float max_interp = MAX_EX_INTERP;
-	float interpolation_time;
 
 	if( cl_updaterate.value < MIN_UPDATERATE )
 	{
-		Con_Printf( "cl_updaterate minimum is %f, resetting to default (20)\n", MIN_UPDATERATE );
+		Con_Printf( "cl_updaterate minimum is %g, resetting to default (%s)\n", MIN_UPDATERATE, cl_updaterate.def_string );
 		Cvar_Reset( "cl_updaterate" );
 	}
 
 	if( cl_updaterate.value > MAX_UPDATERATE )
 	{
-		Con_Printf( "cl_updaterate clamped at maximum (%f)\n", MAX_UPDATERATE );
-		Cvar_SetValue( "cl_updaterate", MAX_UPDATERATE );
+		Con_Printf( "cl_updaterate clamped at maximum (%g)\n", MAX_UPDATERATE );
+		Cvar_DirectSetValue( &cl_updaterate, MAX_UPDATERATE );
 	}
 
-	if( cls.spectator )
-		max_interp = 0.2f;
+	float min_interp = 1.0f / cl_updaterate.value;
+	float max_interp = cls.spectator ? 0.2f : MAX_EX_INTERP;
+	float interpolation_time = cl_interp.value;
 
-	min_interp = 0.01f / cl_updaterate.value;
-	interpolation_time = cl_interp.value * 1000.0;
-
-	if( (cl_interp.value + epsilon) < min_interp )
+	if(( cl_interp.value + epsilon ) < min_interp )
 	{
 		Con_Printf( "ex_interp forced up to %.1f msec\n", min_interp * 1000.f );
-		Cvar_SetValue( "ex_interp", min_interp );
+		Cvar_DirectSetValue( &cl_interp, min_interp );
 	}
-	else if( (cl_interp.value - epsilon) > max_interp )
+	else if(( cl_interp.value - epsilon ) > max_interp )
 	{
 		Con_Printf( "ex_interp forced down to %.1f msec\n", max_interp * 1000.f );
-		Cvar_SetValue( "ex_interp", max_interp );
+		Cvar_DirectSetValue( &cl_interp, max_interp );
 	}
 
 	interpolation_time = bound( min_interp, interpolation_time, max_interp );
@@ -662,6 +655,10 @@ static qboolean CL_ProcessShowTexturesCmds( usercmd_t *cmd )
 		Cvar_SetValue( "r_showtextures", r_showtextures.value + 1 );
 	if( released & ( IN_LEFT|IN_MOVELEFT ))
 		Cvar_SetValue( "r_showtextures", Q_max( 1, r_showtextures.value - 1 ));
+	if( released & IN_FORWARD )
+		Cvar_SetValue( "r_showtextures_zoom", Q_min( SHOWTEXTURES_ZOOM_MAX, r_showtextures_zoom.value + SHOWTEXTURES_ZOOM_STEP ));
+	if( released & IN_BACK )
+		Cvar_SetValue( "r_showtextures_zoom", Q_max( SHOWTEXTURES_ZOOM_MIN, r_showtextures_zoom.value - SHOWTEXTURES_ZOOM_STEP ));
 	oldbuttons = cmd->buttons;
 
 	return true;
@@ -768,13 +765,6 @@ static void CL_CreateCmd( void )
 
 	// fix rounding error and framerate depending player move
 	double    accurate_ms = host.frametime * 1000;
-
-	if( cl_fpsfilter.value >= 2.0f )
-	{
-		double fake_fps = bound( 1.0, fps_rate.value, 100.0 );
-		accurate_ms = 1000.0 / fake_fps;
-	}
-
 	ms = (int)accurate_ms;
 	cl.frametime_remainder += accurate_ms - ms; // accumulate rounding error each frame
 
@@ -898,8 +888,6 @@ static void CL_WritePacket( void )
 
 	if( cls.state < min_state )
 	{
-		if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC )
-			Con_DPrintf( "%s: OUT pre-signon empty ack (state=%d signon=%d)\n", __func__, cls.state, cls.signon );
 		Netchan_TransmitBits( &cls.netchan, 0, "" );
 		return;
 	}
@@ -994,14 +982,7 @@ static void CL_WritePacket( void )
 
 			buf.pData[key - 1] = Q_min( size, 255 );
 			buf.pData[key] = CRC32_BlockSequence( &buf.pData[key + 1], size, cls.netchan.outgoing_sequence );
-
-			// Sven Co-op's SV_ParseMove reads loss/backup/newcmds directly as
-			// plain bytes (no COM_UnMunge on the move body, verified in hw.dll
-			// @0x1db9f50). Vanilla GoldSrc/ReHLDS DO unmunge (munge1, key=seq).
-			// Gate the move-body munge1 on cl_goldsrc_munge: mode 0 (Sven) sends
-			// plain, modes 1/2 (vanilla) keep the munge.
-			if( cl_goldsrc_munge.value != 0 )
-				COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
+			COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
 		}
 		else if( !Host_IsLocalClient( ))
 		{
@@ -1024,11 +1005,7 @@ static void CL_WritePacket( void )
 		{
 			cl.delta_sequence = cl.validsequence;
 			MSG_BeginClientCmd( &buf, clc_delta );
-			// Sven reads clc_delta's sequence as a 16-bit field
-			// (SV_ParseDelta PROTO_BITS_SVEN_DELTA_SEQUENCE), stock GoldSrc as a byte
-			if( proto == PROTO_GOLDSRC )
-				MSG_WriteShort( &buf, cl.validsequence & 0xffff );
-			else MSG_WriteByte( &buf, cl.validsequence & 0xff );
+			MSG_WriteByte( &buf, cl.validsequence & 0xff );
 		}
 		else cl.delta_sequence = -1;
 
@@ -1044,21 +1021,6 @@ static void CL_WritePacket( void )
 		MSG_Clear( &cls.datagram );
 
 		Netchan_TransmitBits( &cls.netchan, MSG_GetNumBitsWritten( &buf ), MSG_GetData( &buf ));
-
-		if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
-		{
-			size_t rlbytes = ( cls.netchan.reliable_length + 7 ) / 8;
-			Con_DPrintf( "%s: OUT seq=%d unreliable_bits=%d reliable_bits=%d\n",
-				__func__, cls.netchan.outgoing_sequence - 1,
-				MSG_GetNumBitsWritten( &buf ), cls.netchan.reliable_length );
-			if( rlbytes > 0 )
-			{
-				Con_DPrintf( "%s: DUMP reliable (queued cmds)\n", __func__ );
-				CL_DumpHex( "reliable", cls.netchan.reliable_buf, rlbytes );
-			}
-			Con_DPrintf( "%s: DUMP unreliable (move/stringcmd)\n", __func__ );
-			CL_DumpHex( "unreliable", MSG_GetData( &buf ), MSG_GetNumBytesWritten( &buf ));
-		}
 	}
 	else
 	{
@@ -1067,12 +1029,6 @@ static void CL_WritePacket( void )
 
 	// update download/upload slider.
 	Netchan_UpdateProgress( &cls.netchan );
-
-	// STEAM/SIGNON DEBUG: confirm the reliable "new" command actually leaves
-	// the client. reliable_length>0 means a reliable msg is queued/unsent.
-	if( cl_goldsrc_debug.value >= 1 )
-		Con_DPrintf( "%s: OUTBOUND state=%d signon=%d reliable_bits=%d seq=%d\n",
-			__func__, cls.state, cls.signon, cls.netchan.reliable_length, cls.netchan.outgoing_sequence );
 }
 
 /*
@@ -1167,7 +1123,27 @@ CL_Quit_f
 void CL_Quit_f( void )
 {
 	CL_Disconnect();
-	Sys_Quit( "command" );
+	Sys_Quit( Cmd_Argc() > 1 ? Cmd_Argv( 1 ) : "command" );
+}
+
+/*
+==================
+CL_RequestQuit
+
+Called when the OS asks the game to quit (window close button, Cmd+Q on macOS...)
+Show the quit confirmation dialog if the menu supports it, so the game can't be closed by an accidental key press, otherwise quit immediately
+==================
+*/
+void CL_RequestQuit( const char *reason )
+{
+	if( Cmd_Exists( "menu_quit" ))
+	{
+		Con_Reportf( "%s: quit requested (%s), passing to the menu\n", __func__, reason );
+		Cbuf_AddText( "menu_quit\n" );
+		return;
+	}
+
+	Sys_Quit( reason );
 }
 
 /*
@@ -1199,24 +1175,6 @@ static void CL_GetCDKey( char *protinfo, size_t protinfosize )
 	Q_strnlwr( MD5_Print( hash ), key, sizeof( key ));
 
 	Info_SetValueForKey( protinfo, "cdkey", key, protinfosize );
-}
-
-void CL_DumpHex( const char *name, const void *data, size_t size )
-{
-	const uint8_t *bytes = (const uint8_t *)data;
-	char line[80];
-	int pos = 0;
-	size_t i;
-
-	for( i = 0; i < size; i++ )
-	{
-		pos += Q_snprintf( line + pos, sizeof( line ) - pos, "%02x ", bytes[i] );
-		if( ( i % 16 ) == 15 || i == size - 1 )
-		{
-			Con_DPrintf( "%s [%zu/%zu]: %s\n", name, i + 1, size, line );
-			pos = 0;
-		}
-	}
 }
 
 static void CL_WriteSteamTicket( sizebuf_t *send )
@@ -1270,20 +1228,6 @@ void CL_SendGoldSrcConnectPacket( netadr_t adr, int challenge, const void *ticke
 		CL_WriteSteamTicket( &send );
 	else
 		MSG_WriteBytes( &send, ticket, ticketlen );
-
-	Con_DPrintf( "%s: sending GoldSrc connect to %s, challenge=%d, protinfo \"%s\"\n", __func__, NET_AdrToString( adr ), challenge, protinfo );
-	if( ticket != NULL )
-	{
-		Con_DPrintf( "%s: ticket_len=%zu\n", __func__, ticketlen );
-		CL_DumpHex( "ticket", ticket, ticketlen );
-	}
-
-	if( cl_goldsrc_debug.value >= 2 )
-	{
-		Con_DPrintf( "%s: DUMP connect packet (%zu bytes)\n", __func__, MSG_GetNumBytesWritten( &send ));
-		CL_DumpHex( "connect_packet", MSG_GetData( &send ), MSG_GetNumBytesWritten( &send ));
-		Con_DPrintf( "%s: protinfo=\"%s\" userinfo=\"%s\"\n", __func__, protinfo, cls.userinfo );
-	}
 
 	if( MSG_CheckOverflow( &send ))
 		Con_Printf( S_ERROR "%s: %s overflow!\n", __func__, MSG_GetName( &send ) );
@@ -1685,7 +1629,6 @@ void CL_ClearState( void )
 	MSG_Clear( &cls.netchan.message );
 	memset( &clgame.fade, 0, sizeof( clgame.fade ));
 	memset( &clgame.shake, 0, sizeof( clgame.shake ));
-	CL_WeaponListFix_Reset();
 	clgame.mapname[0] = '\0';
 	Cvar_DirectFullSet( &cl_background, "0", FCVAR_READ_ONLY );
 	cl.maxclients = 1; // allow to drawing player in menu
@@ -1760,19 +1703,7 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 	switch( proto )
 	{
 	case PROTO_GOLDSRC:
-		SetBits( flags, NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
-
-		if( cl_goldsrc_munge.value == 1 )
-		{
-			SetBits( flags, NETCHAN_USE_MUNGE );
-			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (both directions)^7\n" );
-		}
-		else if( cl_goldsrc_munge.value == 2 )
-		{
-			SetBits( flags, NETCHAN_USE_MUNGE | NETCHAN_USE_MUNGE_TX );
-			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (outgoing only, Sven Coop mode)^7\n" );
-		}
-
+		SetBits( flags, NETCHAN_USE_MUNGE | NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
 		pfnBlockSize = CL_GetGoldSrcFragmentSize;
 		break;
 	default:
@@ -1793,14 +1724,6 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 	}
 
 	Netchan_Setup( NS_CLIENT, &cls.netchan, net_from, Cvar_VariableInteger( "net_qport" ), NULL, pfnBlockSize, flags );
-
-	// the user's rate must drive the client's own outgoing bandwidth choke,
-	// not the hardcoded DEFAULT_RATE (9999) Netchan_Setup leaves in the
-	// channel. With ~550-byte packets that choke throttles the client to
-	// ~18 pps, starving the server of acknowledgements; on lossy links that
-	// dries up the ack stream and the server's outgoing reliable buffer
-	// overflows. Mirror the server-side clamp for consistency.
-	cls.netchan.rate = bound( MIN_RATE, rate.value, MAX_RATE );
 
 	if( FBitSet( flags, NETCHAN_USE_COOKIE ))
 		Netchan_SetCookie( &cls.netchan, cls.netchan_pending_cookie );
@@ -2681,7 +2604,7 @@ static void CL_ClientConnect( connprotocol_t proto, const char *c, netadr_t from
 			CL_Disconnect_f();
 			return;
 		}
-		
+
 		const char *challenge_str = Info_ValueForKey( Cmd_Argv( 1 ), "challenge" );
 
 		if( COM_StringEmpty( challenge_str ))
@@ -2790,8 +2713,6 @@ static void CL_Challenge( const char *c, netadr_t from, sizebuf_t *msg )
 			cls.server_steamid = strtoull( Cmd_Argv( 3 ), NULL, 10 );
 			cls.vac2_secure = Q_atoi( Cmd_Argv( 4 ));
 		}
-
-		Con_DPrintf( "%s: goldsrc challenge, steam_auth=%d server_steamid=%"PRIu64" vac2_secure=%d\n", __func__, cls.steam_auth ? 1 : 0, cls.server_steamid, cls.vac2_secure ? 1 : 0 );
 	}
 
 	cls.bandwidth_test.challenge = Q_atoi( Cmd_Argv( 1 ));
@@ -2858,8 +2779,6 @@ static void CL_Reject( const char *c, const char *args, netadr_t from )
 
 	if( !CL_IsFromConnectingServer( from ))
 		return;
-
-	Con_DPrintf( "%s: server %s rejected connection: \"%s\"\n", __func__, NET_AdrToString( from ), args );
 
 	CL_ErrorMsg( c, args, from, NULL );
 
@@ -3126,34 +3045,8 @@ static void CL_ReadNetMessage( void )
 				continue;
 			}
 
-			// STEAM/SIGNON DEBUG: dump RAW server bytes BEFORE Netchan_Process,
-			// which may silently drop them. Without this we're blind to signon
-			// packets the server sends but we reject.
-			if( cl_goldsrc_debug.value >= 3 && cls.net_protocol == PROTO_GOLDSRC )
-			{
-				Con_DPrintf( "%s: RAW inbound from %s bytes=%zu inseq=%d\n", __func__,
-					NET_AdrToString( net_from ), curSize, cls.netchan.incoming_sequence );
-				CL_DumpHex( "raw-in", MSG_GetData( &net_message ), curSize );
-			}
-
 			if( !Netchan_Process( &cls.netchan, &net_message ))
-			{
-				Con_DPrintf( "%s: Netchan_Process REJECTED packet from %s bytes=%zu inseq=%d\n",
-					__func__, NET_AdrToString( net_from ), curSize, cls.netchan.incoming_sequence );
 				continue;	// wasn't accepted for some reason
-			}
-
-			// STEAM/SIGNON DEBUG: log inbound server packet size so we can tell
-			// whether the server is actually sending signon data or just ACKs.
-			if( cl_goldsrc_debug.value >= 1 )
-				Con_DPrintf( "%s: INBOUND from %s bytes=%zu signon=%d state=%d\n",
-					__func__, NET_AdrToString( net_from ), curSize, cls.signon, cls.state );
-
-			if( cl_goldsrc_debug.value >= 3 && cls.net_protocol == PROTO_GOLDSRC && cls.signon < SIGNONS )
-			{
-				Con_DPrintf( "%s: DUMP inbound packet\n", __func__ );
-				CL_DumpHex( "inbound", MSG_GetData( &net_message ), curSize );
-			}
 		}
 
 		if( cls.state == ca_active )
@@ -3164,20 +3057,6 @@ static void CL_ReadNetMessage( void )
 		else
 		{
 			CL_ResetFrame( &cl.frames[cls.netchan.incoming_sequence & CL_UPDATE_MASK] );
-		}
-
-		// STEAM/SIGNON ACK: acknowledge on RECEIPT right after Netchan_Process,
-		// before parsing. Netchan_Process already bumped incoming_sequence to
-		// "received" — the signal the server's reliable window waits on. Parsing
-		// a big GoldSrc baseline can take tens/hundreds of ms on a slow device;
-		// acking after the parse lets the server's unacked reliable data
-		// (ReHLDS/Sven MAX_MSGLEN ~3990B) fill with ~1500B spawn messages and
-		// overflow into "Reliable channel overflowed".
-		if( cls.net_protocol == PROTO_GOLDSRC && cls.state >= ca_connected && cls.state < ca_active )
-		{
-			if( cl_goldsrc_debug.value >= 2 )
-				Con_DPrintf( "%s: in-band signon ack (unacked reliable=%d)\n", __func__, cls.netchan.incoming_reliable_sequence );
-			Netchan_TransmitBits( &cls.netchan, 0, "" );
 		}
 
 		CL_ParseNetMessage( &net_message, parsefn );
@@ -3469,9 +3348,6 @@ void CL_ServerCommand( qboolean reliable, const char *fmt, ... )
 		MSG_BeginClientCmd( &cls.datagram, clc_stringcmd );
 		MSG_WriteString( &cls.datagram, string );
 	}
-
-	if( cl_goldsrc_debug.value >= 2 && cls.net_protocol == PROTO_GOLDSRC )
-		Con_DPrintf( "%s: QUEUE %s stringcmd: \"%s\"\n", __func__, reliable ? "reliable" : "datagram", string );
 }
 
 /*
@@ -3755,7 +3631,7 @@ CL_Escape_f
 Escape to menu from game
 =================
 */
-static void CL_Escape_f( void )
+void CL_Escape_f( void )
 {
 	if( cls.key_dest == key_menu )
 		return;
@@ -3802,15 +3678,13 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_advertise_engine_in_name );
 	Cvar_RegisterVariable( &cl_log_outofband );
 	Cvar_RegisterVariable( &cl_autorecord );
-	Cvar_RegisterVariable( &cl_screenfade );
+
 	Cvar_RegisterVariable( &showpause );
 	Cvar_RegisterVariable( &mp_decals );
 	Cvar_RegisterVariable( &dev_overview );
 	Cvar_RegisterVariable( &cl_resend );
 	Cvar_RegisterVariable( &cl_allow_upload );
 	Cvar_RegisterVariable( &cl_allow_download );
-	Cvar_RegisterVariable( &cl_goldsrc_munge );
-	Cvar_RegisterVariable( &cl_goldsrc_debug );
 	Cvar_RegisterVariable( &cl_download_ingame );
 	Cvar_RegisterVariable( &cl_logofile );
 	Cvar_RegisterVariable( &cl_logocolor );
@@ -3858,9 +3732,7 @@ static void CL_InitLocal( void )
 	Cvar_Get( "password", "", FCVAR_USERINFO, "server password" );
 	Cvar_Get( "team", "", FCVAR_USERINFO, "player team" );
 	Cvar_Get( "skin", "", FCVAR_USERINFO, "player skin" );
-	Cvar_RegisterVariable( &fps_max );
-	Cvar_RegisterVariable( &cl_fpsfilter );
-	Cvar_RegisterVariable( &fps_rate );
+
 	Cvar_RegisterVariable( &cl_nosmooth );
 	Cvar_RegisterVariable( &cl_nointerp );
 	Cvar_RegisterVariable( &cl_smoothtime );
@@ -3878,13 +3750,11 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &hud_fontrender );
 	Cvar_RegisterVariable( &hud_scale );
 	Cvar_RegisterVariable( &hud_scale_minimal_width );
-	Cvar_RegisterVariable( &hud_saytext_scale );
 	Cvar_RegisterVariable( &cl_showevents );
 	Cvar_Get( "lastdemo", "", FCVAR_ARCHIVE, "last played demo" );
 	Cvar_RegisterVariable( &ui_renderworld );
 	Cvar_RegisterVariable( &cl_maxframetime );
 	Cvar_RegisterVariable( &cl_fixmodelinterpolationartifacts );
-	Cvar_RegisterVariable( &cl_weaponlistfix );
 
 	// server commands
 	Cmd_AddCommand ("noclip", NULL, "enable or disable no clipping mode" );
@@ -3894,8 +3764,9 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand ("drop", NULL, "drop current/specified item or weapon" );
 	Cmd_AddCommand ("gametitle", NULL, "show game logo" );
 	Cmd_AddRestrictedCommand ("kill", NULL, "die instantly" );
-	Cmd_AddCommand ("nod", NULL, "enable nodmode" );
+	Cmd_AddCommand ("god", NULL, "enable godmode" );
 	Cmd_AddCommand ("fov", NULL, "set client field of view" );
+
 	Cmd_AddRestrictedCommand ("ent_list", NULL, "list entities on server" );
 	Cmd_AddRestrictedCommand ("ent_fire", NULL, "fire entity command (be careful)" );
 	Cmd_AddRestrictedCommand ("ent_info", NULL, "dump entity information" );
@@ -3907,9 +3778,10 @@ static void CL_InitLocal( void )
 	Cmd_AddRestrictedCommand( "localservers", CL_LocalServers_f, "collect info about local servers" );
 	Cmd_AddRestrictedCommand( "internetservers", CL_InternetServers_f, "collect info about internet servers" );
 	Cmd_AddRestrictedCommand( "ui_queryserver", CL_QueryServer_f, "query server info from console" );
-	Cmd_AddCommand ("cd", CL_PlayCDTrack_f, "Play cd-track (not real cd-player of course)" );
-	Cmd_AddCommand ("mp3", CL_PlayCDTrack_f, "Play mp3-track (based on virtual cd-player)" );
-	Cmd_AddCommand ("waveplaylen", CL_WavePlayLen_f, "Get approximate length of wave file");
+	Cmd_AddCommand( "cd", CL_CD_f, "Play cd-track (not real cd-player of course)" );
+	Cmd_AddCommand( "mp3", CL_MP3_f, "Play mp3-track (based on virtual cd-player)" );
+	Cmd_AddRestrictedCommand( "waveplaylen", CL_WavePlayLen_f, "Get approximate length of wave file" );
+
 	Cmd_AddRestrictedCommand ("setinfo", CL_SetInfo_f, "examine or change the userinfo string (alias of userinfo)" );
 	Cmd_AddRestrictedCommand ("userinfo", CL_SetInfo_f, "examine or change the userinfo string (alias of setinfo)" );
 	Cmd_AddCommand ("physinfo", CL_Physinfo_f, "print current client physinfo" );
@@ -4151,9 +4023,7 @@ void CL_Shutdown( void )
 	SteamBroker_Shutdown();
 	cls.initialized = false;
 
-	// for client-side VGUI support we use other order
-	if( FI && FI->GameInfo && !FI->GameInfo->internal_vgui_support )
-		VGui_Shutdown();
+	VGui_Shutdown();
 
 	if( g_fsapi.Delete )
 		g_fsapi.Delete( "demoheader.tmp" ); // remove tmp file
