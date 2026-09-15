@@ -28,7 +28,10 @@ static const int g_button_mapping[] =
 	K_DPAD_UP, K_DPAD_DOWN, K_DPAD_LEFT, K_DPAD_RIGHT,
 	K_MISC_BUTTON,
 	K_PADDLE1_BUTTON, K_PADDLE2_BUTTON, K_PADDLE3_BUTTON, K_PADDLE4_BUTTON,
-	K_TOUCHPAD,
+	K_TOUCHPAD,     // left pad click on Steam Controller and Steam Deck
+	K_MISC2_BUTTON, // right pad click
+	// FIXME: I guess, K_MISC2_BUTTON stays there forever for compatibility
+	// but SDL 3.5+ moved right pad and other (like touchpad touch and grips) to new capsense API
 };
 
 // Swap axis to follow default axis binding:
@@ -160,7 +163,7 @@ static void SDLash_SetActiveGamepad( SDL_JoystickID id )
 	if( id == 0 )
 	{
 		g_current_gamepad = NULL;
-		Joy_SetCapabilities( false );
+		Joy_SetCapabilities( false, 0 );
 		Joy_SetCalibrationState( JOY_NOT_CALIBRATED );
 	}
 	else
@@ -177,7 +180,7 @@ static void SDLash_SetActiveGamepad( SDL_JoystickID id )
 			SDLash_RestartCalibration();
 		}
 
-		Joy_SetCapabilities( have_gyro );
+		Joy_SetCapabilities( have_gyro, SDL_GetNumGamepadTouchpads( g_current_gamepad ));
 	}
 }
 
@@ -265,6 +268,18 @@ static void SDLash_GamepadSensorUpdate( const SDL_GamepadSensorEvent *sensor )
 	Joy_GyroEvent( data );
 }
 
+static void SDLash_GamepadTouchpadEvent( const SDL_GamepadTouchpadEvent *tpad, qboolean down )
+{
+	// SDL orders touchpads the way the driver reports them, for two pad devices that's left first, then right
+	// FIXME: DualShock 4 and DualSense track two fingers on their single pad but we only care about the first one
+	if( tpad->touchpad < 0 || tpad->touchpad >= MAX_TOUCHPADS || tpad->finger != 0 )
+		return;
+
+	SDLash_SetActiveGamepad( tpad->which );
+
+	Joy_TouchpadEvent( tpad->touchpad, down, tpad->x, tpad->y, tpad->pressure );
+}
+
 void SDLash_HandleGamepadEvent( const SDL_Event *ev )
 {
 	int x;
@@ -292,6 +307,13 @@ void SDLash_HandleGamepadEvent( const SDL_Event *ev )
 		break;
 	case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
 		SDLash_GamepadSensorUpdate( &ev->gsensor );
+		break;
+	case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+	case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+		SDLash_GamepadTouchpadEvent( &ev->gtouchpad, true );
+		break;
+	case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
+		SDLash_GamepadTouchpadEvent( &ev->gtouchpad, false );
 		break;
 	}
 }
