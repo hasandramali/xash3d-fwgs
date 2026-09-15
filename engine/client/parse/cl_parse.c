@@ -173,7 +173,7 @@ static void CL_ParseSignon( sizebuf_t *msg, connprotocol_t proto )
 		// produced the "dropclient" kick followed by a clgame.entities == NULL
 		// crash while draining the rest of the datagram. Keep the connection and
 		// let the remaining svc commands (lightstyle/signon refresh) parse.
-		Con_Reportf( S_WARNING "received signon %i when at %i\n", i, cls.signon );
+		Con_Reportf( S_WARN "received signon %i when at %i\n", i, cls.signon );
 		CL_SignonReply( proto );
 		return;
 	}
