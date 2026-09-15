@@ -166,8 +166,15 @@ static void CL_ParseSignon( sizebuf_t *msg, connprotocol_t proto )
 
 	if( i <= cls.signon )
 	{
-		Con_Reportf( S_ERROR "received signon %i when at %i\n", i, cls.signon );
-		CL_Disconnect();
+		// Sven hw.dll does NOT treat a lower/equal signon as fatal: it logs the
+		// regression and re-runs the signon reply path without disconnecting
+		// (reverse verified: CL_ParseSignonNum hw.dll RVA 0x2F970 — the current
+		// signon global is left untouched). Xash's previous CL_Disconnect() here
+		// produced the "dropclient" kick followed by a clgame.entities == NULL
+		// crash while draining the rest of the datagram. Keep the connection and
+		// let the remaining svc commands (lightstyle/signon refresh) parse.
+		Con_Reportf( S_WARNING "received signon %i when at %i\n", i, cls.signon );
+		CL_SignonReply( proto );
 		return;
 	}
 
