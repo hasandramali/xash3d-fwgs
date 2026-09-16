@@ -2286,6 +2286,7 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 	while( MSG_GetNumBitsLeft( msg ) >= 8 )
 	{
 		const char *s = name;
+		int savedBit = msg->iCurBit;
 
 		if( pending[0] )
 		{
@@ -2301,7 +2302,9 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 		dt = Delta_FindStruct( s );
 		if( !dt )
 		{
-			// reached the usermsg registration array / trailing payload
+			// not a known delta struct: rewind past the consumed token
+			// so the main parse loop can read it as the next svc command
+			MSG_SeekToBit( msg, savedBit, SEEK_SET );
 			if( dbg >= 1 )
 				Con_DPrintf( "GS-DELTA: tail '%s' bitpos=%d bitsleft=%d\n", s, msg->iCurBit, MSG_GetNumBitsLeft( msg ));
 			break;
@@ -2380,10 +2383,9 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 	if( dbg >= 3 )
 		Delta_GSDumpPayload( "GS-DELTA-TAIL", msg, msg->iCurBit );
 
-	// consume the remaining payload (usermsg registrations etc.) to reach
-	// the exact end of the message, so no leftover bytes are parsed as svc
-	while( MSG_GetNumBitsLeft( msg ) >= 8 )
-		MSG_ReadByte( msg );
+	// Do NOT consume remaining bytes here: after the delta tables the
+	// network message may contain additional svc commands (movevars,
+	// cdtrack, setview, etc.) that the main parse loop must handle.
 
 	if( dbg >= 2 )
 		Con_DPrintf( "GS-DELTA: done bitpos=%d bitsleft=%d\n", msg->iCurBit, MSG_GetNumBitsLeft( msg ));
