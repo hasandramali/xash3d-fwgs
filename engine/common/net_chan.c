@@ -1597,12 +1597,21 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	// packet BEYOND the reliable one before resending. If the reliable
 	// packet itself was dropped, the peer never acks it and the gate stays
 	// locked forever, stranding the reliable queue and overflowing the
-	// peer's outgoing reliable buffer. Resend on a timeout instead, only
-	// while the peer demonstrably has NOT received the reliable packet
-	// (incoming_acknowledged < last_reliable_sequence), so the payload can
-	// never be re-executed on the peer by this fallback.
+	// peer's outgoing reliable buffer. This is the SAME lock class we see
+	// with a peer that acknowledges packets but never flips the reliable
+	// ack bit (its own reliable queue/fragment path is stuck): incoming_
+	// acknowledged keeps advancing past last_reliable_sequence, so the
+	// "<" gate above can never fire and the reliable payload is stranded
+	// at reliable_length for the whole session (jitter: TXDROP every
+	// frame, reliable_bits pinned at 8192).
+	//
+	// Resend on a timeout instead, whenever the peer demonstrably has NOT
+	// flipped its reliable-ack bit (incoming_reliable_acknowledged !=
+	// reliable_sequence). Whether its cumulative acknowledgment already
+	// passed the reliable packet is irrelevant: if the bit never flipped,
+	// the payload has never been executed on the peer, so re-sending it
+	// can never be re-executed there by this fallback.
 	if( !send_reliable && chan->reliable_length > 0
-		&& chan->incoming_acknowledged < chan->last_reliable_sequence
 		&& chan->incoming_reliable_acknowledged != chan->reliable_sequence
 		&& ( host.realtime - chan->last_reliable_send_time >= NETCHAN_RELIABLE_RESEND_TIME ))
 		send_reliable = true;
