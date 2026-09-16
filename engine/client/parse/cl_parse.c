@@ -25,6 +25,8 @@ GNU General Public License for more details.
 #if XASH_LOW_MEMORY != 2
 int CL_UPDATE_BACKUP = SINGLEPLAYER_BACKUP;
 #endif
+
+static qboolean cl_sven_proto = false;
 /*
 ===============
 CL_UserMsgStub
@@ -818,11 +820,19 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 		MSG_ReadBytes( msg, clientdllmd5, sizeof( clientdllmd5 ), sizeof( clientdllmd5 ));
 		cl.maxclients = MSG_ReadByte( msg );
 		cl.playernum = MSG_ReadByte( msg );
-		COM_UnMunge3((byte *)&cl.checksum, sizeof( cl.checksum ), ( 0xff - cl.playernum ) & 0xff );
-
 		MSG_SeekToBit( msg, sizeof( uint8_t ) << 3, SEEK_CUR ); // quake leftover, coop flag
 
 		Q_strncpy( gamefolder, MSG_ReadString( msg ), sizeof( gamefolder ));
+
+		if( !Q_stricmp( gamefolder, "svencoop" ))
+		{
+			// ReHLDS_Sven sends the world CRC unmunged, don't undo what wasn't done
+			cl_sven_proto = true;
+		}
+		else
+		{
+			COM_UnMunge3((byte *)&cl.checksum, sizeof( cl.checksum ), ( 0xff - cl.playernum ) & 0xff );
+		}
 		Con_Printf( "Remote host: %s\n", MSG_ReadString( msg ));
 		// map name is sent as maps/<name>.bsp, only strip the maps/ prefix to keep subdirectories intact
 		s = MSG_ReadString( msg );
@@ -1765,8 +1775,17 @@ void CL_RegisterResources( sizebuf_t *msg, connprotocol_t proto )
 			MSG_BeginClientCmd( msg, clc_stringcmd );
 			if( proto == PROTO_GOLDSRC )
 			{
-				int32_t crc = cl.worldmapCRC;
-				COM_Munge2((byte*)&crc, sizeof( crc ), ( 0xff - cl.servercount ) & 0xff );
+				int32_t crc;
+				if( cl_sven_proto )
+				{
+					// ReHLDS_Sven does not unmunge the spawn CRC, echo the server's own world CRC
+					crc = cl.checksum;
+				}
+				else
+				{
+					crc = cl.worldmapCRC;
+					COM_Munge2((byte*)&crc, sizeof( crc ), ( 0xff - cl.servercount ) & 0xff );
+				}
 				MSG_WriteStringf( msg, "spawn %i %i", cl.servercount, crc );
 				MSG_BeginClientCmd( msg, clc_stringcmd );
 				MSG_WriteString( msg, "sendents" );
