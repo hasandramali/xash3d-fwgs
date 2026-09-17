@@ -102,6 +102,11 @@ extern int CL_UPDATE_BACKUP;
 #define SIGNONS		2		// signon messages to receive before connected
 #define INVALID_HANDLE	0xFFFF		// for XashXT cache system
 
+// set when the connected GoldSrc server is a ReHLDS_Sven server:
+// Sven's engine mishandles fragment-flagged client messages (badread),
+// so some client features are gated on this flag
+extern qboolean cl_sven_proto;
+
 #define MIN_UPDATERATE	0.00001f
 #define MAX_UPDATERATE	9999999.0f
 
@@ -743,6 +748,42 @@ extern convar_t	ui_renderworld;
 extern convar_t cl_fixmodelinterpolationartifacts;
 extern convar_t cl_screenfade;
 extern convar_t cl_weaponlistfix;
+
+typedef struct
+{
+	qboolean valid;
+	qboolean owned_hint;
+	qboolean real_name;
+	char name[64];
+	int ammo1;
+	int max1;
+	int ammo2;
+	int max2;
+	int order_index;
+	int slot;
+	int slot_pos;
+	int id;
+	int flags;
+	int clip;
+	int ammo;
+} cl_weaponlistfix_weapon_t;
+
+typedef struct
+{
+	cl_weaponlistfix_weapon_t weapons[MAX_WEAPONS];
+	int order[MAX_WEAPONS];
+	int count;
+	int active_weapon;
+	int selected_weapon;
+	int select_pending;
+	int display_slot;
+	int hidehud_bits;
+	char pending_name[64];
+	float pending_time;
+	float expire_time;
+} cl_weaponlistfix_t;
+
+extern cl_weaponlistfix_t cl_weaponlistfix_state;
 //=============================================================================
 
 extern client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS];
@@ -763,8 +804,12 @@ void SCR_Viewpos_f( void );
 void CL_WavePlayLen_f( void );
 qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name );
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf );
+void CL_WeaponListFix_OnInvAddPayload( const void *data, int size );
+void CL_WeaponListFix_OnInvRemovePayload( const void *data, int size );
+void CL_WeaponListFix_OnResetHUD( void );
 void CL_WeaponListFix_Draw( void );
 void CL_WeaponListFix_Reset( void );
+void CL_WeaponListFix_AppendMove( usercmd_t *cmd );
 
 //
 // cl_custom.c
@@ -1175,9 +1220,11 @@ void S_StartStreaming( void );
 void S_StopStreaming( void );
 void S_BeginRegistration( void );
 sound_t S_RegisterSound( const char *sample );
+const char *VOX_DebugSentence( int index ); // TEMP-DIAG: sentence text for debug log
 void S_EndRegistration( void );
 void S_RestoreSound( const vec3_t pos, int ent, int chan, sound_t handle, float fvol, float attn, int pitch, int flags, double sample, double end, uint wordIndex );
 void S_StartSound( const vec3_t pos, int ent, int chan, sound_t sfx, float vol, float attn, int pitch, int flags );
+void S_StopSound( int entnum, int channel, const char *soundname );
 void S_AmbientSound( const vec3_t pos, int ent, sound_t handle, float fvol, float attn, int pitch, int flags );
 void S_SoundFade( int fade_percent, int hold_time, int fade_out_seconds, int fade_in_seconds );
 void S_StartLocalSound( const char *name, float volume, qboolean reliable );

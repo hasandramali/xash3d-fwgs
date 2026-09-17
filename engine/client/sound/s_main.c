@@ -631,6 +631,12 @@ void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float fv
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
 
+	// TEMP-DIAG (hgrunt-source hunt): log every playback while goldsrc debug is on.
+	// Short quiet repro only (crowbar wall-hits), then REVERT this block.
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_Printf( "SND-PLAY: %s vol=%.2f attn=%.2f pitch=%d ch=%d ent=%d flags=%x\n",
+			sfx->name, fvol, attn, pitch, chan, ent, flags );
+
 	vol = bound( 0, fvol * 255, 255 );
 	if( pitch <= 1 ) pitch = PITCH_NORM; // Invasion issues
 
@@ -891,6 +897,11 @@ void S_AmbientSound( const vec3_t pos, int ent, sound_t handle, float fvol, floa
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
 
+	// TEMP-DIAG (hgrunt-source hunt, ambient path)
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_Printf( "SND-AMBIENT: %s vol=%.2f attn=%.2f pitch=%d ent=%d flags=%x\n",
+			sfx->name, fvol, attn, pitch, ent, flags );
+
 	vol = bound( 0, fvol * 255, 255 );
 	if( pitch <= 1 ) pitch = PITCH_NORM; // Invasion issues
 
@@ -916,8 +927,13 @@ void S_AmbientSound( const vec3_t pos, int ent, sound_t handle, float fvol, floa
 		// NOTE: sentence names stored in the cache lookup are
 		// prepended with a '!'.  Sentence names stored in the
 		// sentence file do not have a leading '!'.
+		// Clear first: a failed lookup must not replay whatever wav a
+		// previous occupant left in this reused static channel (this was
+		// audibly replaying stale hgrunt lines on Sven sentence indices
+		// the client couldn't resolve yet).
 
 		// link all words and load the first word
+		ch->sfx = NULL;
 		VOX_LoadSound( ch, S_SkipSoundChar( sfx->name ));
 		Q_strncpy( ch->name, sfx->name, sizeof( ch->name ));
 		sfx = ch->sfx;

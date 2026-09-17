@@ -211,6 +211,16 @@ class SteamAuthManager(private val ctx: Context) {
 
     // ticket state
     @Volatile private var currentGameDir: String? = null
+    @Volatile private var currentGamePlaying: Int? = null
+    // Server binding for CMsgClientGamesPlayed (InitiateGameConnection/AdvertiseGame equivalent).
+    // Set per sb_connect in getSessionTicket; cleared on sb_disconnect. When set, sendGamesPlayed
+    // advertises the full server-bound session (steam_id_gs + game IP/port + secure + token) so the
+    // game server's periodic re-validation finds an active client<->server session in the backend.
+    @Volatile private var boundServerSteamId: Long = 0L
+    @Volatile private var boundServerIp: String = ""
+    @Volatile private var boundServerPort: Int = 0
+    @Volatile private var boundServerSecure: Boolean = false
+    @Volatile private var boundServerToken: ByteArray? = null
     private val ticketSequence = AtomicLong(0L)
     private val gameConnectTokens = LinkedBlockingQueue<ByteArray>()
     private val ticketsByGame = ConcurrentHashMap<Int, MutableList<CMsgAuthTicket>>()
@@ -318,6 +328,12 @@ class SteamAuthManager(private val ctx: Context) {
                     loggedIn = true
                     prefs.edit().putBoolean("logged_in", true).apply()
                     startHeartbeat()
+                    // Mirror the PC broker: advertise an online persona and an active Sven Co-op
+                    // game session right at logon, BEFORE any server connect, so Steam (and the
+                    // server's periodic re-validation) sees an online, playing client.
+                    try { sendOnline() } catch (e: Exception) { Log.w(TAG, "sendOnline failed: ${e.message}") }
+                    try { sendGamesPlayed(APPID) } catch (e: Exception) { Log.w(TAG, "sendGamesPlayed failed: ${e.message}") }
+                    currentGamePlaying = APPID
                     return@withContext LoginState.Success
                 }
                 prefs.edit().putBoolean("logged_in", false).apply()
@@ -451,6 +467,10 @@ class SteamAuthManager(private val ctx: Context) {
                     loggedIn = true
                     prefs.edit().putBoolean("logged_in", true).apply()
                     startHeartbeat()
+                    // Mirror the PC broker: advertise online persona + playing Sven Co-op at logon.
+                    try { sendOnline() } catch (e: Exception) { Log.w(TAG, "sendOnline failed: ${e.message}") }
+                    try { sendGamesPlayed(APPID) } catch (e: Exception) { Log.w(TAG, "sendGamesPlayed failed: ${e.message}") }
+                    currentGamePlaying = APPID
                     return@withContext LoginState.Success
                 }
                 prefs.edit().putBoolean("logged_in", false).apply()
@@ -517,17 +537,70 @@ class SteamAuthManager(private val ctx: Context) {
      *
      * Source-era games use the modern combined ticket (authTicket + int32LE(appTicketSize) + appTicket).
      */
-    suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L, serverIp: String = ""): ByteArray = withContext(Dispatchers.IO) {
-        if (!connected) throw Exception("Not connected to Steam")
+    suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L, serverIp: String = "", serverPort: Int = 0, secure: Boolean = false): ByteArray = withContext(Dispatchers.IO) {
+        // Wait for connection with timeout (reconnection might be in progress)
+        val timeoutMs = 30000L // 30 seconds max wait for reconnection
+        val startTime = System.currentTimeMillis()
+        while ((!connected || !loggedIn) && !Thread.interrupted()) {
+            if (System.currentTimeMillis() - startTime > timeoutMs) {
+                throw Exception("Not connected to Steam (timeout waiting for reconnection)")
+            }
+            delay(500)
+        }
+        if (!loggedIn) throw Exception("Steam session is not logged in")
         Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
         val token = gameConnectTokens.poll()
             ?: throw Exception("No game connect tokens left (not yet delivered?)")
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
+        // Bind the playing session to THIS server (InitiateGameConnection/AdvertiseGame
+        // equivalent, FINDINGS 19) BEFORE advertising, so the GamesPlayed message carries
+        // steam_id_gs + game IP/port + secure + token. Advertise the game as "playing" so
+        // Steam authorizes the server's periodic ticket re-validation (see sendGamesPlayed).
+        // Without this the Sven server kicks with "Unable to connect to Steam" after ~130s.
+        boundServerSteamId = serverSteamId
+        boundServerIp = serverIp
+        boundServerPort = serverPort
+        boundServerSecure = secure
+        boundServerToken = token
+        try {
+            sendGamesPlayed(appid)
+            currentGamePlaying = appid
+        } catch (e: Exception) {
+            Log.w(TAG, "getSessionTicket: sendGamesPlayed failed: ${e.message}")
+        }
+
         if (isGoldSrcAppId(appid)) {
             val appTicket = requestAppOwnershipTicket(appid)
                 .also { Log.i(TAG, "getSessionTicket: legacy app ownership ticket OK size=${it.size}") }
+
+            // IMPORTANT: do NOT patch the clientIP field (offset 24) in the app-ownership
+            // blob. The official Steam client reports its obfuscated private IP at LOGIN
+            // (CMsgClientLogon fields 2/11); Steam signs that IP INTO the 857 ticket. When
+            // we overwrote the field locally the signature broke and the server rejected
+            // immediately with "STEAM validation rejected". Fix is in buildLogonBody.
+
+            // Register the auth session with the Steam backend via ClientAuthList (EMsg 5432)
+            // BEFORE the server starts its periodic (~60-90s) re-validation. Without the
+            // CM-side registration the ownership ticket passes the initial connect check, but
+            // the server's revalidation finds no active session and kicks with
+            // "Unable to connect to Steam" after the first interval. Real GoldSrc clients
+            // register their auth session tickets exactly like this.
+            val authTicket = buildAuthTicket(token, 2, resolveExternalIp(), resolveInternalIp())
+            val crc = crc32(authTicket)
+            synchronized(ticketChangeLock) {
+                ticketsByGame.getOrPut(appid) { ArrayList() }.add(
+                    CMsgAuthTicket(gameid = appid.toLong(), ticket = authTicket, ticketCrc = crc)
+                )
+            }
+            val ackBody = sendAuthList(appid)
+            val ackCrcs = readRepeatedVarints(ackBody, 1)
+            Log.i(TAG, "getSessionTicket: auth list sent (legacy), ack crcs=${ackCrcs.joinToString()} our=$crc")
+            if (ackCrcs.none { it == crc }) {
+                Log.w(TAG, "getSessionTicket: AuthList ack did not contain our crc $crc (got ${ackCrcs.joinToString()})")
+            }
+
             val out = ByteArrayOutputStream()
             out.write(Proto.packInt32(token.size))
             out.write(token)
@@ -539,7 +612,7 @@ class SteamAuthManager(private val ctx: Context) {
 
         val appTicket = requestAppOwnershipTicket(appid)
             .also { Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${it.size}") }
-        val authTicket = buildAuthTicket(token, 2)
+        val authTicket = buildAuthTicket(token, 2, resolveExternalIp(), resolveInternalIp())
         Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
 
         // Register the auth ticket with the Steam backend via ClientAuthList (EMsg 5432) BEFORE the
@@ -580,7 +653,13 @@ class SteamAuthManager(private val ctx: Context) {
                         Log.d(TAG, "broker: waiting for accept()")
                         val client = server.accept()
                         Log.i(TAG, "broker: ACCEPTED client from ${client.inetAddress.hostAddress}:${client.port}")
-                        client.soTimeout = 30000
+                        // The engine (cl_steam.c) keeps this connection open for the whole session and
+                        // only sends frames when it needs a ticket or a gamedir change. A short
+                        // SO_TIMEOUT would tear the connection down while the player is idle in-game
+                        // ("connection closed by broker"), forcing a pointless reconnect every ~30s.
+                        // Use no timeout: the handler only exits on EOF (engine closed its socket) or
+                        // on an explicit sb_terminate frame.
+                        client.soTimeout = 0
                         Thread { handleBrokerClient(client) }.apply { isDaemon = true; start() }
                     } catch (e: Exception) {
                         if (server.isClosed) break
@@ -611,7 +690,13 @@ class SteamAuthManager(private val ctx: Context) {
                 Log.i(TAG, "$tag: handler started")
                 while (true) {
                     Log.d(TAG, "$tag: waiting for SBRK frame")
-                    val payload = readSbrkFrame(ins, tag) ?: run {
+                    val payload = try {
+                        readSbrkFrame(ins, tag)
+                    } catch (e: java.net.SocketTimeoutException) {
+                        // Should not trigger (SO_TIMEOUT=0), but keep the connection alive if it does.
+                        Log.d(TAG, "$tag: read timeout (idle broker), keeping connection alive")
+                        continue
+                    } ?: run {
                         Log.w(TAG, "$tag: readSbrkFrame returned null (EOF/bad header), closing client")
                         break
                     }
@@ -621,6 +706,7 @@ class SteamAuthManager(private val ctx: Context) {
                         val parts = command.split(" ")
                         val serverAddr = if (parts.size > 1) parts[1] else ""
                         val serverIp = serverAddr.substringBefore(':')
+                        val serverPort = serverAddr.substringAfter(':', "").toIntOrNull() ?: 0
                         val serverSteamId = if (parts.size > 2) parts[2].toLongOrNull() ?: 0L else 0L
                         val secure = if (parts.size > 3) parts[3] != "0" else false
                         val challenge = if (parts.size > 4) parts[4].toIntOrNull() ?: 0 else 0
@@ -629,10 +715,12 @@ class SteamAuthManager(private val ctx: Context) {
                         Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge reqAppid=$reqAppid effectiveAppid=$effectiveAppid gamedir=$currentGameDir parts=${parts.toList()}")
                         Log.d(TAG, "$tag: connected=${connected} loggedIn=$loggedIn tokens=${gameConnectTokens.size} steamId=$currentSteamId")
                         val ticket = try {
-                            kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(effectiveAppid, serverSteamId, serverIp) }
+                            kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(effectiveAppid, serverSteamId, serverIp, serverPort, secure) }
                         } catch (e: Exception) {
+                            // Do not tear down the broker connection: the engine can retry with a
+                            // fresh sb_connect (e.g. after tokens arrive) without reconnecting.
                             Log.e(TAG, "$tag: getSessionTicket FAILED: ${e.message}", e)
-                            throw e
+                            continue
                         }
                         val steamId = currentSteamId
                         Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId appid=$effectiveAppid")
@@ -644,7 +732,19 @@ class SteamAuthManager(private val ctx: Context) {
                         currentGameDir = if (parts.size > 1) parts[1] else null
                         Log.i(TAG, "sb_gamedir=$currentGameDir")
                     } else if (command.startsWith("sb_disconnect")) {
-                        Log.i(TAG, "sb_disconnect ignored")
+                        // Player left a game server but the engine stays connected to the broker
+                        // (SBRK_STATE_CONNECTED, ready for the next game/connect). Keep alive.
+                        // Drop the server binding so the periodic heartbeat advertises plain
+                        // "playing" again until the next sb_connect re-binds (FINDINGS 19).
+                        boundServerSteamId = 0L
+                        boundServerIp = ""
+                        boundServerPort = 0
+                        boundServerSecure = false
+                        boundServerToken = null
+                        Log.i(TAG, "sb_disconnect recorded (keeping broker connection alive)")
+                    } else if (command.startsWith("sb_terminate")) {
+                        // Engine is shutting down (SteamBroker_AnnounceGameShutdown).
+                        Log.i(TAG, "sb_terminate: engine shutting down, closing broker connection")
                         break
                     } else {
                         Log.w(TAG, "unknown broker command: $command")
@@ -735,7 +835,10 @@ class SteamAuthManager(private val ctx: Context) {
                 try {
                     val sock = Socket()
                     sock.connect(InetSocketAddress(host, port), 10000)
-                    sock.soTimeout = 120000
+                    // Steam CM connections are long-lived; remove read timeout to avoid
+                    // spurious disconnects on flaky mobile networks. The heartbeat (EMsg 1009)
+                    // sent every ~9s keeps the connection alive from both sides.
+                    sock.soTimeout = 0
                     socket = sock
                     input = sock.getInputStream()
                     output = sock.getOutputStream()
@@ -832,12 +935,95 @@ class SteamAuthManager(private val ctx: Context) {
                     prefs.edit().putBoolean("logged_in", false).apply()
                     try { heartbeatJob?.interrupt() } catch (_: Exception) { }
                     try { socket?.close() } catch (_: Exception) { }
+                    gameConnectTokens.clear()
+                    synchronized(ticketChangeLock) { ticketsByGame.clear() }
                     logonFuture?.completeExceptionally(Exception("Connection lost"))
+                    // Schedule automatic reconnection with stored credentials
+                    scheduleReconnect()
                 } else {
                     Log.i(TAG, "reader: stopped after expected disconnect")
                 }
             }
         }.apply { isDaemon = true; name = "sbrk-reader"; start() }
+    }
+
+    /** Schedules a reconnection attempt with exponential backoff after an unexpected disconnect. */
+    private fun scheduleReconnect() {
+        Thread {
+            var attempt = 0
+            val maxAttempts = 10
+            val baseDelayMs = 5000L // 5 seconds initial delay
+            var reloggedIn = false
+
+            while (attempt < maxAttempts && !Thread.interrupted() && !reloggedIn) {
+                attempt++
+                val delayMs = baseDelayMs * (1 shl (attempt - 1)).coerceAtMost(60000) // max 60s
+                Log.i(TAG, "Reconnect attempt $attempt/$maxAttempts in ${delayMs}ms...")
+                try {
+                    Thread.sleep(delayMs)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                
+                // Try to reconnect and re-login
+                kotlinx.coroutines.runBlocking {
+                    connectLock.withLock {
+                        try {
+                            // Close old socket if any
+                            try { socket?.close() } catch (_: Exception) { }
+                            socket = null
+                            input = null
+                            output = null
+                            connected = false
+                            loggedIn = false
+                            encrypted = false
+                            // The old session is dead: drop the game-connect tokens and auth
+                            // tickets belonging to it. Steam issues fresh tokens via EMsg 779
+                            // right after the re-logon completes.
+                            gameConnectTokens.clear()
+                            synchronized(ticketChangeLock) { ticketsByGame.clear() }
+
+                            // Reconnect
+                            connectSocket()
+                            doHandshake()
+                            startReader()
+                            connected = true
+                            Log.i(TAG, "Reconnected to Steam CM")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Reconnect attempt $attempt failed: ${e.message}")
+                            connected = false
+                            return@withLock
+                        }
+                    }
+
+                    // Re-login using stored credentials. NOTE: this must run OUTSIDE
+                    // connectLock — loginWithStored*() re-acquires connectLock internally
+                    // and kotlinx.coroutines Mutex is not reentrant; calling it inside the
+                    // lock above would deadlock the reconnect and leave the session logged out
+                    // forever (ticket requests would then fail with "logged off").
+                    val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
+                    if (state is LoginState.Success) {
+                        Log.i(TAG, "Re-login successful after reconnect")
+                        reloggedIn = true
+                        if (brokerServer != null) {
+                            startBroker()
+                        }
+                    } else {
+                        Log.w(TAG, "Re-login failed after reconnect: $state")
+                        connected = false
+                        loggedIn = false
+                    }
+                }
+            }
+            
+            if (attempt >= maxAttempts) {
+                Log.e(TAG, "All reconnect attempts exhausted. Giving up.")
+                // Mark as fully disconnected so UI can show error
+                connected = false
+                loggedIn = false
+                prefs.edit().putBoolean("logged_in", false).apply()
+            }
+        }.apply { isDaemon = true; name = "steam-reconnect"; start() }
     }
 
     private fun handlePacket(packet: Packet) {
@@ -852,6 +1038,7 @@ class SteamAuthManager(private val ctx: Context) {
                     Log.i(TAG, "logged off (eresult=${readEresult(packet.body)})")
                     connected = false
                     loggedIn = false
+                    gameConnectTokens.clear()
                     logonFuture?.completeExceptionally(Exception("Logged off"))
                 }
                 5429 -> { /* TicketAuthComplete — engine already validated */ }
@@ -1003,6 +1190,7 @@ class SteamAuthManager(private val ctx: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "new login key ack failed: ${e.message}")
         }
+        try { sendOnline() } catch (e: Exception) { Log.w(TAG, "sendOnline failed: ${e.message}") }
     }
 
     // ------------------------------------------------------------------
@@ -1048,6 +1236,12 @@ class SteamAuthManager(private val ctx: Context) {
                 prefs.edit().putBoolean("logged_in", true).apply()
                 loggedIn = true
                 startHeartbeat()
+                // Advertise online persona + active Sven Co-op session so Steam (and the game
+                // server's re-validation) sees an active, online client even BEFORE any server
+                // connect (mirrors SteamKit2 SteamFriends.SetPersonaState(Online) + notifyGamesPlayed).
+                try { sendOnline() } catch (e: Exception) { Log.w(TAG, "sendOnline failed: ${e.message}") }
+                try { sendGamesPlayed(APPID) } catch (e: Exception) { Log.w(TAG, "sendGamesPlayed failed: ${e.message}") }
+                currentGamePlaying = APPID
                 LoginState.Success
             }
             ER_INVALID_PASSWORD -> LoginState.Failed(result, "Invalid password")
@@ -1299,6 +1493,30 @@ class SteamAuthManager(private val ctx: Context) {
         buf.write(Proto.packVarint(7 shl 3 or 0)); buf.write(Proto.packVarint(CLIENT_OS_TYPE_ANDROID_UNKNOWN))
         // 8 should_remember_password
         buf.write(Proto.packVarint(8 shl 3 or 0)); buf.write(Proto.packVarint(1))
+        // 2 deprecated_obfustucated_private_ip (uint32 legacy) + 11 obfuscated_private_ip
+        // (CMsgIPAddress). Real Steam clients advertise their private IPv4 here (XOR
+        // 0xBAADF00D); Steam decodes it and SIGNS it into the EMsg 857 app-ownership
+        // ticket's clientIP field. Without this field Steam stamps the raw obfuscation
+        // mask (0xBAADF00D) as clientIP, which the server's BeginAuthSession rejects.
+        resolveInternalIp()?.takeIf { it.size == 4 }?.let { internalIp ->
+            val v4 = ((internalIp[0].toInt() and 0xff) shl 24) or
+                ((internalIp[1].toInt() and 0xff) shl 16) or
+                ((internalIp[2].toInt() and 0xff) shl 8) or
+                (internalIp[3].toInt() and 0xff)
+            val obfuscated = v4 xor 0xBAADF00D.toInt()
+            // field 2 deprecated_obfustucated_private_ip (uint32)
+            buf.write(Proto.packVarint(2 shl 3 or 0))
+            buf.write(Proto.packLongVarint(obfuscated.toLong() and 0xFFFFFFFFL))
+            // field 11 obfuscated_private_ip = CMsgIPAddress { fixed32 v4 = 1 }
+            val inner = ByteArrayOutputStream()
+            inner.write(Proto.packVarint(1 shl 3 or 5)) // field 1, wire type 5 (fixed32)
+            inner.write(Proto.packInt32(obfuscated))
+            val innerBytes = inner.toByteArray()
+            buf.write(Proto.packVarint(11 shl 3 or 2))
+            buf.write(Proto.packVarint(innerBytes.size))
+            buf.write(innerBytes)
+            Log.i(TAG, "buildLogonBody: obfuscated_private_ip=${internalIp.joinToString(".") { (it.toInt() and 0xff).toString() }} -> ${obfuscated.toLong() and 0xFFFFFFFFL}")
+        }
         // 30 machine_id
         val mid = machineId()
         buf.write(Proto.packVarint(30 shl 3 or 2)); buf.write(Proto.packVarint(mid.size)); buf.write(mid)
@@ -1367,16 +1585,77 @@ class SteamAuthManager(private val ctx: Context) {
     // Modern Steam auth session ticket (matches JavaSteam SteamAuthTicket.buildAuthTicket /
     // SteamKit2 GetAuthSessionTicket). This is what SteamGameServer_BeginAuthSession expects.
     // Layout: int32 tokenLen | token[tokenLen] | int32 sessionSize(=24) |
-    //         int32 1 | int32 ticketType | 8 bytes (externalIP+internalIP, random) |
+    //         int32 1 | int32 ticketType | 8 bytes (externalIP+internalIP) |
     //         int32 timestamp(nonce) | int32 seq
-    // The externalIP/internalIP fields are filled with random bytes by the real Steam client and
-    // are NOT validated by BeginAuthSession, so the server IP must not be embedded here.
+    // Steam backends correlate the ticket's network identity with the client session, so the
+    // external (public) and internal (LAN) IPv4 fields must carry the real client addresses.
+    // Fall back to random bytes only if neither address can be resolved.
     private val authTicketSequence = AtomicInteger(0)
 
-    private fun buildAuthTicket(gameConnectToken: ByteArray, ticketType: Int = 2): ByteArray {
+    // Resolve the public-facing IPv4 used for the Steam CM connection. This is the client's
+    // "network identity" address the Steam backend matches against the auth ticket's externalIP.
+    private var externalIpCache: ByteArray? = null
+    private var internalIpCache: ByteArray? = null
+
+    private fun resolveExternalIp(): ByteArray? {
+        // getLocalHost() is loopback on Android; prefer the CM socket's local endpoint
+        // (the address Android uses towards the Internet), else the CM's own address.
+        try {
+            val localAddr = socket?.localSocketAddress as? java.net.InetSocketAddress
+            val local = localAddr?.address?.getAddress()
+            if (local != null && local.size == 4) {
+                val b0 = local[0].toInt() and 0xff
+                if (b0 != 0 && b0 != 127) {
+                    externalIpCache = local
+                    Log.i(TAG, "resolveExternalIp: socket local=${localAddr.address.hostAddress} (fallback)")
+                    return local
+                }
+            }
+        } catch (_: Exception) { }
+        try {
+            val cmIp = socket?.inetAddress?.address
+            if (cmIp != null && cmIp.size == 4) {
+                Log.i(TAG, "resolveExternalIp: cm=${java.net.InetAddress.getByAddress(cmIp)} (fallback)")
+                return cmIp
+            }
+        } catch (_: Exception) { }
+        return null
+    }
+
+    private fun resolveInternalIp(): ByteArray? {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val ni = interfaces.nextElement()
+                if (!ni.isUp || ni.isLoopback) continue
+                val addrs = ni.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val ia = addrs.nextElement()
+                    if (ia is java.net.Inet4Address && !ia.isLoopbackAddress && !ia.isLinkLocalAddress) {
+                        internalIpCache = ia.address
+                        Log.i(TAG, "resolveInternalIp: ${ia.hostAddress} on ${ni.name}")
+                        return ia.address
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        return null
+    }
+
+    private fun buildAuthTicket(
+        gameConnectToken: ByteArray,
+        ticketType: Int = 2,
+        externalIp: ByteArray? = null,
+        internalIp: ByteArray? = null,
+    ): ByteArray {
         val sessionSize = 4 + 4 + 4 + 4 + 4 + 4 // = 24
         val ipFields = ByteArray(8)
-        SecureRandom().nextBytes(ipFields)
+        if (externalIp?.size == 4 && internalIp?.size == 4) {
+            System.arraycopy(externalIp, 0, ipFields, 0, 4)
+            System.arraycopy(internalIp, 0, ipFields, 4, 4)
+        } else {
+            SecureRandom().nextBytes(ipFields)
+        }
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size))
         stream.write(gameConnectToken)
@@ -1387,7 +1666,11 @@ class SteamAuthManager(private val ctx: Context) {
         stream.write(Proto.packInt32(System.nanoTime().toInt()))
         stream.write(Proto.packInt32(authTicketSequence.incrementAndGet()))
         val bytes = stream.toByteArray()
-        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize)")
+        val ipStr = if (externalIp?.size == 4 && internalIp?.size == 4)
+            "${externalIp.joinToString(".") { (it.toInt() and 0xff).toString() }}," +
+                "${internalIp.joinToString(".") { (it.toInt() and 0xff).toString() }}"
+        else "random"
+        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize ip=$ipStr)")
         return bytes
     }
 
@@ -1430,6 +1713,80 @@ class SteamAuthManager(private val ctx: Context) {
     private class CMsgAuthTicket(val gameid: Long, val ticket: ByteArray, val ticketCrc: Int)
 
     private fun crc32(data: ByteArray): Int = CRC32().apply { update(data) }.value.toInt()
+
+    /**
+     * Notifies Steam that the user is "playing" [appid] (CMsgClientGamesPlayed, EMsg 742).
+     *
+     * The PC steam-broker path uses a real Steam client, whose InitiateGameConnection registers the
+     * user as actively playing Sven Co-op (the friend list shows "Playing Sven Co-op"). The Sven
+     * server's periodic (~60-90s) ticket re-validation then succeeds. JavaSteam never advertised a
+     * playing session, so Steam reports no active game session and the server kicks with
+     * "Unable to connect to Steam" after the first interval. This is the producer-side fix: register
+     * the goldsrc appid as played, like SteamKit2's SteamApps.notifyGamesPlayed / SteamClient does.
+     *
+     * Server binding (FINDINGS 19): game_id alone only flips the friends "playing" state. The real
+     * client's InitiateGameConnection/AdvertiseGame ALSO binds the session to the game server
+     * (steam_id_gs + game IP/port + secure + token, see Steamworks.NET ISteamUser docs and JavaSteam
+     * SteamApps.notifyGamesPlayed). Without the binding the server's re-validation still finds no
+     * active client<->server session and kicks at ~130s even though the account shows "playing".
+     * The binding comes from [boundServerSteamId]/[boundServerIp]/[boundServerPort]/
+     * [boundServerSecure]/[boundServerToken], set per-connection by getSessionTicket.
+     */
+    private fun sendGamesPlayed(appid: Int) {
+        try {
+            if (!connected || !loggedIn) return
+            val sub = ByteArrayOutputStream()
+            val gsId = boundServerSteamId
+            if (gsId != 0L) {
+                sub.write(Proto.packVarint(1 shl 3 or 0)); sub.write(Proto.packLongVarint(gsId)) // steam_id_gs
+            }
+            sub.write(Proto.packVarint(2 shl 3 or 1)); sub.write(Proto.packInt64(appid.toLong())) // game_id fixed64
+            val ipInt = ipv4ToInt(boundServerIp)
+            if (ipInt != 0) {
+                sub.write(Proto.packVarint(3 shl 3 or 0)); sub.write(Proto.packVarint(ipInt)) // deprecated_game_ip_address
+            }
+            if (boundServerPort != 0) {
+                sub.write(Proto.packVarint(4 shl 3 or 0)); sub.write(Proto.packVarint(boundServerPort)) // game_port
+                sub.write(Proto.packVarint(5 shl 3 or 0)); sub.write(Proto.packVarint(if (boundServerSecure) 1 else 0)) // is_secure
+            }
+            boundServerToken?.let { tok ->
+                if (tok.isNotEmpty()) {
+                    sub.write(Proto.packVarint(6 shl 3 or 2)); sub.write(Proto.packVarint(tok.size)); sub.write(tok) // token
+                }
+            }
+            sub.write(Proto.packVarint(9 shl 3 or 0)); sub.write(Proto.packVarint(0)) // process_id
+            sub.write(Proto.packVarint(12 shl 3 or 0)); sub.write(Proto.packVarint(currentSteamId.toInt())) // owner_id = accountid
+            if (ipInt != 0) {
+                // game_ip_address (field 23) = CMsgIPAddress{ v4 fixed32 }.
+                val ipMsg = ByteArrayOutputStream()
+                ipMsg.write(Proto.packVarint(1 shl 3 or 5)); ipMsg.write(Proto.packInt32(ipInt)) // v4
+                val ipBytes = ipMsg.toByteArray()
+                sub.write(Proto.packVarint(23 shl 3 or 2)); sub.write(Proto.packVarint(ipBytes.size)); sub.write(ipBytes)
+            }
+
+            val gamesPlayed = ByteArrayOutputStream()
+            gamesPlayed.write(Proto.packVarint(1 shl 3 or 2)); gamesPlayed.write(Proto.packVarint(sub.size)); gamesPlayed.write(sub.toByteArray())
+            gamesPlayed.write(Proto.packVarint(2 shl 3 or 0)); gamesPlayed.write(Proto.packVarint(0)) // client_os_type
+
+            val payload = gamesPlayed.toByteArray()
+            // Both the legacy and the modern-with-data-blob wrappers, matching what SteamKit2's
+            // notifyGamesPlayed (EMsg.ClientGamesPlayedWithDataBlob=5410) and old clients (742) send.
+            sendProtobufMsg(742, payload, buildProtoHeader(currentSteamId, currentSessionId))
+            sendProtobufMsg(5410, payload, buildProtoHeader(currentSteamId, currentSessionId))
+            Log.i(TAG, "sendGamesPlayed: advertised appid=$appid as playing (emsg=742+5410) boundGs=$gsId")
+        } catch (e: Exception) {
+            Log.w(TAG, "sendGamesPlayed failed: ${e.message}")
+        }
+    }
+
+    private fun ipv4ToInt(ip: String): Int {
+        val p = ip.split(".")
+        if (p.size != 4) return 0
+        return try {
+            ((p[0].toInt() and 0xFF) shl 24) or ((p[1].toInt() and 0xFF) shl 16) or
+                ((p[2].toInt() and 0xFF) shl 8) or (p[3].toInt() and 0xFF)
+        } catch (e: Exception) { 0 }
+    }
 
     // ------------------------------------------------------------------
     // Low-level proto helpers
@@ -1599,6 +1956,7 @@ class SteamAuthManager(private val ctx: Context) {
         connected = false
         loggedIn = false
         gameConnectTokens.clear()
+        currentGamePlaying = null
         synchronized(ticketChangeLock) { ticketsByGame.clear() }
         authSession = null
         pendingJobs.values.forEach { it.completeExceptionally(Exception("Disconnected")) }
@@ -1615,6 +1973,8 @@ class SteamAuthManager(private val ctx: Context) {
                     val body = ByteArrayOutputStream()
                     body.write(Proto.packVarint(1 shl 3 or 0)); body.write(Proto.packVarint(1))
                     sendProtobufMsg(1009, body.toByteArray(), buildProtoHeader(currentSteamId, currentSessionId))
+                    sendProtobufMsg(703, ByteArray(0), buildProtoHeader(currentSteamId, currentSessionId))
+                    currentGamePlaying?.let { sendGamesPlayed(it) }
                 }
             } catch (_: InterruptedException) {
             } catch (e: Exception) {
@@ -1623,13 +1983,44 @@ class SteamAuthManager(private val ctx: Context) {
         }.apply { isDaemon = true; start() }
     }
 
-    private suspend fun awaitJob(future: CompletableFuture<SteamMsg>, what: String): SteamMsg =
-        suspendCancellableCoroutine { cont ->
-            future.whenComplete { value, error ->
-                if (error != null) cont.resumeWithException(error)
-                else cont.resume(value)
-            }
+    /**
+     * Sets the Steam persona state to Online (CMsgClientChangeStatus, EMsg 716).
+     *
+     * A client that logs in but never advertises an online persona shows up as "Offline" on Steam.
+     * The PC steam-broker path uses a real Steam client (which is fully online and playing), so
+     * Steam authorizes the goldsrc server's periodic ticket re-validation. JavaSteam must mirror
+     * that: likely inability to stay "playing" (and thus the ~60-90s "Unable to connect to Steam"
+     * kick) stems from Steam seeing the account offline with no active game session.
+     */
+    private fun sendOnline() {
+        try {
+            if (!connected || !loggedIn) return
+            val body = ByteArrayOutputStream()
+            body.write(Proto.packVarint(1 shl 3 or 0)); body.write(Proto.packVarint(1)) // persona_state = Online
+            body.write(Proto.packVarint(5 shl 3 or 0)); body.write(Proto.packVarint(1)) // persona_set_by_user
+            sendProtobufMsg(716, body.toByteArray(), buildProtoHeader(currentSteamId, currentSessionId))
+            Log.i(TAG, "sendOnline: declared persona Online (emsg=716)")
+        } catch (e: Exception) {
+            Log.w(TAG, "sendOnline failed: ${e.message}")
         }
+    }
+
+    private suspend fun awaitJob(future: CompletableFuture<SteamMsg>, what: String): SteamMsg {
+        // Bound the wait so a dead/half-open CM socket cannot pin the broker client thread
+        // forever; the engine retries the request anyway (see its ticket watchdog).
+        return try {
+            kotlinx.coroutines.withTimeout(20_000L) {
+                suspendCancellableCoroutine { cont ->
+                    future.whenComplete { value, error ->
+                        if (error != null) cont.resumeWithException(error)
+                        else cont.resume(value)
+                    }
+                }
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            throw Exception("$what timed out")
+        }
+    }
 
     // ------------------------------------------------------------------
     // Proto encode helpers (duplicated from GameDataDownloader, file-private there)

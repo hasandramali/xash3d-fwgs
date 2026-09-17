@@ -579,9 +579,52 @@ static void VOX_ReadSentenceFile( const char *path )
 	Mem_Free( buf );
 }
 
+/*
+====================
+VOX_DebugSentence
+
+TEMP-DIAG helper: returns "NAME => text" for a sentence-table index so the
+StartSound debug log can show what a numeric sentence resolves to (ordering
+verification). Returns NULL when out of range.
+====================
+*/
+const char *VOX_DebugSentence( int index )
+{
+	static char dbgbuf[128];
+	const char *name, *text;
+
+	if( index < 0 || index >= cszrawsentences || !rgpszrawsentence[index] )
+		return NULL;
+	name = rgpszrawsentence[index];
+	text = name + Q_strlen( name ) + 1;
+	Q_snprintf( dbgbuf, sizeof( dbgbuf ), "%s => %.80s", name, text );
+	return dbgbuf;
+}
+
 void VOX_Init( void )
 {
-	VOX_ReadSentenceFile( DEFAULT_SOUNDPATH "sentences.txt" );
+	byte *buf;
+	fs_offset_t size;
+
+	VOX_Shutdown();
+
+	// Sven Co-op keeps its speech table in sound/default_sentences.txt while
+	// the stock sound/sentences.txt is usually absent. Server sentence indices
+	// (Sven StartSound) number this table, so load it FIRST to keep numeric
+	// parity with the server; the stock file (if present) extends the table.
+	buf = FS_LoadFile( DEFAULT_SOUNDPATH "default_sentences.txt", &size, false );
+	if( buf )
+	{
+		VOX_ReadSentenceFile_( buf, size );
+		Mem_Free( buf );
+	}
+
+	buf = FS_LoadFile( DEFAULT_SOUNDPATH "sentences.txt", &size, false );
+	if( buf )
+	{
+		VOX_ReadSentenceFile_( buf, size );
+		Mem_Free( buf );
+	}
 }
 
 void VOX_Shutdown( void )

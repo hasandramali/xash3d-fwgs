@@ -43,6 +43,7 @@ GNU General Public License for more details.
 #define SBRK_MAX_FRAME_SIZE			4096
 #define SBRK_CONNECT_TIMEOUT		10.0
 #define SBRK_CONNECT_RETRY_DELAY	5.0
+#define SBRK_TICKET_RESPONSE_TIMEOUT	15.0
 #define SBRK_TICKET_SIZE_MAX 		2048
 
 static CVAR_DEFINE_AUTO( cl_steam_broker_addr, "127.0.0.1:27420", FCVAR_PRIVILEGED|FCVAR_ARCHIVE, "address of steam broker instance" );
@@ -65,6 +66,7 @@ typedef struct
 	netadr_t serveradr;
 	double connection_timeout;
 	double idle_cycle_timeout;
+	double ticket_timeout;
 	uint8_t rx_buffer[SBRK_MAX_FRAME_SIZE + 64];
 	uint8_t tx_buffer[SBRK_MAX_FRAME_SIZE + 64];
 	uint32_t rx_buffer_pos;
@@ -195,6 +197,7 @@ static void SteamBroker_Disconnect( void )
 {
 	SteamBroker_CloseSocket();
 	SteamBroker_SetState( SBRK_STATE_IDLE );
+	cls.broker_wait = false; // stop waiting for a ticket; the engine will re-request once we reconnect
 }
 
 static qboolean SteamBroker_ConnectImpl( void )
@@ -328,12 +331,15 @@ static qboolean SteamBroker_ProcessFrame( void )
 	char response_header[SBRK_RESPONSE_HEADER_SIZE];
 	if( MSG_ReadBytes( &sb, response_header, sizeof( response_header ), SBRK_RESPONSE_HEADER_SIZE ))
 	{
+		broker.ticket_timeout = 0; // broker replied, it is alive: cancel the ticket watchdog
+
 		if( memcmp( response_header, SBRK_RESPONSE_HEADER, SBRK_RESPONSE_HEADER_SIZE ) == 0 )
 		{
 			int32_t challenge = MSG_ReadLong( &sb );
 			if( broker.challenge != challenge )
 			{
 				Con_Printf( S_ERROR "%s: challenge mismatch\n", __func__ );
+				cls.broker_wait = false; // let the engine re-request with the fresh challenge
 			}
 			else
 			{
@@ -524,12 +530,27 @@ static void SteamBroker_UpdateConnecting( void )
 			Con_Printf( S_NOTE "%s: connected to broker at %s\n", __func__, cl_steam_broker_addr.string );
 			SteamBroker_SetState( SBRK_STATE_CONNECTED );
 			SteamBroker_AnnounceGameStart( GI->gamefolder );
+
+			// a ticket request may be pending (broker_wait): re-issue it now that we are connected again
+			if( cls.broker_wait )
+				SteamBroker_InitiateGameConnection( broker.serveradr, broker.challenge );
 		}
 	}
 }
 
 static void SteamBroker_UpdateConnected( void )
 {
+	// If we are waiting for a ticket and the broker hasn't answered in time
+	// (e.g. the Android broker is stuck reconnecting to the Steam CM), drop the
+	// connection so the IDLE state reconnects and the request is retried instead
+	// of hanging forever in broker_wait.
+	if( cls.broker_wait && broker.ticket_timeout != 0 && Platform_DoubleTime() > broker.ticket_timeout )
+	{
+		Con_Printf( S_WARN "%s: no ticket response within %.0f seconds, reconnecting to broker\n", __func__, SBRK_TICKET_RESPONSE_TIMEOUT );
+		SteamBroker_Disconnect( );
+		return;
+	}
+
 	SteamBroker_HandleDataTx( );
 	SteamBroker_HandleDataRx( );
 }
@@ -585,6 +606,9 @@ qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 
 	if( !SteamBroker_SendFrame( buf, len ))
 		return false;
+
+	// arm the ticket-response watchdog
+	broker.ticket_timeout = Platform_DoubleTime() + SBRK_TICKET_RESPONSE_TIMEOUT;
 
 	return true;
 }
@@ -647,6 +671,7 @@ void SteamBroker_Init( void )
 	broker.socket = INVALID_SOCKET;
 	broker.rx_buffer_pos = 0;
 	broker.tx_buffer_pos = 0;
+	broker.ticket_timeout = 0;
 	Cvar_RegisterVariable( &cl_steam_broker_addr );
 	Cvar_RegisterVariable( &cl_steam_appid );
 	NET_NetadrSetType( &broker.adr, NA_UNDEFINED );

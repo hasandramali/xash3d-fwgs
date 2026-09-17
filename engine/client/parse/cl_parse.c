@@ -26,7 +26,8 @@ GNU General Public License for more details.
 int CL_UPDATE_BACKUP = SINGLEPLAYER_BACKUP;
 #endif
 
-static qboolean cl_sven_proto = false;
+qboolean cl_sven_proto = false;
+
 /*
 ===============
 CL_UserMsgStub
@@ -2279,6 +2280,282 @@ qboolean CL_DispatchUserMessage( const char *pszName, int iSize, void *pbuf )
 
 /*
 ==============
+CL_LoadSvenSoundCache
+
+Sven ships a per-map sound table (maps/soundcache/<map>.txt, SOUNDLIST section)
+and addresses most StartSound(107) indices through it — the resourcelist
+precache only carries a handful of sounds (4 on the observed server). The real
+client maintains the same table (it even has cl_flushsoundcache commands).
+Loaded lazily on first StartSound and reloaded on map change.
+==============
+*/
+#define SVEN_SOUNDCACHE_MAX 4096
+static char svenSoundCache[SVEN_SOUNDCACHE_MAX][64];
+static char svenSoundCacheMap[64];
+static qboolean svenSoundCacheLoaded = false;
+
+static void CL_LoadSvenSoundCache( void )
+{
+	char path[MAX_QPATH], mapbase[MAX_QPATH], *line, *end;
+	byte *buf;
+	fs_offset_t size;
+	int n;
+
+	if( COM_StringEmptyOrNULL( clgame.mapname ))
+		return; // too early, retry on the next sound
+	if( svenSoundCacheLoaded && !Q_strcmp( svenSoundCacheMap, clgame.mapname ))
+		return; // current map already loaded
+
+	Q_strncpy( mapbase, clgame.mapname, sizeof( mapbase ));
+	{
+		char *dot = Q_strrchr( mapbase, '.' );
+		if( dot ) *dot = '\0';
+	}
+	Q_snprintf( path, sizeof( path ), "maps/soundcache/%s.txt", mapbase );
+
+	buf = FS_LoadFile( path, &size, false );
+	memset( svenSoundCache, 0, sizeof( svenSoundCache ));
+	Q_strncpy( svenSoundCacheMap, clgame.mapname, sizeof( svenSoundCacheMap ));
+	svenSoundCacheLoaded = true; // don't retry every sound; reloads on map change
+	if( !buf || !size )
+		return;
+
+	// collect .wav lines after "SOUNDLIST {", stop at the closing section
+	n = 0;
+	line = (char *)buf;
+	end = line + size;
+	{
+		qboolean inlist = false;
+		while( line < end && n < SVEN_SOUNDCACHE_MAX )
+		{
+			char *eol = line;
+			while( eol < end && *eol != '\n' ) eol++;
+			{
+				char save = ( eol < end ) ? *eol : '\0';
+				if( eol < end ) *eol = '\0';
+				// trim trailing whitespace/CR
+				{
+					char *t = eol - 1;
+					while( t >= line && ( *t == '\r' || *t == ' ' || *t == '\t' )) *t-- = '\0';
+				}
+				if( !Q_strcmp( line, "SOUNDLIST {" ))
+					inlist = true;
+				else if( inlist && ( !Q_strcmp( line, "}" ) || !Q_strcmp( line, "SENTENCELIST {" )))
+					break;
+				else if( inlist )
+				{
+					size_t len = Q_strlen( line );
+					if( len > 4 && !Q_stricmp( line + len - 4, ".wav" ))
+						Q_strncpy( svenSoundCache[n++], line, sizeof( svenSoundCache[0] ));
+				}
+				if( eol < end ) *eol = save;
+			}
+			line = eol + 1;
+		}
+	}
+	Mem_Free( buf );
+	Con_DPrintf( "CL_LoadSvenSoundCache: %d sounds for %s\n", n, mapbase );
+}
+
+/*
+==============
+CL_ParseSvenStartSound
+
+Sven Co-op positional-sound message (svc 107). The stock hlsdk client leaves
+__MsgFunc_StartSound as a read-and-drop stub, so every server-driven sound
+(NPC shots and speech, impacts, charger beeps, ambient one-shots) was silently
+lost; only locally-predicted sounds (own weapon fire) were audible. Wire
+layout reverse-verified against the real client (client.dll MsgFunc_StartSound
+0x1002e8a0 + resolver 0x1000cfa0 + dispatcher 0x1000d9f0):
+  [SHORT flags][SHORT sndnum if 0x10][BYTE vol if 1][BYTE pitch if 2]
+  [BYTE attn if 4][3xCOORD origin if 8][FLOAT extra if 0x8000]
+  [BYTE channel][SHORT ent]
+Value mapping mirrors the real client: vol byte/255 (default VOL_NORM),
+pitch raw byte (default PITCH_NORM), attn byte/64 (default ATTN_NORM; the
+/64 divide is skipped whenever flag 0x1000 is set).
+NOTE: unlike vanilla (vol,attn,pitch) Sven sends pitch BEFORE attenuation,
+so the vanilla SND_ATTENUATION/SND_PITCH names do NOT apply to bits 1/2.
+flags & 0x100 selects the SENTENCELIST namespace (sndnum = sentence index,
+played as "!N"); when 0x100 is clear sndnum is a SOUNDLIST index into
+maps/soundcache/<map>.txt (file line order — the real client resolves it as
+this+0x1700C+sndnum*0x104). cl.sound_precache[] is NEVER the source here.
+CHAN_STATIC goes ambient.
+==============
+*/
+static void CL_ParseSvenStartSound( const char *pszName, int iSize, void *pbuf )
+{
+	// Sven StartSound flag slots (wire positions verified against client.dll)
+	#define SVEN_SND_VOLUME	(1<<0)	// byte /255
+	#define SVEN_SND_PITCH	(1<<1)	// raw byte
+	#define SVEN_SND_ATTN	(1<<2)	// byte /64
+	#define SVEN_SND_ORIGIN	(1<<3)	// 3xCOORD
+	#define SVEN_SND_INDEX	(1<<4)	// == SND_SENTENCE position; SHORT follows
+	#define SVEN_SND_SENTENCE	(1<<8)	// sndnum = SENTENCELIST index (NOT precache!)
+	#define SVEN_SND_RAWATTN	(1<<12)	// attn byte is raw, don't /64
+	#define SVEN_SND_EXTRA	(1<<15)	// FLOAT follows, consume only
+	sizebuf_t sb;
+	int flags, sndnum = -1;
+	float volume = VOL_NORM;
+	int pitch = PITCH_NORM;
+	float attn = ATTN_NORM;
+	vec3_t pos = { 0, 0, 0 };
+	int channel, ent;
+	sound_t handle = 0;
+	int playFlags = 0;
+
+	MSG_Init( &sb, "SvenStartSound", pbuf, iSize );
+
+	// TEMP-DIAG: dump our precache sound table once so missing indices are
+	// visible against the server-referenced idx values. REVERT after analysis.
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+	{
+		static qboolean precacheDumped = false;
+		if( !precacheDumped )
+		{
+			int i, n = 0;
+			precacheDumped = true;
+			for( i = 0; i < MAX_SOUNDS; i++ )
+			{
+				if( !cl.sound_precache[i][0] )
+					continue;
+				Con_Printf( "SVEN-SNDTABLE: idx=%d file=%s\n", i, cl.sound_precache[i] );
+				if( ++n >= 600 )
+					break;
+			}
+			Con_Printf( "SVEN-SNDTABLE: %d entries total\n", n );
+		}
+	}
+
+	flags = MSG_ReadShort( &sb );
+	if( flags & SVEN_SND_INDEX )
+		sndnum = MSG_ReadShort( &sb );
+	if( flags & SVEN_SND_VOLUME )
+		volume = (float)MSG_ReadByte( &sb ) / 255.0f;
+	if( flags & SVEN_SND_PITCH )
+		pitch = MSG_ReadByte( &sb );
+	if( flags & SVEN_SND_ATTN )
+	{
+		int ab = MSG_ReadByte( &sb );
+		if( flags & SVEN_SND_RAWATTN )
+			attn = (float)ab;
+		else attn = (float)ab * (1.0f / 64.0f);
+		if( attn > 4.0f ) attn = 4.0f;
+		if( attn < 0.0f ) attn = 0.0f;
+	}
+	if( flags & SVEN_SND_ORIGIN )
+	{
+		pos[0] = MSG_ReadCoord( &sb );
+		pos[1] = MSG_ReadCoord( &sb );
+		pos[2] = MSG_ReadCoord( &sb );
+	}
+	if( flags & SVEN_SND_EXTRA )
+		MSG_ReadFloat( &sb ); // extra field, consume only
+	channel = MSG_ReadByte( &sb );
+	ent = MSG_ReadShort( &sb );
+
+	CL_LoadSvenSoundCache();
+
+	// mirror the real client: sentence (0x100) sounds on far entities (>= 2048)
+	// are skipped (client.dll: cmp ent,0x800; jge error on the 0x100 branch).
+	if(( flags & SVEN_SND_SENTENCE ) && ent >= 2048 )
+		return;
+
+	// sndnum < 0 means the message carried no index (0x10 clear): nothing to play.
+	// NOTE: index 0 is a VALID slot — SOUNDLIST[0] (first soundcache entry) or
+	// SENTENCELIST[0] (first sentence), so we must not < 0 guard on zero.
+	if( sndnum < 0 )
+		return;
+
+	// Table selection (client.dll reverse, steam-refs/chatgpt/answer9):
+	//   flags & 0x100          -> SENTENCELIST index, play sentence "!N"
+	//   flags & 0x100 == 0     -> SOUNDLIST index into maps/soundcache/<map>.txt
+	// The real client resolves the latter as this+0x1700C+sndnum*0x104, i.e.
+	// bit 0x100 is a SENTENCE flag, NOT a precache table selector, and
+	// cl.sound_precache[] is never consulted for svc 107.
+	// NOTE on 0x20 (client.dll disasm): it is not a table selector but an
+	// active-instance stop lookup (find the playing sound with this sndnum and
+	// cut it — anti-pileup for rapid fire). It is mirrored below with
+	// S_StopSound before playing, NOT by muting.
+	{
+		const char *src = "none";
+		const char *stopname = NULL;
+		char sentenceName[32];
+		sentenceName[0] = '\0';
+		if( flags & SVEN_SND_SENTENCE )
+		{
+			Q_snprintf( sentenceName, sizeof( sentenceName ), "!%i", sndnum );
+			handle = S_RegisterSound( sentenceName );
+			playFlags |= SND_SENTENCE;
+			stopname = sentenceName;
+			src = "sent";
+		}
+		else if( sndnum < SVEN_SOUNDCACHE_MAX && svenSoundCache[sndnum][0] )
+		{
+			handle = S_RegisterSound( svenSoundCache[sndnum] );
+			stopname = svenSoundCache[sndnum];
+			src = "cache";
+		}
+
+		// 0x20: stop the previous instance on this channel first (rapid-fire
+		// tails must not pile up), then fall through and play normally.
+		if(( flags & 0x20 ) && stopname && stopname[0] )
+			S_StopSound( ent, channel, stopname );
+
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		{
+			char sndname[64];
+			if( !Q_strcmp( src, "cache" ))
+				Q_strncpy( sndname, svenSoundCache[sndnum], sizeof( sndname ));
+			else if( !Q_strcmp( src, "sent" ))
+				Q_snprintf( sndname, sizeof( sndname ), "!%i", sndnum );
+			else Q_strncpy( sndname, "(silent gap)", sizeof( sndname ));
+			Con_Printf( "SVEN-SOUND: flags=%04x idx=%d vol=%.2f pitch=%d attn=%.2f ch=%d ent=%d [%s] %s\n",
+				flags, sndnum, volume, pitch, attn, channel, ent, src, sndname );
+		}
+		// LEVEL-200 DIAG: dump the soundcache neighborhood around this index so an
+		// off-by-N shows up instantly. P[] (precache) is printed for reference
+		// but is NOT consulted by the resolver anymore.
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 200 )
+		{
+			int k;
+			const char *st;
+			char nb[256];
+			nb[0] = '\0';
+			for( k = sndnum - 2; k <= sndnum + 2; k++ )
+			{
+				char one[72];
+				if( k < 0 || k >= MAX_SOUNDS || !cl.sound_precache[k][0] )
+					Q_snprintf( one, sizeof( one ), "P[%d]=- ", k );
+				else Q_snprintf( one, sizeof( one ), "P[%d]=%.40s ", k, cl.sound_precache[k] );
+				Q_strncat( nb, one, sizeof( nb ));
+			}
+			Con_Printf( "SVEN-SND-NB precache: %s\n", nb );
+			nb[0] = '\0';
+			for( k = sndnum - 2; k <= sndnum + 2; k++ )
+			{
+				char one[72];
+				if( k < 0 || k >= SVEN_SOUNDCACHE_MAX || !svenSoundCache[k][0] )
+					Q_snprintf( one, sizeof( one ), "C[%d]=- ", k );
+				else Q_snprintf( one, sizeof( one ), "C[%d]=%.40s ", k, svenSoundCache[k] );
+				Q_strncat( nb, one, sizeof( nb ));
+			}
+			Con_Printf( "SVEN-SND-NB cache: %s\n", nb );
+			st = VOX_DebugSentence( sndnum );
+			Con_Printf( "SVEN-SND-NB sent#%d: %s | origin=(%.0f %.0f %.0f)\n",
+				sndnum, st ? st : "(none)", pos[0], pos[1], pos[2] );
+		}
+	}
+
+	if( !handle || !cl.audio_prepped )
+		return;
+
+	if( channel == CHAN_STATIC )
+		S_AmbientSound( pos, ent, handle, volume, attn, pitch, playFlags );
+	else S_StartSound( pos, ent, channel, handle, volume, attn, pitch, playFlags );
+}
+
+/*
+==============
 CL_ParseUserMessage
 
 handles all user messages
@@ -2358,7 +2635,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				for( int k = 0; k < 18; k++ )
 					MSG_ReadByte( msg );
 				return;
-			case 66: case 68: case 72: case 78: // Geiger, FlashBat, Train, ResetHUD
+			case 66: case 68: case 72: // Geiger, FlashBat, Train
 			case 80: case 81: case 86:   // CdAudio, GameTitle, GameMode
 			case 92: case 103:           // SetFOV, CbElec
 			case 117: case 121:          // SRPrimedOff, VGUIMenu
@@ -2367,6 +2644,14 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 1-byte msg)\n", svc_num );
 				return;
+			case 78: // ResetHUD (1 byte): (re)spawn — forget stale weapon ownership
+			{
+				MSG_ReadByte( msg );
+				CL_WeaponListFix_OnResetHUD();
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=78 (Sven ResetHUD routed to inventory)\n" );
+				return;
+			}
 			case 67: case 71: case 91:   // Flashlight, Battery, HideHUD
 			case 98:                     // Spectator (ToggleElem 138 is VARIABLE on
 			                             // live Sven 5.0: u16 len + payload pairs like
@@ -2385,12 +2670,21 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 					MSG_ReadByte( msg );
 				return;
 			case 96: case 116: case 141: // AmmoX, SRPrimed, UpdateNum
-			case 133: case 88:           // InvRemove, AmmoPickup
+			case 88:                     // AmmoPickup
 				for( int k = 0; k < 5; k++ )
 					MSG_ReadByte( msg );
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 5-byte msg)\n", svc_num );
 				return;
+			case 133: // InvRemove (Sven fixed 5: [LONG id][BYTE], client.dll-verified)
+			{
+				byte inv[5];
+				MSG_ReadBytes( msg, inv, sizeof( inv ), sizeof( inv ));
+				CL_WeaponListFix_OnInvRemovePayload( inv, sizeof( inv ));
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=133 (Sven InvRemove routed to inventory)\n" );
+				return;
+			}
 			case 143:                    // UpdateTime
 				for( int k = 0; k < 9; k++ )
 					MSG_ReadByte( msg );
@@ -2479,6 +2773,26 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			}
 			int skipSize = ( Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
 				? MSG_ReadWord( msg ) : MSG_ReadByte( msg );
+			// Sven inventory grant (132 InvAdd, variable): route the payload to
+			// the engine weapon inventory instead of blind-skipping, so granted
+			// (e.g. spawn-loadout) weapons become selectable without wielding.
+			// Layout client.dll-verified: [LONG id][3 bytes][FLOAT][5 strings].
+			if( svc_num == 132 )
+			{
+				if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH || skipSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
+				{
+					Con_Printf( S_WARN "%s: InvAdd %d has no size prefix: skipping to end of message\n", __func__, svc_num );
+					MSG_SeekToBit( msg, 0, SEEK_END );
+				}
+				else
+				{
+					MSG_ReadBytes( msg, pbuf, sizeof( pbuf ), skipSize );
+					CL_WeaponListFix_OnInvAddPayload( pbuf, skipSize );
+					if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+						Con_Printf( "USRMSG-SKIP: svc_num=132 (Sven InvAdd %d-byte routed to inventory)\n", skipSize );
+				}
+				return;
+			}
 			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH || skipSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
 			{
 				Con_Printf( S_WARN "%s: unregistered msg %d has no size prefix: skipping to end of message\n", __func__, svc_num );
@@ -2560,6 +2874,10 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 		Con_DPrintf( S_ERROR "%s: No pfn %s %d\n", __func__, clgame.msg[i].name, clgame.msg[i].number );
 		clgame.msg[i].func = CL_UserMsgStub; // throw warning only once
 	}
+	// Sven positional sounds (svc 107) are stubbed by the stock client, so
+	// play them engine-side where the precache table and mixer live.
+	if( !Q_strcmp( clgame.msg[i].name, "StartSound" ))
+		CL_ParseSvenStartSound( clgame.msg[i].name, iSize, pbuf );
 	CL_WeaponListFix_OnUserMessage( clgame.msg[i].name, iSize, pbuf );
 }
 /*

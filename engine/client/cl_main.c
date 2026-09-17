@@ -78,7 +78,7 @@ CVAR_DEFINE( cl_interp, "ex_interp", "0.01", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "
 CVAR_DEFINE_AUTO( cl_nointerp, "0", 0, "disable interpolation of entities and players" );
 static CVAR_DEFINE_AUTO( cl_dlmax, "1024", FCVAR_USERINFO|FCVAR_ARCHIVE, "max allowed outcoming fragment size" );
 static CVAR_DEFINE_AUTO( cl_upmax, "512", FCVAR_ARCHIVE, "max allowed incoming fragment size" );
-CVAR_DEFINE_AUTO( cl_lw, "1", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapon predicting" );
+CVAR_DEFINE_AUTO( cl_lw, "0", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapon predicting" );
 CVAR_DEFINE_AUTO( cl_charset, "utf-8", FCVAR_ARCHIVE, "1-byte charset to use (iconv style)" );
 CVAR_DEFINE_AUTO( cl_trace_consistency, "0", 0, "enable consistency info tracing (good for developers)" );
 CVAR_DEFINE_AUTO( cl_trace_stufftext, "0", 0, "enable stufftext (server-to-client console commands) tracing (good for developers)" );
@@ -89,7 +89,7 @@ CVAR_DEFINE_AUTO( hud_utf8, "0", FCVAR_ARCHIVE, "Use utf-8 encoding for hud text
 CVAR_DEFINE_AUTO( ui_renderworld, "1", FCVAR_PROTECTED, "render world when UI is visible" );
 static CVAR_DEFINE_AUTO( cl_maxframetime, "0", 0, "set deadline timer for client rendering to catch freezes" );
 CVAR_DEFINE_AUTO( cl_fixmodelinterpolationartifacts, "1", 0, "try to fix up models interpolation on a moving platforms (monsters on trains for example)" );
-CVAR_DEFINE_AUTO( cl_weaponlistfix, "1", FCVAR_ARCHIVE, "0: off, 1: 5-slot fallback inventory, 2: 7-slot fallback inventory" );
+CVAR_DEFINE_AUTO( cl_weaponlistfix, "2", FCVAR_ARCHIVE, "0: off, 1: Sven-compatible weapon inventory (invnext/invprev switch, slot keys stay on the vanilla/menu path for vote/buy menus), 2: slot1..slot9 also switch weapons via the engine inventory" );
 
 //
 // userinfo
@@ -819,6 +819,7 @@ static void CL_CreateCmd( void )
 	Platform_PreCreateMove();
 	clgame.dllFuncs.CL_CreateMove( host.frametime, cmd, active );
 	IN_EngineAppendMove( host.frametime, cmd, active );
+	CL_WeaponListFix_AppendMove( cmd ); // Sven: weapon select goes via usercmd.weaponselect
 
 	CL_PopPMStates();
 
@@ -932,8 +933,8 @@ static void CL_WritePacket( void )
 	// clamp cmdrate
 	if( cl_cmdrate.value < 10.0f )
 		Cvar_DirectSet( &cl_cmdrate, "10" );
-	else if( cl_cmdrate.value > 100.0f )
-		Cvar_DirectSet( &cl_cmdrate, "100" );
+	else if( cl_cmdrate.value > 250.0f )
+		Cvar_DirectSet( &cl_cmdrate, "250" );
 
 	// are we hltv spectator?
 	if( cls.spectator && cl.delta_sequence == cl.validsequence && ( !cls.demorecording || !cls.demowaiting ) && cls.nextcmdtime + 1.0f > host.realtime )
@@ -956,7 +957,10 @@ static void CL_WritePacket( void )
 		int from, i, key;
 		int packet_loss = bound( 0, (int)cls.packet_loss, 100 );
 
-		cls.nextcmdtime = host.realtime + ( 1.0f / cl_cmdrate.value );
+		// effective cmdrate never throttles below the current framerate so that
+		// a high-refresh display sends every frame (seq = +1, no heldback gaps),
+		// matching the original client's behavior.
+		cls.nextcmdtime = host.realtime + ( 1.0f / Q_max( cl_cmdrate.value, 1.0f / Q_max( host.frametime, 0.001f )));
 
 		if( cls.lastoutgoingcommand < 0 )
 			cls.lastoutgoingcommand = cls.netchan.outgoing_sequence;
@@ -1111,6 +1115,15 @@ static void CL_BeginUpload_f( void )
 		return;
 
 	if( !cl_allow_upload.value )
+		return;
+
+	// Sven's engine mishandles fragment-flagged client messages: it returns
+	// "badread" while reassembling the file-upload fragments and never flips
+	// the reliable-ack bit, deadlocking the reliable channel. Every later
+	// console stringcmd is then strangled in the client queue (kill/say/vote
+	// etc. never reach the server). Skip the customization upload for Sven;
+	// the missing decal/logo is cosmetic, and Sven does reconnect-tolerate it.
+	if( cl_sven_proto )
 		return;
 
 	if( Q_strlen( name ) != 36 || Q_strnicmp( name, "!MD5", 4 ))
@@ -1369,6 +1382,15 @@ static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 				cls.timestart = Platform_DoubleTime();
 				return;
 			}
+
+			// broker is not connected at the moment: keep waiting for it instead of
+			// falling back to a fake (revemu) ticket, which a Steam-authenticated
+			// server will reject. The ticket is re-requested automatically once the
+			// broker reconnects (see SteamBroker_UpdateConnecting).
+			cls.broker_wait = true;
+			cls.timestart = Platform_DoubleTime();
+			Con_Printf( "SteamBroker: broker not connected, waiting for ticket...\n" );
+			return;
 		}
 
 		CL_SendGoldSrcConnectPacket( adr, challenge, NULL, 0 );
@@ -1880,6 +1902,7 @@ void CL_Disconnect( void )
 	cls.connect_time = 0;
 	cls.changedemo = false;
 	cls.max_fragment_size = FRAGMENT_MAX_SIZE; // reset fragment size
+	cl_sven_proto = false; // reset per-connection Sven detection
 	Voice_Disconnect();
 	CL_Stop_f();
 
