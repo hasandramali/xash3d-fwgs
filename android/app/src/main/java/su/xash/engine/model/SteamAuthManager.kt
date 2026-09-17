@@ -580,7 +580,13 @@ class SteamAuthManager(private val ctx: Context) {
                         Log.d(TAG, "broker: waiting for accept()")
                         val client = server.accept()
                         Log.i(TAG, "broker: ACCEPTED client from ${client.inetAddress.hostAddress}:${client.port}")
-                        client.soTimeout = 30000
+                        // The engine (cl_steam.c) keeps this connection open for the whole session and
+                        // only sends frames when it needs a ticket or a gamedir change. A short
+                        // SO_TIMEOUT would tear the connection down while the player is idle in-game
+                        // ("connection closed by broker"), forcing a pointless reconnect every ~30s.
+                        // Use no timeout: the handler only exits on EOF (engine closed its socket) or
+                        // on an explicit sb_terminate frame.
+                        client.soTimeout = 0
                         Thread { handleBrokerClient(client) }.apply { isDaemon = true; start() }
                     } catch (e: Exception) {
                         if (server.isClosed) break
@@ -611,7 +617,13 @@ class SteamAuthManager(private val ctx: Context) {
                 Log.i(TAG, "$tag: handler started")
                 while (true) {
                     Log.d(TAG, "$tag: waiting for SBRK frame")
-                    val payload = readSbrkFrame(ins, tag) ?: run {
+                    val payload = try {
+                        readSbrkFrame(ins, tag)
+                    } catch (e: java.net.SocketTimeoutException) {
+                        // Should not trigger (SO_TIMEOUT=0), but keep the connection alive if it does.
+                        Log.d(TAG, "$tag: read timeout (idle broker), keeping connection alive")
+                        continue
+                    } ?: run {
                         Log.w(TAG, "$tag: readSbrkFrame returned null (EOF/bad header), closing client")
                         break
                     }
@@ -631,8 +643,10 @@ class SteamAuthManager(private val ctx: Context) {
                         val ticket = try {
                             kotlinx.coroutines.runBlocking(Dispatchers.IO) { getSessionTicket(effectiveAppid, serverSteamId, serverIp) }
                         } catch (e: Exception) {
+                            // Do not tear down the broker connection: the engine can retry with a
+                            // fresh sb_connect (e.g. after tokens arrive) without reconnecting.
                             Log.e(TAG, "$tag: getSessionTicket FAILED: ${e.message}", e)
-                            throw e
+                            continue
                         }
                         val steamId = currentSteamId
                         Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId appid=$effectiveAppid")
@@ -644,7 +658,12 @@ class SteamAuthManager(private val ctx: Context) {
                         currentGameDir = if (parts.size > 1) parts[1] else null
                         Log.i(TAG, "sb_gamedir=$currentGameDir")
                     } else if (command.startsWith("sb_disconnect")) {
-                        Log.i(TAG, "sb_disconnect ignored")
+                        // Player left a game server but the engine stays connected to the broker
+                        // (SBRK_STATE_CONNECTED, ready for the next game/connect). Keep alive.
+                        Log.i(TAG, "sb_disconnect recorded (keeping broker connection alive)")
+                    } else if (command.startsWith("sb_terminate")) {
+                        // Engine is shutting down (SteamBroker_AnnounceGameShutdown).
+                        Log.i(TAG, "sb_terminate: engine shutting down, closing broker connection")
                         break
                     } else {
                         Log.w(TAG, "unknown broker command: $command")
