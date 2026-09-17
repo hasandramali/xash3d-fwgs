@@ -366,41 +366,6 @@ static void CL_WeaponListFix_ScanForUnknownWeapons( void )
 	}
 }
 
-static cl_weaponlistfix_weapon_t *CL_WeaponListFix_FindInSlot( int slot, int current_id )
-{
-	int i, start = 0;
-
-	if( slot < 0 || slot >= CL_WeaponListFix_GetSlotCount() || cl_weaponlistfix_state.count <= 0 )
-		return NULL;
-
-	if( current_id > 0 )
-	{
-		for( i = 0; i < cl_weaponlistfix_state.count; i++ )
-		{
-			if( cl_weaponlistfix_state.order[i] == current_id )
-			{
-				start = i + 1;
-				break;
-			}
-		}
-	}
-
-	for( i = 0; i < cl_weaponlistfix_state.count; i++ )
-	{
-		int idx = ( start + i ) % cl_weaponlistfix_state.count;
-		int weapon_slot;
-		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.order[idx] );
-
-		if( !weapon || !CL_WeaponListFix_GetLayout( weapon, &weapon_slot, NULL ) || weapon_slot != slot )
-			continue;
-		if( !CL_WeaponListFix_HasWeapon( weapon ))
-			continue;
-		return weapon;
-	}
-
-	return NULL;
-}
-
 static cl_weaponlistfix_weapon_t *CL_WeaponListFix_FindRelative( int current_id, int direction )
 {
 	int i, start = 0;
@@ -491,7 +456,6 @@ void CL_WeaponListFix_Reset( void )
 qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 {
 	cl_weaponlistfix_weapon_t *weapon = NULL;
-	int slot = -1;
 
 	if( !cl_weaponlistfix.value )
 		return false;
@@ -500,19 +464,12 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	if( cls.state < ca_connected )
 		return false;
 
-	if( !Q_strnicmp( cmd_name, "slot", 4 ) && Q_strlen( cmd_name ) == 5 && cmd_name[4] >= '1' && cmd_name[4] <= '9' )
-	{
-		slot = cmd_name[4] - '1';
-
-		if( slot < 0 || slot >= CL_WeaponListFix_GetSlotCount() )
-			return false;
-
-		weapon = CL_WeaponListFix_FindInSlot( slot,
-			( cl_weaponlistfix_state.display_slot == slot ) ? cl_weaponlistfix_state.selected_weapon : -1 );
-		if( weapon )
-			CL_WeaponListFix_SelectWeapon( weapon );
-		return true;
-	}
+	// NOTE: slot1..slot9 are intentionally NOT swallowed here. Server-side menus
+	// (e.g. Sven voting/selection) are driven by these keys through the vanilla
+	// CHudAmmo/CHudMenu -> menuselect path, and the vanilla slot flow itself ends
+	// in cmd->weaponselect, which is the channel Sven expects. Swallowing them
+	// here turned a menu selection into a weapon switch (user-verified). Only the
+	// cycling keys stay on the engine-side inventory.
 
 	if( !Q_stricmp( cmd_name, "invnext" ))
 	{
