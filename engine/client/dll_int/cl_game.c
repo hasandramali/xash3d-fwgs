@@ -83,6 +83,7 @@ typedef struct
 	int id;
 	int flags;
 	int clip;
+	int ammo;
 } cl_weaponlistfix_weapon_t;
 
 typedef struct
@@ -185,6 +186,36 @@ static int CL_WeaponListFix_ReadByte( cl_weaponlistfix_msg_t *msg )
 static int CL_WeaponListFix_ReadChar( cl_weaponlistfix_msg_t *msg )
 {
 	return (signed char)CL_WeaponListFix_ReadByte( msg );
+}
+
+static int CL_WeaponListFix_ReadShort( cl_weaponlistfix_msg_t *msg )
+{
+	unsigned int val;
+
+	if( msg->pos + 2 > msg->size )
+		return 0;
+
+	val = (unsigned int)msg->data[msg->pos];
+	val |= (unsigned int)msg->data[msg->pos + 1] << 8;
+	msg->pos += 2;
+
+	return (short)val;
+}
+
+static int CL_WeaponListFix_ReadLong( cl_weaponlistfix_msg_t *msg )
+{
+	unsigned int val;
+
+	if( msg->pos + 4 > msg->size )
+		return 0;
+
+	val = (unsigned int)msg->data[msg->pos];
+	val |= (unsigned int)msg->data[msg->pos + 1] << 8;
+	val |= (unsigned int)msg->data[msg->pos + 2] << 16;
+	val |= (unsigned int)msg->data[msg->pos + 3] << 24;
+	msg->pos += 4;
+
+	return (int)val;
 }
 
 static const char *CL_WeaponListFix_ReadString( cl_weaponlistfix_msg_t *msg, char *buffer, size_t size )
@@ -499,13 +530,18 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
 		CL_WeaponListFix_ReadString( &msg, name, sizeof( name ));
-		ammo1 = CL_WeaponListFix_ReadChar( &msg );
-		max1 = CL_WeaponListFix_ReadByte( &msg );
-		ammo2 = CL_WeaponListFix_ReadChar( &msg );
+
+		// Sven Co-op server (server.dll:0x10202560, binary-verified) writes
+		// WeaponList as STRING + LONG(ammo1 idx) + LONG(max1) + BYTE(ammo2 idx)
+		// + BYTE(max2) + BYTE(slot) + SHORT(id) + BYTE(flags). The vanilla
+		// BYTE/BYTE/.../BYTE order drifts by one LONG, so the old id here was
+		// read from the wrong offset and CurWeapon lookups kept failing.
+		ammo1 = CL_WeaponListFix_ReadLong( &msg );
+		max1 = CL_WeaponListFix_ReadLong( &msg );
+		ammo2 = CL_WeaponListFix_ReadByte( &msg );
 		max2 = CL_WeaponListFix_ReadByte( &msg );
-		CL_WeaponListFix_ReadChar( &msg );
-		CL_WeaponListFix_ReadChar( &msg );
-		id = CL_WeaponListFix_ReadChar( &msg );
+		CL_WeaponListFix_ReadByte( &msg ); // weapon slot (nav layout is order-derived)
+		id = CL_WeaponListFix_ReadShort( &msg );
 		flags = CL_WeaponListFix_ReadByte( &msg );
 
 		if( !CL_WeaponListFix_IsUsefulWeapon( name, id ))
@@ -542,12 +578,20 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		int state;
 		int id;
 		int clip;
+		int ammo;
 		cl_weaponlistfix_weapon_t *weapon;
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
 		state = CL_WeaponListFix_ReadByte( &msg );
-		id = CL_WeaponListFix_ReadChar( &msg );
-		clip = CL_WeaponListFix_ReadChar( &msg );
+		id = CL_WeaponListFix_ReadShort( &msg );
+		clip = CL_WeaponListFix_ReadLong( &msg );
+		ammo = CL_WeaponListFix_ReadLong( &msg );
+
+		// server sends 255 instead of -1 for infinite clip/ammo
+		if( clip == 0xFF )
+			clip = -1;
+		if( ammo == 0xFF )
+			ammo = -1;
 
 		if( id < 1 )
 		{
@@ -560,10 +604,18 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		weapon = CL_WeaponListFix_GetWeapon( id );
 		if( !weapon )
+		{
+			// unknown weapon, let auto-scan register it
+			CL_WeaponListFix_AddUnknownWeapon( id );
+			weapon = CL_WeaponListFix_GetWeapon( id );
+		}
+
+		if( !weapon )
 			return;
 
 		weapon->owned_hint = true;
-		weapon->clip = ( clip < -1 ) ? abs( clip ) : clip;
+		weapon->clip = clip;
+		weapon->ammo = ammo;
 
 		if( state > 0 )
 		{
