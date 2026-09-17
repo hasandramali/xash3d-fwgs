@@ -532,15 +532,18 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		CL_WeaponListFix_ReadString( &msg, name, sizeof( name ));
 
 		// Sven Co-op server (server.dll:0x10202560, binary-verified) writes
-		// WeaponList as STRING + LONG(ammo1 idx) + LONG(max1) + BYTE(ammo2 idx)
-		// + BYTE(max2) + BYTE(slot) + SHORT(id) + BYTE(flags). The vanilla
-		// BYTE/BYTE/.../BYTE order drifts by one LONG, so the old id here was
-		// read from the wrong offset and CurWeapon lookups kept failing.
-		ammo1 = CL_WeaponListFix_ReadLong( &msg );
+		// WeaponList as STRING + BYTE(ammo1 idx) + LONG(ammo1 max) + BYTE(ammo2 idx)
+		// + LONG(ammo2 max) + BYTE(slot) + BYTE(pos) + SHORT(id) + BYTE(flags),
+		// which matches client.dll's reader (0x100046A0). The previous LONG+LONG
+		// read drifted the whole message, so real weapon names never reached the
+		// ids CurWeapon reports and the menu showed auto-generated weapon_<id>
+		// fallbacks (e.g. weapon_30) instead of weapon_crowbar.
+		ammo1 = CL_WeaponListFix_ReadChar( &msg );
 		max1 = CL_WeaponListFix_ReadLong( &msg );
-		ammo2 = CL_WeaponListFix_ReadByte( &msg );
-		max2 = CL_WeaponListFix_ReadByte( &msg );
+		ammo2 = CL_WeaponListFix_ReadChar( &msg );
+		max2 = CL_WeaponListFix_ReadLong( &msg );
 		CL_WeaponListFix_ReadByte( &msg ); // weapon slot (nav layout is order-derived)
+		CL_WeaponListFix_ReadByte( &msg ); // slot position
 		id = CL_WeaponListFix_ReadShort( &msg );
 		flags = CL_WeaponListFix_ReadByte( &msg );
 
@@ -632,7 +635,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		cl_weaponlistfix_weapon_t *weapon;
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
-		id = CL_WeaponListFix_ReadByte( &msg );
+		id = CL_WeaponListFix_ReadShort( &msg );
 
 		// Auto-detect unknown weapons
 		CL_WeaponListFix_ScanForUnknownWeapons();
@@ -641,6 +644,28 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		if( weapon )
 			weapon->owned_hint = true;
+		return;
+	}
+
+	if( !Q_stricmp( pszName, "CustWeapon" ))
+	{
+		cl_weaponlistfix_msg_t msg;
+		int id;
+		char name[64];
+		cl_weaponlistfix_weapon_t *weapon;
+
+		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
+		id = CL_WeaponListFix_ReadShort( &msg );
+		CL_WeaponListFix_ReadString( &msg, name, sizeof( name ));
+
+		if( id <= 0 || id >= MAX_WEAPONS )
+			return;
+
+		CL_WeaponListFix_AddUnknownWeapon( id );
+		weapon = CL_WeaponListFix_GetWeapon( id );
+
+		if( weapon && !COM_StringEmpty( name ))
+			Q_strncpy( weapon->name, name, sizeof( weapon->name ));
 		return;
 	}
 
