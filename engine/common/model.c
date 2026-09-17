@@ -469,11 +469,14 @@ static void Mod_PurgeStudioCache( void )
 	// and clear studio sequences
 	for( int i = 1; i < mod_numknown; i++ )
 	{
-		if( mod_known[i].needload == NL_UNREFERENCED )
-			continue;
-
+		// Clear studio sequence caches for *every* studio model, even the ones
+		// currently unreferenced: the studio cache pool is emptied below and a
+		// stale submodels array would dangle and crash Mod_CacheCheck later.
 		if( mod_known[i].type == mod_studio )
 			mod_known[i].submodels = NULL;
+
+		if( mod_known[i].needload == NL_UNREFERENCED )
+			continue;
 
 		if( mod_known[i].name[0] == '*' )
 			Mod_FreeModel( &mod_known[i] );
@@ -564,6 +567,12 @@ Mod_CacheCheck
 */
 void *GAME_EXPORT Mod_CacheCheck( cache_user_t *c )
 {
+	// Never dereference a cache user that isn't within the studio cache pool:
+	// the game DLL keeps these pointers across model reloads and they can go
+	// stale once the pool is emptied (Mod_EmptyPool in Mod_PurgeStudioCache).
+	if( !Mem_IsAllocatedExt( com_studiocache, c ))
+		return NULL;
+
 	if( !c->data )
 		return NULL;
 
@@ -587,6 +596,10 @@ void GAME_EXPORT Mod_LoadCacheFile( const char *filename, cache_user_t *cu )
 	Assert( cu != NULL );
 
 	if( COM_StringEmptyOrNULL( filename ))
+		return;
+
+	// Refuse to write into a stale/corrupt cache user (mirror of Mod_CacheCheck)
+	if( !Mem_IsAllocatedExt( com_studiocache, cu ))
 		return;
 
 	Q_strncpy( modname, filename, sizeof( modname ));
