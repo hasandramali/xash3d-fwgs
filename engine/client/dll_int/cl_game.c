@@ -64,7 +64,7 @@ client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS] =
 };
 
 #define CL_WEAPONLISTFIX_DEFAULT_SLOTS 5
-#define CL_WEAPONLISTFIX_EXTENDED_SLOTS 7
+#define CL_WEAPONLISTFIX_MAX_SLOTS 9
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
 #define CL_WEAPONLISTFIX_SUIT_ID 31
 #define CL_WEAPONLISTFIX_HIDEHUD_WEAPONS BIT( 0 )
@@ -80,6 +80,8 @@ typedef struct
 	int ammo2;
 	int max2;
 	int order_index;
+	int slot;
+	int slot_pos;
 	int id;
 	int flags;
 	int clip;
@@ -93,6 +95,7 @@ typedef struct
 	int count;
 	int active_weapon;
 	int selected_weapon;
+	int select_pending;
 	int display_slot;
 	int hidehud_bits;
 	float expire_time;
@@ -101,6 +104,7 @@ typedef struct
 static cl_weaponlistfix_t cl_weaponlistfix_state;
 
 static int CL_WeaponListFix_CompareWeapons( const void *a, const void *b );
+static cl_weaponlistfix_weapon_t *CL_WeaponListFix_GetWeapon( int id );
 
 static const dllfunc_t cdll_exports[] =
 {
@@ -241,22 +245,33 @@ static const char *CL_WeaponListFix_ReadString( cl_weaponlistfix_msg_t *msg, cha
 
 static int CL_WeaponListFix_GetSlotCount( void )
 {
-	return cl_weaponlistfix.value >= 2.0f ? CL_WEAPONLISTFIX_EXTENDED_SLOTS : CL_WEAPONLISTFIX_DEFAULT_SLOTS;
+	int i, max_slot = 0;
+
+	// use the real slot range reported by WeaponList, clamp to sane bounds
+	for( i = 0; i < cl_weaponlistfix_state.count; i++ )
+	{
+		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.order[i] );
+		if( weapon && weapon->slot > max_slot )
+			max_slot = weapon->slot;
+	}
+
+	if( max_slot <= 0 )
+		return CL_WEAPONLISTFIX_DEFAULT_SLOTS;
+
+	return bound( CL_WEAPONLISTFIX_DEFAULT_SLOTS, max_slot + 1, CL_WEAPONLISTFIX_MAX_SLOTS );
 }
 
 static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *weapon, int *slot, int *slot_pos )
 {
-	int slot_count;
-
-	if( !weapon || !weapon->valid || weapon->order_index < 0 )
+	if( !weapon || !weapon->valid )
 		return false;
 
-	slot_count = CL_WeaponListFix_GetSlotCount();
-
+	// prefer the server-provided WeaponList slot/pos seen in Sven Co-op,
+	// fall back to the nav order for vanilla-style servers
 	if( slot )
-		*slot = weapon->order_index % slot_count;
+		*slot = ( weapon->slot >= 0 ) ? weapon->slot : ( weapon->order_index % CL_WeaponListFix_GetSlotCount() );
 	if( slot_pos )
-		*slot_pos = weapon->order_index / slot_count;
+		*slot_pos = ( weapon->slot_pos >= 0 ) ? weapon->slot_pos : ( weapon->order_index / CL_WeaponListFix_GetSlotCount() );
 
 	return true;
 }
@@ -312,6 +327,8 @@ static void CL_WeaponListFix_AddUnknownWeapon( int id )
 	weapon = &cl_weaponlistfix_state.weapons[id];
 	weapon->valid = true;
 	weapon->id = id;
+	weapon->slot = -1;
+	weapon->slot_pos = -1;
 	weapon->ammo1 = -1;
 	weapon->max1 = -1;
 	weapon->ammo2 = -1;
@@ -433,8 +450,23 @@ static void CL_WeaponListFix_SelectWeapon( cl_weaponlistfix_weapon_t *weapon )
 
 	CL_WeaponListFix_ShowMenu( weapon );
 
-	if( cls.state >= ca_connected )
-		Cbuf_AddTextf( "cmd %s\n", weapon->name );
+	// Sven Co-op expects the selection on the usercmd.weaponselect channel,
+	// NOT as a "cmd weapon_<name>" string command (our ClientCommand reverse
+	// confirmed weapon_/use/lastinv/drop strings sit in a separate dispatcher
+	// and the vanilla hlsdk weapons flow ends in cmd->weaponselect). Stash the
+	// pending id here and let CL_WeaponListFix_AppendMove write it into the
+	// usercmd during CL_CreateMove.
+	if( weapon->id > 0 && weapon->id <= 255 )
+		cl_weaponlistfix_state.select_pending = weapon->id;
+}
+
+void CL_WeaponListFix_AppendMove( usercmd_t *cmd )
+{
+	if( cmd && cl_weaponlistfix_state.select_pending > 0 )
+	{
+		cmd->weaponselect = (byte)cl_weaponlistfix_state.select_pending;
+		cl_weaponlistfix_state.select_pending = 0;
+	}
 }
 
 void CL_WeaponListFix_Reset( void )
@@ -448,6 +480,7 @@ void CL_WeaponListFix_Reset( void )
 
 	cl_weaponlistfix_state.active_weapon = -1;
 	cl_weaponlistfix_state.selected_weapon = -1;
+	cl_weaponlistfix_state.select_pending = 0;
 	cl_weaponlistfix_state.display_slot = -1;
 
 	// Scan for unknown weapons after reset (e.g., on map change or connection)
@@ -467,7 +500,7 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	if( cls.state < ca_connected )
 		return false;
 
-	if( !Q_strnicmp( cmd_name, "slot", 4 ) && Q_strlen( cmd_name ) == 5 && cmd_name[4] >= '1' && cmd_name[4] <= '7' )
+	if( !Q_strnicmp( cmd_name, "slot", 4 ) && Q_strlen( cmd_name ) == 5 && cmd_name[4] >= '1' && cmd_name[4] <= '9' )
 	{
 		slot = cmd_name[4] - '1';
 
@@ -525,7 +558,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		cl_weaponlistfix_msg_t msg;
 		char name[64];
 		cl_weaponlistfix_weapon_t *weapon;
-		int ammo1, max1, ammo2, max2, flags;
+		int ammo1, max1, ammo2, max2, flags, slot, slot_pos;
 		int id;
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
@@ -542,8 +575,8 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		max1 = CL_WeaponListFix_ReadLong( &msg );
 		ammo2 = CL_WeaponListFix_ReadChar( &msg );
 		max2 = CL_WeaponListFix_ReadLong( &msg );
-		CL_WeaponListFix_ReadByte( &msg ); // weapon slot (nav layout is order-derived)
-		CL_WeaponListFix_ReadByte( &msg ); // slot position
+		slot = CL_WeaponListFix_ReadByte( &msg ); // weapon slot (Sven sends real slot here)
+		slot_pos = CL_WeaponListFix_ReadByte( &msg ); // slot position
 		id = CL_WeaponListFix_ReadShort( &msg );
 		flags = CL_WeaponListFix_ReadByte( &msg );
 
@@ -558,11 +591,15 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 				return;
 
 			weapon->order_index = cl_weaponlistfix_state.count;
+			weapon->slot = -1;
+			weapon->slot_pos = -1;
 			cl_weaponlistfix_state.order[cl_weaponlistfix_state.count++] = id;
 		}
 
 		weapon->valid = true;
 		weapon->id = id;
+		weapon->slot = slot;
+		weapon->slot_pos = slot_pos;
 		weapon->ammo1 = ammo1;
 		weapon->max1 = ( max1 == 255 ) ? -1 : max1;
 		weapon->ammo2 = ammo2;

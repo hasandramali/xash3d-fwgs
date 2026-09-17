@@ -765,6 +765,7 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name );
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf );
 void CL_WeaponListFix_Draw( void );
 void CL_WeaponListFix_Reset( void );
+void CL_WeaponListFix_AppendMove( usercmd_t *cmd );
 
 //
 // cl_custom.c
