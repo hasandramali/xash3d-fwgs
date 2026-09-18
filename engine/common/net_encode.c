@@ -2368,7 +2368,17 @@ void Delta_ParseTableField_GS( sizebuf_t *msg )
 			float mul = ( fPre != 0 ) ? (float)fPre / 4000.0f : 1.0f;
 			float post_mul = ( fPost != 0 ) ? (float)fPost / 4000.0f : 1.0f;
 
-			Delta_AddField( dt, name, pInfo->flags, fBits, mul, post_mul );
+			int existingFlags = pInfo->flags;
+			for( int k = 0; k < dt->numFields; k++ )
+			{
+				if( !Q_strcmp( dt->pFields[k].name, name ))
+				{
+					existingFlags = dt->pFields[k].flags;
+					break;
+				}
+			}
+
+			Delta_AddField( dt, name, existingFlags, fBits, mul, post_mul );
 		}
 
 		dt->bInitialized = true;
