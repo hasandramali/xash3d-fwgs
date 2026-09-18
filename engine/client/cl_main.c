@@ -1114,6 +1114,15 @@ static void CL_BeginUpload_f( void )
 	if( !cl_allow_upload.value )
 		return;
 
+	// Sven's engine mishandles fragment-flagged client messages: it returns
+	// "badread" while reassembling the file-upload fragments and never flips
+	// the reliable-ack bit, deadlocking the reliable channel. Every later
+	// console stringcmd is then strangled in the client queue (kill/say/vote
+	// etc. never reach the server). Skip the customization upload for Sven;
+	// the missing decal/logo is cosmetic, and Sven does reconnect-tolerate it.
+	if( cl_sven_proto )
+		return;
+
 	if( Q_strlen( name ) != 36 || Q_strnicmp( name, "!MD5", 4 ))
 	{
 		Con_Printf( "Ingoring upload of non-customization\n" );
@@ -1881,6 +1890,7 @@ void CL_Disconnect( void )
 	cls.connect_time = 0;
 	cls.changedemo = false;
 	cls.max_fragment_size = FRAGMENT_MAX_SIZE; // reset fragment size
+	cl_sven_proto = false; // reset per-connection Sven detection
 	Voice_Disconnect();
 	CL_Stop_f();
 

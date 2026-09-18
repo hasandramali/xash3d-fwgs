@@ -26,7 +26,7 @@ GNU General Public License for more details.
 int CL_UPDATE_BACKUP = SINGLEPLAYER_BACKUP;
 #endif
 
-static qboolean cl_sven_proto = false;
+qboolean cl_sven_proto = false;
 /*
 ===============
 CL_UserMsgStub

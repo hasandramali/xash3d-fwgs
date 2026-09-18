@@ -102,6 +102,11 @@ extern int CL_UPDATE_BACKUP;
 #define SIGNONS		2		// signon messages to receive before connected
 #define INVALID_HANDLE	0xFFFF		// for XashXT cache system
 
+// set when the connected GoldSrc server is a ReHLDS_Sven server:
+// Sven's engine mishandles fragment-flagged client messages (badread),
+// so some client features are gated on this flag
+extern qboolean cl_sven_proto;
+
 #define MIN_UPDATERATE	0.00001f
 #define MAX_UPDATERATE	9999999.0f
 
