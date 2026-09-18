@@ -64,9 +64,9 @@ client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS] =
 };
 
 #define CL_WEAPONLISTFIX_DEFAULT_SLOTS 5
-#define CL_WEAPONLISTFIX_MAX_SLOTS 9
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
 #define CL_WEAPONLISTFIX_SUIT_ID 31
+#define CL_WEAPONLISTFIX_PENDING_TIMEOUT 3.0f
 #define CL_WEAPONLISTFIX_HIDEHUD_WEAPONS BIT( 0 )
 #define CL_WEAPONLISTFIX_HIDEHUD_ALL BIT( 2 )
 
@@ -98,6 +98,8 @@ typedef struct
 	int select_pending;
 	int display_slot;
 	int hidehud_bits;
+	char pending_name[64];	// class name observed from a console weapon_<name> switch
+	float pending_time;
 	float expire_time;
 } cl_weaponlistfix_t;
 
@@ -243,11 +245,10 @@ static const char *CL_WeaponListFix_ReadString( cl_weaponlistfix_msg_t *msg, cha
 	return buffer;
 }
 
-static int CL_WeaponListFix_GetSlotCount( void )
+static int CL_WeaponListFix_GetRealSlotRange( void )
 {
 	int i, max_slot = 0;
 
-	// use the real slot range reported by WeaponList, clamp to sane bounds
 	for( i = 0; i < cl_weaponlistfix_state.count; i++ )
 	{
 		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.order[i] );
@@ -255,10 +256,35 @@ static int CL_WeaponListFix_GetSlotCount( void )
 			max_slot = weapon->slot;
 	}
 
-	if( max_slot <= 0 )
+	return max_slot + 1;
+}
+
+static int CL_WeaponListFix_GetSlotCount( void )
+{
+	int real_range = CL_WeaponListFix_GetRealSlotRange();
+
+	if( real_range <= 0 )
 		return CL_WEAPONLISTFIX_DEFAULT_SLOTS;
 
-	return bound( CL_WEAPONLISTFIX_DEFAULT_SLOTS, max_slot + 1, CL_WEAPONLISTFIX_MAX_SLOTS );
+	// Sven Co-op's WeaponList uses a tall 9-row layout; squeeze it (and any
+	// other over-tall layout) into the compact 5-row HUD.
+	if( real_range > CL_WEAPONLISTFIX_DEFAULT_SLOTS )
+		return CL_WEAPONLISTFIX_DEFAULT_SLOTS;
+
+	return real_range;
+}
+
+static int CL_WeaponListFix_CompressSlot( int slot )
+{
+	int rows = CL_WeaponListFix_GetSlotCount();
+	int real_range = CL_WeaponListFix_GetRealSlotRange();
+
+	// over-tall layouts are squeezed into the 5-row HUD by pairing every two
+	// slots so each row stays balanced: (0,1),(2,3),(4,5),(6,7),(8)
+	if( real_range > rows )
+		return bound( 0, slot / 2, rows - 1 );
+
+	return bound( 0, slot, rows - 1 );
 }
 
 static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *weapon, int *slot, int *slot_pos )
@@ -269,7 +295,10 @@ static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *wea
 	// prefer the server-provided WeaponList slot/pos seen in Sven Co-op,
 	// fall back to the nav order for vanilla-style servers
 	if( slot )
-		*slot = ( weapon->slot >= 0 ) ? weapon->slot : ( weapon->order_index % CL_WeaponListFix_GetSlotCount() );
+	{
+		int weapon_slot = ( weapon->slot >= 0 ) ? weapon->slot : ( weapon->order_index % CL_WeaponListFix_GetSlotCount() );
+		*slot = CL_WeaponListFix_CompressSlot( weapon_slot );
+	}
 	if( slot_pos )
 		*slot_pos = ( weapon->slot_pos >= 0 ) ? weapon->slot_pos : ( weapon->order_index / CL_WeaponListFix_GetSlotCount() );
 
@@ -281,8 +310,6 @@ static qboolean CL_WeaponListFix_IsUsefulWeapon( const char *name, int id )
 	if( id <= 0 || id >= MAX_WEAPONS )
 		return false;
 	if( COM_StringEmpty( name ))
-		return false;
-	if( id == CL_WEAPONLISTFIX_SUIT_ID )
 		return false;
 	if( !Q_stricmp( name, "weapon_suit" ))
 		return false;
@@ -320,6 +347,8 @@ static void CL_WeaponListFix_AddUnknownWeapon( int id )
 		return;
 	if( cl_weaponlistfix_state.count >= MAX_WEAPONS )
 		return;
+	if( id == CL_WEAPONLISTFIX_SUIT_ID )
+		return; // suit is not a selectable weapon, skip the weapon_31 fallback
 
 	// Generate weapon name based on ID
 	Q_snprintf( name, sizeof( name ), "weapon_%d", id );
@@ -344,6 +373,88 @@ static void CL_WeaponListFix_AddUnknownWeapon( int id )
 	qsort( cl_weaponlistfix_state.order, cl_weaponlistfix_state.count, sizeof( int ), CL_WeaponListFix_CompareWeapons );
 
 	Con_DPrintf( "CL_WeaponListFix: Auto-added unknown weapon %s (ID %d)\n", name, id );
+}
+
+// a "real" class name is anything but the automatic weapon_<id> fallback
+static qboolean CL_WeaponListFix_HasRealName( const cl_weaponlistfix_weapon_t *weapon )
+{
+	const char *p;
+
+	if( !weapon || !weapon->valid || COM_StringEmpty( weapon->name ))
+		return false;
+
+	p = weapon->name;
+	if( !Q_strncmp( p, "weapon_", 7 ))
+	{
+		p += 7;
+		if( !*p )
+			return false;
+		while( *p )
+		{
+			if( *p < '0' || *p > '9' )
+				return true;
+			p++;
+		}
+		return false; // all digits: e.g. weapon_31 fallback
+	}
+
+	return true;
+}
+
+static void CL_WeaponListFix_SendWeaponCmd( const char *name )
+{
+	char str[80];
+
+	if( cls.demoplayback || cls.state < ca_connected || cls.state > ca_active )
+		return;
+	if( COM_StringEmpty( name ))
+		return;
+
+	// mirror cmd.Cmd_ForwardToServer: send weapon_<class> as a client command
+	Q_snprintf( str, sizeof( str ), "%s\n", name );
+	MSG_BeginClientCmd( &cls.netchan.message, clc_stringcmd );
+	MSG_WriteString( &cls.netchan.message, str );
+}
+
+// register (or update) a weapon with a real class name, e.g. weapon_crowbar
+static cl_weaponlistfix_weapon_t *CL_WeaponListFix_AddNamedWeapon( int id, const char *name )
+{
+	cl_weaponlistfix_weapon_t *weapon;
+
+	if( id <= 0 || id >= MAX_WEAPONS )
+		return NULL;
+	if( COM_StringEmpty( name ))
+		return NULL;
+
+	weapon = &cl_weaponlistfix_state.weapons[id];
+
+	if( !weapon->valid )
+	{
+		if( cl_weaponlistfix_state.count >= MAX_WEAPONS )
+			return NULL;
+
+		weapon->valid = true;
+		weapon->id = id;
+		weapon->slot = -1;
+		weapon->slot_pos = -1;
+		weapon->ammo1 = -1;
+		weapon->max1 = -1;
+		weapon->ammo2 = -1;
+		weapon->max2 = -1;
+		weapon->flags = 0;
+		weapon->owned_hint = true;
+		weapon->clip = 0;
+		weapon->ammo = 0;
+		weapon->order_index = cl_weaponlistfix_state.count;
+		cl_weaponlistfix_state.order[cl_weaponlistfix_state.count++] = id;
+
+		// sort weapons by slot and pos for better navigation
+		qsort( cl_weaponlistfix_state.order, cl_weaponlistfix_state.count, sizeof( int ), CL_WeaponListFix_CompareWeapons );
+	}
+
+	Q_strncpy( weapon->name, name, sizeof( weapon->name ));
+
+	return weapon;
 }
 
 static void CL_WeaponListFix_ScanForUnknownWeapons( void )
@@ -398,6 +509,42 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_FindRelative( int current_id,
 	return NULL;
 }
 
+// pick the weapon to switch to when a slot key is pressed, mirroring the
+// vanilla behaviour: first owned weapon of the bucket, or the next one when
+// a weapon of the same bucket is already active
+static cl_weaponlistfix_weapon_t *CL_WeaponListFix_PickWeaponInSlot( int slot )
+{
+	int i, n = 0, active = -1;
+	int owned[MAX_WEAPONS];
+
+	if( cl_weaponlistfix_state.count <= 0 || slot < 0 )
+		return NULL;
+
+	for( i = 0; i < cl_weaponlistfix_state.count; i++ )
+	{
+		int weapon_slot;
+		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.order[i] );
+
+		if( !weapon || !CL_WeaponListFix_GetLayout( weapon, &weapon_slot, NULL ) || weapon_slot != slot )
+			continue;
+		if( !CL_WeaponListFix_HasWeapon( weapon ))
+			continue;
+
+		owned[n++] = weapon->id;
+		if( weapon->id == cl_weaponlistfix_state.active_weapon )
+			active = n - 1;
+	}
+
+	if( n <= 0 )
+		return NULL;
+
+	// pressing the key again cycles to the next owned weapon of the bucket
+	if( active >= 0 && n > 1 )
+		return CL_WeaponListFix_GetWeapon( owned[( active + 1 ) % n] );
+
+	return CL_WeaponListFix_GetWeapon( owned[0] );
+}
+
 static void CL_WeaponListFix_ShowMenu( const cl_weaponlistfix_weapon_t *weapon )
 {
 	if( !weapon )
@@ -415,14 +562,20 @@ static void CL_WeaponListFix_SelectWeapon( cl_weaponlistfix_weapon_t *weapon )
 
 	CL_WeaponListFix_ShowMenu( weapon );
 
-	// Sven Co-op expects the selection on the usercmd.weaponselect channel,
-	// NOT as a "cmd weapon_<name>" string command (our ClientCommand reverse
-	// confirmed weapon_/use/lastinv/drop strings sit in a separate dispatcher
-	// and the vanilla hlsdk weapons flow ends in cmd->weaponselect). Stash the
-	// pending id here and let CL_WeaponListFix_AppendMove write it into the
-	// usercmd during CL_CreateMove.
+	// Primary channel: Sven Co-op consumes usercmd.weaponselect, so stash the
+	// pending id and let CL_WeaponListFix_AppendMove write it into the usercmd
+	// during CL_CreateMove.
 	if( weapon->id > 0 && weapon->id <= 255 )
+	{
 		cl_weaponlistfix_state.select_pending = weapon->id;
+
+		// Mirror the selection through the weapon_<class> string command too:
+		// the Sven server switches on it (console weapon_crowbar is user-verified).
+		// The automatic weapon_<id> fallbacks are never sent, the server would
+		// reject them.
+		if( CL_WeaponListFix_HasRealName( weapon ))
+			CL_WeaponListFix_SendWeaponCmd( weapon->name );
+	}
 }
 
 void CL_WeaponListFix_AppendMove( usercmd_t *cmd )
@@ -464,12 +617,40 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	if( cls.state < ca_connected )
 		return false;
 
-	// NOTE: slot1..slot9 are intentionally NOT swallowed here. Server-side menus
-	// (e.g. Sven voting/selection) are driven by these keys through the vanilla
-	// CHudAmmo/CHudMenu -> menuselect path, and the vanilla slot flow itself ends
-	// in cmd->weaponselect, which is the channel Sven expects. Swallowing them
-	// here turned a menu selection into a weapon switch (user-verified). Only the
-	// cycling keys stay on the engine-side inventory.
+	// slot1..slot9 are swallowed ONLY in the aggressive cl_weaponlistfix 2 mode.
+	// In mode 1 the keys stay on the vanilla path so server-side menus
+	// (Sven vote/buy selections) keep working; only the cycling keys
+	// (invnext/invprev) stay on the engine inventory in both modes.
+
+	// remember a console weapon_<classname> switch: the server recognises it
+	// (user-verified) and will answer with CurWeapon for that weapon. Cache the
+	// class name so CurWeapon can bind it to the real id instead of the
+	// automatic weapon_<id> fallback. Don't swallow the command: it has to
+	// keep travelling to the server to perform the actual switch.
+	if( !Q_strncmp( cmd_name, "weapon_", 7 ))
+	{
+		Q_strncpy( cl_weaponlistfix_state.pending_name, cmd_name, sizeof( cl_weaponlistfix_state.pending_name ));
+		cl_weaponlistfix_state.pending_time = cl.time;
+		return false;
+	}
+
+	if( cmd_name[0] == 's' && cmd_name[1] == 'l' && cmd_name[2] == 'o' &&
+	    cmd_name[3] == 't' && cmd_name[4] >= '1' && cmd_name[4] <= '9' && cmd_name[5] == '\0' )
+	{
+		int row = CL_WeaponListFix_CompressSlot( cmd_name[4] - '1' );
+
+		// mode 2 only: otherwise the slot keys must stay free for the
+		// vanilla/menu path (vote/buy selections)
+		if( cl_weaponlistfix.value < 2.0f )
+			return false;
+
+		weapon = CL_WeaponListFix_PickWeaponInSlot( row );
+		if( !weapon )
+			return false; // empty bucket: keep the vanilla path alive
+
+		CL_WeaponListFix_SelectWeapon( weapon );
+		return true;
+	}
 
 	if( !Q_stricmp( cmd_name, "invnext" ))
 	{
@@ -602,13 +783,41 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		weapon = CL_WeaponListFix_GetWeapon( id );
 		if( !weapon )
 		{
-			// unknown weapon, let auto-scan register it
-			CL_WeaponListFix_AddUnknownWeapon( id );
-			weapon = CL_WeaponListFix_GetWeapon( id );
+			// unknown weapon: if a console weapon_<name> switch was observed
+			// right before this CurWeapon, register it under that class name;
+			// otherwise let the auto-scan fall back to weapon_<id>
+			if( state > 0 && cl_weaponlistfix_state.pending_name[0] &&
+			    cl.time - cl_weaponlistfix_state.pending_time <= CL_WEAPONLISTFIX_PENDING_TIMEOUT )
+			{
+				weapon = CL_WeaponListFix_AddNamedWeapon( id, cl_weaponlistfix_state.pending_name );
+				cl_weaponlistfix_state.pending_name[0] = '\0';
+			}
+			else
+			{
+				CL_WeaponListFix_AddUnknownWeapon( id );
+				weapon = CL_WeaponListFix_GetWeapon( id );
+			}
 		}
 
 		if( !weapon )
 			return;
+
+		// a console weapon_<name> switch put the real class name on this id;
+		// the automatic weapon_<id> fallback gets replaced so the inventory
+		// shows weapon_crowbar instead of weapon_31
+		if( state > 0 && cl_weaponlistfix_state.pending_name[0] )
+		{
+			if( cl.time - cl_weaponlistfix_state.pending_time > CL_WEAPONLISTFIX_PENDING_TIMEOUT )
+			{
+				cl_weaponlistfix_state.pending_name[0] = '\0';
+			}
+			else
+			{
+				if( !CL_WeaponListFix_HasRealName( weapon ))
+					Q_strncpy( weapon->name, cl_weaponlistfix_state.pending_name, sizeof( weapon->name ));
+				cl_weaponlistfix_state.pending_name[0] = '\0';
+			}
+		}
 
 		weapon->owned_hint = true;
 		weapon->clip = clip;
@@ -646,7 +855,6 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		cl_weaponlistfix_msg_t msg;
 		int id;
 		char name[64];
-		cl_weaponlistfix_weapon_t *weapon;
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
 		id = CL_WeaponListFix_ReadShort( &msg );
@@ -655,11 +863,11 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		if( id <= 0 || id >= MAX_WEAPONS )
 			return;
 
-		CL_WeaponListFix_AddUnknownWeapon( id );
-		weapon = CL_WeaponListFix_GetWeapon( id );
-
-		if( weapon && !COM_StringEmpty( name ))
-			Q_strncpy( weapon->name, name, sizeof( weapon->name ));
+		// prefer the real class name the server attached to the weapon
+		if( !COM_StringEmpty( name ))
+			CL_WeaponListFix_AddNamedWeapon( id, name );
+		else
+			CL_WeaponListFix_AddUnknownWeapon( id );
 		return;
 	}
 
