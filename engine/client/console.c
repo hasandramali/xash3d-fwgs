@@ -2180,6 +2180,8 @@ void Con_RunConsole( void )
 {
 	Con_SetColor( );
 
+	con.showlines = Con_DestHeight();
+
 	if( con_fixfont.value )
 	{
 		static float last_intended_oldfont = -999.0f;
