@@ -537,6 +537,27 @@ class SteamAuthManager(private val ctx: Context) {
         if (isGoldSrcAppId(appid)) {
             val appTicket = requestAppOwnershipTicket(appid)
                 .also { Log.i(TAG, "getSessionTicket: legacy app ownership ticket OK size=${it.size}") }
+
+            // Register the auth session with the Steam backend via ClientAuthList (EMsg 5432)
+            // BEFORE the server starts its periodic (~60-90s) re-validation. Without the
+            // CM-side registration the ownership ticket passes the initial connect check, but
+            // the server's revalidation finds no active session and kicks with
+            // "Unable to connect to Steam" after the first interval. Real GoldSrc clients
+            // register their auth session tickets exactly like this.
+            val authTicket = buildAuthTicket(token, 2)
+            val crc = crc32(authTicket)
+            synchronized(ticketChangeLock) {
+                ticketsByGame.getOrPut(appid) { ArrayList() }.add(
+                    CMsgAuthTicket(gameid = appid.toLong(), ticket = authTicket, ticketCrc = crc)
+                )
+            }
+            val ackBody = sendAuthList(appid)
+            val ackCrcs = readRepeatedVarints(ackBody, 1)
+            Log.i(TAG, "getSessionTicket: auth list sent (legacy), ack crcs=${ackCrcs.joinToString()} our=$crc")
+            if (ackCrcs.none { it == crc }) {
+                Log.w(TAG, "getSessionTicket: AuthList ack did not contain our crc $crc (got ${ackCrcs.joinToString()})")
+            }
+
             val out = ByteArrayOutputStream()
             out.write(Proto.packInt32(token.size))
             out.write(token)
