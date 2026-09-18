@@ -933,8 +933,8 @@ static void CL_WritePacket( void )
 	// clamp cmdrate
 	if( cl_cmdrate.value < 10.0f )
 		Cvar_DirectSet( &cl_cmdrate, "10" );
-	else if( cl_cmdrate.value > 100.0f )
-		Cvar_DirectSet( &cl_cmdrate, "100" );
+	else if( cl_cmdrate.value > 250.0f )
+		Cvar_DirectSet( &cl_cmdrate, "250" );
 
 	// are we hltv spectator?
 	if( cls.spectator && cl.delta_sequence == cl.validsequence && ( !cls.demorecording || !cls.demowaiting ) && cls.nextcmdtime + 1.0f > host.realtime )
@@ -957,7 +957,10 @@ static void CL_WritePacket( void )
 		int from, i, key;
 		int packet_loss = bound( 0, (int)cls.packet_loss, 100 );
 
-		cls.nextcmdtime = host.realtime + ( 1.0f / cl_cmdrate.value );
+		// effective cmdrate never throttles below the current framerate so that
+		// a high-refresh display sends every frame (seq = +1, no heldback gaps),
+		// matching the original client's behavior.
+		cls.nextcmdtime = host.realtime + ( 1.0f / Q_max( cl_cmdrate.value, 1.0f / Q_max( host.frametime, 0.001f )));
 
 		if( cls.lastoutgoingcommand < 0 )
 			cls.lastoutgoingcommand = cls.netchan.outgoing_sequence;

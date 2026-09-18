@@ -544,7 +544,7 @@ class SteamAuthManager(private val ctx: Context) {
             // the server's revalidation finds no active session and kicks with
             // "Unable to connect to Steam" after the first interval. Real GoldSrc clients
             // register their auth session tickets exactly like this.
-            val authTicket = buildAuthTicket(token, 2)
+val authTicket = buildAuthTicket(token, 2, resolveExternalIp(), resolveInternalIp())
             val crc = crc32(authTicket)
             synchronized(ticketChangeLock) {
                 ticketsByGame.getOrPut(appid) { ArrayList() }.add(
@@ -569,7 +569,7 @@ class SteamAuthManager(private val ctx: Context) {
 
         val appTicket = requestAppOwnershipTicket(appid)
             .also { Log.i(TAG, "getSessionTicket: app ownership ticket OK size=${it.size}") }
-        val authTicket = buildAuthTicket(token, 2)
+        val authTicket = buildAuthTicket(token, 2, resolveExternalIp(), resolveInternalIp())
         Log.i(TAG, "getSessionTicket: built auth ticket size=${authTicket.size}")
 
         // Register the auth ticket with the Steam backend via ClientAuthList (EMsg 5432) BEFORE the
@@ -1503,16 +1503,77 @@ class SteamAuthManager(private val ctx: Context) {
     // Modern Steam auth session ticket (matches JavaSteam SteamAuthTicket.buildAuthTicket /
     // SteamKit2 GetAuthSessionTicket). This is what SteamGameServer_BeginAuthSession expects.
     // Layout: int32 tokenLen | token[tokenLen] | int32 sessionSize(=24) |
-    //         int32 1 | int32 ticketType | 8 bytes (externalIP+internalIP, random) |
+    //         int32 1 | int32 ticketType | 8 bytes (externalIP+internalIP) |
     //         int32 timestamp(nonce) | int32 seq
-    // The externalIP/internalIP fields are filled with random bytes by the real Steam client and
-    // are NOT validated by BeginAuthSession, so the server IP must not be embedded here.
+    // Steam backends correlate the ticket's network identity with the client session, so the
+    // external (public) and internal (LAN) IPv4 fields must carry the real client addresses.
+    // Fall back to random bytes only if neither address can be resolved.
     private val authTicketSequence = AtomicInteger(0)
 
-    private fun buildAuthTicket(gameConnectToken: ByteArray, ticketType: Int = 2): ByteArray {
+    // Resolve the public-facing IPv4 used for the Steam CM connection. This is the client's
+    // "network identity" address the Steam backend matches against the auth ticket's externalIP.
+    private var externalIpCache: ByteArray? = null
+    private var internalIpCache: ByteArray? = null
+
+    private fun resolveExternalIp(): ByteArray? {
+        // getLocalHost() is loopback on Android; prefer the CM socket's local endpoint
+        // (the address Android uses towards the Internet), else the CM's own address.
+        try {
+            val localAddr = socket?.localSocketAddress as? java.net.InetSocketAddress
+            val local = localAddr?.address
+            if (local != null && local.size == 4) {
+                val b0 = local[0].toInt() and 0xff
+                if (b0 != 0 && b0 != 127) {
+                    externalIpCache = local
+                    Log.i(TAG, "resolveExternalIp: socket local=${java.net.InetAddress.getByAddress(local)} (fallback)")
+                    return local
+                }
+            }
+        } catch (_: Exception) { }
+        try {
+            val cmIp = socket?.inetAddress?.address
+            if (cmIp != null && cmIp.size == 4) {
+                Log.i(TAG, "resolveExternalIp: cm=${java.net.InetAddress.getByAddress(cmIp)} (fallback)")
+                return cmIp
+            }
+        } catch (_: Exception) { }
+        return null
+    }
+
+    private fun resolveInternalIp(): ByteArray? {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val ni = interfaces.nextElement()
+                if (!ni.isUp || ni.isLoopback) continue
+                val addrs = ni.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val ia = addrs.nextElement()
+                    if (ia is java.net.Inet4Address && !ia.isLoopbackAddress && !ia.isLinkLocalAddress) {
+                        internalIpCache = ia.address
+                        Log.i(TAG, "resolveInternalIp: ${ia.hostAddress} on ${ni.name}")
+                        return ia.address
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        return null
+    }
+
+    private fun buildAuthTicket(
+        gameConnectToken: ByteArray,
+        ticketType: Int = 2,
+        externalIp: ByteArray? = null,
+        internalIp: ByteArray? = null,
+    ): ByteArray {
         val sessionSize = 4 + 4 + 4 + 4 + 4 + 4 // = 24
         val ipFields = ByteArray(8)
-        SecureRandom().nextBytes(ipFields)
+        if (externalIp?.size == 4 && internalIp?.size == 4) {
+            System.arraycopy(externalIp, 0, ipFields, 0, 4)
+            System.arraycopy(internalIp, 0, ipFields, 4, 4)
+        } else {
+            SecureRandom().nextBytes(ipFields)
+        }
         val stream = ByteArrayOutputStream()
         stream.write(Proto.packInt32(gameConnectToken.size))
         stream.write(gameConnectToken)
@@ -1523,7 +1584,11 @@ class SteamAuthManager(private val ctx: Context) {
         stream.write(Proto.packInt32(System.nanoTime().toInt()))
         stream.write(Proto.packInt32(authTicketSequence.incrementAndGet()))
         val bytes = stream.toByteArray()
-        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize)")
+        val ipStr = if (externalIp?.size == 4 && internalIp?.size == 4)
+            "${externalIp.joinToString(".") { (it.toInt() and 0xff).toString() }}," +
+                "${internalIp.joinToString(".") { (it.toInt() and 0xff).toString() }}"
+        else "random"
+        Log.i(TAG, "buildAuthTicket(modern): ticket=${bytes.size}B (expected 52, tokenLen=${gameConnectToken.size} sessionSize=$sessionSize ip=$ipStr)")
         return bytes
     }
 
