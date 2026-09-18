@@ -1379,6 +1379,15 @@ static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 				cls.timestart = Platform_DoubleTime();
 				return;
 			}
+
+			// broker is not connected at the moment: keep waiting for it instead of
+			// falling back to a fake (revemu) ticket, which a Steam-authenticated
+			// server will reject. The ticket is re-requested automatically once the
+			// broker reconnects (see SteamBroker_UpdateConnecting).
+			cls.broker_wait = true;
+			cls.timestart = Platform_DoubleTime();
+			Con_Printf( "SteamBroker: broker not connected, waiting for ticket...\n" );
+			return;
 		}
 
 		CL_SendGoldSrcConnectPacket( adr, challenge, NULL, 0 );

@@ -521,12 +521,13 @@ class SteamAuthManager(private val ctx: Context) {
         // Wait for connection with timeout (reconnection might be in progress)
         val timeoutMs = 30000L // 30 seconds max wait for reconnection
         val startTime = System.currentTimeMillis()
-        while (!connected && !Thread.interrupted()) {
+        while ((!connected || !loggedIn) && !Thread.interrupted()) {
             if (System.currentTimeMillis() - startTime > timeoutMs) {
                 throw Exception("Not connected to Steam (timeout waiting for reconnection)")
             }
             delay(500)
         }
+        if (!loggedIn) throw Exception("Steam session is not logged in")
         Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
         val token = gameConnectTokens.poll()
@@ -862,6 +863,8 @@ class SteamAuthManager(private val ctx: Context) {
                     prefs.edit().putBoolean("logged_in", false).apply()
                     try { heartbeatJob?.interrupt() } catch (_: Exception) { }
                     try { socket?.close() } catch (_: Exception) { }
+                    gameConnectTokens.clear()
+                    synchronized(ticketChangeLock) { ticketsByGame.clear() }
                     logonFuture?.completeExceptionally(Exception("Connection lost"))
                     // Schedule automatic reconnection with stored credentials
                     scheduleReconnect()
@@ -878,8 +881,9 @@ class SteamAuthManager(private val ctx: Context) {
             var attempt = 0
             val maxAttempts = 10
             val baseDelayMs = 5000L // 5 seconds initial delay
-            
-            while (attempt < maxAttempts && !Thread.interrupted()) {
+            var reloggedIn = false
+
+            while (attempt < maxAttempts && !Thread.interrupted() && !reloggedIn) {
                 attempt++
                 val delayMs = baseDelayMs * (1 shl (attempt - 1)).coerceAtMost(60000) // max 60s
                 Log.i(TAG, "Reconnect attempt $attempt/$maxAttempts in ${delayMs}ms...")
@@ -899,33 +903,43 @@ class SteamAuthManager(private val ctx: Context) {
                             input = null
                             output = null
                             connected = false
+                            loggedIn = false
                             encrypted = false
-                            
+                            // The old session is dead: drop the game-connect tokens and auth
+                            // tickets belonging to it. Steam issues fresh tokens via EMsg 779
+                            // right after the re-logon completes.
+                            gameConnectTokens.clear()
+                            synchronized(ticketChangeLock) { ticketsByGame.clear() }
+
                             // Reconnect
                             connectSocket()
                             doHandshake()
                             startReader()
                             connected = true
                             Log.i(TAG, "Reconnected to Steam CM")
-                            
-                            // Re-login using stored credentials
-                            val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
-                            if (state is LoginState.Success) {
-                                Log.i(TAG, "Re-login successful after reconnect")
-                                // Restart broker if it was running
-                                if (brokerServer != null) {
-                                    startBroker()
-                                }
-                                return@runBlocking
-                            } else {
-                                Log.w(TAG, "Re-login failed after reconnect: $state")
-                                connected = false
-                                loggedIn = false
-                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "Reconnect attempt $attempt failed: ${e.message}")
                             connected = false
+                            return@withLock
                         }
+                    }
+
+                    // Re-login using stored credentials. NOTE: this must run OUTSIDE
+                    // connectLock — loginWithStored*() re-acquires connectLock internally
+                    // and kotlinx.coroutines Mutex is not reentrant; calling it inside the
+                    // lock above would deadlock the reconnect and leave the session logged out
+                    // forever (ticket requests would then fail with "logged off").
+                    val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
+                    if (state is LoginState.Success) {
+                        Log.i(TAG, "Re-login successful after reconnect")
+                        reloggedIn = true
+                        if (brokerServer != null) {
+                            startBroker()
+                        }
+                    } else {
+                        Log.w(TAG, "Re-login failed after reconnect: $state")
+                        connected = false
+                        loggedIn = false
                     }
                 }
             }
@@ -952,6 +966,7 @@ class SteamAuthManager(private val ctx: Context) {
                     Log.i(TAG, "logged off (eresult=${readEresult(packet.body)})")
                     connected = false
                     loggedIn = false
+                    gameConnectTokens.clear()
                     logonFuture?.completeExceptionally(Exception("Logged off"))
                 }
                 5429 -> { /* TicketAuthComplete — engine already validated */ }
@@ -1715,6 +1730,7 @@ class SteamAuthManager(private val ctx: Context) {
                     val body = ByteArrayOutputStream()
                     body.write(Proto.packVarint(1 shl 3 or 0)); body.write(Proto.packVarint(1))
                     sendProtobufMsg(1009, body.toByteArray(), buildProtoHeader(currentSteamId, currentSessionId))
+                    sendProtobufMsg(703, ByteArray(0), buildProtoHeader(currentSteamId, currentSessionId))
                 }
             } catch (_: InterruptedException) {
             } catch (e: Exception) {
@@ -1723,13 +1739,22 @@ class SteamAuthManager(private val ctx: Context) {
         }.apply { isDaemon = true; start() }
     }
 
-    private suspend fun awaitJob(future: CompletableFuture<SteamMsg>, what: String): SteamMsg =
-        suspendCancellableCoroutine { cont ->
-            future.whenComplete { value, error ->
-                if (error != null) cont.resumeWithException(error)
-                else cont.resume(value)
+    private suspend fun awaitJob(future: CompletableFuture<SteamMsg>, what: String): SteamMsg {
+        // Bound the wait so a dead/half-open CM socket cannot pin the broker client thread
+        // forever; the engine retries the request anyway (see its ticket watchdog).
+        return try {
+            kotlinx.coroutines.withTimeout(20_000L) {
+                suspendCancellableCoroutine { cont ->
+                    future.whenComplete { value, error ->
+                        if (error != null) cont.resumeWithException(error)
+                        else cont.resume(value)
+                    }
+                }
             }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            throw Exception("$what timed out")
         }
+    }
 
     // ------------------------------------------------------------------
     // Proto encode helpers (duplicated from GameDataDownloader, file-private there)
