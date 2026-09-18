@@ -518,7 +518,15 @@ class SteamAuthManager(private val ctx: Context) {
      * Source-era games use the modern combined ticket (authTicket + int32LE(appTicketSize) + appTicket).
      */
     suspend fun getSessionTicket(appid: Int = APPID, serverSteamId: Long = 0L, serverIp: String = ""): ByteArray = withContext(Dispatchers.IO) {
-        if (!connected) throw Exception("Not connected to Steam")
+        // Wait for connection with timeout (reconnection might be in progress)
+        val timeoutMs = 30000L // 30 seconds max wait for reconnection
+        val startTime = System.currentTimeMillis()
+        while (!connected && !Thread.interrupted()) {
+            if (System.currentTimeMillis() - startTime > timeoutMs) {
+                throw Exception("Not connected to Steam (timeout waiting for reconnection)")
+            }
+            delay(500)
+        }
         Log.i(TAG, "getSessionTicket: START appid=$appid serverSteamId=$serverSteamId connected=$connected loggedIn=$loggedIn tokensQueued=${gameConnectTokens.size}")
 
         val token = gameConnectTokens.poll()
@@ -754,7 +762,10 @@ class SteamAuthManager(private val ctx: Context) {
                 try {
                     val sock = Socket()
                     sock.connect(InetSocketAddress(host, port), 10000)
-                    sock.soTimeout = 120000
+                    // Steam CM connections are long-lived; remove read timeout to avoid
+                    // spurious disconnects on flaky mobile networks. The heartbeat (EMsg 1009)
+                    // sent every ~9s keeps the connection alive from both sides.
+                    sock.soTimeout = 0
                     socket = sock
                     input = sock.getInputStream()
                     output = sock.getOutputStream()
@@ -852,11 +863,81 @@ class SteamAuthManager(private val ctx: Context) {
                     try { heartbeatJob?.interrupt() } catch (_: Exception) { }
                     try { socket?.close() } catch (_: Exception) { }
                     logonFuture?.completeExceptionally(Exception("Connection lost"))
+                    // Schedule automatic reconnection with stored credentials
+                    scheduleReconnect()
                 } else {
                     Log.i(TAG, "reader: stopped after expected disconnect")
                 }
             }
         }.apply { isDaemon = true; name = "sbrk-reader"; start() }
+    }
+
+    /** Schedules a reconnection attempt with exponential backoff after an unexpected disconnect. */
+    private fun scheduleReconnect() {
+        Thread {
+            var attempt = 0
+            val maxAttempts = 10
+            val baseDelayMs = 5000L // 5 seconds initial delay
+            
+            while (attempt < maxAttempts && !Thread.interrupted()) {
+                attempt++
+                val delayMs = baseDelayMs * (1 shl (attempt - 1)).coerceAtMost(60000) // max 60s
+                Log.i(TAG, "Reconnect attempt $attempt/$maxAttempts in ${delayMs}ms...")
+                try {
+                    Thread.sleep(delayMs)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                
+                // Try to reconnect and re-login
+                kotlinx.coroutines.runBlocking {
+                    connectLock.withLock {
+                        try {
+                            // Close old socket if any
+                            try { socket?.close() } catch (_: Exception) { }
+                            socket = null
+                            input = null
+                            output = null
+                            connected = false
+                            encrypted = false
+                            
+                            // Reconnect
+                            connectSocket()
+                            doHandshake()
+                            startReader()
+                            connected = true
+                            Log.i(TAG, "Reconnected to Steam CM")
+                            
+                            // Re-login using stored credentials
+                            val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
+                            if (state is LoginState.Success) {
+                                Log.i(TAG, "Re-login successful after reconnect")
+                                // Restart broker if it was running
+                                if (brokerServer != null) {
+                                    startBroker()
+                                }
+                                return@runBlocking
+                            } else {
+                                Log.w(TAG, "Re-login failed after reconnect: $state")
+                                connected = false
+                                loggedIn = false
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Reconnect attempt $attempt failed: ${e.message}")
+                            connected = false
+                        }
+                    }
+                }
+            }
+            
+            if (attempt >= maxAttempts) {
+                Log.e(TAG, "All reconnect attempts exhausted. Giving up.")
+                // Mark as fully disconnected so UI can show error
+                connected = false
+                loggedIn = false
+                prefs.edit().putBoolean("logged_in", false).apply()
+            }
+        }.apply { isDaemon = true; name = "steam-reconnect"; start() }
     }
 
     private fun handlePacket(packet: Packet) {
