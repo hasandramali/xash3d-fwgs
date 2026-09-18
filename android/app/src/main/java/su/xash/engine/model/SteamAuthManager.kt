@@ -1520,12 +1520,12 @@ val authTicket = buildAuthTicket(token, 2, resolveExternalIp(), resolveInternalI
         // (the address Android uses towards the Internet), else the CM's own address.
         try {
             val localAddr = socket?.localSocketAddress as? java.net.InetSocketAddress
-            val local = localAddr?.address
+            val local = localAddr?.address?.getAddress()
             if (local != null && local.size == 4) {
                 val b0 = local[0].toInt() and 0xff
                 if (b0 != 0 && b0 != 127) {
                     externalIpCache = local
-                    Log.i(TAG, "resolveExternalIp: socket local=${java.net.InetAddress.getByAddress(local)} (fallback)")
+                    Log.i(TAG, "resolveExternalIp: socket local=${localAddr.address.hostAddress} (fallback)")
                     return local
                 }
             }
