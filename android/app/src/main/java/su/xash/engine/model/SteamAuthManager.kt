@@ -535,22 +535,14 @@ class SteamAuthManager(private val ctx: Context) {
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
         if (isGoldSrcAppId(appid)) {
-            var appTicket = requestAppOwnershipTicket(appid)
+            val appTicket = requestAppOwnershipTicket(appid)
                 .also { Log.i(TAG, "getSessionTicket: legacy app ownership ticket OK size=${it.size}") }
 
-            // The 857 app-ownership blob has a clientIP field at offset 24
-            // (version 4 + count 4 + steamid 8 + appid 4 + timestamp 4). Steam's
-            // response  leaves it as 0xBAADF00D garbage for our session, while
-            // real Steam clients stamp their own IPv4 there before the ticket
-            // reaches the server (our pcap of an accepted ticket shows the real
-            // LAN IP at this offset). Patch it the same way.
-            val legacyIp = resolveInternalIp() ?: resolveExternalIp()
-            if (legacyIp?.size == 4 && appTicket.size >= 28) {
-                System.arraycopy(legacyIp, 0, appTicket, 24, 4)
-                Log.i(TAG, "getSessionTicket: patched legacy blob clientIP@24 -> ${legacyIp.joinToString(".") { (it.toInt() and 0xff).toString() }}")
-            } else {
-                Log.w(TAG, "getSessionTicket: could not patch legacy blob clientIP (ip=${legacyIp?.size} ticket=${appTicket.size}) leaving 0xBAADF00D")
-            }
+            // IMPORTANT: do NOT patch the clientIP field (offset 24) in the app-ownership
+            // blob. The official Steam client reports its obfuscated private IP at LOGIN
+            // (CMsgClientLogon fields 2/11); Steam signs that IP INTO the 857 ticket. When
+            // we overwrote the field locally the signature broke and the server rejected
+            // immediately with "STEAM validation rejected". Fix is in buildLogonBody.
 
             // Register the auth session with the Steam backend via ClientAuthList (EMsg 5432)
             // BEFORE the server starts its periodic (~60-90s) re-validation. Without the
@@ -1449,6 +1441,30 @@ class SteamAuthManager(private val ctx: Context) {
         buf.write(Proto.packVarint(7 shl 3 or 0)); buf.write(Proto.packVarint(CLIENT_OS_TYPE_ANDROID_UNKNOWN))
         // 8 should_remember_password
         buf.write(Proto.packVarint(8 shl 3 or 0)); buf.write(Proto.packVarint(1))
+        // 2 deprecated_obfustucated_private_ip (uint32 legacy) + 11 obfuscated_private_ip
+        // (CMsgIPAddress). Real Steam clients advertise their private IPv4 here (XOR
+        // 0xBAADF00D); Steam decodes it and SIGNS it into the EMsg 857 app-ownership
+        // ticket's clientIP field. Without this field Steam stamps the raw obfuscation
+        // mask (0xBAADF00D) as clientIP, which the server's BeginAuthSession rejects.
+        resolveInternalIp()?.takeIf { it.size == 4 }?.let { internalIp ->
+            val v4 = ((internalIp[0].toInt() and 0xff) shl 24) or
+                ((internalIp[1].toInt() and 0xff) shl 16) or
+                ((internalIp[2].toInt() and 0xff) shl 8) or
+                (internalIp[3].toInt() and 0xff)
+            val obfuscated = v4 xor 0xBAADF00D
+            // field 2 deprecated_obfustucated_private_ip (uint32)
+            buf.write(Proto.packVarint(2 shl 3 or 0))
+            buf.write(Proto.packLongVarint(obfuscated.toLong() and 0xFFFFFFFFL))
+            // field 11 obfuscated_private_ip = CMsgIPAddress { fixed32 v4 = 1 }
+            val inner = ByteArrayOutputStream()
+            inner.write(Proto.packVarint(1 shl 3 or 5)) // field 1, wire type 5 (fixed32)
+            inner.write(Proto.packInt32(obfuscated))
+            val innerBytes = inner.toByteArray()
+            buf.write(Proto.packVarint(11 shl 3 or 2))
+            buf.write(Proto.packVarint(innerBytes.size))
+            buf.write(innerBytes)
+            Log.i(TAG, "buildLogonBody: obfuscated_private_ip=${internalIp.joinToString(".") { (it.toInt() and 0xff).toString() }} -> ${obfuscated.toLong() and 0xFFFFFFFFL}")
+        }
         // 30 machine_id
         val mid = machineId()
         buf.write(Proto.packVarint(30 shl 3 or 2)); buf.write(Proto.packVarint(mid.size)); buf.write(mid)
