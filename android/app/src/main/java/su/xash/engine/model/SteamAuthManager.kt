@@ -535,8 +535,22 @@ class SteamAuthManager(private val ctx: Context) {
         Log.i(TAG, "getSessionTicket: got game connect token size=${token.size}")
 
         if (isGoldSrcAppId(appid)) {
-            val appTicket = requestAppOwnershipTicket(appid)
+            var appTicket = requestAppOwnershipTicket(appid)
                 .also { Log.i(TAG, "getSessionTicket: legacy app ownership ticket OK size=${it.size}") }
+
+            // The 857 app-ownership blob has a clientIP field at offset 24
+            // (version 4 + count 4 + steamid 8 + appid 4 + timestamp 4). Steam's
+            // response  leaves it as 0xBAADF00D garbage for our session, while
+            // real Steam clients stamp their own IPv4 there before the ticket
+            // reaches the server (our pcap of an accepted ticket shows the real
+            // LAN IP at this offset). Patch it the same way.
+            val legacyIp = resolveInternalIp() ?: resolveExternalIp()
+            if (legacyIp?.size == 4 && appTicket.size >= 28) {
+                System.arraycopy(legacyIp, 0, appTicket, 24, 4)
+                Log.i(TAG, "getSessionTicket: patched legacy blob clientIP@24 -> ${legacyIp.joinToString(".") { (it.toInt() and 0xff).toString() }}")
+            } else {
+                Log.w(TAG, "getSessionTicket: could not patch legacy blob clientIP (ip=${legacyIp?.size} ticket=${appTicket.size}) leaving 0xBAADF00D")
+            }
 
             // Register the auth session with the Steam backend via ClientAuthList (EMsg 5432)
             // BEFORE the server starts its periodic (~60-90s) re-validation. Without the
@@ -544,7 +558,7 @@ class SteamAuthManager(private val ctx: Context) {
             // the server's revalidation finds no active session and kicks with
             // "Unable to connect to Steam" after the first interval. Real GoldSrc clients
             // register their auth session tickets exactly like this.
-val authTicket = buildAuthTicket(token, 2, resolveExternalIp(), resolveInternalIp())
+            val authTicket = buildAuthTicket(token, 2, resolveExternalIp(), resolveInternalIp())
             val crc = crc32(authTicket)
             synchronized(ticketChangeLock) {
                 ticketsByGame.getOrPut(appid) { ArrayList() }.add(
