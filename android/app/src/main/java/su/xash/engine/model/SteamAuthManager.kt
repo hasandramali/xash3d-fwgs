@@ -1451,7 +1451,7 @@ class SteamAuthManager(private val ctx: Context) {
                 ((internalIp[1].toInt() and 0xff) shl 16) or
                 ((internalIp[2].toInt() and 0xff) shl 8) or
                 (internalIp[3].toInt() and 0xff)
-            val obfuscated = v4 xor 0xBAADF00D
+            val obfuscated = v4 xor 0xBAADF00D.toInt()
             // field 2 deprecated_obfustucated_private_ip (uint32)
             buf.write(Proto.packVarint(2 shl 3 or 0))
             buf.write(Proto.packLongVarint(obfuscated.toLong() and 0xFFFFFFFFL))
