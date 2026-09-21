@@ -104,8 +104,16 @@ CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILE
 static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "goldSrc netchan packet munge: 0=off, 1=both directions (vanilla/ReHLDS servers), 2=outgoing only (Sven Coop dedicated servers unmunge inbound but send plain outbound)" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
+static CVAR_DEFINE_AUTO( cl_sven_soundcache, "1", FCVAR_ARCHIVE, "Sven sound system: 1=load maps/soundcache/<map>.txt and play svc107 through it (stock behavior), 0=silent" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
+
+void CL_PredictSvenMelee( void );
+extern const char *CL_SvenSoundName( int idx );
+void CL_SvenPredictMapSounds( void );
+void CL_SvenPlayTextureHit( vec3_t start, vec3_t end, int physent, const char *raw );
+void CL_SvenSoundCacheOnDownload( const char *filename );
+void CL_SvenSoundCache_Init( void );
 
 client_t		cl;
 client_static_t	cls;
@@ -845,6 +853,117 @@ static void CL_CreateCmd( void )
 
 	// predict all unacknowledged movements
 	CL_PredictMovement( false );
+
+	// Sven sound system master switch (cl_sven_soundcache): the whole
+	// client-side Sven audio layer (own melee, map/entity prediction and
+	// svc107 resolution) stays silent while it is off.
+	if( Cvar_VariableInteger( "cl_sven_soundcache" ))
+	{
+		CL_PredictSvenMelee();
+
+		// Sven map/entity sound prediction (materials, doors, ambient loops)
+		CL_SvenPredictMapSounds();
+	}
+}
+
+/*
+==================
+CL_PredictSvenMelee
+
+Replicate the Sven client's locally PREDICTED self melee sounds, permanently
+(like the real client, no toggle): the server never emits the local player's
+own crowbar swing/hit via svc 107 (verified across sessions: SOUNDLIST indices
+124-129 never arrive for self; only other players' hitbod does), so without
+this the own crowbar is silent and nearby real sounds (water sprayer, teammate
+fight) perceptually fill the gap ("crowbar makes spray sound").
+Fires on a fresh IN_ATTACK press while the crowbar viewmodel is up, plus an
+auto-swing repeat while held (crowbar keeps swinging, 0.4 s cadence). Each
+swing re-runs the view trace: miss -> cbar_miss1 whoosh, wall brush ->
+cbar_hit1 metal, studio body -> cbar_hitbod1. MELEE ONLY on purpose: the wade
+footprint experiment is deliberately NOT included (it fired on the same press
+in shallow water and intertwined a splash with the metal hit).
+Run right after CL_PredictMovement so pmove physents are current.
+==================
+*/
+#define SVEN_MELEE_REPEAT	0.4f
+#define SVEN_MELEE_RANGE	48.0f
+
+static void CL_SvenMeleeSwing( const char *modelbuf )
+{
+	const char *sndname;
+	vec3_t vf, start, end;
+	pmtrace_t tr;
+	qboolean isbrush = false;
+
+	AngleVectors( cl.viewangles, vf, NULL, NULL );
+	VectorCopy( cl.simorg, start );
+	start[2] += cl.viewheight[2];
+	VectorMA( start, SVEN_MELEE_RANGE, vf, end );
+
+	tr = CL_TraceLine( start, end, 0 ); // PM_NORMAL, hit whatever is there
+	if( tr.fraction >= 1.0f )
+	{
+		sndname = CL_SvenSoundName( 129 );
+		if( !sndname ) sndname = "weapons/cbar_miss1.wav";
+		S_StartLocalSound( sndname, 1.0f, false );
+		return;
+	}
+
+	if( clgame.pmove && tr.ent >= 0 && tr.ent < clgame.pmove->numphysent )
+	{
+		physent_t *pe = &clgame.pmove->physents[tr.ent];
+		if( pe->solid == SOLID_BSP || pe->movetype == MOVETYPE_PUSHSTEP )
+			isbrush = true;
+	}
+
+	if( isbrush )
+	{
+		sndname = CL_SvenSoundName( 124 );	// cbar_hit1
+		if( !sndname ) sndname = "weapons/cbar_hit1.wav";
+		S_StartLocalSound( sndname, 1.0f, false );
+
+		// material debris sound at the impact point (hlsdk
+		// TEXTURETYPE_PlaySound): wood/glass/concrete/slosh textures emit their
+		// own debris wav which the server never sends
+		CL_SvenPlayTextureHit( start, end, tr.ent, NULL );
+	}
+	else
+	{
+		sndname = CL_SvenSoundName( 126 );	// cbar_hitbod1
+		if( !sndname ) sndname = "weapons/cbar_hitbod1.wav";
+		S_StartLocalSound( sndname, 1.0f, false );
+	}
+}
+
+void CL_PredictSvenMelee( void )
+{
+	static int prevbuttons = 0;
+	static double lastmelee = 0.0;
+	int att = cl.cmd.buttons;
+	int press = (( att & IN_ATTACK ) && !( prevbuttons & IN_ATTACK ));
+	char modelbuf[64];
+
+	prevbuttons = att;
+
+	// melee viewmodel check (only when the crowbar is up)
+	modelbuf[0] = '\0';
+	if( clgame.viewent.model )
+		Q_strncpy( modelbuf, clgame.viewent.model->name, sizeof( modelbuf ));
+	if( !Q_strstr( modelbuf, "crowbar" ) && !Q_strstr( modelbuf, "cbar" ))
+		return;
+
+	if( press )
+	{
+		// fresh swing: fire immediately regardless of cadence
+		CL_SvenMeleeSwing( modelbuf );
+		lastmelee = host.realtime + SVEN_MELEE_REPEAT;
+	}
+	else if(( att & IN_ATTACK ) && host.realtime >= lastmelee )
+	{
+		// button held: crowbar auto-swings, repeat at the swing cadence
+		CL_SvenMeleeSwing( modelbuf );
+		lastmelee = host.realtime + SVEN_MELEE_REPEAT;
+	}
 }
 
 void CL_WriteUsercmd( connprotocol_t proto, sizebuf_t *msg, int from, int to )
@@ -3389,6 +3508,11 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 		Con_Printf( S_ERROR "server failed to transmit file '%s'\n", CL_CleanFileName( filename ));
 	}
 
+	// Sven soundcache (maps/soundcache/<map>.txt) requested via "dlfile" from
+	// CL_SvenSoundCacheRequestFile; reload the sound table once it arrives.
+	if( successfully_received && filename && filename[0] != '!' )
+		CL_SvenSoundCacheOnDownload( filename );
+
 	for( p = cl.resourcesneeded.pNext; p != &cl.resourcesneeded; p = p->pNext )
 	{
 		if( !Q_strnicmp( filename, "!MD5", 4 ))
@@ -3856,6 +3980,7 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_allow_download );
 	Cvar_RegisterVariable( &cl_goldsrc_munge );
 	Cvar_RegisterVariable( &cl_goldsrc_debug );
+	Cvar_RegisterVariable( &cl_sven_soundcache );
 	Cvar_RegisterVariable( &cl_download_ingame );
 	Cvar_RegisterVariable( &cl_logofile );
 	Cvar_RegisterVariable( &cl_logocolor );
@@ -3998,6 +4123,8 @@ static void CL_InitLocal( void )
 	Cmd_AddCommand( "richpresence_update", Cmd_Null_f, "compatibility command, does nothing" );
 
 	Cmd_AddCommand( "cl_list_messages", CL_ListMessages_f, "list registered user messages" );
+
+	CL_SvenSoundCache_Init();
 }
 
 //============================================================================

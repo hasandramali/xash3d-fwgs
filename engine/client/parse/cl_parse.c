@@ -113,6 +113,28 @@ static void CL_ParseSoundPacket( sizebuf_t *msg, qboolean restore )
 		MSG_ReadBytes( msg, &forcedEnd, sizeof( forcedEnd ), sizeof( forcedEnd ));
 	}
 
+	// One concise line per vanilla sound so door-type interactions stay visible
+	// at debug 1 (Sven sessions normally never use this path; if one ever does,
+	// the resolved precache name — or its absence — shows here, not in 107).
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+	{
+		const char *vname = "(not precached)";
+		char vsent[32];
+		vsent[0] = '\0';
+		if( FBitSet( flags, SND_SENTENCE ))
+		{
+			if( FBitSet( flags, SND_SEQUENCE ))
+				Q_snprintf( vsent, sizeof( vsent ), "!#%i", sound + MAX_SOUNDS_NONSENTENCE );
+			else Q_snprintf( vsent, sizeof( vsent ), "!%i", sound );
+			vname = vsent;
+		}
+		else if( sound >= 0 && sound < MAX_SOUNDS && cl.sound_precache[sound][0] )
+			vname = cl.sound_precache[sound];
+		Con_Printf( "SND-VANILLA: idx=%d vol=%.2f pitch=%d attn=%.2f ch=%d ent=%d %s%s\n",
+			sound, volume, pitch, attn, chan, entnum, vname,
+			( !handle || !cl.audio_prepped ) ? " (DROP)" : "" );
+	}
+
 	if( !cl.audio_prepped )
 		return; // too early
 
@@ -2287,24 +2309,81 @@ and addresses most StartSound(107) indices through it — the resourcelist
 precache only carries a handful of sounds (4 on the observed server). The real
 client maintains the same table (it even has cl_flushsoundcache commands).
 Loaded lazily on first StartSound and reloaded on map change.
+
+The SENTENCELIST section carries the per-map sentence names that svc 107
+sentence events (flags & 0x100) index by number. The real Sven client numbers
+its VOX sentence table from sound/default_sentences.txt (soundcache verifies:
+RBS/bodyguard landmark indices match the PC log line for line), but plain
+numeric "!N" is fragile — the engine's VOX table can differ from the map's
+SENTENCELIST (e.g. duplicate-named sentence lines). We resolve sentences by
+NAME from this section instead, so "!name" always matches PC playback.
 ==============
 */
 #define SVEN_SOUNDCACHE_MAX 4096
 static char svenSoundCache[SVEN_SOUNDCACHE_MAX][64];
+static char svenSentenceList[SVEN_SOUNDCACHE_MAX][64];
 static char svenSoundCacheMap[64];
 static qboolean svenSoundCacheLoaded = false;
 
+// Sven's engine ships maps/soundcache/<map>.txt per map, addressed by index
+// from svc 107. The real client pulls the server's copy with a plain "dlfile"
+// request on every connection (PC capture: "dlfile \"maps/soundcache/osprey.txt\""
+// then a bz2 reply), so its SOUNDLIST always matches the server even when map
+// versions differ. Ask for it once per map name; a new map (or reconnect onto
+// a different server) re-arms the request because the name no longer matches.
+static char svenSoundCacheRequestedMap[64];
+
+static void CL_SvenSoundCacheRequestFile( const char *mapbase )
+{
+	if( cls.state == ca_disconnected || cls.demoplayback )
+		return; // not connected: nothing to ask
+	if( !Q_strcmp( svenSoundCacheRequestedMap, mapbase ))
+		return; // already asked this map
+
+	byte buf[128];
+	sizebuf_t msg;
+
+	MSG_Init( &msg, "SvenSoundCache", buf, sizeof( buf ));
+	MSG_BeginClientCmd( &msg, clc_stringcmd );
+	// quoted, byte-for-byte like the PC client capture ("dlfile \"maps/soundcache/osprey.txt\"").
+	// ReHLDS-Sven only replies when the filename is quoted.
+	MSG_WriteStringf( &msg, "dlfile \"maps/soundcache/%s.txt\"", mapbase );
+	Netchan_CreateFragments( &cls.netchan, &msg );
+	Netchan_FragSend( &cls.netchan );
+	Q_strncpy( svenSoundCacheRequestedMap, mapbase, sizeof( svenSoundCacheRequestedMap ));
+	Con_DPrintf( "SVEN-SOUNDCACHE: requested maps/soundcache/%s.txt from server\n", mapbase );
+}
+
+// NUL-terminates and trims the next physical line in the loaded file buffer,
+// advancing *pp past its terminator. Returns NULL past the end of buffer.
+static char *CL_SoundCacheNextLine( char **pp, char *end )
+{
+	char *line, *eol, *t;
+
+	line = *pp;
+	if( line >= end ) return NULL;
+	eol = line;
+	while( eol < end && *eol != '\n' ) eol++;
+	if( eol < end ) *eol = '\0';
+	*pp = eol + 1;
+	t = eol - 1;
+	while( t >= line && ( *t == '\r' || *t == ' ' || *t == '\t' )) *t-- = '\0';
+	return line;
+}
+
 static void CL_LoadSvenSoundCache( void )
 {
-	char path[MAX_QPATH], mapbase[MAX_QPATH], *line, *end;
+	char path[MAX_QPATH], mapbase[MAX_QPATH], *line, *end, *p;
 	byte *buf;
 	fs_offset_t size;
-	int n;
+	int n, ns;
 
 	if( COM_StringEmptyOrNULL( clgame.mapname ))
 		return; // too early, retry on the next sound
 	if( svenSoundCacheLoaded && !Q_strcmp( svenSoundCacheMap, clgame.mapname ))
 		return; // current map already loaded
+	if( !Cvar_VariableInteger( "cl_sven_soundcache" ))
+		return; // system off: silent (see FIXME at the resolver)
 
 	Q_strncpy( mapbase, clgame.mapname, sizeof( mapbase ));
 	{
@@ -2313,58 +2392,162 @@ static void CL_LoadSvenSoundCache( void )
 	}
 	Q_snprintf( path, sizeof( path ), "maps/soundcache/%s.txt", mapbase );
 
+	CL_SvenSoundCacheRequestFile( mapbase );
+
 	buf = FS_LoadFile( path, &size, false );
 	memset( svenSoundCache, 0, sizeof( svenSoundCache ));
+	memset( svenSentenceList, 0, sizeof( svenSentenceList ));
+	n = 0;
+	ns = 0;
+	if( !buf || !size )
+	{
+		// Not on disk yet (or the map was never visited before). Keep the gate
+		// open so the next svc107 re-tries; the dlfile request above fetches
+		// the server's copy and CL_SvenSoundCacheOnDownload reloads it.
+		Con_DPrintf( "SVEN-SOUNDCACHE: %s not found locally, waiting for server copy\n", path );
+		svenSoundCacheMap[0] = '\0';
+		svenSoundCacheLoaded = false;
+		return;
+	}
+	{
+		// Stock client (client.dll ECF0) rejects files whose first line is
+		// not the current map name (deletes + retries). Never resolve one
+		// map's events through another map's table; wait for the right copy.
+		char first[64];
+		fs_offset_t fi;
+
+		for( fi = 0; fi + 1 < (fs_offset_t)sizeof( first ) && fi < size
+			&& buf[fi] != '\n' && buf[fi] != '\r'
+			&& buf[fi] != ' ' && buf[fi] != '\t'; fi++ )
+			first[fi] = (char)buf[fi];
+		first[fi] = '\0';
+		if( Q_strcmp( first, mapbase ))
+		{
+			Con_Printf( "SVEN-SOUNDCACHE: %s is for map '%s', not '%s' — ignoring\n", path, first, mapbase );
+			Mem_Free( buf );
+			svenSoundCacheMap[0] = '\0';
+			svenSoundCacheLoaded = false;
+			return;
+		}
+	}
 	Q_strncpy( svenSoundCacheMap, clgame.mapname, sizeof( svenSoundCacheMap ));
 	svenSoundCacheLoaded = true; // don't retry every sound; reloads on map change
-	if( !buf || !size )
-		return;
 
-	// collect .wav lines after "SOUNDLIST {", stop at the closing section
-	n = 0;
+	// collect lines after "SOUNDLIST {", stop at the closing section. The
+	// server dumps its sound list one entry per line and the stock Sven
+	// client (client.dll) assigns EVERY non-empty trimmed line its own index
+	// (trim -> store -> count++, no extension filter). Non-.wav rows such as
+	// "../media/valve.mp3" occupy a real slot too, so they must keep their
+	// position or every later index shifts by one.
 	line = (char *)buf;
 	end = line + size;
+	p = line;
 	{
 		qboolean inlist = false;
-		while( line < end && n < SVEN_SOUNDCACHE_MAX )
+		while( p < end && n < SVEN_SOUNDCACHE_MAX )
 		{
-			char *eol = line;
-			while( eol < end && *eol != '\n' ) eol++;
+			char *l = CL_SoundCacheNextLine( &p, end );
+			if( !l ) break;
+			if( !Q_strcmp( l, "SOUNDLIST {" ))
 			{
-				char save = ( eol < end ) ? *eol : '\0';
-				if( eol < end ) *eol = '\0';
-				// trim trailing whitespace/CR
-				{
-					char *t = eol - 1;
-					while( t >= line && ( *t == '\r' || *t == ' ' || *t == '\t' )) *t-- = '\0';
-				}
-				if( !Q_strcmp( line, "SOUNDLIST {" ))
-					inlist = true;
-				else if( inlist && ( !Q_strcmp( line, "}" ) || !Q_strcmp( line, "SENTENCELIST {" )))
-					break;
-				else if( inlist )
-				{
-					size_t len = Q_strlen( line );
-					if( len > 4 && !Q_stricmp( line + len - 4, ".wav" ))
-						Q_strncpy( svenSoundCache[n++], line, sizeof( svenSoundCache[0] ));
-				}
-				if( eol < end ) *eol = save;
+				inlist = true;
+				continue;
 			}
-			line = eol + 1;
+			if( inlist )
+			{
+				char *lv = l;
+				if( !Q_strcmp( l, "}" )) break;
+				while( *lv == ' ' || *lv == '\t' ) lv++; // client trims leading whitespace
+				if( !*lv ) continue; // empty line: no slot on the server
+				Q_strncpy( svenSoundCache[n++], lv, sizeof( svenSoundCache[0] ));
+			}
+		}
+	}
+	// collect each line after "SENTENCELIST {" (sentence name or raw VOX string),
+	// stop at the closing section or the next section header
+	{
+		qboolean inlist = false;
+		while( p < end && ns < SVEN_SOUNDCACHE_MAX )
+		{
+			char *l = CL_SoundCacheNextLine( &p, end );
+			if( !l ) break;
+			if( !Q_strcmp( l, "SENTENCELIST {" ))
+			{
+				inlist = true;
+				continue;
+			}
+			if( inlist )
+			{
+				if( !Q_strcmp( l, "}" ) || !Q_strcmp( l, "CUSTOMMATERIALS {" )) break;
+				if( l[0] ) Q_strncpy( svenSentenceList[ns++], l, sizeof( svenSentenceList[0] ));
+			}
 		}
 	}
 	Mem_Free( buf );
-	Con_DPrintf( "CL_LoadSvenSoundCache: %d sounds for %s\n", n, mapbase );
+	Con_DPrintf( "CL_LoadSvenSoundCache: %d sounds + %d sentences for %s\n", n, ns, mapbase );
+}
+
+// Called from CL_ProcessFile the moment the server's maps/soundcache/<map>.txt
+// lands on disk (our dlfile request, bz2-decompressed and stored by netchan).
+// Re-arm the loader so the next svc107 uses the server-authoritative
+// SOUNDLIST/SENTENCELIST instead of any stale local copy.
+void CL_SvenSoundCacheOnDownload( const char *filename )
+{
+	if( cls.state == ca_disconnected || COM_StringEmptyOrNULL( filename ) || filename[0] == '!' )
+		return;
+	if( !Q_strstr( filename, "soundcache" ) || !Q_strstr( filename, ".txt" ))
+		return;
+
+	svenSoundCacheLoaded = false;
+	svenSoundCacheMap[0] = '\0';
+	Con_Printf( "SVEN-SOUNDCACHE: server sent %s, re-arming sound table\n", filename );
+	CL_LoadSvenSoundCache();
+}
+
+// == cl_flushsoundcache — mirrors the stock Sven client command ("Flushing
+// cached sound list files..."). Drops the cached tables and re-arms the
+// loader + dlfile request, so svc107 keeps resolving through the server's
+// authoritative list instead of stale local indexes.
+static void CL_SvenSoundCacheFlush_cmd( void )
+{
+	svenSoundCacheLoaded = false;
+	svenSoundCacheMap[0] = '\0';
+	svenSoundCacheRequestedMap[0] = '\0';
+	Con_Printf( "Flushing cached sound list files...\n" );
+}
+
+void CL_SvenSoundCache_Init( void )
+{
+	Cmd_AddCommand( "cl_flushsoundcache", CL_SvenSoundCacheFlush_cmd, "flush cached sound list files (Sven co-op)" );
+}
+
+// read-only accessor for the map's SOUNDLIST entry (used by the local melee
+// prediction, cl_main.c CL_PredictSvenMelee). NULL when unavailable.
+const char *CL_SvenSoundName( int idx )
+{
+	if( svenSoundCacheLoaded && idx >= 0 && idx < SVEN_SOUNDCACHE_MAX && svenSoundCache[idx][0] )
+		return svenSoundCache[idx];
+	return NULL;
+}
+
+// true once the current map's soundcache is loaded (i.e. we are on a
+// Sven-like server). The sound mixer uses it to select FMOD-style inverse
+// distance rolloff instead of the classic linear curve.
+qboolean CL_SvenSoundActive( void )
+{
+	return svenSoundCacheLoaded;
 }
 
 /*
 ==============
 CL_ParseSvenStartSound
 
-Sven Co-op positional-sound message (svc 107). The stock hlsdk client leaves
-__MsgFunc_StartSound as a read-and-drop stub, so every server-driven sound
-(NPC shots and speech, impacts, charger beeps, ambient one-shots) was silently
-lost; only locally-predicted sounds (own weapon fire) were audible. Wire
+Sven Co-op positional-sound message (svc 107). The hlsdk-stock client never
+hooked this message, so every server-driven sound (NPC shots and speech,
+impacts, charger beeps, ambient one-shots) was silently lost; only locally
+predicted sounds (own weapon fire) were audible. Xash hooks it and replays
+each successfully-parsed waveform through S_StartSound exactly like Sven's
+own client.dll does. Wire
 layout reverse-verified against the real client (client.dll MsgFunc_StartSound
 0x1002e8a0 + resolver 0x1000cfa0 + dispatcher 0x1000d9f0):
   [SHORT flags][SHORT sndnum if 0x10][BYTE vol if 1][BYTE pitch if 2]
@@ -2376,7 +2559,8 @@ pitch raw byte (default PITCH_NORM), attn byte/64 (default ATTN_NORM; the
 NOTE: unlike vanilla (vol,attn,pitch) Sven sends pitch BEFORE attenuation,
 so the vanilla SND_ATTENUATION/SND_PITCH names do NOT apply to bits 1/2.
 flags & 0x100 selects the SENTENCELIST namespace (sndnum = sentence index,
-played as "!N"); when 0x100 is clear sndnum is a SOUNDLIST index into
+played by the map's sentence NAME as "!name"), and 0x1000 skips the /64
+volume division (raw attenuation byte).
 maps/soundcache/<map>.txt (file line order — the real client resolves it as
 this+0x1700C+sndnum*0x104). cl.sound_precache[] is NEVER the source here.
 CHAN_STATIC goes ambient.
@@ -2405,26 +2589,13 @@ static void CL_ParseSvenStartSound( const char *pszName, int iSize, void *pbuf )
 
 	MSG_Init( &sb, "SvenStartSound", pbuf, iSize );
 
-	// TEMP-DIAG: dump our precache sound table once so missing indices are
-	// visible against the server-referenced idx values. REVERT after analysis.
-	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-	{
-		static qboolean precacheDumped = false;
-		if( !precacheDumped )
-		{
-			int i, n = 0;
-			precacheDumped = true;
-			for( i = 0; i < MAX_SOUNDS; i++ )
-			{
-				if( !cl.sound_precache[i][0] )
-					continue;
-				Con_Printf( "SVEN-SNDTABLE: idx=%d file=%s\n", i, cl.sound_precache[i] );
-				if( ++n >= 600 )
-					break;
-			}
-			Con_Printf( "SVEN-SNDTABLE: %d entries total\n", n );
-		}
-	}
+	// FIXME (sound debugging shelved 2026-09-24): the server numbers svc107
+	// from its in-memory sounds[] table, which equals these file rows only
+	// when the served file was freshly dumped. Removed diagnostics/overrides
+	// (gen/learn/remap/entmatch/sent-local/preload/dual-source) live in git
+	// history (sc-proto) if the hunt reopens. Toggle below is the only knob.
+	if( !Cvar_VariableInteger( "cl_sven_soundcache" ))
+		return; // system off: silent
 
 	flags = MSG_ReadShort( &sb );
 	if( flags & SVEN_SND_INDEX )
@@ -2466,34 +2637,26 @@ static void CL_ParseSvenStartSound( const char *pszName, int iSize, void *pbuf )
 	if( sndnum < 0 )
 		return;
 
-	// Table selection (client.dll reverse, steam-refs/chatgpt/answer9):
-	//   flags & 0x100          -> SENTENCELIST index, play sentence "!N"
-	//   flags & 0x100 == 0     -> SOUNDLIST index into maps/soundcache/<map>.txt
-	// The real client resolves the latter as this+0x1700C+sndnum*0x104, i.e.
-	// bit 0x100 is a SENTENCE flag, NOT a precache table selector, and
-	// cl.sound_precache[] is never consulted for svc 107.
-	// NOTE on 0x20 (client.dll disasm): it is not a table selector but an
-	// active-instance stop lookup (find the playing sound with this sndnum and
-	// cut it — anti-pileup for rapid fire). It is mirrored below with
-	// S_StopSound before playing, NOT by muting.
 	{
-		const char *src = "none";
 		const char *stopname = NULL;
 		char sentenceName[32];
 		sentenceName[0] = '\0';
 		if( flags & SVEN_SND_SENTENCE )
 		{
-			Q_snprintf( sentenceName, sizeof( sentenceName ), "!%i", sndnum );
+			// Resolve by the map's SENTENCELIST name, not by numeric "!N":
+			// "!name" is found by NAME in VOX_LookupString, so playback
+			// matches the PC client whenever the served list is fresh.
+			if( sndnum >= 0 && sndnum < SVEN_SOUNDCACHE_MAX && svenSentenceList[sndnum][0] )
+				Q_snprintf( sentenceName, sizeof( sentenceName ), "!%s", svenSentenceList[sndnum] );
+			else Q_snprintf( sentenceName, sizeof( sentenceName ), "!%i", sndnum );
 			handle = S_RegisterSound( sentenceName );
 			playFlags |= SND_SENTENCE;
 			stopname = sentenceName;
-			src = "sent";
 		}
-		else if( sndnum < SVEN_SOUNDCACHE_MAX && svenSoundCache[sndnum][0] )
+		else if( sndnum >= 0 && sndnum < SVEN_SOUNDCACHE_MAX && svenSoundCache[sndnum][0] )
 		{
 			handle = S_RegisterSound( svenSoundCache[sndnum] );
 			stopname = svenSoundCache[sndnum];
-			src = "cache";
 		}
 
 		// 0x20: stop the previous instance on this channel first (rapid-fire
@@ -2501,54 +2664,19 @@ static void CL_ParseSvenStartSound( const char *pszName, int iSize, void *pbuf )
 		if(( flags & 0x20 ) && stopname && stopname[0] )
 			S_StopSound( ent, channel, stopname );
 
-		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-		{
-			char sndname[64];
-			if( !Q_strcmp( src, "cache" ))
-				Q_strncpy( sndname, svenSoundCache[sndnum], sizeof( sndname ));
-			else if( !Q_strcmp( src, "sent" ))
-				Q_snprintf( sndname, sizeof( sndname ), "!%i", sndnum );
-			else Q_strncpy( sndname, "(silent gap)", sizeof( sndname ));
-			Con_Printf( "SVEN-SOUND: flags=%04x idx=%d vol=%.2f pitch=%d attn=%.2f ch=%d ent=%d [%s] %s\n",
-				flags, sndnum, volume, pitch, attn, channel, ent, src, sndname );
-		}
-		// LEVEL-200 DIAG: dump the soundcache neighborhood around this index so an
-		// off-by-N shows up instantly. P[] (precache) is printed for reference
-		// but is NOT consulted by the resolver anymore.
-		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 200 )
-		{
-			int k;
-			const char *st;
-			char nb[256];
-			nb[0] = '\0';
-			for( k = sndnum - 2; k <= sndnum + 2; k++ )
-			{
-				char one[72];
-				if( k < 0 || k >= MAX_SOUNDS || !cl.sound_precache[k][0] )
-					Q_snprintf( one, sizeof( one ), "P[%d]=- ", k );
-				else Q_snprintf( one, sizeof( one ), "P[%d]=%.40s ", k, cl.sound_precache[k] );
-				Q_strncat( nb, one, sizeof( nb ));
-			}
-			Con_Printf( "SVEN-SND-NB precache: %s\n", nb );
-			nb[0] = '\0';
-			for( k = sndnum - 2; k <= sndnum + 2; k++ )
-			{
-				char one[72];
-				if( k < 0 || k >= SVEN_SOUNDCACHE_MAX || !svenSoundCache[k][0] )
-					Q_snprintf( one, sizeof( one ), "C[%d]=- ", k );
-				else Q_snprintf( one, sizeof( one ), "C[%d]=%.40s ", k, svenSoundCache[k] );
-				Q_strncat( nb, one, sizeof( nb ));
-			}
-			Con_Printf( "SVEN-SND-NB cache: %s\n", nb );
-			st = VOX_DebugSentence( sndnum );
-			Con_Printf( "SVEN-SND-NB sent#%d: %s | origin=(%.0f %.0f %.0f)\n",
-				sndnum, st ? st : "(none)", pos[0], pos[1], pos[2] );
-		}
 	}
 
 	if( !handle || !cl.audio_prepped )
 		return;
 
+	// The wire may carry no ORIGIN (e.g. flags 0x30 sounds routed via a proxy
+	// ent like 419 that never exists client-side): pass the zero vector EXACTLY
+	// like the real client does (client.dll leaves its origin buffer zeroed —
+	// answer9). With (0,0,0) the engine's spatializer mutes phantom entities
+	// that have no client-side position but still anchors the channel to a
+	// real entity when one exists, so proxied step/body sounds on actual
+	// players (e.g. the local player's own footsteps) stay audible — same
+	// management as Sven's own client.
 	if( channel == CHAN_STATIC )
 		S_AmbientSound( pos, ent, handle, volume, attn, pitch, playFlags );
 	else S_StartSound( pos, ent, channel, handle, volume, attn, pitch, playFlags );

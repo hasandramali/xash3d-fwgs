@@ -596,8 +596,28 @@ static void SND_Spatialize( channel_t *ch )
 		if( ch->dist_mult <= 0.0f ) dot = 0.0f;
 	}
 
-	// fill out channel volumes for single location
-	S_SpatializeChannel( &ch->leftvol, &ch->rightvol, ch->master_vol, dot, dist * ch->dist_mult );
+	// fill out channel volumes for single location.
+	// Sven servers (soundcache active) use FMOD-style inverse distance rolloff:
+	// the real client plays 107 sounds through FMOD itself, whose default
+	// inverse curve melts distant sounds into background (500u battle ~= 4%),
+	// while our linear falloff keeps them at 60%+ ("random loud sounds
+	// everywhere", e.g. a far gauss fight drowning the door you just opened).
+	// Vanilla servers keep the classic linear curve (local test validated it).
+	{
+		float frac = dist * ch->dist_mult;
+		extern qboolean CL_SvenSoundActive( void );
+		if( CL_SvenSoundActive() && ch->dist_mult > 0.0f )
+		{
+			// eff = distance in attn-scaled units (dist_mult = attn/1000).
+			// Full volume inside SVEN_ROLLOFF_MIN (footsteps/huddle range),
+			// inverse falloff beyond: 64/(64 + (eff-64)*3).
+			float eff = dist * ch->dist_mult * SND_CLIP_DISTANCE;
+			if( eff > SVEN_ROLLOFF_MIN )
+				frac = 1.0f - ( SVEN_ROLLOFF_MIN / ( SVEN_ROLLOFF_MIN + ( eff - SVEN_ROLLOFF_MIN ) * SVEN_ROLLOFF_K ));
+			else frac = 0.0f;
+		}
+		S_SpatializeChannel( &ch->leftvol, &ch->rightvol, ch->master_vol, dot, frac );
+	}
 
 	// if playing a word, set volume
 	VOX_SetChanVol( ch );
@@ -632,10 +652,22 @@ void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float fv
 	if( !sfx ) return;
 
 	// TEMP-DIAG (hgrunt-source hunt): log every playback while goldsrc debug is on.
-	// Short quiet repro only (crowbar wall-hits), then REVERT this block.
+// Short quiet repro only (crowbar wall-hits), then REVERT this block.
+// dist = units from the listener at start (0 = local/2D; large = distant
+// source). Settles "my crowbar makes spray sound" debates with data: the
+// metal is dist 0, a teammate's sprayer hundreds of units away.
 	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-		Con_Printf( "SND-PLAY: %s vol=%.2f attn=%.2f pitch=%d ch=%d ent=%d flags=%x\n",
-			sfx->name, fvol, attn, pitch, chan, ent, flags );
+	{
+		vec3_t delta;
+		float dist = -1.0f;
+		if( pos )
+		{
+			VectorSubtract( pos, refState.vieworg, delta );
+			dist = VectorLength( delta );
+		}
+		Con_Printf( "SND-PLAY: %s vol=%.2f attn=%.2f pitch=%d ch=%d ent=%d flags=%x dist=%.0f\n",
+			sfx->name, fvol, attn, pitch, chan, ent, flags, dist );
+	}
 
 	vol = bound( 0, fvol * 255, 255 );
 	if( pitch <= 1 ) pitch = PITCH_NORM; // Invasion issues
@@ -897,10 +929,19 @@ void S_AmbientSound( const vec3_t pos, int ent, sound_t handle, float fvol, floa
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
 
-	// TEMP-DIAG (hgrunt-source hunt, ambient path)
+	// TEMP-DIAG (hgrunt-source hunt, ambient path). dist as above.
 	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-		Con_Printf( "SND-AMBIENT: %s vol=%.2f attn=%.2f pitch=%d ent=%d flags=%x\n",
-			sfx->name, fvol, attn, pitch, ent, flags );
+	{
+		vec3_t delta;
+		float dist = -1.0f;
+		if( pos )
+		{
+			VectorSubtract( pos, refState.vieworg, delta );
+			dist = VectorLength( delta );
+		}
+		Con_Printf( "SND-AMBIENT: %s vol=%.2f attn=%.2f pitch=%d ent=%d flags=%x dist=%.0f\n",
+			sfx->name, fvol, attn, pitch, ent, flags, dist );
+	}
 
 	vol = bound( 0, fvol * 255, 255 );
 	if( pitch <= 1 ) pitch = PITCH_NORM; // Invasion issues

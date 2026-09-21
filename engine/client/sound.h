@@ -47,6 +47,11 @@ extern poolhandle_t sndpool;
 #define MAX_RAW_SAMPLES      16384
 #define SND_CLIP_DISTANCE    1000.0f
 
+// FMOD-style inverse rolloff for Sven sessions (see SND_Spatialize): full
+// volume inside this radius (footsteps/huddle range), inverse falloff beyond.
+#define SVEN_ROLLOFF_MIN	48.0f
+#define SVEN_ROLLOFF_K		3.0f
+
 extern int idsp_room;
 extern snd_globals_t snd;
 
