@@ -102,7 +102,6 @@ static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FI
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
-static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "goldSrc netchan packet munge: 0=off, 1=both directions (vanilla/ReHLDS servers), 2=outgoing only (Sven Coop dedicated servers unmunge inbound but send plain outbound)" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
 static CVAR_DEFINE_AUTO( cl_sven_soundcache, "1", FCVAR_ARCHIVE, "Sven sound system: 1=load maps/soundcache/<map>.txt and play svc107 through it (stock behavior), 0=silent" );
 static CVAR_DEFINE_AUTO( cl_stall_timeout, "75", 0, "Signon stall watchdog: seconds with zero signon/resource/download progress before a fresh auto-reconnect (new challenge+ticket), 0=off" );
@@ -1188,11 +1187,7 @@ static void CL_WritePacket( void )
 
 			// Sven Co-op's SV_ParseMove reads loss/backup/newcmds directly as
 			// plain bytes (no COM_UnMunge on the move body, verified in hw.dll
-			// @0x1db9f50). Vanilla GoldSrc/ReHLDS DO unmunge (munge1, key=seq).
-			// Gate the move-body munge1 on cl_goldsrc_munge: mode 0 (Sven) sends
-			// plain, modes 1/2 (vanilla) keep the munge.
-			if( cl_goldsrc_munge.value != 0 )
-				COM_Munge( &buf.pData[key + 1], Q_min( size, 255 ), cls.netchan.outgoing_sequence );
+			// @0x1db9f50): always send plain, munge locked off.
 		}
 		else if( !Host_IsLocalClient( ))
 		{
@@ -1991,17 +1986,8 @@ void CL_SetupNetchanForProtocol( connprotocol_t proto )
 	{
 	case PROTO_GOLDSRC:
 		SetBits( flags, NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
-
-		if( cl_goldsrc_munge.value == 1 )
-		{
-			SetBits( flags, NETCHAN_USE_MUNGE );
-			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (both directions)^7\n" );
-		}
-		else if( cl_goldsrc_munge.value == 2 )
-		{
-			SetBits( flags, NETCHAN_USE_MUNGE | NETCHAN_USE_MUNGE_TX );
-			Con_Reportf( "^2NETCHAN_USE_MUNGE enabled (outgoing only, Sven Coop mode)^7\n" );
-		}
+		// packet munge locked off (was cl_goldsrc_munge): Sven servers
+		// unmunge inbound but expect plain outbound.
 
 		pfnBlockSize = CL_GetGoldSrcFragmentSize;
 		break;
@@ -4045,7 +4031,6 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_resend );
 	Cvar_RegisterVariable( &cl_allow_upload );
 	Cvar_RegisterVariable( &cl_allow_download );
-	Cvar_RegisterVariable( &cl_goldsrc_munge );
 	Cvar_RegisterVariable( &cl_goldsrc_debug );
 	Cvar_RegisterVariable( &cl_sven_soundcache );
 	Cvar_RegisterVariable( &cl_stall_timeout );

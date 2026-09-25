@@ -2899,8 +2899,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 					pb[8], pb[9], pb[10], pb[11], pb[12], pb[13], pb[14], pb[15] );
 				Con_Printf( "USRMSG-HEX: svc_num=%d payload[0..%d]=%s\n", svc_num, show - 1, hexbuf );
 			}
-			int skipSize = ( Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
-				? MSG_ReadWord( msg ) : MSG_ReadByte( msg );
+			int skipSize = MSG_ReadWord( msg ); // munge locked off: u16 prefix
 			// Sven inventory grant (132 InvAdd, variable): route the payload to
 			// the engine weapon inventory instead of blind-skipping, so granted
 			// (e.g. spawn-loadout) weapons become selectable without wielding.
@@ -2960,19 +2959,13 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 
 	iSize = clgame.msg[i].size;
 
-	// message with variable sizes receive an actual size as first byte
+	// message with variable sizes receive an actual size as first byte:
+	// Sven Co-op writes variable-size user messages with a 16-bit size
+	// prefix (wire-verified: svc122 "ServerName" == [u16 len]["Sven Co-op
+	// 5.0 server\0"], and the following svc147 == [u16 len][payload]).
+	// Munge locked off: always the 16-bit form.
 	if( iSize == -1 )
-	{
-		// Sven Co-op writes variable-size user messages with a 16-bit size
-		// prefix (wire-verified: svc122 "ServerName" == [u16 len]["Sven Co-op
-		// 5.0 server\0"], and the following svc147 == [u16 len][payload]).
-		// Vanilla GoldSrc uses a 1-byte size. Match Sven only in its mode.
-		if( proto == PROTO_GOLDSRC && Cvar_VariableInteger( "cl_goldsrc_munge" ) == 0 )
-			iSize = MSG_ReadWord( msg );
-		else if( proto == PROTO_GOLDSRC )
-			iSize = MSG_ReadByte( msg );
-		else iSize = MSG_ReadWord( msg );
-	}
+		iSize = MSG_ReadWord( msg );
 
 	if( iSize >= MAX_USERMSG_LENGTH )
 	{
