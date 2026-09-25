@@ -875,20 +875,32 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 	{
 		cl_weaponlistfix_msg_t msg;
 		int id;
-		char name[64];
+		char sprdir[64];
+		cl_weaponlistfix_weapon_t *weapon;
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
 		id = CL_WeaponListFix_ReadShort( &msg );
-		CL_WeaponListFix_ReadString( &msg, name, sizeof( name ));
+		CL_WeaponListFix_ReadString( &msg, sprdir, sizeof( sprdir ));
 
 		if( id <= 0 || id >= MAX_WEAPONS )
 			return;
 
-		// prefer the real class name the server attached to the weapon
-		if( !COM_StringEmpty( name ))
-			CL_WeaponListFix_AddNamedWeapon( id, name );
-		else
+		// Stock client.dll (MsgFunc_CustWeapon 0x100047d0) stores this string
+		// at WEAPON+0x1b5 and LoadWeaponSprites builds "sprites/<dir>/<w>.txt"
+		// from it: it is a SPRITE SUBDIRECTORY (e.g. custom map weapons under
+		// "hunger/weapons"), never a class name. Storing it as weapon->name
+		// used to paint "hunger/weapons" into the inventory and send that path
+		// back as the select command, which the server ignores — customs could
+		// never be switched. Keep identity (WeaponList/CurWeapon name) intact
+		// and record only the sprite dir.
+		weapon = CL_WeaponListFix_GetWeapon( id );
+		if( !weapon )
+		{
 			CL_WeaponListFix_AddUnknownWeapon( id );
+			weapon = CL_WeaponListFix_GetWeapon( id );
+		}
+		if( weapon )
+			Q_strncpy( weapon->sprdir, sprdir, sizeof( weapon->sprdir ));
 		return;
 	}
 

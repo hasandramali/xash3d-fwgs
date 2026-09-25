@@ -755,6 +755,9 @@ typedef struct
 	qboolean owned_hint;
 	qboolean real_name;
 	char name[64];
+	char sprdir[64]; // CustWeapon sprite subdirectory (e.g. "hunger/weapons").
+	                 // NEVER a class name: stock client.dll keeps it separate
+	                 // from szName and only builds "sprites/<dir>/<w>.txt".
 	int ammo1;
 	int max1;
 	int ammo2;
@@ -997,6 +1000,10 @@ void CL_ParseResource( sizebuf_t *msg );
 void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto );
 void CL_UpdateUserPings( sizebuf_t *msg );
 void CL_ParseBaseline( sizebuf_t *msg, connprotocol_t proto );
+qboolean CL_GSBaselineReceived( int entnum );		// proedu/goldsrc: per-eindex "baseline arrived" flag
+void CL_GSBaselineSet( int entnum );
+void CL_GSBaselineResetAll( void );
+void CL_NoteConnectProgress( void );			// proedu: signon-stall watchdog progress marker
 void CL_ParseStaticDecal( sizebuf_t *msg );
 void CL_ParseResourceList( sizebuf_t *msg, connprotocol_t proto );
 void CL_ParseMovevars( sizebuf_t *msg );

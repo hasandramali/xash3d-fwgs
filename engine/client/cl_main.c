@@ -42,11 +42,7 @@ static CVAR_DEFINE_AUTO( cl_logoext, "bmp", FCVAR_ARCHIVE, "temporary cvar to te
 static CVAR_DEFINE( cl_logoupdate, "@cl_logoupdate", "0", 0, "set by menu to trigger clan logo update" );
 CVAR_DEFINE_AUTO( cl_logomaxdim, "96", FCVAR_ARCHIVE, "maximum decal dimension" );
 static CVAR_DEFINE_AUTO( cl_test_bandwidth, "1", FCVAR_ARCHIVE, "test network bandwith before connection" );
-CVAR_DEFINE_AUTO( fps_max, "61", 0, "fps limit" );
-CVAR_DEFINE_AUTO( cl_fpsfilter, "0", FCVAR_READ_ONLY, "FPS filter mode: 0=use fps_max, 1=use max_fps, 2=use max_fps+fake msec" );
 static CVAR_DEFINE_AUTO( cl_require_challenge_echo, "-1", FCVAR_ARCHIVE, "reject connect packets that don't echo challenge, protects against spoofed servers but breaks connection to old servers (-1 = engine default)" );
-
-CVAR_DEFINE_AUTO( fps_rate, "100", FCVAR_READ_ONLY, "fake FPS rate when cl_fpsfilter is 2" );
 CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_CHEAT, "render particles" );
 CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_CHEAT, "render tracers" );
 CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_CHEAT, "render beams" );
@@ -100,11 +96,10 @@ static CVAR_DEFINE_AUTO( model, "", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABL
 static CVAR_DEFINE_AUTO( topcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player top color" );
 static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player bottom color" );
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
-CVAR_DEFINE_AUTO( cl_ticket_generator, "revemu2013", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
-static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "i think people don't like seeing someone tagged [Xash3D]" );
+CVAR_DEFINE_AUTO( cl_ticket_generator, "steam", FCVAR_READ_ONLY|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
 static CVAR_DEFINE_AUTO( cl_sven_soundcache, "1", FCVAR_ARCHIVE, "Sven sound system: 1=load maps/soundcache/<map>.txt and play svc107 through it (stock behavior), 0=silent" );
-static CVAR_DEFINE_AUTO( cl_stall_timeout, "75", 0, "Signon stall watchdog: seconds with zero signon/resource/download progress before a fresh auto-reconnect (new challenge+ticket), 0=off" );
+static CVAR_DEFINE_AUTO( cl_stall_timeout, "4", 0, "Signon stall watchdog: seconds with zero signon/resource/download progress before a fresh auto-reconnect (new challenge+ticket), 0=off" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -338,10 +333,11 @@ with new cls.state
 */
 #define CL_STALL_MAXAUTO	2	// fresh auto-reconnects per manual connect
 
-static double	stallSince = 0.0;
+static double	stallProgress = 0.0;	// host.realtime of last real connection progress
 static int	stallSignon = -1;
 static int	stallState = -1;
 static int	stallResCount = -1;
+static int	stallFragBytes = -1;
 static int	stallAutos = 0;
 
 static int CL_StallResCount( void )
@@ -354,10 +350,43 @@ static int CL_StallResCount( void )
 	return n;
 }
 
+// Total bytes currently buffered in the incoming file-fragment stream.
+// Unlike mere stream existence (which stays true for a stuck or abandoned
+// download whose buffer is never completed/cleared), only a GROWING total
+// counts as progress, so a wedged download can't keep the watchdog asleep.
+static int CL_StallFragBytes( void )
+{
+	int n = 0;
+	fragbuf_t *p;
+
+	for( p = cls.netchan.incomingbufs[FRAG_FILE_STREAM]; p; p = p->next )
+		n += MSG_GetNumBytesWritten( &p->frag_message );
+	return n;
+}
+
 static void CL_StallWatchdogReset( void )
 {
 	stallAutos = 0;
 	stallSignon = -1;
+	stallFragBytes = -1;
+	stallProgress = 0.0;
+}
+
+/*
+=====================
+CL_NoteConnectProgress
+
+Mark that the connection made real progress. Called by the GoldSrc message
+dispatcher for every substantive svc command (anything beyond the pure
+padding/keepalive set: svc_bad pads, svc_nop, svc_roomtype). Pure ack-only
+or keepalive datagrams do NOT arrive here, so they can never keep a parked
+server alive in the stall watchdog's eyes.
+=====================
+*/
+void CL_NoteConnectProgress( void )
+{
+	if( !cls.demoplayback && !cl.background )
+		stallProgress = host.realtime;
 }
 
 static void CL_CheckClientState( void )
@@ -403,26 +432,48 @@ static void CL_CheckClientState( void )
 	}
 
 	// Signon stall watchdog: a parked server (ghost slot, wedged changelevel,
-	// missed signon data) ACKs our packets but never advances signon, leaving
-	// retransmitted spawn/sendents circling forever while it counts us in.
-	// With zero progress (no signon/state change, no resource-list change, no
-	// file fragments in flight) for cl_stall_timeout seconds, drop fully and
-	// reconnect fresh (new challenge+ticket), capped per manual connect.
-	if( !cls.demoplayback && !cl.background && cls.state == ca_connected && cls.signon < SIGNONS )
+	// signon stream that ends without the closing svc_signonnum and stops) keeps
+	// ACKing our packets and sending keepalive/nop crumbs but never advances
+	// signon. Real progress is measured by the surfaces below, NOT by raw
+	// inbound bytes: a wedged-but-alive server still echoes acks, so a
+	// byte-count re-arm would keep the timer sleeping forever (observed: the
+	// server fed nops/acks for 19s with zero signon progress and cl_stall_timeout
+	// never fired). Progress = signon/state change, resource list change,
+	// GROWING incoming file-fragment bytes, or any substantive svc command
+	// parsed (CL_NoteConnectProgress). A stuck download (stream allocated but
+	// zero bytes arriving, e.g. a dlfile the server never serves while it
+	// keeps ACKing + nopping) must NOT re-arm the timer, otherwise the
+	// client loops the same reliable retransmit forever with the timeout set
+	// and doing nothing. Without any of those for cl_stall_timeout
+	// seconds, drop fully and reconnect fresh (new challenge+ticket), capped per
+	// manual connect. Covers ca_validate too: the GoldSrc signon transfer is
+	// streamed while state is already ca_validate, and Sven servers occasionally
+	// end that stream without the final svc_signonnum (trimmed joins).
+	if( !cls.demoplayback && !cl.background
+		&& ( cls.state == ca_connected || cls.state == ca_validate ) && cls.signon < SIGNONS )
 	{
 		float timeout = cl_stall_timeout.value;
 		int rc = CL_StallResCount();
-		qboolean frags = cls.netchan.incomingbufs[FRAG_FILE_STREAM] != NULL;
+		int fragBytes = CL_StallFragBytes();
+		qboolean progressed = ( cls.signon != stallSignon || (int)cls.state != stallState
+			|| rc != stallResCount || fragBytes != stallFragBytes || stallProgress == 0.0 );
+
+		if( progressed )
+		{
+			stallSignon = cls.signon;
+			stallState = (int)cls.state;
+			stallResCount = rc;
+			stallFragBytes = fragBytes;
+			stallProgress = host.realtime;
+		}
 
 		if( timeout > 0.0f && stallAutos < CL_STALL_MAXAUTO
-			&& cls.signon == stallSignon && (int)cls.state == stallState
-			&& rc == stallResCount && !frags
-			&& host.realtime - stallSince > timeout )
+			&& host.realtime - stallProgress > timeout )
 		{
 			Con_Printf( "Signon stalled with no progress for %.0fs, reconnecting fresh (attempt %d/%d)...\n",
 				timeout, stallAutos + 1, CL_STALL_MAXAUTO );
 			stallAutos++;
-			stallSince = host.realtime;
+			stallProgress = host.realtime;
 			stallSignon = -1; // re-arm progress tracking
 			CL_Disconnect(); // clears the server-side ghost slot
 			cls.state = ca_connecting; // CheckForResend fetches a new challenge
@@ -430,13 +481,6 @@ static void CL_CheckClientState( void )
 			cls.connect_time = MAX_HEARTBEAT;
 			cls.connect_retry = 0;
 			return;
-		}
-		if( cls.signon != stallSignon || (int)cls.state != stallState || rc != stallResCount || frags )
-		{
-			stallSignon = cls.signon;
-			stallState = (int)cls.state;
-			stallResCount = rc;
-			stallSince = host.realtime;
 		}
 	}
 }
@@ -843,12 +887,6 @@ static void CL_CreateCmd( void )
 
 	// fix rounding error and framerate depending player move
 	double    accurate_ms = host.frametime * 1000;
-
-	if( cl_fpsfilter.value >= 2.0f )
-	{
-		double fake_fps = bound( 1.0, fps_rate.value, 100.0 );
-		accurate_ms = 1000.0 / fake_fps;
-	}
 
 	ms = (int)accurate_ms;
 	cl.frametime_remainder += accurate_ms - ms; // accumulate rounding error each frame
@@ -1472,9 +1510,6 @@ void CL_SendGoldSrcConnectPacket( netadr_t adr, int challenge, const void *ticke
 	Info_SetValueForKeyf( protinfo, "unique", sizeof( protinfo ), "%i", 0xffffffff );
 	Info_SetValueForKey( protinfo, "raw", "steam", sizeof( protinfo ));
 	CL_GetCDKey( protinfo, sizeof( protinfo ));
-	const char *name = Info_ValueForKey( cls.userinfo, "name" );
-	if( cl_advertise_engine_in_name.value && Q_strnicmp( name, "[Xash3D]", 8 ))
-		Info_SetValueForKeyf( cls.userinfo, "name", sizeof( cls.userinfo ), "[Xash3D]%s", name );
 
 	MSG_Init( &send, "GoldSrcConnect", send_buf, sizeof( send_buf ));
 	MSG_WriteLong( &send, NET_HEADER_OUTOFBANDPACKET );
@@ -1901,6 +1936,7 @@ void CL_ClearState( void )
 	S_StopAllSounds ( true );
 	CL_ClearEffects ();
 	CL_FreeEdicts ();
+	CL_GSBaselineResetAll();
 
 	PM_ClearPhysEnts( clgame.pmove );
 	NetAPI_CancelAllRequests();
@@ -3705,19 +3741,7 @@ tell server about changed userinfo
 */
 void CL_UpdateInfo( const char *key, const char *value )
 {
-	switch( cls.net_protocol )
-	{
-	case PROTO_GOLDSRC:
-		if( cl_advertise_engine_in_name.value && !Q_stricmp( key, "name" ) && Q_strnicmp( value, "[Xash3D]", 8 ))
-		{
-			CL_ServerCommand( true, "setinfo \"%s\" \"[Xash3D]%s\"\n", key, value );
-			break;
-		}
-		// intentional fallthrough
-	default:
-		CL_ServerCommand( true, "setinfo \"%s\" \"%s\"\n", key, value );
-		break;
-	}
+	CL_ServerCommand( true, "setinfo \"%s\" \"%s\"\n", key, value );
 }
 
 //=============================================================================
@@ -4021,7 +4045,6 @@ static void CL_InitLocal( void )
 	cl.resourcesonhand.pNext = cl.resourcesonhand.pPrev = &cl.resourcesonhand;
 
 	Cvar_RegisterVariable( &cl_ticket_generator );
-	Cvar_RegisterVariable( &cl_advertise_engine_in_name );
 	Cvar_RegisterVariable( &cl_log_outofband );
 	Cvar_RegisterVariable( &cl_autorecord );
 	Cvar_RegisterVariable( &cl_screenfade );
@@ -4081,9 +4104,6 @@ static void CL_InitLocal( void )
 	Cvar_Get( "password", "", FCVAR_USERINFO, "server password" );
 	Cvar_Get( "team", "", FCVAR_USERINFO, "player team" );
 	Cvar_Get( "skin", "", FCVAR_USERINFO, "player skin" );
-	Cvar_RegisterVariable( &fps_max );
-	Cvar_RegisterVariable( &cl_fpsfilter );
-	Cvar_RegisterVariable( &fps_rate );
 	Cvar_RegisterVariable( &cl_nosmooth );
 	Cvar_RegisterVariable( &cl_nointerp );
 	Cvar_RegisterVariable( &cl_smoothtime );

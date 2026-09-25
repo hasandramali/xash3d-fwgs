@@ -21,6 +21,45 @@ GNU General Public License for more details.
 #include "input.h"
 #include "server.h"
 
+/*
+======================
+Baseline autocure (proedu)
+
+Track which entity indices actually arrived in svc_spawnbaseline. When a
+delta-packet newent decodes against &ent->baseline for an index that never
+got its baseline (truncated/stalled signon stream), the resulting entity is
+garbage/invisible. During SIGNON only: detect it, drop the entity (stream
+still consumed) and invalidate the frame so the engine's existing flush
+machinery nudges the server into a full (delta=0) resend which re-baselines
+the affected indices. During ACTIVE play a missing baseline is normal (Sven
+sends spawnbaselines at signon only), so late spawns decode vanilla-style
+and stay in the frame instead of staying invisible forever.
+
+Flag array is per eindex (MAX_GOLDSRC_ENTITY_BITS wide, same as the
+on-wire Svengine entity index space). Cleared on every CL_ClearState.
+======================
+*/
+#define GS_BASELINE_SLOTS	( 1 << MAX_GOLDSRC_ENTITY_BITS )
+
+static qboolean gs_baseline_rx[GS_BASELINE_SLOTS];
+
+qboolean CL_GSBaselineReceived( int entnum )
+{
+	if( entnum < 0 || entnum >= GS_BASELINE_SLOTS ) return false;
+	return gs_baseline_rx[entnum];
+}
+
+void CL_GSBaselineSet( int entnum )
+{
+	if( entnum >= 0 && entnum < GS_BASELINE_SLOTS )
+		gs_baseline_rx[entnum] = true;
+}
+
+void CL_GSBaselineResetAll( void )
+{
+	memset( gs_baseline_rx, 0, sizeof( gs_baseline_rx ));
+}
+
 static void CL_ParseExtraInfo( sizebuf_t *msg )
 {
 	string clientfallback;
@@ -177,7 +216,13 @@ static int CL_FlushEntityPacketGS( frame_t *frame, sizebuf_t *msg )
 		else break;
 
 		if( MSG_CheckOverflow( msg ))
-			Host_Error( "%s: overflow\n", __func__ );
+		{
+			// GoldSrc: same desync family as the delta decoder overflow (server
+			// encoded against baseline sets we don't hold). Don't crash; leave
+			// the overflow flag set so the main dispatch loop drains the
+			// datagram and re-syncs on the next netchan frame.
+			return playerbytes;
+		}
 
 		player = CL_IsPlayerIndex( newnum );
 		bufstart = MSG_GetNumBytesRead( msg );
@@ -192,16 +237,36 @@ static int CL_FlushEntityPacketGS( frame_t *frame, sizebuf_t *msg )
 	}
 
 	if( MSG_CheckOverflow( msg ))
-		Host_Error( "%s: overflow\n", __func__ );
+	{
+		// GoldSrc: see the in-loop overflow comment above.
+		return playerbytes;
+	}
 
 	return playerbytes;
 }
 
-static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from )
+// Message is hopelessly desynchronized: mark the frame unusable, drain the
+// rest of the datagram and clear the sticky overflow flag so the main
+// dispatch loop exits on the < 8 bits-left check instead of Host_Error (the
+// next delta=0 full update from the server re-baselines).
+static void CL_GSAbortDesync( frame_t *frame, sizebuf_t *msg )
+{
+	if( frame )
+	{
+		frame->valid = false;
+		cl.validsequence = 0; // can't render a frame
+	}
+	MSG_EndBitWriting( msg );
+	MSG_SeekToBit( msg, 0, SEEK_END );
+	msg->bOverflow = false;
+}
+
+static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from, qboolean delta_update )
 {
 	cl_entity_t	*ent;
 	entity_state_t	*to;
 	qboolean newent = from == NULL;
+	qboolean append = true;
 	int pack = frame->num_entities;
 	qboolean has_update = msg != NULL;
 	static entity_state_t nullent;
@@ -212,8 +277,17 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 	if(( newnum < 0 ) || ( newnum >= clgame.maxEntities ))
 	{
 		Con_DPrintf( S_ERROR "CL_DeltaEntity: invalid newnum: %d\n", newnum );
-		Host_Error( "%s: bad delta entity number: %i\n", __func__, newnum );
-		return;
+		// Desynced GoldSrc delta stream: the server encoded against entity/
+		// baseline sets we don't hold (lost packet, Sven-SV engine delta
+		// reset, sporelauncher volleys...). The real Sven client drops the
+		// frame and re-syncs on the next full update, it does NOT crash.
+		// Signal the caller to abort+flush this poison message.
+		if( msg )
+		{
+			frame->valid = false;
+			cl.validsequence = 0; // can't render a frame
+		}
+		return false;
 	}
 
 	ent = CL_EDICT_NUM( newnum );
@@ -223,7 +297,7 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 			CL_KillDeadBeams( ent );
 		else
 			Con_Printf( S_WARN "%s: entity remove on non-delta update (%d)\n", __func__, newnum );
-		return;
+		return true;
 	}
 
 	ent->index = newnum; // enumerate entity index
@@ -244,7 +318,38 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 			else from = &cls.packet_entities[(cls.next_client_entities - hdr->offset ) % cls.num_client_entities];
 		}
 		else
+		{
 			from = &ent->baseline;
+
+			// Baseline autocure: a delta (delta=1) newent has no source other
+			// than ent->baseline (delta headers never carry the offset field,
+			// only full frames do).
+			// During SIGNON a missing baseline means the signon stream was
+			// truncated: drop the entity (its wire fields are still consumed
+			// below so the stream stays aligned) and invalidate the frame so
+			// the flush path forces a full (delta=0) resync from the server.
+			// During ACTIVE play a missing baseline is NORMAL: Sven only
+			// sends svc_spawnbaseline at signon, so every late-spawned
+			// entity (spores, portal balls, monsters, items) has none, and
+			// the server sends full data for entities new to the client.
+			// Decode vanilla-style against the stored baseline and keep the
+			// frame valid, otherwise late spawns stay invisible forever.
+			if( delta_update && !CL_GSBaselineReceived( newnum ))
+			{
+				if( cls.signon < SIGNONS )
+				{
+					Con_Printf( S_WARN "%s: eindex %d has no baseline (incomplete svc_spawnbaseline); dropped entity, requesting full resync\n", __func__, newnum );
+					frame->valid = false;
+					cl.validsequence = 0; // can't render a frame
+					from = &nullent;
+					append = false;
+				}
+				else
+				{
+					Con_DPrintf( "%s: eindex %d late spawn without spawnbaseline, decoding vanilla-style\n", __func__, newnum );
+				}
+			}
+		}
 	}
 
 	if( has_update )
@@ -253,6 +358,9 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 
 	to->entityType = hdr->custom ? ENTITY_BEAM : ENTITY_NORMAL;
 	to->number = newnum;
+
+	if( !append )
+		return true; // fields consumed above; dropped entity stays out of the frame
 
 	if( newent )
 	{
@@ -272,15 +380,17 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 	// add entity to packet
 	cls.next_client_entities++;
 	frame->num_entities++;
+
+	return true;
 }
 
-static void CL_CopyPacketEntity( frame_t *frame, int num, const entity_state_t *from )
+static qboolean CL_CopyPacketEntity( frame_t *frame, int num, const entity_state_t *from )
 {
 	delta_header_t fakehdr =
 	{
 		.custom = FBitSet( from->entityType, ENTITY_BEAM ) == ENTITY_BEAM,
 	};
-	CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from );
+	return CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from, false );
 }
 
 static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
@@ -349,7 +459,25 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 		else break;
 
 		if( MSG_CheckOverflow( msg ))
-			Host_Error( "%s: overflow\n", __func__ );
+		{
+			// Overflow while decoding a delta packet entity is a desync (the
+			// server encoded against entity/baseline sets we don't hold, e.g.
+			// Sven sporelauncher alt-fire volleys), NOT necessarily corruption.
+			// The real Sven client drops the frame and lets the next full
+			// update re-baseline instead of crashing out. Mirror that.
+			Con_Printf( S_WARN "%s: overflow, dropping frame and requesting full resync\n", __func__ );
+			frame->valid = false;
+			cl.validsequence = 0; // can't render a frame
+			MSG_EndBitWriting( msg );
+			// MSG_CheckOverflow's bOverflow is sticky (MSG_EndBitWriting does
+			// NOT clear it); the main dispatch loop tests it at the top of
+			// every iteration and would otherwise still Host_Error. Drain the
+			// rest of the datagram and clear the flag so the loop exits on
+			// the < 8 bits-left check instead of crashing.
+			MSG_SeekToBit( msg, 0, SEEK_END );
+			msg->bOverflow = false;
+			return playerbytes;
+		}
 
 		player = CL_IsPlayerIndex( newnum );
 
@@ -359,7 +487,11 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 				Con_Printf( S_WARN "%s: old frame copy on non-delta update (%d < %d)\n", __func__, oldnum, newnum );
 
 			// one or more entities from the old packet are unchanged
-			CL_CopyPacketEntity( frame, oldnum, oldent );
+			if( !CL_CopyPacketEntity( frame, oldnum, oldent ))
+			{
+				CL_GSAbortDesync( frame, msg );
+				return playerbytes;
+			}
 			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 
@@ -372,14 +504,22 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 
 			// from delta
 			srcMark = "old-delta";
-			CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent );
+			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent, delta ))
+			{
+				CL_GSAbortDesync( frame, msg );
+				return playerbytes;
+			}
 			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 		else if( oldnum > newnum )
 		{
 			// from baseline
 			srcMark = "baseline";
-			CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL );
+			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL, delta ))
+			{
+				CL_GSAbortDesync( frame, msg );
+				return playerbytes;
+			}
 		}
 
 		// entity-level wire ledger: decode the delta packet header so the
@@ -403,7 +543,15 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	}
 
 	if( MSG_CheckOverflow( msg ))
-		Host_Error( "%s: overflow\n", __func__ );
+	{
+		Con_Printf( S_WARN "%s: overflow after decoder, dropping frame and requesting full resync\n", __func__ );
+		frame->valid = false;
+		cl.validsequence = 0; // can't render a frame
+		MSG_EndBitWriting( msg );
+		MSG_SeekToBit( msg, 0, SEEK_END );
+		msg->bOverflow = false;
+		return playerbytes;
+	}
 
 	// any remaining entities in the old frame are copied over
 	while( oldnum != MAX_ENTNUMBER )
@@ -594,6 +742,19 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 
 		if( MSG_CheckOverflow( msg ))
 		{
+			if( cls.net_protocol == PROTO_GOLDSRC )
+			{
+				// Any GoldSrc sub-parser (clientdata, delta entities, sound...)
+				// can over-read when the server encodes against baseline sets we
+				// don't hold or when the datagram is truncated. The Sven client
+				// tolerates this by consuming the datagram and re-syncing on the
+				// next netchan frame instead of dying; overflow is only detected
+				// here at the top of each message, so drain + re-sync is safe.
+				Con_Printf( S_WARN "%s: GoldSrc datagram overflow at byte %d, draining and re-syncing\n",
+					__func__, (int)MSG_GetNumBytesRead( msg ));
+				MSG_Clear( msg );
+				return;
+			}
 			Host_Error( "%s: overflow!\n", __func__ );
 			return;
 		}
@@ -622,6 +783,13 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 				Con_Printf( "SVC-PAD: skipping svc_bad(0x00) pad byte at offset %d (Sven stream padding)\n", bufStart );
 			continue;
 		}
+
+		// proedu: any GoldSrc command outside the keepalive/padding set is real
+		// connection progress for the signon stall watchdog. svc_nop and
+		// svc_roomtype are the pure filler a parked server feeds forever, so they
+		// deliberately do NOT refresh the timer.
+		if( cmd != svc_nop && cmd != svc_roomtype && cls.net_protocol == PROTO_GOLDSRC )
+			CL_NoteConnectProgress();
 
 		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
 		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
@@ -667,7 +835,20 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 		case svc_goldsrc_version:
 			param1 = MSG_ReadLong( msg );
 			if( param1 != PROTOCOL_GOLDSRC_VERSION )
-				Host_Error( "Server use invalid protocol (%i should be %i)\n", param1, PROTOCOL_GOLDSRC_VERSION );
+			{
+				// The genuine svc_goldsrc_version ("04 30 00 00 00" == 48) is only
+				// sent once at signon, where the real protocol decision is made in
+				// CL_ParseServerData. A stray 0x04 byte later in a datagram with a
+				// random value is a misaligned/garbage tail, not a protocol change
+				// (byte-verified against buffer.dat: the whole stream is aligned
+				// exactly down to svc_nop, then 0xE0 at the boundary cannot be a
+				// registered Sven message since they only occupy ~64..149). The
+				// Sven reference client survives this by consuming the datagram and
+				// re-syncing on the next netchan frame, so drain instead of crash.
+				Con_Printf( S_WARN "%s: svc_goldsrc_version=%d (expected %d) at byte %d -- stray/garbage tail, draining datagram\n",
+					__func__, param1, PROTOCOL_GOLDSRC_VERSION, (int)bufStart );
+				MSG_SeekToBit( msg, 0, SEEK_END );
+			}
 			break;
 		case svc_sound:
 			CL_ParseSoundPacketGS( msg );

@@ -1266,6 +1266,10 @@ void CL_ParseBaseline( sizebuf_t *msg, connprotocol_t proto )
 			ent->baseline.entityType = type;
 		}
 		else MSG_ReadDeltaEntity( msg, &nullstate, &ent->baseline, newnum, player, 1.0f );
+
+		// proedu: mark this eindex as having a usable baseline so the goldsrc
+		// delta path can sniff missing-baseline decodes (see CL_DeltaEntityGS)
+		CL_GSBaselineSet( newnum );
 	}
 
 	cl.instanced_baseline_count = MSG_ReadUBitLong( msg, 6 );
