@@ -2976,6 +2976,25 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	// parse user message into buffer
 	MSG_ReadBytes( msg, pbuf, sizeof( pbuf ), iSize );
 
+	// TEMP-DIAG for the reserve-ammo verdict (remove after): dump framing +
+	// raw payload of ammo messages. First 4 hits only.
+	if( !Q_strcmp( clgame.msg[i].name, "AmmoX" ) || !Q_strcmp( clgame.msg[i].name, "CurWeapon" ))
+	{
+		static int ammoWireDbg = 0;
+		if( ammoWireDbg < 4 )
+		{
+			int show, k;
+			char hex[64];
+
+			ammoWireDbg++;
+			show = Q_min( iSize, 10 );
+			hex[0] = '\0';
+			for( k = 0; k < show; k++ )
+				Q_snprintf( hex + Q_strlen( hex ), sizeof( hex ) - Q_strlen( hex ), "%02x ", pbuf[k] );
+			Con_Printf( "AMMO-WIRE: %s regsize=%d payload=%s\n", clgame.msg[i].name, iSize, hex );
+		}
+	}
+
 	if( cl_trace_messages.value )
 	{
 		Con_Reportf( "^3USERMSG %s SIZE %i SVC_NUM %i\n",
