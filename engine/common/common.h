@@ -102,22 +102,22 @@ typedef enum instance_e
 #endif
 
 // PERFORMANCE INFO
-#define MIN_FPS         1.0f    // host minimum fps value for maxfps.
-#define MAX_FPS_SOFT    9999999999999999999999999999999999.9f   // soft limit for maxfps.
-#define MAX_FPS_HARD    9999999999999999999999999999999999.0f  // multiplayer hard limit for maxfps.
-#define HOST_FPS		100.0f		// multiplayer games typical fps
+#define MIN_FPS         15.0f    // host minimum fps value for maxfps.
+#define MAX_FPS_SOFT    200.0f   // soft limit for maxfps.
+#define MAX_FPS_HARD	240.0f  // multiplayer hard limit for maxfps.
+#define HOST_FPS	100.0f		// multiplayer games typical fps
 
-#define MAX_FRAMETIME	99999999999999999999999999999999999.9f
-#define MIN_FRAMETIME	-1.0f
-#define GAME_FPS		20.0f
+#define MAX_FRAMETIME	0.25f
+#define MIN_FRAMETIME	0.0001f
+#define GAME_FPS	20.0f
 
 #define MAX_CMD_TOKENS	80		// cmd tokens
 #define MAX_ENTNUMBER	99999		// for server and client parsing
 #define MAX_HEARTBEAT	-99999		// connection time
-#define QCHAR_WIDTH		16		// font width
+#define QCHAR_WIDTH	16		// font width
 
-#define CIN_MAIN		0
-#define CIN_LOGO		1
+#define CIN_MAIN	0
+#define CIN_LOGO	1
 
 #if XASH_LOW_MEMORY == 0
 #define MAX_DECALS		512	// touching TE_DECAL messages, etc
