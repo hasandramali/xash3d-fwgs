@@ -2035,8 +2035,15 @@ static void CL_ParseHLTV( sizebuf_t *msg )
 	switch( MSG_ReadByte( msg ))
 	{
 	case HLTV_ACTIVE:
-		cl.proxy_redirect = true;
-		cls.spectator = true;
+		// Deliberately NOT setting spectator/proxy here. A 0x00 first byte
+		// also arrives as non-HLTV traffic misrouted to this handler (e.g. a
+		// binary blob on a reused svc number), and honoring it poisons
+		// cls.spectator: every later CL_ParseClientData returns immediately
+		// (zero bytes consumed), so the next payload byte is misread as a new
+		// svc ("unregistered msg 200" artifacts), tails get eaten and signon
+		// never completes. Real HLTV-proxy viewing is out of scope.
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+			Con_Printf( "HLTV: ignoring ACTIVE on a game connection (spectator left off)\n" );
 		break;
 	case HLTV_STATUS:
 		MSG_ReadLong( msg );
