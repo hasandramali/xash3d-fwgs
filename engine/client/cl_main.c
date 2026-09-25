@@ -46,7 +46,7 @@ CVAR_DEFINE_AUTO( fps_max, "61", 0, "fps limit" );
 CVAR_DEFINE_AUTO( cl_fpsfilter, "0", FCVAR_READ_ONLY, "FPS filter mode: 0=use fps_max, 1=use max_fps, 2=use max_fps+fake msec" );
 static CVAR_DEFINE_AUTO( cl_require_challenge_echo, "-1", FCVAR_ARCHIVE, "reject connect packets that don't echo challenge, protects against spoofed servers but breaks connection to old servers (-1 = engine default)" );
 
-CVAR_DEFINE_AUTO( fps_rate, "100", FCVAR_ARCHIVE, "fake FPS rate when cl_fpsfilter is 2" );
+CVAR_DEFINE_AUTO( fps_rate, "100", FCVAR_READ_ONLY, "fake FPS rate when cl_fpsfilter is 2" );
 CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_CHEAT, "render particles" );
 CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_CHEAT, "render tracers" );
 CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_CHEAT, "render beams" );
