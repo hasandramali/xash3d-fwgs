@@ -2923,7 +2923,13 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			}
 			if( skipSize < 0 || skipSize >= MAX_USERMSG_LENGTH || skipSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
 			{
-				Con_Printf( S_WARN "%s: unregistered msg %d has no size prefix: skipping to end of message\n", __func__, svc_num );
+				// Rate-limit the warning: a per-frame offender (e.g. msg 200
+				// during a stuck signon) would otherwise flood console/log.
+				// Parsing behavior is unchanged (consume to end of datagram).
+				static int unregWarnCount = 0;
+
+				if(( unregWarnCount++ % 256 ) == 0 )
+					Con_Printf( S_WARN "%s: unregistered msg %d has no size prefix: skipping to end of message\n", __func__, svc_num );
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (size-less GoldSrc msg, consumed to end)\n", svc_num );
 				MSG_SeekToBit( msg, 0, SEEK_END );
