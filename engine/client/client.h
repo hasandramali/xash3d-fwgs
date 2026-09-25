@@ -107,10 +107,10 @@ extern int CL_UPDATE_BACKUP;
 // so some client features are gated on this flag
 extern qboolean cl_sven_proto;
 
-#define MIN_UPDATERATE	0.00001f
-#define MAX_UPDATERATE	9999999.0f
+#define MIN_UPDATERATE	10.0f
+#define MAX_UPDATERATE	102.0f
 
-#define MAX_EX_INTERP	1000000000.0f
+#define MAX_EX_INTERP	0.1f
 
 #define MAX_TEXTCHANNELS 8 // must be power of two (GoldSrc uses 4 channels)
 
