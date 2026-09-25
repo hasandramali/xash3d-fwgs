@@ -468,8 +468,12 @@ static delta_info_t *Delta_FindStruct( const char *name )
 			return &dt_info[i];
 	}
 
-	Con_DPrintf( S_WARN "Struct %s not found in delta_info\n", name );
-
+	// NOTE: no warning here on purpose. This lookup doubles as a
+	// struct-or-field probe while parsing server delta tables (each field
+	// name misses first, then resolves as a field), so warning per miss
+	// spammed ~100 lines per connect. Genuine failures are still loud:
+	// Delta_InitFields Sys_Errors on unknown structs, and unknown wire
+	// fields log in the GS table parser.
 	// found nothing
 	return NULL;
 }

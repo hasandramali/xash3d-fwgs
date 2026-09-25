@@ -264,8 +264,11 @@ finish:
 
 static void CSCR_RegisterVariable( scrvardef_t *var, void *unused )
 {
-	if( !Cvar_FindVar( var->name ))
+	if( !Cvar_FindVar( var->name ) && !Cmd_Exists( var->name ))
 		Cvar_Get( var->name, var->value, var->flags|FCVAR_TEMPORARY, var->desc );
+	// NOTE: stale script keys that collide with real commands (e.g. the
+	// deprecated hpk_maxsize vs its notice command) are skipped silently
+	// instead of erroring on every startup.
 }
 
 /*

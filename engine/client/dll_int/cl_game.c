@@ -628,7 +628,8 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 			if( drop && drop->owned_hint )
 			{
 				drop->owned_hint = false;
-				Con_DPrintf( "CL_WeaponListFix: drop clears %s (ID %d)\n", drop->name, id );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_DPrintf( "CL_WeaponListFix: drop clears %s (ID %d)\n", drop->name, id );
 			}
 		}
 		return false;
@@ -653,7 +654,8 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 		if( !weapon )
 			return false; // empty bucket: keep the vanilla path alive
 
-		Con_DPrintf( "CL_WeaponListFix: slotkey=%s row=%d -> id=%d %s\n",
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+			Con_DPrintf( "CL_WeaponListFix: slotkey=%s row=%d -> id=%d %s\n",
 			cmd_name, row, weapon->id, weapon->name );
 
 		// Mode 2: the engine inventory switches AND the key keeps travelling
@@ -758,7 +760,8 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		weapon->flags = flags;
 		Q_strncpy( weapon->name, name, sizeof( weapon->name ));
 		weapon->real_name = true; // server-provided class name, safe to send back
-		Con_DPrintf( "CL_WeaponListFix: WeaponList %s id=%d slot=%d pos=%d\n", name, id, slot, slot_pos );
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+			Con_DPrintf( "CL_WeaponListFix: WeaponList %s id=%d slot=%d pos=%d\n", name, id, slot, slot_pos );
 
 		// sort weapons by slot and pos for better navigation
 		qsort( cl_weaponlistfix_state.order, cl_weaponlistfix_state.count, sizeof( int ), CL_WeaponListFix_CompareWeapons );
@@ -1033,7 +1036,8 @@ void CL_WeaponListFix_OnInvRemovePayload( const void *data, int size )
 	if( weapon && weapon->owned_hint )
 	{
 		weapon->owned_hint = false;
-		Con_DPrintf( "CL_WeaponListFix: InvRemove drops %s (ID %d)\n", weapon->name, id );
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+			Con_DPrintf( "CL_WeaponListFix: InvRemove drops %s (ID %d)\n", weapon->name, id );
 	}
 }
 
