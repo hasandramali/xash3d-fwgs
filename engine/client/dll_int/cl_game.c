@@ -242,33 +242,23 @@ static int CL_WeaponListFix_GetSlotCount( void )
 	return real_range;
 }
 
-static int CL_WeaponListFix_CompressSlot( int slot )
-{
-	int rows = CL_WeaponListFix_GetSlotCount();
-	int real_range = CL_WeaponListFix_GetRealSlotRange();
-
-	// over-tall layouts are squeezed into the 5-row HUD by pairing every two
-	// slots so each row stays balanced: (0,1),(2,3),(4,5),(6,7),(8)
-	if( real_range > rows )
-		return bound( 0, slot / 2, rows - 1 );
-
-	return bound( 0, slot, rows - 1 );
-}
-
 static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *weapon, int *slot, int *slot_pos )
 {
-	if( !weapon || !weapon->valid )
+	int slot_count;
+
+	if( !weapon || !weapon->valid || weapon->order_index < 0 )
 		return false;
 
-	// prefer the server-provided WeaponList slot/pos seen in Sven Co-op,
-	// fall back to the nav order for vanilla-style servers
+	// Distribute round-robin by arrival order (like upstream master), NOT by
+	// server slot: Sven's tall 0..9 layout has gaps (no weapons at 4,6,7,8),
+	// so slot-following left rows 4&5 empty. Round-robin fills every row
+	// whenever enough weapons exist.
+	slot_count = CL_WeaponListFix_GetSlotCount();
+
 	if( slot )
-	{
-		int weapon_slot = ( weapon->slot >= 0 ) ? weapon->slot : ( weapon->order_index % CL_WeaponListFix_GetSlotCount() );
-		*slot = CL_WeaponListFix_CompressSlot( weapon_slot );
-	}
+		*slot = weapon->order_index % slot_count;
 	if( slot_pos )
-		*slot_pos = ( weapon->slot_pos >= 0 ) ? weapon->slot_pos : ( weapon->order_index / CL_WeaponListFix_GetSlotCount() );
+		*slot_pos = weapon->order_index / slot_count;
 
 	return true;
 }
@@ -638,11 +628,11 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	if( cmd_name[0] == 's' && cmd_name[1] == 'l' && cmd_name[2] == 'o' &&
 	    cmd_name[3] == 't' && cmd_name[4] >= '1' && cmd_name[4] <= '9' && cmd_name[5] == '\0' )
 	{
-		// Slot keys address the VISIBLE (compressed) inventory rows 1:1:
-		// slotN cycles the weapons shown in row N-1. Do NOT CompressSlot()
-		// the key (that paired (1,2)->row0 and caused the "+2" shift); the
-		// weapons themselves are already bucketed into compressed rows by
-		// GetLayout. Rows beyond the visible count stay empty -> vanilla path.
+		// Slot keys address the VISIBLE inventory rows 1:1:
+		// slotN cycles the weapons shown in row N-1. Rows are filled
+		// round-robin by arrival order (GetLayout), so every row fills up
+		// instead of following Sven's gappy tall layout. Rows beyond the
+		// visible count stay empty -> vanilla path.
 		int row = cmd_name[4] - '1';
 
 		// mode 2 only: otherwise the slot keys must stay free for the
