@@ -105,6 +105,7 @@ static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR
 static CVAR_DEFINE_AUTO( cl_goldsrc_munge, "0", 0, "goldSrc netchan packet munge: 0=off, 1=both directions (vanilla/ReHLDS servers), 2=outgoing only (Sven Coop dedicated servers unmunge inbound but send plain outbound)" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
 static CVAR_DEFINE_AUTO( cl_sven_soundcache, "1", FCVAR_ARCHIVE, "Sven sound system: 1=load maps/soundcache/<map>.txt and play svc107 through it (stock behavior), 0=silent" );
+static CVAR_DEFINE_AUTO( cl_stall_timeout, "75", 0, "Signon stall watchdog: seconds with zero signon/resource/download progress before a fresh auto-reconnect (new challenge+ticket), 0=off" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -336,6 +337,30 @@ finalize connection process and begin new frame
 with new cls.state
 ===============
 */
+#define CL_STALL_MAXAUTO	2	// fresh auto-reconnects per manual connect
+
+static double	stallSince = 0.0;
+static int	stallSignon = -1;
+static int	stallState = -1;
+static int	stallResCount = -1;
+static int	stallAutos = 0;
+
+static int CL_StallResCount( void )
+{
+	int n = 0;
+	resource_t *p;
+
+	for( p = cl.resourcesneeded.pNext; p != &cl.resourcesneeded; p = p->pNext )
+		n++;
+	return n;
+}
+
+static void CL_StallWatchdogReset( void )
+{
+	stallAutos = 0;
+	stallSignon = -1;
+}
+
 static void CL_CheckClientState( void )
 {
 	// first update is the pre-final signon stage
@@ -366,12 +391,53 @@ static void CL_CheckClientState( void )
 
 		Con_DPrintf( "client connected at %.2f sec\n", Platform_DoubleTime() - cls.timestart );
 
+		CL_StallWatchdogReset(); // successful connect: re-arm auto budget
+
+
 		if( cl_autorecord.value && !cls.demoplayback )
 		{
 			if( cls.demorecording )
 				CL_Stop_f();
 
 			Cbuf_AddTextf( "record %s_%s\n", Q_timestamp( TIME_FILENAME ), clgame.mapname );
+		}
+	}
+
+	// Signon stall watchdog: a parked server (ghost slot, wedged changelevel,
+	// missed signon data) ACKs our packets but never advances signon, leaving
+	// retransmitted spawn/sendents circling forever while it counts us in.
+	// With zero progress (no signon/state change, no resource-list change, no
+	// file fragments in flight) for cl_stall_timeout seconds, drop fully and
+	// reconnect fresh (new challenge+ticket), capped per manual connect.
+	if( !cls.demoplayback && !cl.background && cls.state == ca_connected && cls.signon < SIGNONS )
+	{
+		float timeout = cl_stall_timeout.value;
+		int rc = CL_StallResCount();
+		qboolean frags = cls.netchan.incomingbufs[FRAG_FILE_STREAM] != NULL;
+
+		if( timeout > 0.0f && stallAutos < CL_STALL_MAXAUTO
+			&& cls.signon == stallSignon && (int)cls.state == stallState
+			&& rc == stallResCount && !frags
+			&& host.realtime - stallSince > timeout )
+		{
+			Con_Printf( "Signon stalled with no progress for %.0fs, reconnecting fresh (attempt %d/%d)...\n",
+				timeout, stallAutos + 1, CL_STALL_MAXAUTO );
+			stallAutos++;
+			stallSince = host.realtime;
+			stallSignon = -1; // re-arm progress tracking
+			CL_Disconnect(); // clears the server-side ghost slot
+			cls.state = ca_connecting; // CheckForResend fetches a new challenge
+			cls.signon = 0;
+			cls.connect_time = MAX_HEARTBEAT;
+			cls.connect_retry = 0;
+			return;
+		}
+		if( cls.signon != stallSignon || (int)cls.state != stallState || rc != stallResCount || frags )
+		{
+			stallSignon = cls.signon;
+			stallState = (int)cls.state;
+			stallResCount = rc;
+			stallSince = host.realtime;
 		}
 	}
 }
@@ -1759,6 +1825,7 @@ static void CL_Connect_f( void )
 	cls.connect_time = MAX_HEARTBEAT; // CL_CheckForResend() will fire immediately
 	cls.max_fragment_size = FRAGMENT_MAX_SIZE; // guess a we can establish connection with maximum fragment size
 	cls.connect_retry = 0;
+	CL_StallWatchdogReset(); // manual connect: fresh auto-retry budget
 	memset( &cls.bandwidth_test, 0, sizeof( cls.bandwidth_test ));
 	cls.spectator = false;
 	cls.signon = 0;
@@ -3981,6 +4048,7 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_goldsrc_munge );
 	Cvar_RegisterVariable( &cl_goldsrc_debug );
 	Cvar_RegisterVariable( &cl_sven_soundcache );
+	Cvar_RegisterVariable( &cl_stall_timeout );
 	Cvar_RegisterVariable( &cl_download_ingame );
 	Cvar_RegisterVariable( &cl_logofile );
 	Cvar_RegisterVariable( &cl_logocolor );
