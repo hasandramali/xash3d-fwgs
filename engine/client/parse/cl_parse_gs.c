@@ -400,7 +400,18 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 		else break;
 
 		if( MSG_CheckOverflow( msg ))
-			Host_Error( "%s: overflow\n", __func__ );
+		{
+			// Overflow while decoding a delta packet entity is a desync (the
+			// server encoded against entity/baseline sets we don't hold, e.g.
+			// Sven sporelauncher alt-fire volleys), NOT necessarily corruption.
+			// The real Sven client drops the frame and lets the next full
+			// update re-baseline instead of crashing out. Mirror that.
+			Con_Printf( S_WARN "%s: overflow, dropping frame and requesting full resync\n", __func__ );
+			frame->valid = false;
+			cl.validsequence = 0; // can't render a frame
+			MSG_EndBitWriting( msg );
+			return playerbytes;
+		}
 
 		player = CL_IsPlayerIndex( newnum );
 
@@ -454,7 +465,13 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	}
 
 	if( MSG_CheckOverflow( msg ))
-		Host_Error( "%s: overflow\n", __func__ );
+	{
+		Con_Printf( S_WARN "%s: overflow after decoder, dropping frame and requesting full resync\n", __func__ );
+		frame->valid = false;
+		cl.validsequence = 0; // can't render a frame
+		MSG_EndBitWriting( msg );
+		return playerbytes;
+	}
 
 	// any remaining entities in the old frame are copied over
 	while( oldnum != MAX_ENTNUMBER )
@@ -725,7 +742,20 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 		case svc_goldsrc_version:
 			param1 = MSG_ReadLong( msg );
 			if( param1 != PROTOCOL_GOLDSRC_VERSION )
-				Host_Error( "Server use invalid protocol (%i should be %i)\n", param1, PROTOCOL_GOLDSRC_VERSION );
+			{
+				// The genuine svc_goldsrc_version ("04 30 00 00 00" == 48) is only
+				// sent once at signon, where the real protocol decision is made in
+				// CL_ParseServerData. A stray 0x04 byte later in a datagram with a
+				// random value is a misaligned/garbage tail, not a protocol change
+				// (byte-verified against buffer.dat: the whole stream is aligned
+				// exactly down to svc_nop, then 0xE0 at the boundary cannot be a
+				// registered Sven message since they only occupy ~64..149). The
+				// Sven reference client survives this by consuming the datagram and
+				// re-syncing on the next netchan frame, so drain instead of crash.
+				Con_Printf( S_WARN "%s: svc_goldsrc_version=%d (expected %d) at byte %d -- stray/garbage tail, draining datagram\n",
+					__func__, param1, PROTOCOL_GOLDSRC_VERSION, (int)bufStart );
+				MSG_SeekToBit( msg, 0, SEEK_END );
+			}
 			break;
 		case svc_sound:
 			CL_ParseSoundPacketGS( msg );
