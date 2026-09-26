@@ -28,9 +28,12 @@ Baseline autocure (proedu)
 Track which entity indices actually arrived in svc_spawnbaseline. When a
 delta-packet newent decodes against &ent->baseline for an index that never
 got its baseline (truncated/stalled signon stream), the resulting entity is
-garbage/invisible. Detect it, drop the entity and invalidate the frame so the
-engine's existing flush machinery nudges the server into a full (delta=0)
-resend which re-baselines the affected indices.
+garbage/invisible. During SIGNON only: detect it, drop the entity (stream
+still consumed) and invalidate the frame so the engine's existing flush
+machinery nudges the server into a full (delta=0) resend which re-baselines
+the affected indices. During ACTIVE play a missing baseline is normal (Sven
+sends spawnbaselines at signon only), so late spawns decode vanilla-style
+and stay in the frame instead of staying invisible forever.
 
 Flag array is per eindex (MAX_GOLDSRC_ENTITY_BITS wide, same as the
 on-wire Svengine entity index space). Cleared on every CL_ClearState.
@@ -320,21 +323,31 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 
 			// Baseline autocure: a delta (delta=1) newent has no source other
 			// than ent->baseline (delta headers never carry the offset field,
-			// only full frames do). If that baseline never arrived, any entity
-			// decoded from it is garbage. Drop it and invalidate the frame so
+			// only full frames do).
+			// During SIGNON a missing baseline means the signon stream was
+			// truncated: drop the entity (its wire fields are still consumed
+			// below so the stream stays aligned) and invalidate the frame so
 			// the flush path forces a full (delta=0) resync from the server.
-			// CRITICAL: still consume the entity's wire fields below (decode
-			// into the scratch slot without appending). Returning early here
-			// leaves the field bits unread, which desyncs every subsequent
-			// entity/command in the datagram (garbage eindexes, stray svc_bad
-			// pads, malformed svc_disconnect tails).
+			// During ACTIVE play a missing baseline is NORMAL: Sven only
+			// sends svc_spawnbaseline at signon, so every late-spawned
+			// entity (spores, portal balls, monsters, items) has none, and
+			// the server sends full data for entities new to the client.
+			// Decode vanilla-style against the stored baseline and keep the
+			// frame valid, otherwise late spawns stay invisible forever.
 			if( delta_update && !CL_GSBaselineReceived( newnum ))
 			{
-				Con_Printf( S_WARN "%s: eindex %d has no baseline (incomplete svc_spawnbaseline); dropped entity, requesting full resync\n", __func__, newnum );
-				frame->valid = false;
-				cl.validsequence = 0; // can't render a frame
-				from = &nullent;
-				append = false;
+				if( cls.signon < SIGNONS )
+				{
+					Con_Printf( S_WARN "%s: eindex %d has no baseline (incomplete svc_spawnbaseline); dropped entity, requesting full resync\n", __func__, newnum );
+					frame->valid = false;
+					cl.validsequence = 0; // can't render a frame
+					from = &nullent;
+					append = false;
+				}
+				else
+				{
+					Con_DPrintf( "%s: eindex %d late spawn without spawnbaseline, decoding vanilla-style\n", __func__, newnum );
+				}
 			}
 		}
 	}

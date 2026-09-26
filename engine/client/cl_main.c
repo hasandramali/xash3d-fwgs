@@ -337,6 +337,7 @@ static double	stallProgress = 0.0;	// host.realtime of last real connection prog
 static int	stallSignon = -1;
 static int	stallState = -1;
 static int	stallResCount = -1;
+static int	stallFragBytes = -1;
 static int	stallAutos = 0;
 
 static int CL_StallResCount( void )
@@ -349,10 +350,25 @@ static int CL_StallResCount( void )
 	return n;
 }
 
+// Total bytes currently buffered in the incoming file-fragment stream.
+// Unlike mere stream existence (which stays true for a stuck or abandoned
+// download whose buffer is never completed/cleared), only a GROWING total
+// counts as progress, so a wedged download can't keep the watchdog asleep.
+static int CL_StallFragBytes( void )
+{
+	int n = 0;
+	fragbuf_t *p;
+
+	for( p = cls.netchan.incomingbufs[FRAG_FILE_STREAM]; p; p = p->next )
+		n += MSG_GetNumBytesWritten( &p->frag_message );
+	return n;
+}
+
 static void CL_StallWatchdogReset( void )
 {
 	stallAutos = 0;
 	stallSignon = -1;
+	stallFragBytes = -1;
 	stallProgress = 0.0;
 }
 
@@ -422,9 +438,13 @@ static void CL_CheckClientState( void )
 	// inbound bytes: a wedged-but-alive server still echoes acks, so a
 	// byte-count re-arm would keep the timer sleeping forever (observed: the
 	// server fed nops/acks for 19s with zero signon progress and cl_stall_timeout
-	// never fired). Progress = signon/state change, resource list change, a file
-	// fragment stream in flight, or any substantive svc command parsed
-	// (CL_NoteConnectProgress). Without any of those for cl_stall_timeout
+	// never fired). Progress = signon/state change, resource list change,
+	// GROWING incoming file-fragment bytes, or any substantive svc command
+	// parsed (CL_NoteConnectProgress). A stuck download (stream allocated but
+	// zero bytes arriving, e.g. a dlfile the server never serves while it
+	// keeps ACKing + nopping) must NOT re-arm the timer, otherwise the
+	// client loops the same reliable retransmit forever with the timeout set
+	// and doing nothing. Without any of those for cl_stall_timeout
 	// seconds, drop fully and reconnect fresh (new challenge+ticket), capped per
 	// manual connect. Covers ca_validate too: the GoldSrc signon transfer is
 	// streamed while state is already ca_validate, and Sven servers occasionally
@@ -434,15 +454,16 @@ static void CL_CheckClientState( void )
 	{
 		float timeout = cl_stall_timeout.value;
 		int rc = CL_StallResCount();
-		qboolean frags = cls.netchan.incomingbufs[FRAG_FILE_STREAM] != NULL;
+		int fragBytes = CL_StallFragBytes();
 		qboolean progressed = ( cls.signon != stallSignon || (int)cls.state != stallState
-			|| rc != stallResCount || frags || stallProgress == 0.0 );
+			|| rc != stallResCount || fragBytes != stallFragBytes || stallProgress == 0.0 );
 
 		if( progressed )
 		{
 			stallSignon = cls.signon;
 			stallState = (int)cls.state;
 			stallResCount = rc;
+			stallFragBytes = fragBytes;
 			stallProgress = host.realtime;
 		}
 
