@@ -43,10 +43,7 @@ static CVAR_DEFINE( cl_logoupdate, "@cl_logoupdate", "0", 0, "set by menu to tri
 CVAR_DEFINE_AUTO( cl_logomaxdim, "96", FCVAR_ARCHIVE, "maximum decal dimension" );
 static CVAR_DEFINE_AUTO( cl_test_bandwidth, "1", FCVAR_ARCHIVE, "test network bandwith before connection" );
 CVAR_DEFINE_AUTO( fps_max, "61", 0, "fps limit" );
-CVAR_DEFINE_AUTO( cl_fpsfilter, "0", FCVAR_READ_ONLY, "FPS filter mode: 0=use fps_max, 1=use max_fps, 2=use max_fps+fake msec" );
 static CVAR_DEFINE_AUTO( cl_require_challenge_echo, "-1", FCVAR_ARCHIVE, "reject connect packets that don't echo challenge, protects against spoofed servers but breaks connection to old servers (-1 = engine default)" );
-
-CVAR_DEFINE_AUTO( fps_rate, "100", FCVAR_READ_ONLY, "fake FPS rate when cl_fpsfilter is 2" );
 CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_CHEAT, "render particles" );
 CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_CHEAT, "render tracers" );
 CVAR_DEFINE( cl_draw_beams, "r_drawbeams", "1", FCVAR_CHEAT, "render beams" );
@@ -101,7 +98,6 @@ static CVAR_DEFINE_AUTO( topcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTE
 static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player bottom color" );
 CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 CVAR_DEFINE_AUTO( cl_ticket_generator, "steam", FCVAR_READ_ONLY|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
-static CVAR_DEFINE_AUTO( cl_advertise_engine_in_name, "0", FCVAR_PROTECTED|FCVAR_READ_ONLY, "need remove this shid" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
 static CVAR_DEFINE_AUTO( cl_sven_soundcache, "1", FCVAR_ARCHIVE, "Sven sound system: 1=load maps/soundcache/<map>.txt and play svc107 through it (stock behavior), 0=silent" );
 static CVAR_DEFINE_AUTO( cl_stall_timeout, "4", 0, "Signon stall watchdog: seconds with zero signon/resource/download progress before a fresh auto-reconnect (new challenge+ticket), 0=off" );
@@ -872,12 +868,6 @@ static void CL_CreateCmd( void )
 	// fix rounding error and framerate depending player move
 	double    accurate_ms = host.frametime * 1000;
 
-	if( cl_fpsfilter.value >= 2.0f )
-	{
-		double fake_fps = bound( 1.0, fps_rate.value, 100.0 );
-		accurate_ms = 1000.0 / fake_fps;
-	}
-
 	ms = (int)accurate_ms;
 	cl.frametime_remainder += accurate_ms - ms; // accumulate rounding error each frame
 
@@ -1500,9 +1490,6 @@ void CL_SendGoldSrcConnectPacket( netadr_t adr, int challenge, const void *ticke
 	Info_SetValueForKeyf( protinfo, "unique", sizeof( protinfo ), "%i", 0xffffffff );
 	Info_SetValueForKey( protinfo, "raw", "steam", sizeof( protinfo ));
 	CL_GetCDKey( protinfo, sizeof( protinfo ));
-	const char *name = Info_ValueForKey( cls.userinfo, "name" );
-	if( cl_advertise_engine_in_name.value && Q_strnicmp( name, "[Xash3D]", 8 ))
-		Info_SetValueForKeyf( cls.userinfo, "name", sizeof( cls.userinfo ), "[Xash3D]%s", name );
 
 	MSG_Init( &send, "GoldSrcConnect", send_buf, sizeof( send_buf ));
 	MSG_WriteLong( &send, NET_HEADER_OUTOFBANDPACKET );
@@ -3734,19 +3721,7 @@ tell server about changed userinfo
 */
 void CL_UpdateInfo( const char *key, const char *value )
 {
-	switch( cls.net_protocol )
-	{
-	case PROTO_GOLDSRC:
-		if( cl_advertise_engine_in_name.value && !Q_stricmp( key, "name" ) && Q_strnicmp( value, "[Xash3D]", 8 ))
-		{
-			CL_ServerCommand( true, "setinfo \"%s\" \"[Xash3D]%s\"\n", key, value );
-			break;
-		}
-		// intentional fallthrough
-	default:
-		CL_ServerCommand( true, "setinfo \"%s\" \"%s\"\n", key, value );
-		break;
-	}
+	CL_ServerCommand( true, "setinfo \"%s\" \"%s\"\n", key, value );
 }
 
 //=============================================================================
@@ -4050,7 +4025,6 @@ static void CL_InitLocal( void )
 	cl.resourcesonhand.pNext = cl.resourcesonhand.pPrev = &cl.resourcesonhand;
 
 	Cvar_RegisterVariable( &cl_ticket_generator );
-	Cvar_RegisterVariable( &cl_advertise_engine_in_name );
 	Cvar_RegisterVariable( &cl_log_outofband );
 	Cvar_RegisterVariable( &cl_autorecord );
 	Cvar_RegisterVariable( &cl_screenfade );
@@ -4111,8 +4085,6 @@ static void CL_InitLocal( void )
 	Cvar_Get( "team", "", FCVAR_USERINFO, "player team" );
 	Cvar_Get( "skin", "", FCVAR_USERINFO, "player skin" );
 	Cvar_RegisterVariable( &fps_max );
-	Cvar_RegisterVariable( &cl_fpsfilter );
-	Cvar_RegisterVariable( &fps_rate );
 	Cvar_RegisterVariable( &cl_nosmooth );
 	Cvar_RegisterVariable( &cl_nointerp );
 	Cvar_RegisterVariable( &cl_smoothtime );

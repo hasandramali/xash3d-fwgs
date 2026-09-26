@@ -74,7 +74,6 @@ static CVAR_DEFINE_AUTO( host_serverstate, "0", FCVAR_READ_ONLY, "displays curre
 static CVAR_DEFINE_AUTO( host_gameloaded, "0", FCVAR_READ_ONLY, "inidcates a loaded game.dll" );
 static CVAR_DEFINE_AUTO( host_clientloaded, "0", FCVAR_READ_ONLY, "inidcates a loaded client.dll" );
 CVAR_DEFINE_AUTO( host_limitlocal, "0", 0, "apply cl_cmdrate and rate to loopback connection" );
-CVAR_DEFINE( host_maxfps, "max_fps", "72", FCVAR_ARCHIVE|FCVAR_PROTECTED, "host fps upper limit" );
 CVAR_DEFINE_AUTO( fps_override, "0", FCVAR_FILTERABLE, "unlock higher framerate values, not supported" );
 static CVAR_DEFINE_AUTO( host_framerate, "0", FCVAR_FILTERABLE, "locks frame timing to this value in seconds" );
 static CVAR_DEFINE( host_sleeptime, "sleeptime", "1", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "milliseconds to sleep for each frame. higher values reduce fps accuracy" );
@@ -509,8 +508,9 @@ static double Host_CalcFPS( void )
 	}
 	else if( Host_IsSinglePlayerGame( ))
 	{
-		if( !gl_vsync.value )
-			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
+		// vsync is expected to limit the framerate, but some drivers
+		// ignore it, so never let the game run completely unlimited
+		fps = gl_vsync.value ? MAX_FPS_HARD : fps_max.value;
 	}
 	else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
 	{
@@ -518,12 +518,15 @@ static double Host_CalcFPS( void )
 	}
 	else
 	{
-		if( !gl_vsync.value )
-		{
-			double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
+		const double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
 
-			fps = ( cl_fpsfilter.value == 0.0f ) ? fps_max.value : host_maxfps.value;
-			if( fps == 0.0 ) fps = max_fps;
+		if( gl_vsync.value )
+			fps = max_fps;
+		else
+		{
+			fps = fps_max.value;
+			if( fps == 0.0 )
+				fps = max_fps;
 			fps = bound( MIN_FPS, fps, max_fps );
 		}
 	}
@@ -1187,7 +1190,6 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 
 	Cvar_RegisterVariable( &host_allow_materials );
 	Cvar_RegisterVariable( &host_serverstate );
-	Cvar_RegisterVariable( &host_maxfps );
 	Cvar_RegisterVariable( &fps_override );
 	Cvar_RegisterVariable( &host_framerate );
 	Cvar_RegisterVariable( &host_sleeptime );
