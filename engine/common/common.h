@@ -162,7 +162,7 @@ extern convar_t	con_gamemaps;
 extern convar_t	sv_background;
 extern convar_t	cl_background;
 #if !XASH_DEDICATED
-extern convar_t	fps_max;
+extern convar_t	host_maxfps;
 #endif
 
 #define Mod_AllowMaterials() ( host_allow_materials.value != 0.0f && !FBitSet( host.features, ENGINE_DISABLE_HDTEXTURES ))

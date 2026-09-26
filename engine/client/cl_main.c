@@ -42,7 +42,6 @@ static CVAR_DEFINE_AUTO( cl_logoext, "bmp", FCVAR_ARCHIVE, "temporary cvar to te
 static CVAR_DEFINE( cl_logoupdate, "@cl_logoupdate", "0", 0, "set by menu to trigger clan logo update" );
 CVAR_DEFINE_AUTO( cl_logomaxdim, "96", FCVAR_ARCHIVE, "maximum decal dimension" );
 static CVAR_DEFINE_AUTO( cl_test_bandwidth, "1", FCVAR_ARCHIVE, "test network bandwith before connection" );
-CVAR_DEFINE_AUTO( fps_max, "61", 0, "fps limit" );
 static CVAR_DEFINE_AUTO( cl_require_challenge_echo, "-1", FCVAR_ARCHIVE, "reject connect packets that don't echo challenge, protects against spoofed servers but breaks connection to old servers (-1 = engine default)" );
 CVAR_DEFINE( cl_draw_particles, "r_drawparticles", "1", FCVAR_CHEAT, "render particles" );
 CVAR_DEFINE( cl_draw_tracers, "r_drawtracers", "1", FCVAR_CHEAT, "render tracers" );
@@ -4084,7 +4083,6 @@ static void CL_InitLocal( void )
 	Cvar_Get( "password", "", FCVAR_USERINFO, "server password" );
 	Cvar_Get( "team", "", FCVAR_USERINFO, "player team" );
 	Cvar_Get( "skin", "", FCVAR_USERINFO, "player skin" );
-	Cvar_RegisterVariable( &fps_max );
 	Cvar_RegisterVariable( &cl_nosmooth );
 	Cvar_RegisterVariable( &cl_nointerp );
 	Cvar_RegisterVariable( &cl_smoothtime );

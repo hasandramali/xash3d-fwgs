@@ -413,7 +413,7 @@ static void CL_WriteDemoHeader( const char *name )
 	demo.header.id = IDEMOHEADER;
 	demo.header.dem_protocol = DEMO_PROTOCOL;
 	demo.header.net_protocol = CL_GetDemoNetProtocol( cls.net_protocol );
-	demo.header.host_fps = fps_max.value ? bound( MIN_FPS, fps_max.value, maxfps ) : maxfps;
+	demo.header.host_fps = host_maxfps.value ? bound( MIN_FPS, host_maxfps.value, maxfps ) : maxfps;
 	Q_strncpy( demo.header.mapname, clgame.mapname, sizeof( demo.header.mapname ));
 	Q_strncpy( demo.header.comment, clgame.maptitle, sizeof( demo.header.comment ));
 	Q_strncpy( demo.header.gamedir, FS_Gamedir(), sizeof( demo.header.gamedir ));
@@ -1545,7 +1545,7 @@ void CL_PlayDemo_f( void )
 	{
 		int	c, neg = false;
 
-		demo.header.host_fps = fps_max.value;
+		demo.header.host_fps = host_maxfps.value;
 
 		while(( c = FS_Getc( cls.demofile )) != '\n' )
 		{
