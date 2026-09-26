@@ -410,6 +410,13 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 			frame->valid = false;
 			cl.validsequence = 0; // can't render a frame
 			MSG_EndBitWriting( msg );
+			// MSG_CheckOverflow's bOverflow is sticky (MSG_EndBitWriting does
+			// NOT clear it); the main dispatch loop tests it at the top of
+			// every iteration and would otherwise still Host_Error. Drain the
+			// rest of the datagram and clear the flag so the loop exits on
+			// the < 8 bits-left check instead of crashing.
+			MSG_SeekToBit( msg, 0, SEEK_END );
+			msg->bOverflow = false;
 			return playerbytes;
 		}
 
@@ -470,6 +477,8 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 		frame->valid = false;
 		cl.validsequence = 0; // can't render a frame
 		MSG_EndBitWriting( msg );
+		MSG_SeekToBit( msg, 0, SEEK_END );
+		msg->bOverflow = false;
 		return playerbytes;
 	}
 
@@ -662,6 +671,19 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 
 		if( MSG_CheckOverflow( msg ))
 		{
+			if( cls.net_protocol == PROTO_GOLDSRC )
+			{
+				// Any GoldSrc sub-parser (clientdata, delta entities, sound...)
+				// can over-read when the server encodes against baseline sets we
+				// don't hold or when the datagram is truncated. The Sven client
+				// tolerates this by consuming the datagram and re-syncing on the
+				// next netchan frame instead of dying; overflow is only detected
+				// here at the top of each message, so drain + re-sync is safe.
+				Con_Printf( S_WARN "%s: GoldSrc datagram overflow at byte %d, draining and re-syncing\n",
+					__func__, (int)MSG_GetNumBytesRead( msg ));
+				MSG_Clear( msg );
+				return;
+			}
 			Host_Error( "%s: overflow!\n", __func__ );
 			return;
 		}
