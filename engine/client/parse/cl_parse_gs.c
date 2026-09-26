@@ -21,6 +21,42 @@ GNU General Public License for more details.
 #include "input.h"
 #include "server.h"
 
+/*
+======================
+Baseline autocure (proedu)
+
+Track which entity indices actually arrived in svc_spawnbaseline. When a
+delta-packet newent decodes against &ent->baseline for an index that never
+got its baseline (truncated/stalled signon stream), the resulting entity is
+garbage/invisible. Detect it, drop the entity and invalidate the frame so the
+engine's existing flush machinery nudges the server into a full (delta=0)
+resend which re-baselines the affected indices.
+
+Flag array is per eindex (MAX_GOLDSRC_ENTITY_BITS wide, same as the
+on-wire Svengine entity index space). Cleared on every CL_ClearState.
+======================
+*/
+#define GS_BASELINE_SLOTS	( 1 << MAX_GOLDSRC_ENTITY_BITS )
+
+static qboolean gs_baseline_rx[GS_BASELINE_SLOTS];
+
+qboolean CL_GSBaselineReceived( int entnum )
+{
+	if( entnum < 0 || entnum >= GS_BASELINE_SLOTS ) return false;
+	return gs_baseline_rx[entnum];
+}
+
+void CL_GSBaselineSet( int entnum )
+{
+	if( entnum >= 0 && entnum < GS_BASELINE_SLOTS )
+		gs_baseline_rx[entnum] = true;
+}
+
+void CL_GSBaselineResetAll( void )
+{
+	memset( gs_baseline_rx, 0, sizeof( gs_baseline_rx ));
+}
+
 static void CL_ParseExtraInfo( sizebuf_t *msg )
 {
 	string clientfallback;
@@ -197,7 +233,7 @@ static int CL_FlushEntityPacketGS( frame_t *frame, sizebuf_t *msg )
 	return playerbytes;
 }
 
-static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from )
+static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from, qboolean delta_update )
 {
 	cl_entity_t	*ent;
 	entity_state_t	*to;
@@ -244,7 +280,22 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 			else from = &cls.packet_entities[(cls.next_client_entities - hdr->offset ) % cls.num_client_entities];
 		}
 		else
+		{
 			from = &ent->baseline;
+
+			// Baseline autocure: a delta (delta=1) newent has no source other
+			// than ent->baseline (delta headers never carry the offset field,
+			// only full frames do). If that baseline never arrived, any entity
+			// decoded from it is garbage. Drop it and invalidate the frame so
+			// the flush path forces a full (delta=0) resync from the server.
+			if( delta_update && !CL_GSBaselineReceived( newnum ))
+			{
+				Con_Printf( S_WARN "%s: eindex %d has no baseline (incomplete svc_spawnbaseline); dropped entity, requesting full resync\n", __func__, newnum );
+				frame->valid = false;
+				cl.validsequence = 0; // can't render a frame
+				return;
+			}
+		}
 	}
 
 	if( has_update )
@@ -280,7 +331,7 @@ static void CL_CopyPacketEntity( frame_t *frame, int num, const entity_state_t *
 	{
 		.custom = FBitSet( from->entityType, ENTITY_BEAM ) == ENTITY_BEAM,
 	};
-	CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from );
+	CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from, false );
 }
 
 static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
@@ -372,14 +423,14 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 
 			// from delta
 			srcMark = "old-delta";
-			CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent );
+			CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent, delta );
 			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 		else if( oldnum > newnum )
 		{
 			// from baseline
 			srcMark = "baseline";
-			CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL );
+			CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL, delta );
 		}
 
 		// entity-level wire ledger: decode the delta packet header so the

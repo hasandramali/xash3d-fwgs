@@ -1914,6 +1914,7 @@ void CL_ClearState( void )
 	S_StopAllSounds ( true );
 	CL_ClearEffects ();
 	CL_FreeEdicts ();
+	CL_GSBaselineResetAll();
 
 	PM_ClearPhysEnts( clgame.pmove );
 	NetAPI_CancelAllRequests();
