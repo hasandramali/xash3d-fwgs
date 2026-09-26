@@ -705,25 +705,6 @@ int Con_UtfMoveRight( char *str, int pos, int length )
 	return pos + 1;
 }
 
-static void Con_DrawCharToConback( int num, const byte *conchars, byte *dest )
-{
-	int row = num >> 4;
-	int col = num & 15;
-	const byte *source = conchars + (row << 10) + (col << 3);
-
-	int drawline = 8;
-
-	while( drawline-- )
-	{
-		for( int x = 0; x < 8; x++ )
-			if( source[x] != 255 )
-				dest[x] = 0x60 + source[x];
-		source += 128;
-		dest += 320;
-	}
-
-}
-
 /*
 ====================
 Con_GetFont
@@ -2323,43 +2304,6 @@ void Con_CharEvent( int key )
 	}
 }
 
-static int Con_LoadSimpleConback( const char *name, int flags )
-{
-	for( int i = 0; i < 5; i++ )
-	{
-		string path;
-
-		switch( i )
-		{
-		case 0:
-			Q_snprintf( path, sizeof( path ), "gfx/shell/%s.dds", name );
-			break;
-		case 1:
-			Q_snprintf( path, sizeof( path ), "gfx/shell/%s.bmp", name );
-			break;
-		case 2:
-			Q_snprintf( path, sizeof( path ), "gfx/shell/%s.tga", name );
-			break;
-		case 3:
-			Q_snprintf( path, sizeof( path ), "cached/%s640", name );
-			break;
-		case 4:
-			Q_snprintf( path, sizeof( path ), "cached/%s", name );
-			break;
-		}
-
-		if( g_fsapi.FileExists( path, false ))
-		{
-			int gl_texturenum = ref.dllFuncs.GL_LoadTexture( path, NULL, 0, flags );
-
-			if( gl_texturenum )
-				return gl_texturenum;
-		}
-	}
-
-	return 0;
-}
-
 /*
 =========
 Con_VidInit
@@ -2369,8 +2313,6 @@ INTERNAL RESOURCE
 */
 void Con_VidInit( void )
 {
-	const uint flags = TF_IMAGE|TF_ALLOW_NEAREST;
-
 	if( !con.historyLoaded )
 	{
 		Con_LoadHistory( &con.history );
@@ -2383,45 +2325,8 @@ void Con_VidInit( void )
 	Con_LoadConchars();
 	Con_CheckResize();
 
-#if XASH_LOW_MEMORY
-	con.background = R_GetBuiltinTexture( REF_GRAY_TEXTURE );
-#else
-	// loading console image
-	con.background = Con_LoadSimpleConback( host.allow_console ? "conback" : "loading", flags );
-
-	if( !con.background ) // last chance - quake conback image
-	{
-		fs_offset_t length = 0;
-		const byte *buf;
-
-		// quake games always use fixed width fonts, hl games only use variable width
-		// and we want to store buildnumber only in quake
-		if( con.curFont && con.curFont->type == FONT_FIXED && ( buf = ref.dllFuncs.R_GetTextureOriginalBuffer( con.curFont->hFontTexture )) != NULL )
-		{
-			lmp_t	*cb = (lmp_t *)FS_LoadFile( "gfx/conback.lmp", &length, false );
-
-			// another sanity test, quake background is always 320x200
-			if( cb && cb->width == 320 && cb->height == 200 )
-			{
-				char ver[64];
-				int len = Q_snprintf( ver, 64, "%i", Q_buildnum( )); // can store only buildnum
-				byte *dest = (byte *)(cb + 1) + 320 * 186 + 320 - 11 - 8 * len;
-				int y = len;
-				for( int x = 0; x < y; x++ )
-					Con_DrawCharToConback( ver[x], buf, dest + (x << 3));
-				con.background = ref.dllFuncs.GL_LoadTexture( "#gfx/conback.lmp", (byte *)cb, length, TF_IMAGE );
-			}
-			if( cb ) Mem_Free( cb );
-		}
-
-		if( !con.background ) // trying the load unmodified conback
-			con.background = ref.dllFuncs.GL_LoadTexture( "gfx/conback.lmp", NULL, 0, TF_IMAGE );
-	}
-
-	// missed console image will be replaced as gray background like X-Ray or Crysis
-	if( con.background == R_GetBuiltinTexture( REF_DEFAULT_TEXTURE ) || con.background == 0 )
-		con.background = R_GetBuiltinTexture( REF_GRAY_TEXTURE );
-#endif
+	// Plain black console background: never look up a conback/loading image.
+	con.background = R_GetBuiltinTexture( REF_BLACK_TEXTURE );
 }
 
 /*

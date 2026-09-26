@@ -213,7 +213,13 @@ static int CL_FlushEntityPacketGS( frame_t *frame, sizebuf_t *msg )
 		else break;
 
 		if( MSG_CheckOverflow( msg ))
-			Host_Error( "%s: overflow\n", __func__ );
+		{
+			// GoldSrc: same desync family as the delta decoder overflow (server
+			// encoded against baseline sets we don't hold). Don't crash; leave
+			// the overflow flag set so the main dispatch loop drains the
+			// datagram and re-syncs on the next netchan frame.
+			return playerbytes;
+		}
 
 		player = CL_IsPlayerIndex( newnum );
 		bufstart = MSG_GetNumBytesRead( msg );
@@ -228,12 +234,31 @@ static int CL_FlushEntityPacketGS( frame_t *frame, sizebuf_t *msg )
 	}
 
 	if( MSG_CheckOverflow( msg ))
-		Host_Error( "%s: overflow\n", __func__ );
+	{
+		// GoldSrc: see the in-loop overflow comment above.
+		return playerbytes;
+	}
 
 	return playerbytes;
 }
 
-static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from, qboolean delta_update )
+// Message is hopelessly desynchronized: mark the frame unusable, drain the
+// rest of the datagram and clear the sticky overflow flag so the main
+// dispatch loop exits on the < 8 bits-left check instead of Host_Error (the
+// next delta=0 full update from the server re-baselines).
+static void CL_GSAbortDesync( frame_t *frame, sizebuf_t *msg )
+{
+	if( frame )
+	{
+		frame->valid = false;
+		cl.validsequence = 0; // can't render a frame
+	}
+	MSG_EndBitWriting( msg );
+	MSG_SeekToBit( msg, 0, SEEK_END );
+	msg->bOverflow = false;
+}
+
+static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from, qboolean delta_update )
 {
 	cl_entity_t	*ent;
 	entity_state_t	*to;
@@ -248,8 +273,17 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 	if(( newnum < 0 ) || ( newnum >= clgame.maxEntities ))
 	{
 		Con_DPrintf( S_ERROR "CL_DeltaEntity: invalid newnum: %d\n", newnum );
-		Host_Error( "%s: bad delta entity number: %i\n", __func__, newnum );
-		return;
+		// Desynced GoldSrc delta stream: the server encoded against entity/
+		// baseline sets we don't hold (lost packet, Sven-SV engine delta
+		// reset, sporelauncher volleys...). The real Sven client drops the
+		// frame and re-syncs on the next full update, it does NOT crash.
+		// Signal the caller to abort+flush this poison message.
+		if( msg )
+		{
+			frame->valid = false;
+			cl.validsequence = 0; // can't render a frame
+		}
+		return false;
 	}
 
 	ent = CL_EDICT_NUM( newnum );
@@ -259,7 +293,7 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 			CL_KillDeadBeams( ent );
 		else
 			Con_Printf( S_WARN "%s: entity remove on non-delta update (%d)\n", __func__, newnum );
-		return;
+		return true;
 	}
 
 	ent->index = newnum; // enumerate entity index
@@ -293,7 +327,7 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 				Con_Printf( S_WARN "%s: eindex %d has no baseline (incomplete svc_spawnbaseline); dropped entity, requesting full resync\n", __func__, newnum );
 				frame->valid = false;
 				cl.validsequence = 0; // can't render a frame
-				return;
+				return true;
 			}
 		}
 	}
@@ -323,15 +357,17 @@ static void CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t
 	// add entity to packet
 	cls.next_client_entities++;
 	frame->num_entities++;
+
+	return true;
 }
 
-static void CL_CopyPacketEntity( frame_t *frame, int num, const entity_state_t *from )
+static qboolean CL_CopyPacketEntity( frame_t *frame, int num, const entity_state_t *from )
 {
 	delta_header_t fakehdr =
 	{
 		.custom = FBitSet( from->entityType, ENTITY_BEAM ) == ENTITY_BEAM,
 	};
-	CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from, false );
+	return CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from, false );
 }
 
 static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
@@ -428,7 +464,11 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 				Con_Printf( S_WARN "%s: old frame copy on non-delta update (%d < %d)\n", __func__, oldnum, newnum );
 
 			// one or more entities from the old packet are unchanged
-			CL_CopyPacketEntity( frame, oldnum, oldent );
+			if( !CL_CopyPacketEntity( frame, oldnum, oldent ))
+			{
+				CL_GSAbortDesync( frame, msg );
+				return playerbytes;
+			}
 			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 
@@ -441,14 +481,22 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 
 			// from delta
 			srcMark = "old-delta";
-			CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent, delta );
+			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent, delta ))
+			{
+				CL_GSAbortDesync( frame, msg );
+				return playerbytes;
+			}
 			oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 		}
 		else if( oldnum > newnum )
 		{
 			// from baseline
 			srcMark = "baseline";
-			CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL, delta );
+			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL, delta ))
+			{
+				CL_GSAbortDesync( frame, msg );
+				return playerbytes;
+			}
 		}
 
 		// entity-level wire ledger: decode the delta packet header so the
