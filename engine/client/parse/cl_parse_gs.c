@@ -674,6 +674,13 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 			continue;
 		}
 
+		// proedu: any GoldSrc command outside the keepalive/padding set is real
+		// connection progress for the signon stall watchdog. svc_nop and
+		// svc_roomtype are the pure filler a parked server feeds forever, so they
+		// deliberately do NOT refresh the timer.
+		if( cmd != svc_nop && cmd != svc_roomtype && cls.net_protocol == PROTO_GOLDSRC )
+			CL_NoteConnectProgress();
+
 		// STEAM/SIGNON DEBUG: trace every GoldSrc server command during connect
 		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 			Con_DPrintf( "%s: svc cmd=%d (%s) signon=%d state=%d msgbits=%d byte=%d bit=%d\n", __func__, cmd, CL_MsgInfo( cmd ), cls.signon, cls.state, MSG_GetNumBitsLeft( msg ), (int)bufStart, MSG_GetNumBitsRead( msg ) );

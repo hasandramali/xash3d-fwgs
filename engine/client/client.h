@@ -1000,6 +1000,7 @@ void CL_ParseBaseline( sizebuf_t *msg, connprotocol_t proto );
 qboolean CL_GSBaselineReceived( int entnum );		// proedu/goldsrc: per-eindex "baseline arrived" flag
 void CL_GSBaselineSet( int entnum );
 void CL_GSBaselineResetAll( void );
+void CL_NoteConnectProgress( void );			// proedu: signon-stall watchdog progress marker
 void CL_ParseStaticDecal( sizebuf_t *msg );
 void CL_ParseResourceList( sizebuf_t *msg, connprotocol_t proto );
 void CL_ParseMovevars( sizebuf_t *msg );
