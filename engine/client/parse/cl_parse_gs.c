@@ -263,6 +263,7 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 	cl_entity_t	*ent;
 	entity_state_t	*to;
 	qboolean newent = from == NULL;
+	qboolean append = true;
 	int pack = frame->num_entities;
 	qboolean has_update = msg != NULL;
 	static entity_state_t nullent;
@@ -322,12 +323,18 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 			// only full frames do). If that baseline never arrived, any entity
 			// decoded from it is garbage. Drop it and invalidate the frame so
 			// the flush path forces a full (delta=0) resync from the server.
+			// CRITICAL: still consume the entity's wire fields below (decode
+			// into the scratch slot without appending). Returning early here
+			// leaves the field bits unread, which desyncs every subsequent
+			// entity/command in the datagram (garbage eindexes, stray svc_bad
+			// pads, malformed svc_disconnect tails).
 			if( delta_update && !CL_GSBaselineReceived( newnum ))
 			{
 				Con_Printf( S_WARN "%s: eindex %d has no baseline (incomplete svc_spawnbaseline); dropped entity, requesting full resync\n", __func__, newnum );
 				frame->valid = false;
 				cl.validsequence = 0; // can't render a frame
-				return true;
+				from = &nullent;
+				append = false;
 			}
 		}
 	}
@@ -338,6 +345,9 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 
 	to->entityType = hdr->custom ? ENTITY_BEAM : ENTITY_NORMAL;
 	to->number = newnum;
+
+	if( !append )
+		return true; // fields consumed above; dropped entity stays out of the frame
 
 	if( newent )
 	{
