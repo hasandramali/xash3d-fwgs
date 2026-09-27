@@ -20,6 +20,21 @@
 				android:layout_height="wrap_content"
 				android:textAppearance="?attr/textAppearanceBodyMedium" />
 
+			<com.google.android.material.progressindicator.LinearProgressIndicator
+				android:id="@+id/authProgress"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="8dp"
+				android:indeterminate="true"
+				android:visibility="gone" />
+
+			<com.google.android.material.textview.MaterialTextView
+				android:id="@+id/authElapsed"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:visibility="gone"
+				android:textAppearance="?attr/textAppearanceBodySmall" />
+
 			<com.google.android.material.textfield.TextInputLayout
 				android:id="@+id/usernameLayout"
 				android:layout_width="match_parent"
@@ -85,6 +100,21 @@
 				android:text="@string/steam_logout_button"
 				android:visibility="gone"
 				style="@style/Widget.Material3.Button.OutlinedButton" />
+
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/brokerButton"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="8dp"
+				android:text="@string/steam_broker_start"
+				style="@style/Widget.Material3.Button.OutlinedButton" />
+
+			<com.google.android.material.switchmaterial.SwitchMaterial
+				android:id="@+id/autoConnectSwitch"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="16dp"
+				android:text="@string/steam_auto_connect" />
 
 		</LinearLayout>
 	</ScrollView>

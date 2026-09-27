@@ -3,7 +3,7 @@
 	<item
 		android:id="@+id/action_download"
 		android:icon="@drawable/ic_baseline_download_24"
-		android:title="@string/game_data_downloader"
+		android:title="@string/download_svencoop"
 		app:showAsAction="ifRoom" />
 	<item
 		android:id="@+id/action_steam"

@@ -49,8 +49,6 @@
 	<!-- Dedicated server -->
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-	<!-- Self-update: install downloaded APK -->
-	<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
 	<application
 		android:name=".MainApplication"
@@ -81,14 +79,8 @@
 				android:name="android.support.FILE_PROVIDER_PATHS"
 				android:resource="@xml/paths" />
 		</provider>
-		<receiver
-			android:name=".model.InstallStatusReceiver"
-			android:exported="false">
-			<intent-filter>
-				<action android:name="su.xash.engine.INSTALL_RESULT" />
-			</intent-filter>
-		</receiver>
 
+		<!-- the window is always fullscreen, so the system ignores windowSoftInputMode and SoftKeyboardPan pans the view on its own -->
 		<activity
 			android:name=".XashActivity"
 			android:alwaysRetainTaskState="true"
@@ -96,7 +88,8 @@
 			android:exported="true"
 			android:launchMode="singleTask"
 			android:preferMinimalPostProcessing="true"
-			android:windowSoftInputMode="adjustResize">
+			android:screenOrientation="sensorLandscape"
+			android:windowSoftInputMode="adjustPan">
 			<intent-filter>
 				<action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
 			</intent-filter>

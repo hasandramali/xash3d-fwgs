@@ -180,6 +180,17 @@ static void COM_GenerateServerLibraryPath( const char *alt_dllname, char *out, s
 	// path to the dll directory
 	COM_ExtractFilePath( temp, dir );
 
+#ifdef XASH_ANDROID
+	// SvenClient port: the game logic always ships as hl, resolved below to
+	// libhl_android_<arch>.so. Never derive the basename from liblist.gam
+	// here: missing or stale gamedll keys resolve late/wrong on some devices
+	// and can stall startup behind a black screen. An explicit -dll @<name>
+	// override still wins.
+	if( !alt_dllname )
+		base_dllname = "hl";
+	else
+		base_dllname = alt_dllname;
+#else
 	if( alt_dllname )
 	{
 		base_dllname = alt_dllname;
@@ -191,6 +202,7 @@ static void COM_GenerateServerLibraryPath( const char *alt_dllname, char *out, s
 		COM_StripIntelSuffix( temp );
 		base_dllname = COM_FileWithoutPath( temp );
 	}
+#endif
 
 	COM_GenerateCommonLibraryName( base_dllname, libname, sizeof( libname ));
 
