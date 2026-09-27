@@ -300,6 +300,8 @@ class SteamAuthFragment : Fragment() {
         logoutButton.visibility = if (loggedIn) View.VISIBLE else View.GONE
         usernameLayout.visibility = if (loggedIn) View.GONE else View.VISIBLE
         passwordLayout.visibility = if (loggedIn) View.GONE else View.VISIBLE
+        // No account, no broker: the toggle only makes sense once logged in.
+        brokerButton.visibility = if (loggedIn) View.VISIBLE else View.GONE
         if (loggedIn) {
             statusText.text = getString(R.string.steam_logged_in, auth.currentUsername)
         }

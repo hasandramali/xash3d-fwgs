@@ -404,18 +404,18 @@ class LibraryFragment : Fragment(), MenuProvider {
 			item.icon?.mutate()?.alpha = if (downloading) 100 else 255
 		}
 	}
-	/** Tints the toolbar Steam icon green while a Steam session is live. */
+	/** Toolbar Steam icon: green while the ticket broker runs, default white when stopped. */
 	private fun refreshSteamIcon() {
 		val item = steamMenuItem ?: return
 		if (!isAdded) return
-		val auth = try {
-			SteamAuthManager.get(requireContext())
+		val brokerRunning = try {
+			SteamAuthManager.get(requireContext()).isBrokerRunning()
 		} catch (_: Exception) {
 			return
 		}
 		requireActivity().runOnUiThread {
 			val icon = item.icon?.mutate() ?: return@runOnUiThread
-			if (auth.isLoggedIn) {
+			if (brokerRunning) {
 				DrawableCompat.setTint(icon, ContextCompat.getColor(requireContext(), R.color.steam_online_green))
 			} else {
 				DrawableCompat.setTintList(icon, null)

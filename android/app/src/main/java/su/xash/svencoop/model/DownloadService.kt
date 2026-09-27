@@ -112,6 +112,11 @@ class DownloadService : Service() {
         downloadJob = null
         cleanupTmpFiles()
         _state.value = DownloadState.Cancelled
+        // The job's finally() also tears down, but a worker stuck in a
+        // blocking read may delay it: drop the progress notification right
+        // now so Cancel feels instant even if the thread lingers.
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        nm().cancel(NOTIFICATION_ID)
     }
 
     private fun cleanupTmpFiles() {

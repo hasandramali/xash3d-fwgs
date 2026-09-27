@@ -708,6 +708,7 @@ class SteamAuthManager(private val ctx: Context) {
             try {
                 val server = ServerSocket(BROKER_PORT, 4, InetAddress.getByName("127.0.0.1"))
                 brokerServer = server
+                notifyAuthStateChanged()
                 Log.i(TAG, "SteamBroker listening on 127.0.0.1:$BROKER_PORT (thread=${Thread.currentThread().name})")
                 while (!server.isClosed) {
                     try {
@@ -729,6 +730,7 @@ class SteamAuthManager(private val ctx: Context) {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "broker thread FAILED: ${e.message}", e)
+                notifyAuthStateChanged()
             }
             Log.i(TAG, "broker: accept loop exited (isClosed=${brokerServer?.isClosed})")
         }.apply { isDaemon = true; name = "sbrk-broker"; start() }
@@ -740,6 +742,7 @@ class SteamAuthManager(private val ctx: Context) {
         brokerServer = null
         brokerThread?.interrupt()
         brokerThread = null
+        notifyAuthStateChanged()
     }
 
     private fun handleBrokerClient(client: Socket) {
