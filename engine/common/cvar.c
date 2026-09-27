@@ -48,7 +48,7 @@ static const cvar_filter_quirks_t cvar_filter_quirks[] =
 
 static const cvar_filter_quirks_t *cvar_active_filter_quirks = NULL;
 CVAR_DEFINE_AUTO( cl_filterstuffcmd, "1", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "filter commands coming from server" );
-CVAR_DEFINE_AUTO( cl_breakrules, "0", FCVAR_ARCHIVE | FCVAR_PRIVILEGED | FCVAR_PROTECTED, "bypass: 1=FCVAR_CHEAT, 2=FCVAR_CHEAT+FCVAR_READ_ONLY" );
+CVAR_DEFINE_AUTO( cl_breakrules, "0", FCVAR_PRIVILEGED | FCVAR_PROTECTED, "bypass: 1=FCVAR_CHEAT, 2=FCVAR_CHEAT+FCVAR_READ_ONLY" );
 /*
 ============
 Cvar_GetList
