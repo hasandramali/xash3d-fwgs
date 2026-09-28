@@ -171,7 +171,7 @@ def options(opt):
 	grp.add_option('--enable-tui', action = 'store_true', dest = 'ENABLE_TUI', default = False,
 		help = 'enable TUI main menu [default: %(default)s]')
 
-	grp.add_option('--gamedir', action = 'store', dest = 'GAMEDIR', default = 'valve',
+	grp.add_option('--gamedir', action = 'store', dest = 'GAMEDIR', default = 'svencoop',
 		help = 'engine default (base) game directory [default: %(default)s]')
 
 	grp.add_option('-8', '--64bits', action = 'store_true', dest = 'ALLOW64', default = False,

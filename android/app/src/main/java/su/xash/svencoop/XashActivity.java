@@ -210,7 +210,7 @@ public class XashActivity extends SDLActivity {
         Log.i(TAG, "XASH3D_RODIR = " + rodir);
 
         String gamedir = getIntent().getStringExtra("gamedir");
-        if (gamedir == null) gamedir = "valve";
+        if (gamedir == null) gamedir = "svencoop";
         
         String basedir = findBestBasedir(gamedir);
         nativeSetenv("XASH3D_BASEDIR", basedir);

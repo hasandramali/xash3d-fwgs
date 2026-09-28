@@ -31,7 +31,7 @@ class Game(val ctx: Context, val basedir: File) {
 		"hl_urbicide", "induction", "redempt", "secret",
 		"sewer_beta", "tot", "valve", "vendetta")
 
-	var defaultGameDir = "valve"
+	var defaultGameDir = "svencoop"
 
 	private val pref = ctx.getSharedPreferences(basedir.name, Context.MODE_PRIVATE)
 

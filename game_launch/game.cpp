@@ -43,7 +43,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 
 #ifndef XASH_GAMEDIR
-#define XASH_GAMEDIR "valve" // !!! Replace with your default (base) game directory !!!
+#define XASH_GAMEDIR "svencoop" // !!! Replace with your default (base) game directory !!!
 #endif
 
 typedef void (*pfnChangeGame)( const char *progname );

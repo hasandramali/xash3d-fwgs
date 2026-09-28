@@ -22,7 +22,7 @@ GNU General Public License for more details.
 #endif
 
 #ifndef XASH_GAMEDIR
-#define XASH_GAMEDIR "valve" // !!! Replace with your default (base) game directory !!!
+#define XASH_GAMEDIR "svencoop" // !!! Replace with your default (base) game directory !!!
 #endif
 
 static int  szArgc;
