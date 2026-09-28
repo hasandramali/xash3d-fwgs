@@ -76,8 +76,14 @@ class SteamAuthFragment : Fragment() {
             if (deviceWaitJob != null) cancelDeviceWait() else doLogin()
         }
         logoutButton.setOnClickListener {
-            auth.logout()
-            updateUi()
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.steam_logout_confirm_title)
+                .setPositiveButton(R.string.steam_logout_button) { _, _ ->
+                    auth.logout()
+                    updateUi()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
         }
         brokerButton.setOnClickListener { toggleBroker() }
 

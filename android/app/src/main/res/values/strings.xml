@@ -128,6 +128,7 @@
     <string name="steam_twofactor_hint">Two-factor code</string>
     <string name="steam_login_button">Log In</string>
     <string name="steam_logout_button">Log Out</string>
+    <string name="steam_logout_confirm_title">Are you sure?</string>
     <string name="steam_connecting">Connecting to Steam…</string>
     <string name="steam_authenticating">Authenticating…</string>
     <string name="steam_logged_in">Logged in as %1$s</string>

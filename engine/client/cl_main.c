@@ -74,7 +74,7 @@ CVAR_DEFINE( cl_interp, "ex_interp", "0.01", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "
 CVAR_DEFINE_AUTO( cl_nointerp, "0", 0, "disable interpolation of entities and players" );
 static CVAR_DEFINE_AUTO( cl_dlmax, "1024", FCVAR_USERINFO|FCVAR_ARCHIVE, "max allowed outcoming fragment size" );
 static CVAR_DEFINE_AUTO( cl_upmax, "512", FCVAR_ARCHIVE, "max allowed incoming fragment size" );
-CVAR_DEFINE_AUTO( cl_lw, "0", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapon predicting" );
+CVAR_DEFINE_AUTO( cl_lw, "0", FCVAR_READ_ONLY|FCVAR_USERINFO, "experimental client weapon predicting" );
 CVAR_DEFINE_AUTO( cl_charset, "utf-8", FCVAR_ARCHIVE, "1-byte charset to use (iconv style)" );
 CVAR_DEFINE_AUTO( cl_trace_consistency, "0", 0, "enable consistency info tracing (good for developers)" );
 CVAR_DEFINE_AUTO( cl_trace_stufftext, "0", 0, "enable stufftext (server-to-client console commands) tracing (good for developers)" );
