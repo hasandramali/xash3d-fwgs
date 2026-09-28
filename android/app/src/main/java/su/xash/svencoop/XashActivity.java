@@ -14,7 +14,6 @@ import android.provider.Settings.Secure;
 import android.util.Log;
 import android.util.DisplayMetrics;
 import android.view.KeyEvent;
-import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -50,17 +49,12 @@ public class XashActivity extends SDLActivity {
     // boots. SDL2/Android binds the EGL surface to that stale window and
     // never recreates it on resize, so the compositor rejects every frame
     // (BLAST "rejecting buffer ... 986x2176 transform=7") while audio and
-    // input keep working. Gate the SDL startup on a settled landscape
-    // surface, and if a mid-boot rotation still slipped through, force one
-    // surface destroy/create cycle (GONE->VISIBLE) once the rotation has
-    // settled. Both are startup-only and fail-open.
+    // input keep working. super.onResume() must stay synchronous (the
+    // framework kills the app otherwise), so instead of gating the startup we
+    // detect a mid-boot rotation and force one surface destroy/create cycle
+    // (GONE->VISIBLE) once it has settled. Startup-only, one-shot.
     private final Handler mStartupHandler = new Handler(Looper.getMainLooper());
-    private boolean mSdlStarted = false;
     private boolean mSurfaceRecovered = false;
-    private int mResumeGateTries = 0;
-    private static final int RESUME_GATE_MAX_TRIES = 20; // ~2s fail-open
-    private static final long RESUME_GATE_INTERVAL_MS = 100;
-    private static final long SURFACE_SETTLE_MS = 150;
     private int mLastSurfaceW = 0;
     private int mLastSurfaceH = 0;
     private long mLastSurfaceChangeMs = 0;
@@ -125,20 +119,10 @@ public class XashActivity extends SDLActivity {
 
     @Override
     protected void onResume() {
-        if (!mSdlStarted && !isLandscapeSurfaceSettled()) {
-            if (mResumeGateTries < RESUME_GATE_MAX_TRIES) {
-                mResumeGateTries++;
-                mStartupHandler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        onResume();
-                    }
-                }, RESUME_GATE_INTERVAL_MS);
-                return;
-            }
-            Log.w(TAG, "landscape surface did not settle in time; starting SDL anyway (stale-surface recovery will handle it)");
-        }
-        mSdlStarted = true;
+        // NOTE: super.onResume() MUST be called synchronously here; the
+        // framework throws SuperNotCalledException otherwise, so the SDL
+        // startup can only be gated indirectly (see the stale-surface
+        // recovery below, which heals the race after the fact).
         super.onResume();
         applyFixedSurfaceSize();
         // Late enough that native video init is done even on slow devices,
@@ -169,20 +153,6 @@ public class XashActivity extends SDLActivity {
         }
         super.onDestroy();
         System.exit(0);
-    }
-
-    private boolean isLandscapeSurfaceSettled() {
-        if (mLastSurfaceW <= 0 || mLastSurfaceH <= 0) {
-            return false; // no surface yet
-        }
-        if (mLastSurfaceW <= mLastSurfaceH) {
-            return false; // still portrait: rotation in flight
-        }
-        int rotation = getWindowManager().getDefaultDisplay().getRotation();
-        if (rotation != Surface.ROTATION_90 && rotation != Surface.ROTATION_270) {
-            return false;
-        }
-        return android.os.SystemClock.uptimeMillis() - mLastSurfaceChangeMs >= SURFACE_SETTLE_MS;
     }
 
     private void maybeRecoverStaleSurface() {
