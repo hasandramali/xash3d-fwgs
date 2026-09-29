@@ -6,15 +6,12 @@ import android.content.res.AssetManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Handler;
-import android.os.Looper;
 import android.preference.PreferenceManager;
 import android.content.SharedPreferences;
 import android.provider.Settings.Secure;
 import android.util.Log;
 import android.util.DisplayMetrics;
 import android.view.KeyEvent;
-import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
@@ -43,68 +40,15 @@ public class XashActivity extends SDLActivity {
     private int mAppliedSurfaceHeight = -1;
     private boolean mAppliedSurfaceStretch = false;
 
-    // Black-screen guard: on some devices (MIUI rotation animation,
-    // MainActivity portrait -> XashActivity landscape transition) the first
-    // SurfaceView surface still carries portrait geometry when the SDL thread
-    // boots. SDL2/Android binds the EGL surface to that stale window and
-    // never recreates it on resize, so the compositor rejects every frame
-    // (BLAST "rejecting buffer ... 986x2176 transform=7") while audio and
-    // input keep working. super.onResume() must stay synchronous (the
-    // framework kills the app otherwise), so instead of gating the startup we
-    // detect a mid-boot rotation and force one surface destroy/create cycle
-    // (GONE->VISIBLE) once it has settled. Startup-only, one-shot.
-    private final Handler mStartupHandler = new Handler(Looper.getMainLooper());
-    private boolean mSurfaceRecovered = false;
-    private int mLastSurfaceW = 0;
-    private int mLastSurfaceH = 0;
-    private long mLastSurfaceChangeMs = 0;
-    private int mFirstSurfaceW = 0;
-    private int mFirstSurfaceH = 0;
-    private boolean mSawPortraitSurface = false;
-
-    private final SurfaceHolder.Callback mStartupSurfaceCallback = new SurfaceHolder.Callback() {
-        @Override
-        public void surfaceCreated(SurfaceHolder holder) {
-        }
-
-        @Override
-        public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-            if (mSurfaceRecovered) {
-                return; // boot window over, stop tracking
-            }
-            if (mFirstSurfaceW == 0 && mFirstSurfaceH == 0) {
-                mFirstSurfaceW = width;
-                mFirstSurfaceH = height;
-            }
-            if (width <= height) {
-                mSawPortraitSurface = true;
-            }
-            mLastSurfaceW = width;
-            mLastSurfaceH = height;
-            mLastSurfaceChangeMs = android.os.SystemClock.uptimeMillis();
-        }
-
-        @Override
-        public void surfaceDestroyed(SurfaceHolder holder) {
-        }
-    };
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // Request landscape before the window is first traversed so the very
-        // first surface is born landscape whenever the system honors it.
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         super.onCreate(savedInstanceState);
 
         ensurePreferences();
 
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
-
-        SurfaceView surfaceView = findSurfaceView(getWindow().getDecorView());
-        if (surfaceView != null) {
-            surfaceView.getHolder().addCallback(mStartupSurfaceCallback);
         }
 
         parseFixedResolution(getFinalArgv());
@@ -119,72 +63,8 @@ public class XashActivity extends SDLActivity {
 
     @Override
     protected void onResume() {
-        // NOTE: super.onResume() MUST be called synchronously here; the
-        // framework throws SuperNotCalledException otherwise, so the SDL
-        // startup can only be gated indirectly (see the stale-surface
-        // recovery below, which heals the race after the fact).
         super.onResume();
         applyFixedSurfaceSize();
-        // Late enough that native video init is done even on slow devices,
-        // early enough that the user is still in the menu.
-        mStartupHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                maybeRecoverStaleSurface();
-            }
-        }, 2500);
-    }
-
-    @Override
-    protected void onPause() {
-        mStartupHandler.removeCallbacksAndMessages(null);
-        super.onPause();
-    }
-
-    @Override
-    protected void onDestroy() {
-        mStartupHandler.removeCallbacksAndMessages(null);
-        SurfaceView surfaceView = findSurfaceView(getWindow().getDecorView());
-        if (surfaceView != null) {
-            try {
-                surfaceView.getHolder().removeCallback(mStartupSurfaceCallback);
-            } catch (Throwable ignored) {
-            }
-        }
-        super.onDestroy();
-        System.exit(0);
-    }
-
-    private void maybeRecoverStaleSurface() {
-        if (mSurfaceRecovered) {
-            return;
-        }
-        mSurfaceRecovered = true;
-
-        boolean rotatedDuringBoot = mSawPortraitSurface
-            || (mFirstSurfaceW > 0 && (mFirstSurfaceW != mLastSurfaceW || mFirstSurfaceH != mLastSurfaceH));
-        if (!rotatedDuringBoot) {
-            return; // clean boot, nothing to do
-        }
-
-        final SurfaceView surfaceView = findSurfaceView(getWindow().getDecorView());
-        if (surfaceView == null) {
-            return;
-        }
-
-        // A surface destroy/create cycle forces SDL2/Android to drop the
-        // stale (portrait) EGL surface and bind a fresh landscape one. The
-        // EGL context (and all textures) survive; this is the same path as a
-        // normal runtime rotation, just triggered once at startup.
-        Log.w(TAG, "mid-boot rotation detected (" + mFirstSurfaceW + "x" + mFirstSurfaceH
-            + " -> " + mLastSurfaceW + "x" + mLastSurfaceH + "); recreating surface once to fix stale EGL");
-        surfaceView.setVisibility(View.GONE);
-        mStartupHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                surfaceView.setVisibility(View.VISIBLE);
-            }
-        }, 250);
     }
 
     @Override
@@ -193,6 +73,12 @@ public class XashActivity extends SDLActivity {
         if (hasFocus) {
             applyFixedSurfaceSize();
         }
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        System.exit(0);
     }
 
     @Override

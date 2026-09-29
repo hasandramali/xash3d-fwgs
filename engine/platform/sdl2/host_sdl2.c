@@ -410,23 +410,6 @@ static void SDLash_EventHandler( SDL_Event *event )
 			break;
 		case SDL_WINDOWEVENT_RESIZED:
 			VID_SaveWindowSize( event->window.data1, event->window.data2 );
-#if XASH_ANDROID
-			// Black-screen fingerprint: if the EGL drawable is still stuck
-			// with pre-rotation (portrait) geometry while the window is
-			// already landscape, the compositor rejects every frame and SDL
-			// stays black while audio keeps running. SDL2/Android does not
-			// recreate the EGL surface on resize, so log the mismatch loudly
-			// instead of failing silently.
-			{
-				int draw_w = 0, draw_h = 0;
-				if( host.hWnd )
-					SDL_GL_GetDrawableSize( host.hWnd, &draw_w, &draw_h );
-				if( draw_w > 0 && draw_h > 0
-					&& (( draw_w < draw_h ) != ( event->window.data1 < event->window.data2 )))
-					Con_Reportf( S_WARN "%s: stale EGL surface after rotation: drawable %dx%d vs window %dx%d (expect black screen; XashActivity will recover)\n",
-						__func__, draw_w, draw_h, event->window.data1, event->window.data2 );
-			}
-#endif
 			break;
 		case SDL_WINDOWEVENT_MAXIMIZED:
 			Cvar_DirectSet( &vid_maximized, "1" );
