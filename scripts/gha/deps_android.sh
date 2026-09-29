@@ -31,8 +31,11 @@ echo "Download FFmpeg"
 mkdir -p 3rdparty/ffmpeg || exit 1
 for ABI in armeabi-v7a:arm32 arm64-v8a:arm64 x86:i386; do
 	FFMPEG_ARCHIVE=$(GH_CPU_ARCH="${ABI#*:}" get_ffmpeg_archive)
-	wget "https://github.com/FWGS/FFmpeg-Builds/releases/download/latest/$FFMPEG_ARCHIVE.tar.xz" -qO- | tar -xJf - -C 3rdparty/ffmpeg || exit 1
-	mv "3rdparty/ffmpeg/$FFMPEG_ARCHIVE" "3rdparty/ffmpeg/${ABI%%:*}"
+	echo "Fetching $FFMPEG_ARCHIVE.tar.xz ..."
+	wget "https://github.com/FWGS/FFmpeg-Builds/releases/download/latest/$FFMPEG_ARCHIVE.tar.xz" -O "$FFMPEG_ARCHIVE.tar.xz" || exit 1
+	tar -xJf "$FFMPEG_ARCHIVE.tar.xz" -C 3rdparty/ffmpeg || exit 1
+	mv "3rdparty/ffmpeg/$FFMPEG_ARCHIVE" "3rdparty/ffmpeg/${ABI%%:*}" || exit 1
+	rm "$FFMPEG_ARCHIVE.tar.xz"
 done
 
 echo "Download Android SDK"
