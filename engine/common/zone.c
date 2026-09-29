@@ -611,6 +611,28 @@ qboolean Mem_IsAllocatedExt( poolhandle_t poolptr, void *data )
 	return Mem_CheckAlloc( pool, data );
 }
 
+// Unlike Mem_IsAllocatedExt, accept an interior span (e.g. a cache_user_t
+// inside an allocated sequence-group array). Never inspect the candidate.
+qboolean Mem_IsAllocatedRangeExt( poolhandle_t poolptr, const void *data, size_t size )
+{
+	mempool_t *pool = poolptr ? Mem_FindPool( poolptr ) : NULL;
+	uintptr_t address = (uintptr_t)data;
+	if( !pool || !data || !size ) return false;
+	for( memheader_t *header = pool->chain; header; header = header->next )
+	{
+		uintptr_t start = (uintptr_t)(header + 1);
+		if( address >= start && address - start <= header->size &&
+			size <= header->size - (address - start) ) return true;
+	}
+	for( memheader_small_t *header = pool->chain_small; header; header = header->next )
+	{
+		uintptr_t start = (uintptr_t)(header + 1);
+		if( address >= start && address - start <= header->size &&
+			size <= header->size - (address - start) ) return true;
+	}
+	return false;
+}
+
 void _Mem_Check( const char *filename, int fileline )
 {
 	for( size_t i = 0; i < poolcount; i++ )

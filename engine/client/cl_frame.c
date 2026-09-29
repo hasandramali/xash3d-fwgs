@@ -39,6 +39,17 @@ CL_UpdatePositions
 Store another position into interpolation circular buffer
 ==================
 */
+// Sven NPC animation clocks may stay unchanged across movement snapshots.
+// Keep position interpolation on the snapshot clock, not the sequence clock.
+static qboolean CL_SvenNPCLerp( const cl_entity_t *ent )
+{
+	return cl_sven_proto && !ent->player && ent->model && ent->model->type == mod_studio &&
+		(ent->curstate.movetype == MOVETYPE_STEP || ent->curstate.movetype == MOVETYPE_FLY ||
+		 FBitSet( ent->curstate.eflags, EFLAG_SLERP )) &&
+		ent->curstate.movetype != MOVETYPE_FOLLOW && ent->curstate.movetype != MOVETYPE_COMPOUND &&
+		!(ent->curstate.starttime && ent->curstate.impacttime);
+}
+
 static void CL_UpdatePositions( cl_entity_t *ent )
 {
 	position_history_t *prev = &ent->ph[ent->current_position & HISTORY_MASK];
@@ -48,7 +59,7 @@ static void CL_UpdatePositions( cl_entity_t *ent )
 	VectorCopy( ent->curstate.origin, ph->origin );
 	VectorCopy( ent->curstate.angles, ph->angles );
 
-	ph->animtime = ent->curstate.animtime;
+	ph->animtime = CL_SvenNPCLerp( ent ) ? ent->curstate.msg_time : ent->curstate.animtime;
 
 	// a1ba: for some reason, this sometimes still may happen
 	// at this time, I'm not sure whether this bug happens in delta readwrite code
@@ -325,11 +336,14 @@ static void CL_ProcessEntityUpdate( cl_entity_t *ent )
 	if( CL_EntityCustomLerp( ent ) && !parametric )
 		ent->curstate.animtime = ent->curstate.msg_time;
 
-	if( !CL_CompareTimestamps( ent->curstate.animtime, ent->prevstate.animtime ) || CL_EntityIgnoreLerp( ent ))
+	if( !CL_CompareTimestamps( ent->curstate.animtime, ent->prevstate.animtime ) || CL_EntityIgnoreLerp( ent ) ||
+		(cl_sven_proto && ent->curstate.sequence != ent->prevstate.sequence) )
 	{
 		CL_UpdateLatchedVars( ent );
-		CL_UpdatePositions( ent );
+		if( !CL_SvenNPCLerp( ent ) ) CL_UpdatePositions( ent );
 	}
+
+	if( CL_SvenNPCLerp( ent ) ) CL_UpdatePositions( ent );
 
 	// g-cont. it should be done for all the players?
 	if( ent->player && !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
@@ -551,6 +565,8 @@ void CL_ComputePlayerOrigin( cl_entity_t *ent )
 	CL_PureOrigin( ent, targettime, origin, angles );
 
 	VectorCopy( angles, ent->angles );
+	if( cl_sven_proto && !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
+		ent->angles[PITCH] /= -3.0f;
 	VectorCopy( origin, ent->origin );
 }
 
@@ -1114,6 +1130,7 @@ static void CL_LinkPacketEntities( frame_t *frame )
 		// animtime must keep an actual
 		ent->curstate.animtime = state->animtime;
 		ent->curstate.frame = state->frame;
+		if( cl_sven_proto ) ent->curstate.movetype = state->movetype;
 		qboolean interpolate = false;
 
 		if( !ent->model ) continue;
@@ -1130,7 +1147,9 @@ static void CL_LinkPacketEntities( frame_t *frame )
 
 		qboolean parametric = ( ent->curstate.impacttime != 0.0f && ent->curstate.starttime != 0.0f );
 
-		if( !parametric && ent->curstate.movetype != MOVETYPE_COMPOUND )
+		qboolean svenNPCLerp = CL_SvenNPCLerp( ent );
+
+		if( !svenNPCLerp && !parametric && ent->curstate.movetype != MOVETYPE_COMPOUND )
 		{
 			if( ent->curstate.animtime == ent->prevstate.animtime && !VectorCompare( ent->curstate.origin, ent->prevstate.origin ))
 				ent->lastmove = cl.time + 0.2;
@@ -1194,6 +1213,16 @@ static void CL_LinkPacketEntities( frame_t *frame )
 				VectorCopy( ent->curstate.origin, ent->origin );
 				VectorCopy( ent->curstate.angles, ent->angles );
 			}
+			else if( svenNPCLerp )
+			{
+				// Prevent the studio DLL from applying STEP movement a second time.
+				VectorCopy( ent->curstate.origin, ent->origin );
+				VectorCopy( ent->curstate.angles, ent->angles );
+				if( cl_nointerp.value <= 0 && !FBitSet( ent->curstate.effects, EF_NOINTERP ))
+					CL_InterpolateModel( ent );
+				ent->curstate.movetype = MOVETYPE_NONE;
+			}
+
 			else if( CL_EntityCustomLerp( ent ))
 			{
 				if ( !CL_InterpolateModel( ent ))

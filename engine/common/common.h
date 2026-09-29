@@ -386,6 +386,7 @@ void _Mem_FreePool( poolhandle_t *poolptr, const char *filename, int fileline );
 void _Mem_EmptyPool( poolhandle_t poolptr, const char *filename, int fileline );
 void _Mem_Check( const char *filename, int fileline );
 qboolean Mem_IsAllocatedExt( poolhandle_t poolptr, void *data );
+qboolean Mem_IsAllocatedRangeExt( poolhandle_t poolptr, const void *data, size_t size );
 void Mem_PrintStats( void );
 void Mem_Stats_f( void );
 

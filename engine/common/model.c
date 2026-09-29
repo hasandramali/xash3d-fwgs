@@ -570,7 +570,7 @@ void *GAME_EXPORT Mod_CacheCheck( cache_user_t *c )
 	// Never dereference a cache user that isn't within the studio cache pool:
 	// the game DLL keeps these pointers across model reloads and they can go
 	// stale once the pool is emptied (Mod_EmptyPool in Mod_PurgeStudioCache).
-	if( !Mem_IsAllocatedExt( com_studiocache, c ))
+	if( !Mem_IsAllocatedRangeExt( com_studiocache, c, sizeof( *c ) ))
 		return NULL;
 
 	if( !c->data )
@@ -599,7 +599,7 @@ void GAME_EXPORT Mod_LoadCacheFile( const char *filename, cache_user_t *cu )
 		return;
 
 	// Refuse to write into a stale/corrupt cache user (mirror of Mod_CacheCheck)
-	if( !Mem_IsAllocatedExt( com_studiocache, cu ))
+	if( !Mem_IsAllocatedRangeExt( com_studiocache, cu, sizeof( *cu ) ))
 		return;
 
 	Q_strncpy( modname, filename, sizeof( modname ));
