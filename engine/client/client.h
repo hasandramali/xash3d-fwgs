@@ -807,8 +807,6 @@ void SCR_Viewpos_f( void );
 void CL_WavePlayLen_f( void );
 qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name );
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf );
-void CL_WeaponListFix_OnInvAddPayload( const void *data, int size );
-void CL_WeaponListFix_OnInvRemovePayload( const void *data, int size );
 void CL_WeaponListFix_OnResetHUD( void );
 void CL_WeaponListFix_Draw( void );
 void CL_WeaponListFix_Reset( void );

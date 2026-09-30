@@ -912,21 +912,6 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		cl_weaponlistfix_state.hidehud_bits = CL_WeaponListFix_ReadByte( &msg );
 	}
 
-	// NOTE: InvRemove/InvAdd/ResetHUD usually arrive through the REGISTERED
-	// path (Sven sends svc 39 records, so the unregistered skip-path cases in
-	// cl_parse.c never fire for them). Handle them here where the payload is
-	// already framed in pbuf.
-	if( !Q_stricmp( pszName, "InvRemove" ))
-	{
-		CL_WeaponListFix_OnInvRemovePayload( pbuf, iSize );
-		return;
-	}
-
-	if( !Q_stricmp( pszName, "InvAdd" ))
-	{
-		CL_WeaponListFix_OnInvAddPayload( pbuf, iSize );
-		return;
-	}
 
 	if( !Q_stricmp( pszName, "ResetHUD" ))
 	{
@@ -960,88 +945,7 @@ void CL_WeaponListFix_OnResetHUD( void )
 	cl_weaponlistfix_state.select_pending = 0;
 }
 
-/*
-====================
-CL_WeaponListFix_OnInvAddPayload
 
-Sven inventory grant (svc 132, variable). Wire layout reverse-verified against
-the real client (client.dll MsgFunc_InvAdd 0x10031bb0 -> 0x10061870):
-[LONG id][BYTE][BYTE][BYTE][FLOAT][STRING x5]. The first string is the item
-name. Only weapon_* names enter the engine weapon inventory (map items/keys
-can't be selected via a weapon_ client command anyway); the rest is consumed
-and ignored. A later WeaponList/CustWeapon record overwrites a wrong name, so
-a mis-guess self-heals.
-====================
-*/
-void CL_WeaponListFix_OnInvAddPayload( const void *data, int size )
-{
-	cl_weaponlistfix_msg_t msg;
-	char name[64], skip[64];
-	cl_weaponlistfix_weapon_t *weapon;
-	int id, i;
-
-	if( !cl_weaponlistfix.value )
-		return;
-
-	CL_WeaponListFix_MsgInit( &msg, data, size );
-	id = CL_WeaponListFix_ReadLong( &msg );
-	CL_WeaponListFix_ReadByte( &msg );
-	CL_WeaponListFix_ReadByte( &msg );
-	CL_WeaponListFix_ReadByte( &msg );
-	CL_WeaponListFix_ReadLong( &msg ); // float bits, consume only
-	CL_WeaponListFix_ReadString( &msg, name, sizeof( name ));
-	for( i = 0; i < 4; i++ )
-		CL_WeaponListFix_ReadString( &msg, skip, sizeof( skip ));
-
-	if( id <= 0 || id >= MAX_WEAPONS )
-		return;
-	if( Q_strncmp( name, "weapon_", 7 ))
-		return; // not a weapon grant, keep the weapon inventory clean
-
-	weapon = CL_WeaponListFix_AddNamedWeapon( id, name );
-	if( weapon )
-	{
-		// AddNamedWeapon only marks owned on creation; a WeaponList static
-		// record may already exist unowned — the grant owns it now.
-		weapon->owned_hint = true;
-	}
-}
-
-/*
-====================
-CL_WeaponListFix_OnInvRemovePayload
-
-Sven inventory removal (svc 133, fixed 5). Wire layout reverse-verified against
-the real client (client.dll MsgFunc_InvRemove 0x10031be0 -> 0x10061a30, which
-consumes exactly 5 bytes): [LONG id][BYTE]. Clears ownership so dropped/
-removed weapons leave the invnext/invprev rotation. A later CurWeapon/
-WeapPickup re-arms ownership, so a mis-mapped id self-heals on next wield.
-====================
-*/
-void CL_WeaponListFix_OnInvRemovePayload( const void *data, int size )
-{
-	cl_weaponlistfix_msg_t msg;
-	cl_weaponlistfix_weapon_t *weapon;
-	int id;
-
-	if( !cl_weaponlistfix.value )
-		return;
-
-	CL_WeaponListFix_MsgInit( &msg, data, size );
-	id = CL_WeaponListFix_ReadLong( &msg );
-	CL_WeaponListFix_ReadByte( &msg ); // secondary key, consume only
-
-	if( id <= 0 || id >= MAX_WEAPONS )
-		return;
-
-	weapon = CL_WeaponListFix_GetWeapon( id );
-	if( weapon && weapon->owned_hint )
-	{
-		weapon->owned_hint = false;
-		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-			Con_DPrintf( "CL_WeaponListFix: InvRemove drops %s (ID %d)\n", weapon->name, id );
-	}
-}
 
 /*
 ====================

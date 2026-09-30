@@ -656,6 +656,24 @@ void *GAME_EXPORT VGui_GetPanel( void )
 
 void VGui_ReportTextInput( const char *text )
 {
+ // Android IMEs can emit text without SDL key events. Sven camera scripts
+ // accept VGUI key codes, not Unicode text; translate representable keys.
+ if( text && cls.state == ca_active && Cvar_VariableInteger( "cl_sven_camera_mouse" ) && vgui.dllFuncs.Key )
+ {
+  for( const unsigned char *p = (const unsigned char *)text; *p; ++p )
+  {
+   enum VGUI_KeyCode code;
+   int key = *p;
+   if( key >= 'A' && key <= 'Z' ) key += 'a' - 'A';
+   if( key < 32 || key >= 127 || Key_IsDown( key )) continue;
+   code = VGUI_MapKey( key );
+   if( code < 0 ) continue;
+   vgui.dllFuncs.Key( KA_PRESSED, code );
+   vgui.dllFuncs.Key( KA_RELEASED, code );
+  }
+  return;
+ }
+
 	if( vgui.dllFuncs.TextInput )
 		vgui.dllFuncs.TextInput( text );
 }

@@ -2819,9 +2819,8 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			{
 				byte inv[5];
 				MSG_ReadBytes( msg, inv, sizeof( inv ), sizeof( inv ));
-				CL_WeaponListFix_OnInvRemovePayload( inv, sizeof( inv ));
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-					Con_Printf( "USRMSG-SKIP: svc_num=133 (Sven InvRemove routed to inventory)\n" );
+					Con_Printf( "USRMSG-SKIP: svc_num=133 (Sven InvRemove unregistered)\n" );
 				return;
 			}
 			case 143:                    // UpdateTime
@@ -2911,9 +2910,8 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				Con_Printf( "USRMSG-HEX: svc_num=%d payload[0..%d]=%s\n", svc_num, show - 1, hexbuf );
 			}
 			int skipSize = MSG_ReadWord( msg ); // munge locked off: u16 prefix
-			// Sven inventory grant (132 InvAdd, variable): route the payload to
-			// the engine weapon inventory instead of blind-skipping, so granted
-			// (e.g. spawn-loadout) weapons become selectable without wielding.
+			// Unregistered map inventory messages are consumed here. The client
+			// handles registered InvAdd messages; these IDs are not weapon IDs.
 			// Layout client.dll-verified: [LONG id][3 bytes][FLOAT][5 strings].
 			if( svc_num == 132 )
 			{
@@ -2925,9 +2923,8 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				else
 				{
 					MSG_ReadBytes( msg, pbuf, sizeof( pbuf ), skipSize );
-					CL_WeaponListFix_OnInvAddPayload( pbuf, skipSize );
 					if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-						Con_Printf( "USRMSG-SKIP: svc_num=132 (Sven InvAdd %d-byte routed to inventory)\n", skipSize );
+						Con_Printf( "USRMSG-SKIP: svc_num=132 (Sven InvAdd %d-byte unregistered)\n", skipSize );
 				}
 				return;
 			}

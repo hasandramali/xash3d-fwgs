@@ -567,6 +567,23 @@ void Touch_SetClientOnly( byte state )
 	// client.dll, locking user in edit state, so disable it first
 	Touch_DisableEdit_f();
 
+	if( state && ( Cvar_VariableInteger( "cl_sven_camera_mouse" ) || Cvar_VariableInteger( "cl_sven_ui_capture" )))
+	{
+		// A held +use/+attack must receive its release before its button is hidden.
+		for( touch_button_t *button = touch.list_user.first; button; button = button->next )
+		{
+			if( button->finger >= 0 && button->type == touch_command && button->command[0] == '+' )
+			{
+				char command[256];
+				Q_snprintf( command, sizeof( command ), "-%s\n", button->command + 1 );
+				if( FBitSet( button->flags, TOUCH_FL_UNPRIVILEGED )) Cbuf_AddFilteredText( command );
+				else Cbuf_AddText( command );
+			}
+			button->finger = -1;
+		}
+		touch.pitch = touch.yaw = 0;
+		touch.precision = false;
+	}
 	touch.clientonly = state;
 
 	touch.resize_finger = touch.move_finger = touch.look_finger = touch.wheel_finger = -1;
@@ -1485,6 +1502,8 @@ static void Touch_DrawButtons( touchbuttonlist_t *list )
 
 void Touch_Draw( void )
 {
+	if( cls.state == ca_active && Cvar_VariableInteger( "cl_sven_camera_mouse" ))
+		return; // Client VGUI draws the interactive camera controls.
 	if( !touch.initialized || ( !touch_enable.value && !touch.clientonly ))
 		return;
 
@@ -2212,6 +2231,14 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 	}
 
 
+	// Camera touchpad consumes normalized screen coordinates before VGUI's
+	// absolute tap emulation; otherwise dragging would also click the world.
+	if( cls.state == ca_active && Cvar_VariableInteger( "cl_sven_camera_mouse" ) &&
+		clgame.dllFuncs.pfnTouchEvent && clgame.dllFuncs.pfnTouchEvent( type, fingerID, x, y, dx, dy ))
+		return true;
+
+	const qboolean capture = Cvar_VariableInteger( "cl_sven_ui_capture" );
+
 	if( VGui_IsActive() )
 	{
 		VGui_MouseMove( x * refState.width, y * refState.height );
@@ -2228,6 +2255,8 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 			break;
 		}
 	}
+
+	if( capture ) return true; // Never turn a menu tap into a gameplay command.
 
 	if( !touch.initialized || ( !touch_enable.value && !touch.clientonly ))
 		return false;
