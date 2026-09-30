@@ -86,7 +86,9 @@ def main():
 	hlsdk_out_path = os.path.join(args.configuration_dir, "hlsdk-portable")
 
 	run_cmake(hlsdk_path, hlsdk_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root,
-			  args.min_sdk_version, "-DANDROID_APK=ON")
+			  args.min_sdk_version, "-DANDROID_APK=ON",
+			  "-DFREEVGUI_SRC_DIR=" + os.path.join(args.wscript_path, "3rdparty", "freevgui"),
+			  "-DXASH3D_ENGINE_RUNTIME_DIR=" + args.wscript_path)
 
 	# configure mainui_cpp
 	mainui_path = os.path.join(args.wscript_path, "3rdparty", "mainui")
