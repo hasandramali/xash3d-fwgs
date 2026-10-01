@@ -333,6 +333,38 @@ static qboolean WIN_SetWindowIcon( HICON ico )
 
 /*
 =================
+GL_IsKnownOptionalProc
+=================
+*/
+static qboolean GL_IsKnownOptionalProc( const char *name )
+{
+	// Probes that legitimately fail on some drivers but are harmless, so
+	// don't spam S_ERROR for them (real misses are still reported
+	// per-extension by GL_CheckExtension):
+	// - glColorMaterial does not exist in OpenGL ES (any version); nanogl
+	//   probes it at init and the renderer never calls pglColorMaterial.
+	// - KHR_debug entry points don't exist on bare GLES1 contexts; they are
+	//   only probed, never required.
+	static const char *const optional_procs[] =
+	{
+		"glColorMaterial",
+		"glDebugMessageControlKHR",
+		"glDebugMessageInsertKHR",
+		"glDebugMessageCallbackKHR",
+		"glGetDebugMessageLogKHR",
+	};
+
+	for( size_t i = 0; i < ARRAYSIZE( optional_procs ); i++ )
+	{
+		if( !Q_strcmp( name, optional_procs[i] ))
+			return true;
+	}
+
+	return false;
+}
+
+/*
+=================
 GL_GetProcAddress
 =================
 */
@@ -348,7 +380,9 @@ void *GL_GetProcAddress( const char *name )
 
 	if( !func )
 	{
-		Con_Reportf( S_ERROR "%s failed for %s\n", __func__, name );
+		if( GL_IsKnownOptionalProc( name ))
+			Con_DPrintf( "%s: optional %s not present, ignoring\n", __func__, name );
+		else Con_Reportf( S_ERROR "%s failed for %s\n", __func__, name );
 	}
 
 	return func;
