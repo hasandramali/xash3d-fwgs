@@ -1211,18 +1211,26 @@ qboolean Netchan_CopyNormalFragments( netchan_t *chan, sizebuf_t *msg, size_t *l
 	if( chan->use_bz2 && size >= 4 && !memcmp( MSG_GetData( msg ), "BZ2", 4 ))
 	{
 #if !XASH_DEDICATED
-		byte buf[0x10000];
-		uint uDecompressedLen = sizeof( buf );
+		// Sven signon bursts can decompress to several times the old 64K
+		// stack buffer (their engine unpacks into ~256K of stack). Use a
+		// heap buffer sized to the largest message we can deliver, so an
+		// oversized chunk fails with exact sizes instead of stalling the
+		// connection on BZ_OUTBUFF_FULL (-8).
+		const size_t outcap = (size_t)MSG_GetMaxBytes( msg );
+		byte *buf = Mem_Malloc( net_mempool, outcap );
+		uint uDecompressedLen = outcap;
 		int bz2_err = BZ2_bzBuffToBuffDecompress( buf, &uDecompressedLen, MSG_GetData( msg ) + 4, size - 4, 1, 0 );
 
 		if( bz2_err != BZ_OK )
 		{
-			Con_Printf( S_ERROR "%s: BZ2 decompression failed (%d)\n", __func__, bz2_err );
+			Con_Printf( S_ERROR "%s: BZ2 decompression failed (%d), compressed %zu bytes, output cap %zu bytes\n", __func__, bz2_err, size - 4, outcap );
+			Mem_Free( buf );
 			return false;
 		}
 
 		size = uDecompressedLen;
 		memcpy( msg->pData, buf, size );
+		Mem_Free( buf );
 #else
 		Host_Error( "%s: BZ2 compression is not supported for server\n", __func__ );
 #endif
