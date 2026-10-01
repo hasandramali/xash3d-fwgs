@@ -53,7 +53,7 @@ CVAR_DEFINE_AUTO( cl_nopred, "0", FCVAR_USERINFO, "disable client movement predi
 static CVAR_DEFINE_AUTO( cl_nodelta, "0", 0, "disable delta-compression for server messages" );
 CVAR_DEFINE( cl_crosshair, "crosshair", "1", FCVAR_ARCHIVE, "show weapon chrosshair" );
 static CVAR_DEFINE_AUTO( cl_cmdbackup, "10", FCVAR_ARCHIVE, "how many additional history commands are sent" );
-CVAR_DEFINE_AUTO( cl_showerror, "0", FCVAR_ARCHIVE, "show prediction error" );
+CVAR_DEFINE_AUTO( cl_showerror, "0", FCVAR_ARCHIVE, "show prediction error (1 = screen, 2 = screen + verbose PRED-TRACE console log)" );
 CVAR_DEFINE_AUTO( cl_bmodelinterp, "1", 0, "enable bmodel interpolation" );
 static CVAR_DEFINE_AUTO( cl_lightstyle_lerping, "0", FCVAR_ARCHIVE, "enables animated light lerping (perfomance option)" );
 CVAR_DEFINE_AUTO( cl_idealpitchscale, "0.8", 0, "how much to look up/down slopes and stairs when not using freelook" );

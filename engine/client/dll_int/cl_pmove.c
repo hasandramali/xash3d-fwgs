@@ -185,6 +185,42 @@ static qboolean CL_PlayerTeleported( local_state_t *from, local_state_t *to )
 }
 
 /*
+====================
+CL_PredictionErrorTrace
+
+cl_showerror 2: verbose single-line console trace (lands in engine.log)
+for every prediction correction / teleport, carrying the full
+server-vs-predicted state needed for offline analysis. Level 1 keeps the
+old on-screen-only NPrintf lines.
+====================
+*/
+static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3_t delta, int frame, int cmd )
+{
+	const entity_state_t *ps = &cl.frames[cmd].playerstate[cl.playernum];
+	const clientdata_t *cd = &cl.frames[cmd].clientdata;
+	const usercmd_t *ucmd = &cl.commands[frame].cmd;
+	const float *pred = cl.local.predicted_origins[frame];
+
+	Con_Printf( "PRED-TRACE: %s dist=%.3f delta=(%.2f,%.2f,%.2f) "
+		"srv_org=(%.1f,%.1f,%.1f) pred_org=(%.1f,%.1f,%.1f) "
+		"srv_vel=(%.1f,%.1f,%.1f) simvel=(%.1f,%.1f,%.1f) "
+		"srv_ang=(%.1f,%.1f,%.1f) onground=%d wlevel=%d move=%d hull=%d "
+		"fric=%.2f grav=%.2f maxspd=%.0f msec=%d btn=%d "
+		"ack=%u out=%u cmd=%d pcmod=%d t=%.3f\n",
+		teleported ? "teleport" : "error", dist, delta[0], delta[1], delta[2],
+		ps->origin[0], ps->origin[1], ps->origin[2],
+		pred[0], pred[1], pred[2],
+		ps->velocity[0], ps->velocity[1], ps->velocity[2],
+		cl.simvel[0], cl.simvel[1], cl.simvel[2],
+		ps->angles[0], ps->angles[1], ps->angles[2],
+		ps->onground, cd->waterlevel, ps->movetype, ps->usehull,
+		ps->friction, ps->gravity, cd->maxspeed,
+		ucmd->msec, ucmd->buttons,
+		cls.netchan.incoming_acknowledged, cls.netchan.outgoing_sequence,
+		cmd, cl.parsecountmod, cl.time );
+}
+
+/*
 ===================
 CL_CheckPredictionError
 ===================
@@ -213,6 +249,9 @@ void CL_CheckPredictionError( void )
 		if( cl_showerror.value && host_developer.value )
 			Con_NPrintf( 10 + ( ++pos & 3 ), "^3player teleported:^7 %.3f units\n", dist );
 
+		if( cl_showerror.value >= 2.0f && host_developer.value )
+			CL_PredictionErrorTrace( true, dist, delta, frame, cmd );
+
 		// a teleport or something or gamepaused
 		VectorClear( cl.local.prediction_error );
 	}
@@ -220,6 +259,9 @@ void CL_CheckPredictionError( void )
 	{
 		if( cl_showerror.value && dist > MIN_PREDICTION_EPSILON && host_developer.value )
 			Con_NPrintf( 10 + ( ++pos & 3 ), "^1prediction error:^7 %.3f units\n", dist );
+
+		if( cl_showerror.value >= 2.0f && dist > MIN_PREDICTION_EPSILON && host_developer.value )
+			CL_PredictionErrorTrace( false, dist, delta, frame, cmd );
 
 		VectorCopy( cl.frames[cmd].playerstate[cl.playernum].origin, cl.local.predicted_origins[frame] );
 
