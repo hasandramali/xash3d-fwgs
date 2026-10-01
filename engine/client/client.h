@@ -58,6 +58,7 @@ typedef struct frame_s
 	double		latency;
 	double		time;		// server timestamp
 	qboolean		valid;		// cleared if delta parsing was invalid
+	int entity_sequence; // exact sequence whose entity snapshot occupies this slot
 	qboolean		choked;
 
 	clientdata_t	clientdata;	// local client private data

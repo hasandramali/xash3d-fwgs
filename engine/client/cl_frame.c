@@ -347,7 +347,14 @@ static void CL_ProcessEntityUpdate( cl_entity_t *ent )
 
 	// g-cont. it should be done for all the players?
 	if( ent->player && !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
-		ent->curstate.angles[PITCH] /= -3.0f;
+	{
+		// Sven already transmits studio pitch (-view pitch / 3).
+		if( cl_sven_proto )
+		{
+			if( ent->curstate.angles[PITCH] > 180.0f ) ent->curstate.angles[PITCH] -= 360.0f;
+		}
+		else ent->curstate.angles[PITCH] /= -3.0f;
+	}
 
 	VectorCopy( ent->curstate.origin, ent->origin );
 	VectorCopy( ent->curstate.angles, ent->angles );
@@ -565,8 +572,8 @@ void CL_ComputePlayerOrigin( cl_entity_t *ent )
 	CL_PureOrigin( ent, targettime, origin, angles );
 
 	VectorCopy( angles, ent->angles );
-	if( cl_sven_proto && !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
-		ent->angles[PITCH] /= -3.0f;
+	if( cl_sven_proto && !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ) && ent->angles[PITCH] > 180.0f )
+		ent->angles[PITCH] -= 360.0f;
 	VectorCopy( origin, ent->origin );
 }
 
@@ -620,6 +627,7 @@ process player states after the new packet has received
 */
 void CL_ProcessPacket( frame_t *frame )
 {
+	frame->entity_sequence = cls.netchan.incoming_sequence;
 	for( int pnum = 0; pnum < frame->num_entities; pnum++ )
 	{
 		// request the entity state from circular buffer
@@ -698,7 +706,12 @@ static void CL_FlushEntityPacket( sizebuf_t *msg, connprotocol_t proto )
 
 qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe )
 {
-	int subtracted = ( cls.netchan.incoming_sequence - oldpacket ) & 0xFF;
+	int mask = cl_sven_proto ? 0xFFFF : 0xFF;
+	int subtracted = ( cls.netchan.incoming_sequence - oldpacket ) & mask;
+	// A ring slot is not proof that its snapshot exists. Never delta against
+	// an invalid frame, a skipped packet, or a slot left over from a ring wrap.
+	if( cl_sven_proto && ( !oldframe->valid || oldframe->entity_sequence != cls.netchan.incoming_sequence - subtracted ))
+		return false;
 
 	if( subtracted == 0 )
 	{

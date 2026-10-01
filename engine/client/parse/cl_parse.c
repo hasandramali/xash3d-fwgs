@@ -469,6 +469,7 @@ void CL_BatchResourceRequest( qboolean initialize )
 		case t_decal:
 			if( !HPAK_GetDataPointer( hpk_custom_file.string, p, NULL, NULL ))
 			{
+				done_downloading = false;
 				if( !FBitSet( p->ucFlags, RES_REQUESTED ))
 				{
 					MSG_BeginClientCmd( &msg, clc_stringcmd );
@@ -488,7 +489,10 @@ void CL_BatchResourceRequest( qboolean initialize )
 				break;
 			}
 			if( !CL_CheckFile( &msg, p ))
+			{
+				done_downloading = false; // WAD/generic resources must finish before Mod_LoadWorld
 				break;
+			}
 			CL_MoveToOnHandList( p );
 			break;
 		case t_world:
@@ -1063,6 +1067,7 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	cl.parsecountmod = cl.parsecount & CL_UPDATE_MASK;	// index into window.
 	frame = &cl.frames[cl.parsecountmod];			// frame at index.
 
+	if( cl_sven_proto ) frame->valid = false; // this slot has not received entities yet
 	frame->time = cl.mtime[0];				// mark network received time
 	frame->receivedtime = host.realtime;			// time now that we are parsing.
 

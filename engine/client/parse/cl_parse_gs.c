@@ -652,6 +652,19 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	if( !frame->valid )
 		return playerbytes;
 
+	if( dbg >= 4 )
+	{
+		int no_model = 0, unloaded = 0, no_baseline = 0;
+		for( int i = 0; i < frame->num_entities; ++i )
+		{
+			entity_state_t *state = &cls.packet_entities[(frame->first_entity + i) % cls.num_client_entities];
+			if( !state->modelindex ) no_model++;
+			else if( !CL_ModelHandle( state->modelindex )) unloaded++;
+			if( !CL_GSBaselineReceived( state->number )) no_baseline++;
+		}
+		Con_DPrintf( "GS-FRAME: seq=%d entities=%d model0=%d unloaded=%d no_baseline=%d\n",
+			cls.netchan.incoming_sequence, frame->num_entities, no_model, unloaded, no_baseline );
+	}
 	CL_ProcessPacket( frame );
 	CL_SetSolidEntities();
 
