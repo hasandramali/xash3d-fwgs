@@ -54,6 +54,22 @@ static void CL_UpdatePositions( cl_entity_t *ent )
 {
 	position_history_t *prev = &ent->ph[ent->current_position & HISTORY_MASK];
 
+	if( CL_SvenNPCLerp( ent ) && prev->animtime > 0.0f )
+	{
+		// Network snapshots can arrive much faster than monster movement updates.
+		// Repeated poses must not shorten a movement segment to one packet.
+		if( ent->curstate.msg_time > prev->animtime &&
+			VectorCompare( prev->origin, ent->curstate.origin ) &&
+			VectorCompare( prev->angles, ent->curstate.angles ))
+			return;
+
+		// Resume after a stop without interpolating over the whole idle period.
+		// Keep at most 200 ms of movement latency, even after packet starvation.
+		if( ent->curstate.msg_time - prev->animtime > 0.2f )
+			prev->animtime = Q_max( prev->animtime,
+				ent->curstate.msg_time - 0.1f );
+	}
+
 	ent->current_position = (ent->current_position + 1) & HISTORY_MASK;
 	position_history_t *ph = &ent->ph[ent->current_position];
 	VectorCopy( ent->curstate.origin, ph->origin );
@@ -488,14 +504,33 @@ static int CL_InterpolateModel( cl_entity_t *e )
 	if( cl.local.moving && cl.local.onground == e->index )
 		return 1;
 
-	double t = cl.time - cl_interp.value;
+	double delay = cl_interp.value;
+	if( CL_SvenNPCLerp( e ))
+	{
+		const position_history_t *latest = &e->ph[e->current_position & HISTORY_MASK];
+		const position_history_t *previous = &e->ph[(e->current_position - 1) & HISTORY_MASK];
+		// Buffer one actual movement interval, not merely one network packet.
+		// Once updates stop, target time advances to the final pose (no extrapolation).
+		if( previous->animtime > 0.0f )
+			delay = Q_max( delay, bound( 0.0, latest->animtime - previous->animtime, 0.2 ));
+	}
+	double t = cl.time - delay;
 	CL_FindInterpolationUpdates( e, t, &ph0, &ph1 );
 
 	double t1 = ph1->animtime;
 	double t2 = ph0->animtime;
 
 	if( t - t1 < 0.0f )
+	{
+		if( CL_SvenNPCLerp( e ))
+		{
+			// The movement buffer is still warming up; do not flash the raw pose.
+			VectorCopy( ph1->origin, e->origin );
+			VectorCopy( ph1->angles, e->angles );
+			return 1;
+		}
 		return 0;
+	}
 
 	if( t1 == 0.0f )
 	{

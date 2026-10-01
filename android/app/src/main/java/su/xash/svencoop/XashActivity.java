@@ -2,9 +2,12 @@ package su.xash.svencoop;
 
 import android.annotation.SuppressLint;
 import android.content.pm.ActivityInfo;
+import android.content.Context;
 import android.content.res.AssetManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Environment;
 import android.preference.PreferenceManager;
 import android.content.SharedPreferences;
@@ -18,6 +21,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
+import org.libsdl.app.SDLSurface;
 
 import su.xash.svencoop.util.SoftKeyboardPan;
 
@@ -41,6 +45,11 @@ public class XashActivity extends SDLActivity {
     private boolean mAppliedSurfaceStretch = false;
 
     @Override
+    protected SDLSurface createSDLSurface(Context context) {
+        return new StartupSurface(context);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
@@ -48,8 +57,24 @@ public class XashActivity extends SDLActivity {
 
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            WindowManager.LayoutParams attributes = getWindow().getAttributes();
+            attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attributes);
         }
+
+        // SDLActivity queues windowed style in super.onCreate. Follow it on the
+        // same UI queue, before StartupSurface releases the native thread.
+        // Do not call SDL's setWindowStyle here: it waits for surfaceChanged
+        // and would block this UI thread for its 500 ms timeout.
+        new Handler(Looper.getMainLooper()).post(() -> {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+            mFullscreenModeActive = true;
+        });
 
         parseFixedResolution(getFinalArgv());
         applyFixedSurfaceSize();

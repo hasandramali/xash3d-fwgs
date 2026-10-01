@@ -5051,6 +5051,12 @@ qboolean CL_LoadProgs( const char *name )
 	qboolean valid_single_export = false;
 	qboolean missed_exports = false;
 	qboolean try_internal_vgui_support = GI->internal_vgui_support;
+#if XASH_ANDROID
+	// The Sven Android client statically links FreeVGUI and exports its API.
+	// Do not probe vgui.so before loading that client, even with old gameinfo.
+	if( !Q_stricmp( GI->gamefolder, "svencoop" ))
+		try_internal_vgui_support = true;
+#endif
 
 	if( clgame.hInstance ) CL_UnloadProgs();
 
