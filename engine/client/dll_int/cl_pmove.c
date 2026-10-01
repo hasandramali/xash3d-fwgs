@@ -218,6 +218,39 @@ static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3
 		ucmd->msec, ucmd->buttons,
 		cls.netchan.incoming_acknowledged, cls.netchan.outgoing_sequence,
 		cmd, cl.parsecountmod, cl.time );
+
+	// On teleport-level snaps, dump nearby brush entities (submodel doors,
+	// walls, buttons): distinguishes "entity absent client-side" (no line
+	// for the expected *N model) from "entity present but misplaced" (origin
+	// far from here) in the next engine.log without extra commands.
+	if( teleported && clgame.entities )
+	{
+		vec3_t deltaEnt;
+		float distEnt;
+		int shown = 0;
+
+		for( int i = 1; i < clgame.maxEntities && shown < 8; i++ )
+		{
+			const cl_entity_t *e = &clgame.entities[i];
+
+			if( !e->model || e->model->type != mod_brush )
+				continue;
+			if( e->curstate.modelindex <= 0 )
+				continue;
+
+			VectorSubtract( e->curstate.origin, ps->origin, deltaEnt );
+			distEnt = VectorLength( deltaEnt );
+
+			if( distEnt > 1024.0f )
+				continue;
+
+			Con_Printf( "PRED-TRACE: nearbrush eindex=%d model=%d org=(%.1f,%.1f,%.1f) dist=%.0f solid=%d effects=%d rendermode=%d\n",
+				e->curstate.number, e->curstate.modelindex,
+				e->curstate.origin[0], e->curstate.origin[1], e->curstate.origin[2],
+				distEnt, e->curstate.solid, e->curstate.effects, e->curstate.rendermode );
+			shown++;
+		}
+	}
 }
 
 /*
