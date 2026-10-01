@@ -1896,6 +1896,9 @@ void R_InitDlightTexture( void )
 		update = true;
 
 	tr.dlightTexture = GL_LoadTextureFromBuffer( "*dlight", &r_image, TF_NOMIPMAP|TF_CLAMP|TF_ATLAS_PAGE, update );
+
+	// texture content was (re)created: cached dynamic texels are stale
+	R_DlightCacheInvalidate();
 }
 
 /*

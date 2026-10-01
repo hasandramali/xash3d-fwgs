@@ -53,6 +53,112 @@ static separate_pass_t draw_details = { 0, -1 };
 static msurface_t		*skychain = NULL;
 static gllightmapstate_t	gl_lms;
 
+/*
+ * Dynamic lightmap frame cache.
+ *
+ * R_BlendLightmaps rebuilds every dynamic surface and re-uploads the whole
+ * dynamic atlas every frame, even when nothing changed (steady strobes,
+ * long-lived map lights). The rebuild output is a pure function of the
+ * lighting state + the dynamic surface set, so when both hash identically
+ * to the previous frame the texels would be bit-identical: skip the CPU
+ * rebuild and the GPU re-upload, only re-issue draws (atlas packing is
+ * deterministic, so UVs match). Any real change (light toggles, moves,
+ * style flicker, camera move changing the visible set, map/texture
+ * recreation, gamma & co) changes the signature and takes the full path.
+ * Pixel-identical by construction; toggle timing untouched.
+ */
+static int Mod_LightmappedWaterMinlight( void );
+static float Mod_LightmappedWaterScale( void );
+static uint64_t	dlight_cache_state;
+static uint64_t	dlight_cache_chain;
+static uint	dlight_cache_gen; // bumped by R_DlightCacheInvalidate()
+static qboolean	dlight_cache_valid;
+
+void R_DlightCacheInvalidate( void )
+{
+	dlight_cache_valid = false;
+	dlight_cache_gen++;
+}
+
+static uint64_t DLight_HashBytes( uint64_t hash, const void *data, size_t len )
+{
+	const byte *p = (const byte *)data;
+
+	// FNV-1a 64-bit
+	for( size_t i = 0; i < len; i++ )
+	{
+		hash ^= p[i];
+		hash *= 1099511628211ULL;
+	}
+
+	return hash;
+}
+
+static uint64_t R_DynamicStateHash( void )
+{
+	uint64_t hash = 14695981039346656037ULL; // FNV offset basis
+
+	// map + texture generation identity
+	hash = DLight_HashBytes( hash, &WORLDMODEL, sizeof( WORLDMODEL ));
+	hash = DLight_HashBytes( hash, &dlight_cache_gen, sizeof( dlight_cache_gen ));
+	hash = DLight_HashBytes( hash, &tr.dlightTexture, sizeof( tr.dlightTexture ));
+	hash = DLight_HashBytes( hash, &tr.block_size, sizeof( tr.block_size ));
+
+	// live dynamic lights, field by field (no padding bytes)
+	for( int i = 0; i < MAX_DLIGHTS; i++ )
+	{
+		const dlight_t *dl = &gp_dlights[i];
+
+		if( dl->die < gp_cl->time || !dl->radius )
+			continue;
+
+		hash = DLight_HashBytes( hash, dl->origin, sizeof( dl->origin ));
+		hash = DLight_HashBytes( hash, &dl->radius, sizeof( dl->radius ));
+		hash = DLight_HashBytes( hash, &dl->color, sizeof( dl->color ));
+		hash = DLight_HashBytes( hash, &dl->die, sizeof( dl->die ));
+		hash = DLight_HashBytes( hash, &dl->decay, sizeof( dl->decay ));
+		hash = DLight_HashBytes( hash, &dl->minlight, sizeof( dl->minlight ));
+		hash = DLight_HashBytes( hash, &dl->key, sizeof( dl->key ));
+		hash = DLight_HashBytes( hash, &dl->dark, sizeof( dl->dark ));
+	}
+
+	// light styles (flicker switches surface rebuilds on/off)
+	hash = DLight_HashBytes( hash, g_lightstylevalue, sizeof( g_lightstylevalue ));
+
+	// build config scalars affecting R_BuildLightMap output
+	hash = DLight_HashBytes( hash, &v_lightgamma->value, sizeof( float ));
+	hash = DLight_HashBytes( hash, &gl_overbright.value, sizeof( float ));
+	hash = DLight_HashBytes( hash, &r_vbo_overbrightmode.value, sizeof( float ));
+	hash = DLight_HashBytes( hash, &r_vbo.value, sizeof( float ));
+	hash = DLight_HashBytes( hash, &r_fullbright->value, sizeof( float ));
+	hash = DLight_HashBytes( hash, &gp_host->features, sizeof( gp_host->features ));
+
+	{
+		const int litwater_min = Mod_LightmappedWaterMinlight();
+		const float litwater_scale = Mod_LightmappedWaterScale();
+
+		hash = DLight_HashBytes( hash, &litwater_min, sizeof( litwater_min ));
+		hash = DLight_HashBytes( hash, &litwater_scale, sizeof( litwater_scale ));
+	}
+
+	return hash;
+}
+
+static uint64_t R_DynamicChainHash( void )
+{
+	uint64_t hash = 14695981039346656037ULL; // FNV offset basis
+
+	for( msurface_t *surf = gl_lms.dynamic_surfaces; surf != NULL; surf = surf->info->lightmapchain )
+	{
+		uintptr_t p = (uintptr_t)surf;
+
+		hash = DLight_HashBytes( hash, &p, sizeof( p ));
+		hash = DLight_HashBytes( hash, &surf->dlightbits, sizeof( surf->dlightbits ));
+	}
+
+	return hash;
+}
+
 static void LM_UploadBlock( qboolean dynamic );
 static qboolean R_AddSurfToVBO( msurface_t *surf, qboolean buildlightmaps );
 static void R_DrawVBO( qboolean drawlightmaps, qboolean drawtextures );
@@ -1204,6 +1310,27 @@ static void R_BlendLightmaps( void )
 		GL_Bind( XASH_TEXTURE0, tr.dlightTexture );
 		newsurf = gl_lms.dynamic_surfaces;
 
+		// frame cache: identical state + identical surface set reproduces
+		// identical texels, so skip the CPU rebuild and GPU re-upload below
+		// and only re-issue draws (packing is deterministic, UVs match)
+		qboolean dlight_skip = false;
+
+		if( r_dlight_cache.value )
+		{
+			const uint64_t state = R_DynamicStateHash();
+			const uint64_t chain = R_DynamicChainHash();
+
+			if( dlight_cache_valid && state == dlight_cache_state && chain == dlight_cache_chain )
+				dlight_skip = true;
+			else
+			{
+				dlight_cache_state = state;
+				dlight_cache_chain = chain;
+				dlight_cache_valid = true;
+			}
+		}
+		else dlight_cache_valid = false;
+
 		for( msurface_t *surf = gl_lms.dynamic_surfaces; surf != NULL; surf = surf->info->lightmapchain )
 		{
 			mextrasurf_t	*info = surf->info;
@@ -1218,12 +1345,14 @@ static void R_BlendLightmaps( void )
 				base = gl_lms.lightmap_buffer;
 				base += ( surf->info->dlight_t * BLOCK_SIZE + surf->info->dlight_s ) * 4;
 
-				R_BuildLightMap( surf, base, BLOCK_SIZE * 4, true );
+				if( !dlight_skip )
+					R_BuildLightMap( surf, base, BLOCK_SIZE * 4, true );
 			}
 			else
 			{
 				// upload what we have so far
-				LM_UploadBlock( true );
+				if( !dlight_skip )
+					LM_UploadBlock( true );
 
 				// draw all surfaces that use this lightmap
 				msurface_t *drawsurf;
@@ -1247,12 +1376,13 @@ static void R_BlendLightmaps( void )
 				base = gl_lms.lightmap_buffer;
 				base += ( surf->info->dlight_t * BLOCK_SIZE + surf->info->dlight_s ) * 4;
 
-				R_BuildLightMap( surf, base, BLOCK_SIZE * 4, true );
+				if( !dlight_skip )
+					R_BuildLightMap( surf, base, BLOCK_SIZE * 4, true );
 			}
 		}
 
 		// draw remainder of dynamic lightmaps that haven't been uploaded yet
-		if( newsurf ) LM_UploadBlock( true );
+		if( newsurf && !dlight_skip ) LM_UploadBlock( true );
 
 		for( msurface_t *surf = newsurf; surf != NULL; surf = surf->info->lightmapchain )
 		{

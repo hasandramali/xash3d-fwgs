@@ -394,6 +394,7 @@ void GL_ApplyTextureParams( gl_texture_t *tex );
 int GL_FindTexture( const char *name );
 void GL_FreeTexture( unsigned int texnum );
 void R_InitDlightTexture( void );
+void R_DlightCacheInvalidate( void );
 void R_TextureList_f( void );
 void R_InitImages( void );
 void R_ShutdownImages( void );
@@ -813,6 +814,7 @@ extern convar_t r_ripple_updatetime;
 extern convar_t r_ripple_spawntime;
 extern convar_t r_large_lightmaps;
 extern convar_t r_scene_scale;
+extern convar_t r_dlight_cache;
 
 //
 // engine shared convars
