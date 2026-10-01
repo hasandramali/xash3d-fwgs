@@ -4,39 +4,39 @@ import android.app.Activity;
 import android.content.Context;
 import android.os.Build;
 import android.util.Log;
-import android.view.SurfaceHolder;
+import android.view.View;
 import org.libsdl.app.SDLSurface;
 
-/** Start SDL only after the fullscreen surface and rotation have settled. */
+/** Defer surface creation, never SDL's SurfaceHolder callbacks. */
 final class StartupSurface extends SDLSurface {
-    private SurfaceHolder pendingHolder;
-    private int pendingFormat, pendingWidth, pendingHeight;
     private int lastRotation = -1;
     private int stableFrames;
-    private boolean started;
+    private int lastWidth, lastHeight;
+    private boolean released;
     private boolean scheduled;
 
     StartupSurface(Context context) {
         super(context);
+        // INVISIBLE still participates in layout, but has no native surface.
+        // Delaying surfaceChanged alone leaves Android's surface transaction
+        // and SDL's native window initialization on different timelines.
+        setVisibility(View.INVISIBLE);
     }
 
     private final Runnable checkSurface = new Runnable() {
         @Override public void run() {
             scheduled = false;
-            SurfaceHolder holder = pendingHolder;
-            if (holder == null || !holder.getSurface().isValid()) return;
-
+            if (released) return;
             Activity activity = (Activity)getContext();
             boolean multiWindow = Build.VERSION.SDK_INT >= 24 && activity.isInMultiWindowMode();
             int rotation = mDisplay.getRotation();
-            // Focus and a valid landscape layout are prerequisites, not timers.
-            // Check across display frames so EGL cannot latch the launcher's
-            // portrait/pre-fullscreen buffer transform on the SDL thread.
             if (!hasWindowFocus() || (!multiWindow && getWidth() < getHeight())
                     || getWidth() <= 0 || getHeight() <= 0 || isLayoutRequested()
-                    || rotation != lastRotation) {
+                    || rotation != lastRotation || getWidth() != lastWidth || getHeight() != lastHeight) {
                 stableFrames = 0;
                 lastRotation = rotation;
+                lastWidth = getWidth();
+                lastHeight = getHeight();
             } else {
                 stableFrames++;
             }
@@ -44,11 +44,12 @@ final class StartupSurface extends SDLSurface {
                 scheduleCheck();
                 return;
             }
-            pendingHolder = null;
-            Log.i("XashActivity", "Starting SDL on settled surface "
-                    + pendingWidth + "x" + pendingHeight + " rotation=" + rotation);
-            StartupSurface.super.surfaceChanged(holder, pendingFormat, pendingWidth, pendingHeight);
-            started = mIsSurfaceReady;
+            released = true;
+            Log.i("XashActivity", "Creating SDL surface on settled layout "
+                    + getWidth() + "x" + getHeight() + " rotation=" + rotation);
+            // Android now dispatches surfaceCreated/surfaceChanged normally,
+            // including the native window's final rotation and buffer geometry.
+            setVisibility(View.VISIBLE);
         }
     };
 
@@ -59,26 +60,16 @@ final class StartupSurface extends SDLSurface {
         }
     }
 
-    @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        if (started) {
-            super.surfaceChanged(holder, format, width, height);
-            return;
-        }
-        pendingHolder = holder;
-        pendingFormat = format;
-        pendingWidth = width;
-        pendingHeight = height;
-        stableFrames = 0;
-        scheduleCheck();
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (!released) scheduleCheck();
     }
 
-    @Override public void surfaceDestroyed(SurfaceHolder holder) {
+    @Override protected void onDetachedFromWindow() {
         removeCallbacks(checkSurface);
         scheduled = false;
-        pendingHolder = null;
         stableFrames = 0;
         lastRotation = -1;
-        // Once SDL has started, retain its normal pause/resume/context lifecycle.
-        super.surfaceDestroyed(holder);
+        super.onDetachedFromWindow();
     }
 }
