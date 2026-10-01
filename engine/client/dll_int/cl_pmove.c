@@ -220,34 +220,42 @@ static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3
 		cmd, cl.parsecountmod, cl.time );
 
 	// On teleport-level snaps, dump nearby brush entities (submodel doors,
-	// walls, buttons): distinguishes "entity absent client-side" (no line
-	// for the expected *N model) from "entity present but misplaced" (origin
-	// far from here) in the next engine.log without extra commands.
+	// walls, buttons): brush origins are usually (0,0,0) by design, so use
+	// the model bounds. Tells in the next log whether the blocking brush
+	// exists client-side and where it is: absent from the list = never
+	// spawned/parsed here; present with far bounds = misplaced state.
 	if( teleported && clgame.entities )
 	{
-		vec3_t deltaEnt;
-		float distEnt;
+		vec3_t worldMins, worldMaxs;
 		int shown = 0;
 
 		for( int i = 1; i < clgame.maxEntities && shown < 8; i++ )
 		{
 			const cl_entity_t *e = &clgame.entities[i];
+			qboolean nearAxis[3];
+			int k;
 
 			if( !e->model || e->model->type != mod_brush )
 				continue;
 			if( e->curstate.modelindex <= 0 )
 				continue;
 
-			VectorSubtract( e->curstate.origin, ps->origin, deltaEnt );
-			distEnt = VectorLength( deltaEnt );
+			for( k = 0; k < 3; k++ )
+			{
+				worldMins[k] = e->model->mins[k] + e->curstate.origin[k];
+				worldMaxs[k] = e->model->maxs[k] + e->curstate.origin[k];
+				nearAxis[k] = ( ps->origin[k] + 64.0f >= worldMins[k] )
+					&& ( ps->origin[k] - 64.0f <= worldMaxs[k] );
+			}
 
-			if( distEnt > 1024.0f )
+			if( !( nearAxis[0] && nearAxis[1] && nearAxis[2] ))
 				continue;
 
-			Con_Printf( "PRED-TRACE: nearbrush eindex=%d model=%d org=(%.1f,%.1f,%.1f) dist=%.0f solid=%d effects=%d rendermode=%d\n",
+			Con_Printf( "PRED-TRACE: nearbrush eindex=%d model=%d mins=(%.0f,%.0f,%.0f) maxs=(%.0f,%.0f,%.0f) solid=%d effects=%d rendermode=%d\n",
 				e->curstate.number, e->curstate.modelindex,
-				e->curstate.origin[0], e->curstate.origin[1], e->curstate.origin[2],
-				distEnt, e->curstate.solid, e->curstate.effects, e->curstate.rendermode );
+				worldMins[0], worldMins[1], worldMins[2],
+				worldMaxs[0], worldMaxs[1], worldMaxs[2],
+				e->curstate.solid, e->curstate.effects, e->curstate.rendermode );
 			shown++;
 		}
 	}
