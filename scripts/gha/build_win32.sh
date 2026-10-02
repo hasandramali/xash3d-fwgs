@@ -43,13 +43,24 @@ WINSDK_LATEST=$(ls -1 "C:/Program Files (x86)/Windows Kits/10/bin" | grep -E '^1
 echo "Latest installed Windows SDK is $WINSDK_LATEST"
 
 "C:/Program Files (x86)/Windows Kits/10/bin/$WINSDK_LATEST/x64/signtool.exe" \
-	sign //f scripts/fwgs.pfx //fd SHA256 //p "$FWGS_PFX_PASSWORD" ./*.dll ./*.exe
+	sign //f scripts/fwgs.pfx //fd SHA256 //p "$FWGS_PFX_PASSWORD" ./*.dll ./*.exe || \
+	echo "WARNING: code signing failed (bad/missing PFX password), continuing with unsigned binaries"
 
 if [ "$ARCH" = "i386" ]; then # VGUI is already signed
-	cp 3rdparty/vgui_support/vgui-dev/lib/win32_vc6/vgui.dll .
+	if [ -f 3rdparty/vgui_support/vgui-dev/lib/win32_vc6/vgui.dll ]; then
+		cp 3rdparty/vgui_support/vgui-dev/lib/win32_vc6/vgui.dll .
+	else
+		echo "WARNING: prebuilt vgui.dll not present, skipping (freevgui build does not need it)"
+	fi
 fi
 
 mkdir -p artifacts/
+# NOTE: valve/ holds game content that is not built here; only pack it when present,
+# otherwise 7z exits 1 on the missing dir warning and fails the workflow.
+PACKAGE_FILES="./*.dll ./*.exe ./*.pdb activities.txt"
+if [ -d valve ]; then
+	PACKAGE_FILES="$PACKAGE_FILES valve/"
+fi
+# shellcheck disable=SC2086
 7z a -t7z "artifacts/xash3d-fwgs-win32-$ARCH.7z" -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on \
-	./*.dll ./*.exe ./*.pdb activities.txt \
-	valve/
+	$PACKAGE_FILES
