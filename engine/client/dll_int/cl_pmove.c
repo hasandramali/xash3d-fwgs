@@ -200,6 +200,20 @@ static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3
 	const clientdata_t *cd = &cl.frames[cmd].clientdata;
 	const usercmd_t *ucmd = &cl.commands[frame].cmd;
 	const float *pred = cl.local.predicted_origins[frame];
+	static float lastTeleportTime = -100.0f;
+	static float lastTeleportDist = -1.0f;
+
+	float teleportDelta = dist - lastTeleportDist;
+	// Identical back-to-back teleports (respawn settling, signon) used to
+	// flood the log with dozens of duplicate lines; keep one per second.
+	if( teleported && cl.time - lastTeleportTime < 1.0f
+		&& teleportDelta < 0.01f && teleportDelta > -0.01f )
+		return;
+	if( teleported )
+	{
+		lastTeleportTime = cl.time;
+		lastTeleportDist = dist;
+	}
 
 	Con_Printf( "PRED-TRACE: %s dist=%.3f delta=(%.2f,%.2f,%.2f) "
 		"srv_org=(%.1f,%.1f,%.1f) pred_org=(%.1f,%.1f,%.1f) "
