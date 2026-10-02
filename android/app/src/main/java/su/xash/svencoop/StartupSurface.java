@@ -3,11 +3,11 @@ package su.xash.svencoop;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.PixelCopy;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.View;
 import org.libsdl.app.SDLSurface;
@@ -113,48 +113,80 @@ final class StartupSurface extends SDLSurface {
                 return;
             }
             final Bitmap bitmap = Bitmap.createBitmap(BLACK_CHECK_SIZE, BLACK_CHECK_SIZE, Bitmap.Config.ARGB_8888);
-            try {
-                PixelCopy.request(holder.getSurface(), bitmap, new PixelCopy.OnPixelCopyFinishedListener() {
-                    @Override public void onPixelCopyFinished(int copyResult) {
-                        removeCallbacks(blackCheckTimeout);
-                        if (checkDone) {
-                            bitmap.recycle();
-                            return;
-                        }
-                        checkDone = true;
-                        if (copyResult != PixelCopy.SUCCESS) {
-                            Log.w("XashActivity", "Black-presentation copy failed (" + copyResult + "), treating as wedged");
-                            bitmap.recycle();
-                            recoverFromBlack();
-                            return;
-                        }
-                        boolean allBlack = true;
-                        for (int y = 0; y < bitmap.getHeight() && allBlack; y++) {
-                            for (int x = 0; x < bitmap.getWidth(); x++) {
-                                if ((bitmap.getPixel(x, y) & 0x00FFFFFF) != 0) {
-                                    allBlack = false;
-                                    break;
-                                }
-                            }
-                        }
-                        bitmap.recycle();
-                        if (!allBlack) {
-                            Log.i("XashActivity", "Black-presentation check passed");
-                            return;
-                        }
-                        Log.w("XashActivity", "Black presentation detected, recovering");
-                        recoverFromBlack();
-                    }
-                }, new Handler(Looper.getMainLooper()));
-                postDelayed(blackCheckTimeout, BLACK_CHECK_TIMEOUT_MS);
-            } catch (Exception e) {
-                Log.w("XashActivity", "Black-presentation copy threw, treating as wedged: " + e);
+            if (!requestPixelCopy(holder.getSurface(), bitmap)) {
+                Log.i("XashActivity", "Black-presentation copy unavailable; skipping check");
                 bitmap.recycle();
                 checkDone = true;
-                recoverFromBlack();
+                return;
             }
+            postDelayed(blackCheckTimeout, BLACK_CHECK_TIMEOUT_MS);
         }
     };
+
+    /**
+     * Screenshots the surface via android.graphics.PixelCopy using reflection,
+     * so this file still compiles against SDKs predating API 24 (the caller
+     * already guards by SDK_INT, and anything missing degrades to "skip").
+     * Returns false when the copy could not even be started.
+     */
+    private boolean requestPixelCopy(Surface surface, final Bitmap bitmap) {
+        try {
+            final Class<?> pixelCopyClass = Class.forName("android.graphics.PixelCopy");
+            final Class<?> listenerClass =
+                    Class.forName("android.graphics.PixelCopy$OnPixelCopyFinishedListener");
+            final int success = pixelCopyClass.getField("SUCCESS").getInt(null);
+            Object listener = java.lang.reflect.Proxy.newProxyInstance(
+                    getClass().getClassLoader(),
+                    new Class<?>[]{ listenerClass },
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) {
+                            if (method != null && "onPixelCopyFinished".equals(method.getName())) {
+                                onPixelCopyResult(args != null && args.length > 0 && args[0] instanceof Integer
+                                        ? (Integer) args[0] : Integer.MIN_VALUE, success, bitmap);
+                            }
+                            return null;
+                        }
+                    });
+            pixelCopyClass
+                    .getMethod("request", Surface.class, Bitmap.class, listenerClass, Handler.class)
+                    .invoke(null, surface, bitmap, listener, new Handler(Looper.getMainLooper()));
+            return true;
+        } catch (Exception e) {
+            Log.i("XashActivity", "PixelCopy unavailable (" + e.getClass().getSimpleName() + "); skipping check");
+            return false;
+        }
+    }
+
+    private void onPixelCopyResult(int copyResult, int success, Bitmap bitmap) {
+        removeCallbacks(blackCheckTimeout);
+        if (checkDone) {
+            bitmap.recycle();
+            return;
+        }
+        checkDone = true;
+        if (copyResult != success) {
+            Log.w("XashActivity", "Black-presentation copy failed (" + copyResult + "), treating as wedged");
+            bitmap.recycle();
+            recoverFromBlack();
+            return;
+        }
+        boolean allBlack = true;
+        for (int y = 0; y < bitmap.getHeight() && allBlack; y++) {
+            for (int x = 0; x < bitmap.getWidth(); x++) {
+                if ((bitmap.getPixel(x, y) & 0x00FFFFFF) != 0) {
+                    allBlack = false;
+                    break;
+                }
+            }
+        }
+        bitmap.recycle();
+        if (!allBlack) {
+            Log.i("XashActivity", "Black-presentation check passed");
+            return;
+        }
+        Log.w("XashActivity", "Black presentation detected, recovering");
+        recoverFromBlack();
+    }
 
     private void scheduleBlackCheck() {
         if (checkDone) return;
