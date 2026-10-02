@@ -1290,6 +1290,10 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 		// exec all files from userconfig.d
 		Cbuf_AddText( "userconfigd\n" );
 		Cbuf_Execute();
+
+		// parse commandline too (mobile launchers pass +commands via argv,
+		// e.g. Global Command-line Arguments); dedicated does the same below
+		host.stuffcmds_pending = true;
 		break;
 	case HOST_DEDICATED:
 		// allways parse commandline in dedicated-mode
