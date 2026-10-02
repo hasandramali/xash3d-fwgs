@@ -206,6 +206,7 @@ static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3
 		"srv_vel=(%.1f,%.1f,%.1f) simvel=(%.1f,%.1f,%.1f) "
 		"srv_ang=(%.1f,%.1f,%.1f) onground=%d wlevel=%d move=%d hull=%d "
 		"fric=%.2f grav=%.2f maxspd=%.0f msec=%d btn=%d mid=%d pfuser=%.1f smid=%d "
+		"hp=%d deadf=%d flags=%d smove=%d "
 		"ack=%u out=%u cmd=%d pcmod=%d t=%.3f\n",
 		teleported ? "teleport" : "error", dist, delta[0], delta[1], delta[2],
 		ps->origin[0], ps->origin[1], ps->origin[2],
@@ -218,6 +219,8 @@ static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3
 		ucmd->msec, ucmd->buttons,
 		cl.predicted_frames[frame].client.m_iId, cl.predicted_frames[frame].client.fuser4,
 		cd->m_iId,
+		ps->health, cd->deadflag, cd->flags,
+		cl.predicted_frames[frame].playerstate.movetype,
 		cls.netchan.incoming_acknowledged, cls.netchan.outgoing_sequence,
 		cmd, cl.parsecountmod, cl.time );
 
