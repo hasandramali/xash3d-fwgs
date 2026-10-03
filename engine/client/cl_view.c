@@ -537,6 +537,19 @@ void V_PostRender( void )
 	ref.dllFuncs.R_AllowFog( false );
 	ref.dllFuncs.R_Set2DMode( true );
 
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+	{
+		static int previous = -1;
+		int gate = (cls.state == ca_active) | ((cls.signon == SIGNONS) << 1)
+			| ((cls.scrshot_action != scrshot_mapshot) << 2) | (cl.video_prepped << 3);
+		if( gate != previous )
+		{
+			Con_Printf( "HUD-GATE: gate=%d state=%d signon=%d video=%d time=%.3f\n",
+				gate, cls.state, cls.signon, cl.video_prepped, cl.time );
+			previous = gate;
+		}
+	}
+
 	if( cls.state == ca_active && cls.signon == SIGNONS && cls.scrshot_action != scrshot_mapshot )
 	{
 		SCR_TileClear();

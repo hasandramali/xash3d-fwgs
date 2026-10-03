@@ -342,6 +342,9 @@ void GAME_EXPORT CL_WeaponAnim( int iAnim, int body )
 {
 	cl_entity_t *view = &clgame.viewent;
 
+	if( cl_trace_events.value )
+		Con_Printf( "WEAPON-ANIM: seq=%d body=%d previous=%d model=%d time=%.3f\n",
+			iAnim, body, cl.local.weaponsequence, cl.local.viewmodel, cl.time );
 	cl.local.weaponstarttime = 0.0f;
 	cl.local.weaponsequence = iAnim;
 	view->curstate.framerate = 1.0f;

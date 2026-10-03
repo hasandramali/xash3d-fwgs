@@ -794,7 +794,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 			// unknown weapon: if a console weapon_<name> switch was observed
 			// right before this CurWeapon, register it under that class name;
 			// otherwise let the auto-scan fall back to weapon_<id>
-			if( state > 0 && cl_weaponlistfix_state.pending_name[0] &&
+			if( ( state & 1 ) && cl_weaponlistfix_state.pending_name[0] &&
 			    cl.time - cl_weaponlistfix_state.pending_time <= CL_WEAPONLISTFIX_PENDING_TIMEOUT )
 			{
 				weapon = CL_WeaponListFix_AddNamedWeapon( id, cl_weaponlistfix_state.pending_name );
@@ -813,7 +813,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		// a console weapon_<name> switch put the real class name on this id;
 		// the automatic weapon_<id> fallback gets replaced so the inventory
 		// shows weapon_crowbar instead of weapon_31
-		if( state > 0 && cl_weaponlistfix_state.pending_name[0] )
+		if( ( state & 1 ) && cl_weaponlistfix_state.pending_name[0] )
 		{
 			if( cl.time - cl_weaponlistfix_state.pending_time > CL_WEAPONLISTFIX_PENDING_TIMEOUT )
 			{
@@ -834,7 +834,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		weapon->clip = clip;
 		weapon->ammo = ammo;
 
-		if( state > 0 )
+		if( ( state & 1 ) )
 		{
 			cl_weaponlistfix_state.active_weapon = id;
 		}
