@@ -79,15 +79,9 @@ def main():
 			  "-DSDL_DUMMYAUDIO=OFF", "-DSDL_DUMMYVIDEO=OFF",
 			  "-DSDL_VULKAN=OFF", "-DSDL_OFFSCREEN=OFF", "-DSDL_STATIC=OFF")
 
-	# configure hlsdk-portable: prefer the fork working tree at the repo root
-	# (svencoop branch with our client fixes). If it is missing, clone our
-	# own repo - never FWGS, this fork has no relation to it.
-	hlsdk_path = os.path.join(args.wscript_path, "hlsdk-portable")
-	if os.path.isdir(hlsdk_path):
-		print("using in-tree hlsdk-portable at {}".format(hlsdk_path))
-	else:
-		hlsdk_path = os.path.join(args.wscript_path, "3rdparty", "hlsdk-portable")
-		check_repo("hlsdk-portable", "svencoop", "https://github.com/hasandramali/hlsdk-portable", hlsdk_path)
+	# configure hlsdk-portable
+	hlsdk_path = os.path.join(args.wscript_path, "3rdparty", "hlsdk-portable")
+	check_repo("hlsdk-portable", "mobile_hacks", "https://github.com/FWGS/hlsdk-portable", hlsdk_path)
 
 	hlsdk_out_path = os.path.join(args.configuration_dir, "hlsdk-portable")
 
