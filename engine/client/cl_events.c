@@ -222,9 +222,10 @@ static qboolean CL_FireEvent( event_info_t *ei, int slot )
 
 			if( cl_trace_events.value )
 			{
-				Con_Printf( "^3EVENT %s AT %.2f %.2f %.2f\n"    // event name
+				Con_Printf( "^3EVENT %s AT %.2f %.2f %.2f ent=%d local=%d\n"    // event name
 					"\t%.2f %.2f %i %i %s %s\n", // bool params
 					name, ei->args.origin[0], ei->args.origin[1], ei->args.origin[2],
+					ei->args.entindex, cl.playernum + 1,
 					ei->args.fparam1, ei->args.fparam2,
 					ei->args.iparam1, ei->args.iparam2,
 					ei->args.bparam1 ? "TRUE" : "FALSE", ei->args.bparam2 ? "TRUE" : "FALSE" );
@@ -425,6 +426,9 @@ void CL_ParseEvent( sizebuf_t *msg, connprotocol_t proto )
 		int packet_index;
 		float delay;
 		int event_index = MSG_ReadUBitLong( msg, MAX_EVENT_BITS );
+
+		// Every event is delta-coded from zero, never from the preceding event.
+		args = nullargs;
 
 		if( MSG_ReadOneBit( msg ))
 		{
