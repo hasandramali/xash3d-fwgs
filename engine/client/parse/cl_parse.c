@@ -489,8 +489,6 @@ void CL_BatchResourceRequest( qboolean initialize )
 			CL_MoveToOnHandList( p );
 			break;
 		case t_world:
-			// Sven Co-op sends world/check resources with this type;
-			// GoldSrc client ignores them (world model arrives as t_model idx 1)
 			break;
 		}
 	}
