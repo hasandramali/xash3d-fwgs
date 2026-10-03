@@ -1244,7 +1244,25 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 }
 
 /*
-==============
+===================
+HTTP_GetDownloadedBytes
+
+Total bytes received so far across all queued/in-flight downloads.
+See net_ws.h for why the signon watchdog needs this.
+===================
+*/
+size_t HTTP_GetDownloadedBytes( void )
+{
+	size_t total = 0;
+
+	for( httpfile_t *curfile = http.first_file; curfile; curfile = curfile->next )
+		total += (size_t)curfile->downloaded;
+
+	return total;
+}
+
+/*
+===================
 HTTP_Run
 
 Download next file block of each active file

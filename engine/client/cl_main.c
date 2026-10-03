@@ -338,6 +338,7 @@ static int	stallSignon = -1;
 static int	stallState = -1;
 static int	stallResCount = -1;
 static int	stallFragBytes = -1;
+static size_t	stallHttpBytes = (size_t)-1;
 static int	stallAutos = 0;
 
 static int CL_StallResCount( void )
@@ -369,6 +370,7 @@ static void CL_StallWatchdogReset( void )
 	stallAutos = 0;
 	stallSignon = -1;
 	stallFragBytes = -1;
+	stallHttpBytes = (size_t)-1;
 	stallProgress = 0.0;
 }
 
@@ -455,8 +457,9 @@ static void CL_CheckClientState( void )
 		float timeout = cl_stall_timeout.value;
 		int rc = CL_StallResCount();
 		int fragBytes = CL_StallFragBytes();
+		size_t httpBytes = HTTP_GetDownloadedBytes();
 		qboolean progressed = ( cls.signon != stallSignon || (int)cls.state != stallState
-			|| rc != stallResCount || fragBytes != stallFragBytes || stallProgress == 0.0 );
+			|| rc != stallResCount || fragBytes != stallFragBytes || httpBytes != stallHttpBytes || stallProgress == 0.0 );
 
 		if( progressed )
 		{
@@ -464,6 +467,7 @@ static void CL_CheckClientState( void )
 			stallState = (int)cls.state;
 			stallResCount = rc;
 			stallFragBytes = fragBytes;
+			stallHttpBytes = httpBytes;
 			stallProgress = host.realtime;
 		}
 
