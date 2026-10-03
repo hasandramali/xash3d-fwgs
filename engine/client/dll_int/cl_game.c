@@ -1220,6 +1220,11 @@ SPR_DrawGeneric
 draw hudsprite routine
 ====================
 */
+// Submission counts distinguish HUD logic from a renderer visibility problem.
+// Sample only while cl_goldsrc_debug is enabled; never query GPU state here.
+static qboolean hud_trace_drawing;
+static unsigned hud_trace_sprites, hud_trace_invalid, hud_trace_black;
+
 static void SPR_DrawGeneric( int frame, float x, float y, float width, float height, const wrect_t *prc )
 {
 	float	s1, s2, t1, t2;
@@ -1270,6 +1275,13 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 	// scale for screen sizes
 	SPR_AdjustSize( &x, &y, &width, &height );
 	ref.dllFuncs.Color4ub( clgame.ds.spriteColor[0], clgame.ds.spriteColor[1], clgame.ds.spriteColor[2], clgame.ds.spriteColor[3] );
+	if( hud_trace_drawing )
+	{
+		hud_trace_sprites++;
+		if( !texnum ) hud_trace_invalid++;
+		if( !(clgame.ds.spriteColor[0] | clgame.ds.spriteColor[1] | clgame.ds.spriteColor[2]) )
+			hud_trace_black++;
+	}
 	ref.dllFuncs.R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, texnum );
 }
 
@@ -1866,6 +1878,10 @@ void CL_DrawHUD( int state )
 	if( state == CL_ACTIVE && cl.paused )
 		state = CL_PAUSED;
 
+	hud_trace_drawing = (state == CL_ACTIVE || state == CL_PAUSED)
+		&& Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1;
+	hud_trace_sprites = hud_trace_invalid = hud_trace_black = 0;
+
 	switch( state )
 	{
 	case CL_ACTIVE:
@@ -1901,6 +1917,23 @@ void CL_DrawHUD( int state )
 		}
 		break;
 	}
+	if( hud_trace_drawing )
+	{
+		static double nextReport;
+		static unsigned minSprites = ~0u, maxSprites, invalid, black;
+		minSprites = Q_min( minSprites, hud_trace_sprites );
+		maxSprites = Q_max( maxSprites, hud_trace_sprites );
+		invalid += hud_trace_invalid;
+		black += hud_trace_black;
+		if( host.realtime >= nextReport )
+		{
+			Con_Printf( "HUD-SUBMIT: sprites=%u..%u invalid=%u black=%u weapons=0x%08x time=%.3f\n",
+				minSprites, maxSprites, invalid, black, (unsigned)cl.local.weapons, cl.time );
+			nextReport = host.realtime + 1.0;
+			minSprites = ~0u; maxSprites = invalid = black = 0;
+		}
+	}
+	hud_trace_drawing = false;
 }
 
 static void CL_ClearUserMessage( char *pszName, int svc_num )
