@@ -28,6 +28,11 @@ void CL_ResourcePath( char *filepath, size_t size, const resource_t *pResource )
 	if( pResource->type == t_sound )
 		Q_snprintf( filepath, size, DEFAULT_SOUNDPATH "%s", pResource->szFileName );
 	else Q_strncpy( filepath, pResource->szFileName, size );
+
+	// Sven servers send Windows-style paths (models\barney.mdl). Normalize
+	// to forward slashes so the safety check, the local-file lookup and the
+	// download target all agree; stock clients accept both.
+	COM_FixSlashes( filepath );
 }
 
 /*

@@ -207,7 +207,12 @@ static qboolean CL_FireEvent( event_info_t *ei, int slot )
 		if( !ev )
 		{
 			int idx = bound( 1, ei->index, ( MAX_EVENTS - 1 ));
-			Con_Reportf( S_ERROR "%s: %s not precached\n", __func__, cl.event_precache[idx] );
+			Con_Reportf( S_ERROR "%s: %s not precached (idx=%d origin=%.1f %.1f %.1f fp=%.3f %.3f ip=%d %d b=%d %d ent=%d)\n",
+				__func__, cl.event_precache[idx], ei->index,
+				ei->args.origin[0], ei->args.origin[1], ei->args.origin[2],
+				ei->args.fparam1, ei->args.fparam2,
+				ei->args.iparam1, ei->args.iparam2,
+				ei->args.bparam1, ei->args.bparam2, ei->args.entindex );
 			break;
 		}
 
@@ -232,7 +237,12 @@ static qboolean CL_FireEvent( event_info_t *ei, int slot )
 				return true;
 			}
 
-			Con_Reportf( S_ERROR "%s: %s not hooked\n", __func__, name );
+			Con_Reportf( S_ERROR "%s: %s not hooked (idx=%d origin=%.1f %.1f %.1f fp=%.3f %.3f ip=%d %d b=%d %d ent=%d)\n",
+				__func__, name, ei->index,
+				ei->args.origin[0], ei->args.origin[1], ei->args.origin[2],
+				ei->args.fparam1, ei->args.fparam2,
+				ei->args.iparam1, ei->args.iparam2,
+				ei->args.bparam1, ei->args.bparam2, ei->args.entindex );
 			break;
 		}
 	}

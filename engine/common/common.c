@@ -800,7 +800,11 @@ qboolean COM_IsSafeFileToDownload( const char *filename )
 	if( last == NULL )
 		return false;
 
-	if( Q_strlen( last ) != 4 )
+	// NOTE: was `Q_strlen( last ) != 4`, which only allowed 3-letter
+	// extensions and silently refused Sven event scripts (events/*.sc)
+	// among others. Any non-empty extension is fine here: executables
+	// stay banned via file_exts, and loaders only act on types they know.
+	if( Q_strlen( last ) < 2 )
 		return false;
 
 	for( int i = 0; i < ARRAYSIZE( file_exts ); i++ )
