@@ -113,6 +113,15 @@ qboolean CL_CheckFile( sizebuf_t *msg, resource_t *pResource )
 	if( Host_IsLocalClient() || CL_HasResourceFile( pResource, filepath ))
 		return true;
 
+	// proven missing on fastdl (404) and on the game server (txferfailed):
+	// asking again every batch/reconnect wedges the join in a download
+	// loop, so join without it (a manually installed copy still wins above)
+	if( COM_WasMissingRemoteFile( filepath ))
+	{
+		Con_DPrintf( "skipping known-missing %s\n", filepath );
+		return true;
+	}
+
 	if( cls.demoplayback )
 	{
 		Con_Reportf( S_WARN "file %s missing during demo playback.\n", filepath );

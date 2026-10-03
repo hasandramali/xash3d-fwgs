@@ -816,6 +816,54 @@ qboolean COM_IsSafeFileToDownload( const char *filename )
 	return true;
 }
 
+#define MAX_MISSING_REMOTE	128
+static char missingRemote[MAX_MISSING_REMOTE][MAX_QPATH];
+static int missingRemoteCount = 0;
+
+void COM_NoteMissingRemoteFile( const char *filepath )
+{
+	char fixed[MAX_QPATH];
+
+	if( COM_StringEmptyOrNULL( filepath ))
+		return;
+
+	Q_strncpy( fixed, filepath, sizeof( fixed ));
+	COM_FixSlashes( fixed );
+
+	for( int i = 0; i < missingRemoteCount; i++ )
+	{
+		if( !Q_stricmp( missingRemote[i], fixed ))
+			return; // already known missing
+	}
+
+	if( missingRemoteCount < MAX_MISSING_REMOTE )
+		Q_strncpy( missingRemote[missingRemoteCount++], fixed, MAX_QPATH );
+}
+
+qboolean COM_WasMissingRemoteFile( const char *filepath )
+{
+	char fixed[MAX_QPATH];
+
+	if( COM_StringEmptyOrNULL( filepath ))
+		return false;
+
+	Q_strncpy( fixed, filepath, sizeof( fixed ));
+	COM_FixSlashes( fixed );
+
+	for( int i = 0; i < missingRemoteCount; i++ )
+	{
+		if( !Q_stricmp( missingRemote[i], fixed ))
+			return true;
+	}
+
+	return false;
+}
+
+void COM_ClearMissingRemoteFiles( void )
+{
+	missingRemoteCount = 0;
+}
+
 char *_copystring( poolhandle_t mempool, const char *s, const char *filename, int fileline )
 {
 	if( !s ) return NULL;

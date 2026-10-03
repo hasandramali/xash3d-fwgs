@@ -1059,6 +1059,10 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 					{
 					case 404:
 						Con_Printf( S_ERROR "%s: file not found\n", curfile->path );
+						// definitive: not on fastdl. Remember it so later
+						// batches (and watchdog reconnects) don't re-request
+						// a file that exists nowhere instead of joining.
+						COM_NoteMissingRemoteFile( curfile->path );
 						break;
 					default:
 						Con_Printf( S_ERROR "%s: bad response: %s\n", curfile->path, curfile->buf );

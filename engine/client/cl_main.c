@@ -482,7 +482,9 @@ static void CL_CheckClientState( void )
 			CL_Disconnect(); // clears the server-side ghost slot
 			cls.state = ca_connecting; // CheckForResend fetches a new challenge
 			cls.signon = 0;
-			cls.connect_time = MAX_HEARTBEAT;
+			// brief breather before re-challenging: lets a ghost slot on
+			// the server side expire instead of stacking a new one on top
+			cls.connect_time = host.realtime;
 			cls.connect_retry = 0;
 			return;
 		}
@@ -1860,6 +1862,7 @@ static void CL_Connect_f( void )
 	cls.max_fragment_size = FRAGMENT_MAX_SIZE; // guess a we can establish connection with maximum fragment size
 	cls.connect_retry = 0;
 	CL_StallWatchdogReset(); // manual connect: fresh auto-retry budget
+	COM_ClearMissingRemoteFiles(); // new server: re-probe every file
 	memset( &cls.bandwidth_test, 0, sizeof( cls.bandwidth_test ));
 	cls.spectator = false;
 	cls.signon = 0;
@@ -2151,6 +2154,10 @@ void CL_Disconnect_f( void )
 	if( Host_IsLocalClient( ))
 		Host_EndGame( true, "disconnected from server\n" );
 	else CL_Disconnect();
+
+	// manual disconnect: forget session-missing files, the next server
+	// may well have them (watchdog auto-reconnects keep the cache)
+	COM_ClearMissingRemoteFiles();
 }
 
 void CL_Crashed( void )
@@ -3599,6 +3606,9 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 	else if( !successfully_received )
 	{
 		Con_Printf( S_ERROR "server failed to transmit file '%s'\n", CL_CleanFileName( filename ));
+		// definitive: the game server doesn't have it either. Remember it
+		// so we stop asking every batch/reconnect and can join without it.
+		COM_NoteMissingRemoteFile( filename );
 	}
 
 	// Sven soundcache (maps/soundcache/<map>.txt) requested via "dlfile" from
