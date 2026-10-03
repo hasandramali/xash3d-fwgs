@@ -1219,7 +1219,7 @@ void CL_PredictMovement( qboolean repredicting )
 	{
 		cl_entity_t	*ent = CL_GetEntityByIndex( cl.local.lastground );
 		cl.local.onground = cl.local.lastground;
-		cl.local.moving = false;
+		cl.local.moving = cl_sven_proto && FBitSet( to->client.flags, FL_ONTRAIN );
 
 		if( ent )
 		{
@@ -1227,7 +1227,8 @@ void CL_PredictMovement( qboolean repredicting )
 
 			delta[0] = ent->curstate.origin[0] - ent->prevstate.origin[0];
 			delta[1] = ent->curstate.origin[1] - ent->prevstate.origin[1];
-			delta[2] = 0.0f;
+			// Vertical pushers need the same view smoothing as horizontal trains.
+			delta[2] = cl_sven_proto ? ent->curstate.origin[2] - ent->prevstate.origin[2] : 0.0f;
 
 			if( VectorLength( delta ) > 0.0f )
 			{

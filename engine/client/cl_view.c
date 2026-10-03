@@ -163,7 +163,12 @@ static void V_SetRefParams( ref_params_t *fd )
 		cl.first_frame = false;		// now can be unlocked
 		fd->smoothing = true;		// NOTE: currently this used to prevent ugly un-duck effect while level is changed
 	}
-	else fd->smoothing = cl.local.pushmsec;		// enable smoothing in multiplayer by server request (AMX uses)
+	else
+	{
+		// Sven does not transmit Xash's pushmsec extension. Activate the
+		// client's existing train/lift view interpolation from ground motion.
+		fd->smoothing = cl.local.pushmsec || ( cl_sven_proto && cl.local.moving );
+	}
 
 	// get pointers to movement vars and user cmd
 	fd->movevars = &clgame.movevars;
