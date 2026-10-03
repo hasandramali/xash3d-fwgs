@@ -79,9 +79,15 @@ def main():
 			  "-DSDL_DUMMYAUDIO=OFF", "-DSDL_DUMMYVIDEO=OFF",
 			  "-DSDL_VULKAN=OFF", "-DSDL_OFFSCREEN=OFF", "-DSDL_STATIC=OFF")
 
-	# configure hlsdk-portable
-	hlsdk_path = os.path.join(args.wscript_path, "3rdparty", "hlsdk-portable")
-	check_repo("hlsdk-portable", "mobile_hacks", "https://github.com/FWGS/hlsdk-portable", hlsdk_path)
+	# configure hlsdk-portable: prefer the fork working tree at the repo root
+	# (svencoop branch with our client fixes); fall back to a stock clone
+	# under 3rdparty so clean checkouts keep working.
+	hlsdk_path = os.path.join(args.wscript_path, "hlsdk-portable")
+	if os.path.isdir(hlsdk_path):
+		print("using in-tree hlsdk-portable at {}".format(hlsdk_path))
+	else:
+		hlsdk_path = os.path.join(args.wscript_path, "3rdparty", "hlsdk-portable")
+		check_repo("hlsdk-portable", "mobile_hacks", "https://github.com/FWGS/hlsdk-portable", hlsdk_path)
 
 	hlsdk_out_path = os.path.join(args.configuration_dir, "hlsdk-portable")
 
