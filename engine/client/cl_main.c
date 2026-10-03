@@ -1949,6 +1949,10 @@ void CL_ClearState( void )
 	NetAPI_CancelAllRequests();
 
 	// wipe the entire cl structure
+	// DLL hooks persist across maps, but event indices belong to one server.
+	for( int i = 0; i < MAX_EVENTS && clgame.events[i]; i++ )
+		clgame.events[i]->index = 0;
+
 	memset( &cl, 0, sizeof( cl ));
 	MSG_Clear( &cls.netchan.message );
 	memset( &clgame.fade, 0, sizeof( clgame.fade ));

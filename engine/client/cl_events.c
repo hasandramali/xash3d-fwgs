@@ -139,7 +139,12 @@ void CL_SetEventIndex( const char *szEvName, int ev_index )
 		if( !Q_stricmp( ev->name, szEvName ))
 		{
 			ev->index = ev_index;
-			return;
+		}
+		else if( ev->index == ev_index )
+		{
+			// Hook callbacks survive server changes; precache numbers do not.
+			// Invalidate the previous server's owner of this number.
+			ev->index = 0;
 		}
 	}
 }
@@ -196,7 +201,7 @@ CL_FireEvent
 */
 static qboolean CL_FireEvent( event_info_t *ei, int slot )
 {
-	if( !ei || !ei->index )
+	if( !ei || ei->index <= 0 || ei->index >= MAX_EVENTS )
 		return false;
 
 	// get the func pointer
@@ -216,7 +221,7 @@ static qboolean CL_FireEvent( event_info_t *ei, int slot )
 			break;
 		}
 
-		if( ev->index == ei->index )
+		if( ev->index == ei->index && !Q_stricmp( ev->name, cl.event_precache[ei->index] ))
 		{
 			const char *name = cl.event_precache[ei->index];
 
