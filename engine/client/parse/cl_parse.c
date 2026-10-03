@@ -113,9 +113,6 @@ static void CL_ParseSoundPacket( sizebuf_t *msg, qboolean restore )
 		MSG_ReadBytes( msg, &forcedEnd, sizeof( forcedEnd ), sizeof( forcedEnd ));
 	}
 
-	// One concise line per vanilla sound so door-type interactions stay visible
-	// at debug 1 (Sven sessions normally never use this path; if one ever does,
-	// the resolved precache name — or its absence — shows here, not in 107).
 	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 	{
 		const char *vname = "(not precached)";
@@ -191,13 +188,6 @@ static void CL_ParseSignon( sizebuf_t *msg, connprotocol_t proto )
 
 	if( i <= cls.signon )
 	{
-		// Sven hw.dll does NOT treat a lower/equal signon as fatal: it logs the
-		// regression and re-runs the signon reply path without disconnecting
-		// (reverse verified: CL_ParseSignonNum hw.dll RVA 0x2F970 — the current
-		// signon global is left untouched). Xash's previous CL_Disconnect() here
-		// produced the "dropclient" kick followed by a clgame.entities == NULL
-		// crash while draining the rest of the datagram. Keep the connection and
-		// let the remaining svc commands (lightstyle/signon refresh) parse.
 		Con_Reportf( S_WARN "received signon %i when at %i\n", i, cls.signon );
 		CL_SignonReply( proto );
 		return;
@@ -720,11 +710,6 @@ CL_ParseResourceRequest
 */
 void CL_SendResourceList( const resource_t *list, int count )
 {
-	// Sven reads the client resource-list reply as a plain reliable message.
-	// Send it on the direct reliable channel instead of the fragment framework:
-	// a small (single-packet) reply must not carry the fragment flag, otherwise
-	// Sven's SV_ReadClientMessage despairs on the fragment reassembly and keeps
-	// returning "badread", never acknowledging the reply (reliable deadlock).
 	MSG_BeginClientCmd( &cls.netchan.message, clc_resourcelist );
 	MSG_WriteShort( &cls.netchan.message, count );
 
