@@ -1254,10 +1254,10 @@ static void CL_WritePacket( void )
 		{
 			cl.delta_sequence = cl.validsequence;
 			MSG_BeginClientCmd( &buf, clc_delta );
-			// Sven reads clc_delta's sequence as a 16-bit field
-			// (SV_ParseDelta PROTO_BITS_SVEN_DELTA_SEQUENCE), stock GoldSrc as a byte
+			// Sven reads an unsigned 16-bit sequence. WriteShort discards bit 15
+			// for positive values >= 32768, requesting the wrong delta base.
 			if( proto == PROTO_GOLDSRC )
-				MSG_WriteShort( &buf, cl.validsequence & 0xffff );
+				MSG_WriteWord( &buf, cl.validsequence & 0xffff );
 			else MSG_WriteByte( &buf, cl.validsequence & 0xff );
 		}
 		else cl.delta_sequence = -1;
