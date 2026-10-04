@@ -301,6 +301,12 @@ void CL_CheckPredictionError( void )
 	frame = ( cls.netchan.incoming_acknowledged ) & CL_UPDATE_MASK;
 	cmd = cl.parsecountmod;
 
+	// Ring indices alone do not identify a prediction. During entity resync
+	// prediction can stop while commands/ACKs continue and reuse these slots.
+	if( cl_sven_proto && ( !cl.local.predicted_command_valid[frame]
+		|| cl.local.predicted_commands[frame] != (uint)cls.netchan.incoming_acknowledged ))
+		return;
+
 	// compare what the server returned with what we had predicted it to be
 	VectorSubtract( cl.frames[cmd].playerstate[cl.playernum].origin, cl.local.predicted_origins[frame], delta );
 	dist = VectorLength( delta );
@@ -1105,6 +1111,30 @@ CL_PredictMovement
 Sets cl.predicted.origin and cl.predicted.angles
 =================
 */
+static qboolean CL_UseClientDataDuringResync( const frame_t *frame )
+{
+	// A clientdata update can be usable while its entity delta needs a full
+	// resend. Follow that authoritative position instead of freezing at the
+	// last rendered position and later treating old command slots as teleports.
+	if( cl_sven_proto && ( !cl.validsequence || !frame->valid )
+		&& frame->clientdata_sequence == cl.parsecount && cl.parsecount > 0 )
+	{
+		VectorCopy( frame->clientdata.origin, cl.simorg );
+		VectorCopy( frame->clientdata.velocity, cl.simvel );
+		VectorCopy( frame->clientdata.punchangle, cl.punchangle );
+		VectorCopy( frame->clientdata.view_ofs, cl.viewheight );
+		VectorCopy( cl.simorg, cl.local.lastorigin );
+		cls.correction_time = 0;
+		cl.local.moving = false;
+		cl.local.repredicting = false;
+		cl.local.onground = FBitSet( frame->clientdata.flags, FL_ONGROUND ) ? 0 : -1;
+		cl.local.waterlevel = frame->clientdata.waterlevel;
+		return true;
+	}
+
+	return false;
+}
+
 void CL_PredictMovement( qboolean repredicting )
 {
 	runcmd_t		*to_cmd = NULL, *from_cmd;
@@ -1119,6 +1149,9 @@ void CL_PredictMovement( qboolean repredicting )
 
 	if( cls.demoplayback && !repredicting )
 		CL_DemoInterpolateAngles();
+
+	frame = &cl.frames[cl.parsecountmod];
+	if( CL_UseClientDataDuringResync( frame )) return;
 
 	CL_SetUpPlayerPrediction( false, false );
 
@@ -1181,6 +1214,8 @@ void CL_PredictMovement( qboolean repredicting )
 
 		CL_RunUsercmd( from, to, &to_cmd->cmd, runfuncs, &time, current_command );
 		VectorCopy( to->playerstate.origin, cl.local.predicted_origins[current_command_mod] );
+		cl.local.predicted_commands[current_command_mod] = current_command;
+		cl.local.predicted_command_valid[current_command_mod] = true;
 		to_cmd->processedfuncs = true;
 
 		if( to_cmd->senttime >= host.realtime )

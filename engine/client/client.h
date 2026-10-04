@@ -59,6 +59,7 @@ typedef struct frame_s
 	double		time;		// server timestamp
 	qboolean		valid;		// cleared if delta parsing was invalid
 	int entity_sequence; // exact sequence whose entity snapshot occupies this slot
+	int clientdata_sequence; // independent identity: packets can omit entities
 	qboolean		choked;
 
 	clientdata_t	clientdata;	// local client private data
@@ -125,6 +126,8 @@ typedef struct
 {
 	// got from prediction system
 	vec3_t		predicted_origins[CMD_BACKUP];
+	uint predicted_commands[CMD_BACKUP];
+	qboolean predicted_command_valid[CMD_BACKUP];
 	vec3_t		prediction_error;
 	vec3_t		lastorigin;
 	int		lastground;

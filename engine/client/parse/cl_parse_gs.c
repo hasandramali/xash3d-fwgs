@@ -516,6 +516,15 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 
 		if( !CL_ValidateDeltaPacket( oldpacket, oldframe ))
 		{
+			static double nextReport;
+			if( host.realtime >= nextReport )
+			{
+				nextReport = host.realtime + 1.0;
+				Con_DPrintf( "Sven entity resync: seq=%d base=%u stored=%d valid=%d age=%u ring=%d/%d\n",
+					cls.netchan.incoming_sequence, oldpacket, oldframe->entity_sequence, oldframe->valid,
+					( cls.netchan.incoming_sequence - oldpacket ) & 0xffff,
+					cls.next_client_entities - oldframe->first_entity, cls.num_client_entities );
+			}
 			MSG_StartBitWriting( msg );
 			CL_FlushEntityPacketGS( frame, msg );
 			MSG_EndBitWriting( msg );

@@ -1052,6 +1052,7 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	cl.parsecount = i;					// ack'd incoming messages.
 	cl.parsecountmod = cl.parsecount & CL_UPDATE_MASK;	// index into window.
 	frame = &cl.frames[cl.parsecountmod];			// frame at index.
+	if( cl_sven_proto ) frame->clientdata_sequence = -1;
 
 	if( cl_sven_proto ) frame->valid = false; // this slot has not received entities yet
 	frame->time = cl.mtime[0];				// mark network received time
@@ -1147,6 +1148,29 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 		else
 			delta_sequence = MSG_ReadByte( msg );
 
+		if( cl_sven_proto )
+		{
+			const frame_t *base = &cl.frames[delta_sequence & CL_UPDATE_MASK];
+			int age = ( cls.netchan.incoming_sequence - delta_sequence ) & 0xffff;
+			if( age == 0 || age >= CL_UPDATE_BACKUP || base->clientdata_sequence <= 0
+				|| base->clientdata_sequence != cls.netchan.incoming_sequence - age )
+			{
+				// The stream is delta-coded against data we no longer own.
+				// Discard it rather than synthesize a position from a reused slot.
+				static double nextReport;
+				if( host.realtime >= nextReport )
+				{
+					nextReport = host.realtime + 1.0;
+					Con_DPrintf( "Sven clientdata resync: seq=%d base=%d stored=%d age=%d\n",
+						cls.netchan.incoming_sequence, delta_sequence, base->clientdata_sequence, age );
+				}
+				frame->valid = false;
+				cl.validsequence = 0;
+				MSG_SeekToBit( msg, 0, SEEK_END );
+				return;
+			}
+		}
+
 		from_cd = &cl.frames[delta_sequence & CL_UPDATE_MASK].clientdata;
 		from_wd = cl.frames[delta_sequence & CL_UPDATE_MASK].weapondata;
 	}
@@ -1193,6 +1217,9 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 			MSG_ReadWeaponData( msg, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
 		}
 	}
+
+	if( cl_sven_proto && !MSG_CheckOverflow( msg ))
+		frame->clientdata_sequence = cls.netchan.incoming_sequence;
 
 	// make a local copy of physinfo
 	Q_strncpy( cls.physinfo, frame->clientdata.physinfo, sizeof( cls.physinfo ));
