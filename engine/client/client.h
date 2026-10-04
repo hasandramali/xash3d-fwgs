@@ -822,6 +822,7 @@ qboolean CL_HasResourceFile( const resource_t *pResource, const char *filepath )
 void CL_AddToResourceList( resource_t *pResource, resource_t *pList );
 void CL_RemoveFromResourceList( resource_t *pResource );
 void CL_MoveToOnHandList( resource_t *pResource );
+void CL_CompleteFileResources( const char *filename, qboolean received );
 void CL_ClearResourceLists( void );
 void CL_DumpHex( const char *name, const void *data, size_t size );
 void CL_SendResourceList( const resource_t *list, int count );
@@ -894,6 +895,7 @@ void CL_PlaybackEvent( int flags, const edict_t *pInvoker, word eventindex, floa
 void CL_RegisterEvent( int lastnum, const char *szEvName, pfnEventHook func );
 void CL_ResetEvent( event_info_t *ei );
 word CL_EventIndex( const char *name );
+qboolean CL_HasEventHook( const char *name );
 void CL_FireEvents( void );
 
 //

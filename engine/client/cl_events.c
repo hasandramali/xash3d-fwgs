@@ -155,6 +155,17 @@ CL_EventIndex
 
 =============
 */
+qboolean CL_HasEventHook( const char *name )
+{
+	if( COM_StringEmptyOrNULL( name )) return false;
+	for( int i = 0; i < MAX_EVENTS && clgame.events[i]; ++i )
+	{
+		const cl_user_event_t *ev = clgame.events[i];
+		if( ev->func && !Q_stricmp( ev->name, name )) return true;
+	}
+	return false;
+}
+
 word CL_EventIndex( const char *name )
 {
 	if( COM_StringEmptyOrNULL( name ))

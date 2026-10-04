@@ -528,8 +528,9 @@ static void CL_AddLinksToPmove( frame_t *frame )
 		if( state->solid == SOLID_TRIGGER || ( state->solid == SOLID_NOT && state->skin >= CONTENTS_EMPTY ))
 			continue;
 
-		// dead body
-		if( state->mins[2] == 0.0f && state->maxs[2] == 1.0f )
+		// Stock HL excludes flat corpses. Sven hw.dll 0x1d22530 proceeds
+		// directly to the hull-size check: these one-unit boxes stay solid.
+		if( !cl_sven_proto && state->mins[2] == 0.0f && state->maxs[2] == 1.0f )
 			continue;
 
 		// can't collide with zeroed hull

@@ -3681,6 +3681,9 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 		CL_MoveToOnHandList( p );
 	}
 
+	// Resolve canonical-path matches left behind by the legacy name lookup.
+	CL_CompleteFileResources( filename, successfully_received );
+
 	if( cls.state != ca_disconnected )
 	{
 		host.downloadcount = 0;

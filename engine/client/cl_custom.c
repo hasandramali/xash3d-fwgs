@@ -45,6 +45,12 @@ qboolean CL_HasResourceFile( const resource_t *pResource, const char *filepath )
 {
 	char cachepath[MAX_SYSPATH];
 
+	// Native Sven events execute DLL callbacks; no script bytes are read.
+	// Keep the server's name/index registration, but don't download a file
+	// when its handler is already installed. Unknown scripts still download.
+	if( cl_sven_proto && pResource->type == t_eventscript && CL_HasEventHook( filepath ))
+		return true;
+
 	// only the download cache is ours to verify and refetch, whatever the game itself provides is none of the server's business
 	COM_DownloadCachePath( cachepath, sizeof( cachepath ), filepath, false );
 
@@ -184,6 +190,25 @@ void CL_MoveToOnHandList( resource_t *pResource )
 
 	CL_RemoveFromResourceList( pResource );
 	CL_AddToResourceList( pResource, &cl.resourcesonhand );
+}
+
+// Download requests use canonical paths; resource names may use backslashes.
+// Complete every matching resource entry, including aliases of the same file.
+void CL_CompleteFileResources( const char *filename, qboolean received )
+{
+	char normalized[MAX_QPATH];
+	if( COM_StringEmptyOrNULL( filename ) || filename[0] == '!' ) return;
+	Q_strncpy( normalized, filename, sizeof( normalized ));
+	COM_FixSlashes( normalized );
+	for( resource_t *p = cl.resourcesneeded.pNext, *next; p != &cl.resourcesneeded; p = next )
+	{
+		char path[MAX_QPATH];
+		next = p->pNext;
+		CL_ResourcePath( path, sizeof( path ), p );
+		if( Q_stricmp( path, normalized )) continue;
+		if( received ) ClearBits( p->ucFlags, RES_WASMISSING );
+		CL_MoveToOnHandList( p );
+	}
 }
 
 static void CL_ClearResourceList( resource_t *pList )
