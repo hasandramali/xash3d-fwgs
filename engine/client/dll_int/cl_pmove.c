@@ -333,8 +333,10 @@ void CL_CheckPredictionError( void )
 
 		VectorCopy( cl.frames[cmd].playerstate[cl.playernum].origin, cl.local.predicted_origins[frame] );
 
-		// save for error interpolation
-		VectorCopy( delta, cl.local.prediction_error );
+		// A matching snapshot must not erase an in-progress Sven correction.
+		// The offset is consumed over time independently of new movement.
+		if( !cl_sven_proto || dist > MIN_CORRECTION_DISTANCE || cls.correction_time <= 0 )
+			VectorCopy( delta, cl.local.prediction_error );
 
 		// GoldSrc checks for singleplayer
 		// we would check for local server
@@ -1111,6 +1113,21 @@ CL_PredictMovement
 Sets cl.predicted.origin and cl.predicted.angles
 =================
 */
+static void CL_SmoothSvenPrediction( qboolean repredicting )
+{
+	if( cls.correction_time <= 0 || cl_nosmooth.value || cl_smoothtime.value <= 0 )
+		return;
+
+	if( !repredicting )
+		cls.correction_time -= host.frametime;
+	cls.correction_time = bound( 0.0, cls.correction_time, cl_smoothtime.value );
+
+	// Keep all newly predicted movement (notably the initial Gauss impulse).
+	// Fade only the server-minus-prediction error, not the player's velocity.
+	VectorMA( cl.simorg, -cls.correction_time / cl_smoothtime.value,
+		cl.local.prediction_error, cl.simorg );
+}
+
 static qboolean CL_UseClientDataDuringResync( const frame_t *frame )
 {
 	// A clientdata update can be usable while its entity delta needs a full
@@ -1309,7 +1326,9 @@ void CL_PredictMovement( qboolean repredicting )
 		cl.local.moving = false;
 	}
 
-	if( cls.correction_time > 0 && !cl_nosmooth.value && cl_smoothtime.value )
+	if( cl_sven_proto )
+		CL_SmoothSvenPrediction( repredicting );
+	else if( cls.correction_time > 0 && !cl_nosmooth.value && cl_smoothtime.value )
 	{
 		vec3_t delta;
 		float frac;
