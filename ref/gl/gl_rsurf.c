@@ -14,6 +14,7 @@ GNU General Public License for more details.
 */
 
 #include "gl_local.h"
+#include "../common/ref_texture_anim.h"
 #include "xash3d_mathlib.h"
 #include "mod_local.h"
 #include "atlas.h"
@@ -575,6 +576,9 @@ static texture_t *R_TextureAnim( texture_t *b )
 	texture_t *base = b;
 	int	reletive;
 
+	if( RI.currententity && FBitSet( RI.currententity->curstate.effects, EF_SVEN_FRAMEANIMTEXTURES ))
+		return R_TextureFrame( base, RI.currententity->curstate.frame );
+
 	if( RI.currententity->curstate.frame )
 	{
 		if( base->alternate_anims )
@@ -590,6 +594,9 @@ static texture_t *R_TextureAnim( texture_t *b )
 	}
 	else
 	{
+		if( RI.currententity && FBitSet( RI.currententity->curstate.effects, EF_SVEN_NOANIMTEXTURES ))
+			return base;
+
 		int	speed;
 
 		// Quake1 textures uses 10 frames per second
@@ -626,6 +633,9 @@ static texture_t *R_TextureAnimation( msurface_t *s )
 	texture_t	*base = s->texinfo->texture;
 	int	reletive;
 
+	if( RI.currententity && FBitSet( RI.currententity->curstate.effects, EF_SVEN_FRAMEANIMTEXTURES ))
+		return R_TextureFrame( base, RI.currententity->curstate.frame );
+
 	if( RI.currententity && RI.currententity->curstate.frame )
 	{
 		if( base->alternate_anims )
@@ -644,6 +654,9 @@ static texture_t *R_TextureAnimation( msurface_t *s )
 	}
 	else
 	{
+		if( RI.currententity && FBitSet( RI.currententity->curstate.effects, EF_SVEN_NOANIMTEXTURES ))
+			return base;
+
 		int	speed;
 
 		// Quake1 textures uses 10 frames per second

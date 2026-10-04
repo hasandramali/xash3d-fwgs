@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_surf.c: surface-related refresh code
 
 #include "r_local.h"
+#include "../common/ref_texture_anim.h"
 #include "mod_local.h"
 
 drawsurf_t r_drawsurf;
@@ -241,6 +242,9 @@ static texture_t *R_TextureAnimation( msurface_t *s )
 	texture_t *base = s->texinfo->texture;
 	int       reletive;
 
+	if( RI.currententity && FBitSet( RI.currententity->curstate.effects, EF_SVEN_FRAMEANIMTEXTURES ))
+		return R_TextureFrame( base, RI.currententity->curstate.frame );
+
 	if( RI.currententity && RI.currententity->curstate.frame )
 	{
 		if( base->alternate_anims )
@@ -259,6 +263,9 @@ static texture_t *R_TextureAnimation( msurface_t *s )
 	}
 	else
 	{
+		if( RI.currententity && FBitSet( RI.currententity->curstate.effects, EF_SVEN_NOANIMTEXTURES ))
+			return base;
+
 		int speed;
 
 		// Quake1 textures uses 10 frames per second

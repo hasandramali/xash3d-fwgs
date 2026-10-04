@@ -114,6 +114,10 @@
 #define EF_LIGHT			64	// rocket flare glow sprite
 #define EF_NODRAW			128	// don't draw entity
 
+// Sven brush texture controls (not studio-model effect aliases).
+#define EF_SVEN_NOANIMTEXTURES  (1U<<8)
+#define EF_SVEN_FRAMEANIMTEXTURES (1U<<9)
+
 #define EF_WATERSIDES		(1U<<26)	// Do not remove sides for func_water entity
 #define EF_FULLBRIGHT		(1U<<27)	// Just get fullbright
 #define EF_NOSHADOW			(1U<<28)	// ignore shadow for this entity
