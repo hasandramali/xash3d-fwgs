@@ -165,8 +165,8 @@ static void V_SetRefParams( ref_params_t *fd )
 	}
 	else
 	{
-		// Sven does not transmit Xash's pushmsec extension. Activate the
-		// client's existing train/lift view interpolation from ground motion.
+		// Keep the server pushmsec request and also recognize moving ground
+		// when enabling the client's train/lift view interpolation.
 		fd->smoothing = cl.local.pushmsec || ( cl_sven_proto && cl.local.moving );
 	}
 

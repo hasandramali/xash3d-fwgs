@@ -999,6 +999,33 @@ CL_RunUsercmd
 Runs prediction code for user cmd
 =================
 */
+// Sample the actual post-move ground, not entity_state.onground (which
+// Sven does not necessarily transmit). Use cl_showerror 1 for a small log.
+static void CL_TraceTransport( const local_state_t *from, const playermove_t *pm )
+{
+	static double nextReport;
+	if( !cl_sven_proto || cl_showerror.value < 1 || host.realtime < nextReport )
+		return;
+	nextReport = host.realtime + 1.0;
+	const physent_t *ground = pm->onground >= 0 && pm->onground < pm->numphysent
+		? &pm->physents[pm->onground] : NULL;
+	const cl_entity_t *ent = ground ? CL_GetEntityByIndex( ground->info ) : NULL;
+	vec3_t shift = { 0 };
+	if( ent ) VectorSubtract( ent->curstate.origin, ent->prevstate.origin, shift );
+	Con_Printf( "PRED-TRANSPORT: t=%.3f ground=%d ent=%d solid=%d physents=%d "
+		"flags=%x->%x pushmsec=%d move=%d->%d orgZ=%.3f->%.3f "
+		"vel=(%.2f,%.2f,%.2f) base=(%.2f,%.2f,%.2f) "
+		"groundShift=(%.3f,%.3f,%.3f) dt=%.4f vsmooth=%.3f\n",
+		cl.time, pm->onground, ground ? ground->info : -1, ground ? ground->solid : -1,
+		pm->numphysent, (unsigned)from->client.flags, (unsigned)pm->flags,
+		cl.local.pushmsec, from->playerstate.movetype, pm->movetype,
+		from->playerstate.origin[2], pm->origin[2],
+		from->client.velocity[0], from->client.velocity[1], from->client.velocity[2],
+		from->playerstate.basevelocity[0], from->playerstate.basevelocity[1], from->playerstate.basevelocity[2],
+		shift[0], shift[1], shift[2], ent ? ent->curstate.msg_time - ent->prevstate.msg_time : 0,
+		Cvar_VariableValue( "cl_vsmoothing" ));
+}
+
 static void CL_RunUsercmd( local_state_t *from, local_state_t *to, usercmd_t *u, qboolean runfuncs, double *time, unsigned int random_seed )
 {
 	usercmd_t		cmd;
@@ -1035,6 +1062,7 @@ static void CL_RunUsercmd( local_state_t *from, local_state_t *to, usercmd_t *u,
 		if( clgame.pmove->onground > 0 && clgame.pmove->onground < clgame.pmove->numphysent )
 			cl.local.lastground = clgame.pmove->physents[clgame.pmove->onground].info;
 		else cl.local.lastground = clgame.pmove->onground; // world(0) or in air(-1)
+		if( runfuncs ) CL_TraceTransport( from, clgame.pmove );
 	}
 
 	clgame.dllFuncs.pfnPostRunCmd( from, to, &cmd, runfuncs, *time, random_seed );
