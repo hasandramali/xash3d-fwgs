@@ -1542,7 +1542,8 @@ static void Delta_DebugFieldValue( const delta_t *pField, const void *to, char *
 
 static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const void *from, void *to, double timebase )
 {
-	uint8_t bits[8] = { 0 };
+	// The four-bit wire count can describe up to fifteen mask bytes.
+	uint8_t bits[16] = { 0 };
 	delta_t *pField;
 	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
 	int entryBit;
@@ -1561,7 +1562,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 	// visible in a single engine.log.
 	if( dbg >= 6 )
 	{
-		char flags[8 * 3 + 1];
+		char flags[16 * 3 + 1];
 		int nflags = Q_min( c, (int)sizeof( bits ));
 		for( i = 0; i < nflags; i++ )
 			Q_snprintf( flags + i * 3, sizeof( flags ) - i * 3, "%02x%s", bits[i], i + 1 < nflags ? " " : "" );

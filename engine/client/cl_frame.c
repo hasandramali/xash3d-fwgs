@@ -501,10 +501,14 @@ static int CL_InterpolateModel( cl_entity_t *e )
 	if( e->model->type == mod_brush && !cl_bmodelinterp.value )
 		return 1;
 
-	if( cl.local.moving && cl.local.onground == e->index )
+	qboolean riding = cl.local.moving && cl.local.onground == e->index;
+	if( riding && !cl_sven_proto )
 		return 1;
 
-	double delay = cl_interp.value;
+	// Sven's view buffers moving-ground motion. Render the supporting brush
+	// on that same timeline; leaving it at the latest packet makes it jump
+	// underneath an otherwise smoothed camera. Collision still uses curstate.
+	double delay = riding ? Q_max( 0.0, Cvar_VariableValue( "cl_vsmoothing" )) : cl_interp.value;
 	if( CL_SvenNPCLerp( e ))
 	{
 		const position_history_t *latest = &e->ph[e->current_position & HISTORY_MASK];
@@ -653,6 +657,20 @@ static void CL_ResetLatchedState( int pnum, frame_t *frame, cl_entity_t *ent )
 	}
 }
 
+// A Sven packet can omit the local entity (for example when it is hidden).
+// clientdata still carries its authoritative position. A recycled frame slot
+// must not seed prediction with the local player's position from a ring ago.
+static void CL_CompleteLocalPlayerState( frame_t *frame )
+{
+	entity_state_t state;
+	if( !cl_sven_proto || frame->playerstate[cl.playernum].messagenum == cl.parsecount )
+		return;
+	state = clgame.entities[cl.playernum + 1].curstate;
+	state.number = cl.playernum + 1;
+	clgame.dllFuncs.pfnTxferLocalOverrides( &state, &frame->clientdata );
+	CL_ProcessPlayerState( cl.playernum, &state );
+}
+
 /*
 =================
 CL_ProcessPacket
@@ -687,8 +705,13 @@ void CL_ProcessPacket( frame_t *frame )
 
 		CL_ProcessPlayerState(( state->number - 1 ), state );
 
-		if( state->number == ( cl.playernum + 1 ))
+		if( !cl_sven_proto && state->number == cl.playernum + 1 )
 			CL_CheckPredictionError();
+	}
+	if( cl_sven_proto )
+	{
+		CL_CompleteLocalPlayerState( frame );
+		CL_CheckPredictionError();
 	}
 }
 

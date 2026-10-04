@@ -89,7 +89,9 @@ void CL_RedoPrediction( void )
 	if ( cls.netchan.incoming_sequence != cls.lastupdate_sequence )
 	{
 		CL_PredictMovement( true );
-		CL_CheckPredictionError();
+		// Sven checks once, after a complete entity snapshot. A packet without
+		// entities must not compare an old playerstate from a recycled slot.
+		if( !cl_sven_proto ) CL_CheckPredictionError();
 	}
 }
 
