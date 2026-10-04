@@ -99,7 +99,7 @@ CVAR_DEFINE_AUTO( rate, "25000", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, 
 CVAR_DEFINE_AUTO( cl_ticket_generator, "steam", FCVAR_READ_ONLY|FCVAR_PRIVILEGED, "you wouldn't steal a car" );
 static CVAR_DEFINE_AUTO( cl_goldsrc_debug, "0", 0, "goldSrc connection debug level: 0=off, 1=signon state/seq, 2=+outgoing packet hexdumps (connect/move/reliable), 3=+incoming packet hexdumps & per-message detail, 4=+delta field-level bit ledger (every parsed field with bit positions), 5=+full delta table fieldlist dump on parse error" );
 static CVAR_DEFINE_AUTO( cl_sven_soundcache, "1", FCVAR_ARCHIVE, "Sven sound system: 1=load maps/soundcache/<map>.txt and play svc107 through it (stock behavior), 0=silent" );
-static CVAR_DEFINE_AUTO( cl_stall_timeout, "5", 0, "Signon stall watchdog: seconds with zero signon/resource/download progress before a fresh auto-reconnect (new challenge+ticket), 0=off" );
+static CVAR_DEFINE_AUTO( cl_stall_timeout, "6", 0, "Signon stall watchdog: seconds with zero signon/resource/download progress before a fresh auto-reconnect (new challenge+ticket), 0=off" );
 static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
@@ -360,8 +360,11 @@ static int CL_StallFragBytes( void )
 	int n = 0;
 	fragbuf_t *p;
 
-	for( p = cls.netchan.incomingbufs[FRAG_FILE_STREAM]; p; p = p->next )
-		n += MSG_GetNumBytesWritten( &p->frag_message );
+	// Resource lists and baselines arrive on the normal fragment stream.
+	// They are real progress too, even before the assembled message parses.
+	for( int stream = 0; stream < MAX_STREAMS; stream++ )
+		for( p = cls.netchan.incomingbufs[stream]; p; p = p->next )
+			n += MSG_GetNumBytesWritten( &p->frag_message );
 	return n;
 }
 
@@ -471,9 +474,14 @@ static void CL_CheckClientState( void )
 			stallProgress = host.realtime;
 		}
 
-		if( timeout > 0.0f && stallAutos < CL_STALL_MAXAUTO
-			&& host.realtime - stallProgress > timeout )
+		if( timeout > 0.0f && host.realtime - stallProgress > timeout )
 		{
+			if( stallAutos >= CL_STALL_MAXAUTO )
+			{
+				Con_Printf( "Server signon did not resume after %d reconnects; disconnecting. Please retry when the server is ready.\n", CL_STALL_MAXAUTO );
+				CL_Disconnect();
+				return;
+			}
 			Con_Printf( "Signon stalled with no progress for %.0fs, reconnecting fresh (attempt %d/%d)...\n",
 				timeout, stallAutos + 1, CL_STALL_MAXAUTO );
 			stallAutos++;

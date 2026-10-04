@@ -18,6 +18,9 @@
 
 #include "xash3d_types.h"
 
+// Engine already aligned simorg to the rendered supporting platform.
+#define VIEW_SMOOTH_PLATFORM 2
+
 typedef struct ref_params_s
 {
 	// output

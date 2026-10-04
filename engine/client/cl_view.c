@@ -118,6 +118,23 @@ static void V_SetupViewModel( void )
 V_SetRefParams
 ===============
 */
+static qboolean V_AlignPlatformView( ref_params_t *fd, const cl_entity_t *ground )
+{
+	vec3_t offset;
+	if( !cl_sven_proto || !cl.local.moving || cl.local.onground <= 0
+		|| !ground || ground->curstate.solid != SOLID_BSP )
+		return false;
+
+	// Collision/prediction uses the current snapshot. Only the platform's
+	// render displacement should be delayed, never the player's own input.
+	VectorSubtract( ground->origin, ground->curstate.origin, offset );
+	if( VectorLength( offset ) >= 64.0f )
+		return false;
+	VectorAdd( fd->simorg, offset, fd->simorg );
+	fd->smoothing = VIEW_SMOOTH_PLATFORM;
+	return true;
+}
+
 static void V_SetRefParams( ref_params_t *fd )
 {
 	memset( fd, 0, sizeof( ref_params_t ));
@@ -169,6 +186,8 @@ static void V_SetRefParams( ref_params_t *fd )
 		// when enabling the client's train/lift view interpolation.
 		fd->smoothing = cl.local.pushmsec || ( cl_sven_proto && cl.local.moving );
 	}
+
+	V_AlignPlatformView( fd, CL_GetEntityByIndex( cl.local.onground ));
 
 	// get pointers to movement vars and user cmd
 	fd->movevars = &clgame.movevars;

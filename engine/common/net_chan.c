@@ -1562,6 +1562,20 @@ transmition / retransmition of the reliable messages.
 A 0 length will still generate a packet and deal with the reliable messages.
 ================
 */
+static qboolean Netchan_ShouldResendReliable( const netchan_t *chan )
+{
+	if( chan->reliable_length <= 0
+		|| chan->incoming_reliable_acknowledged == chan->reliable_sequence )
+		return false;
+
+	// GoldSrc toggles on every received reliable payload. Only a later ACK
+	// proves that the previous payload was lost; a timer cannot prove loss.
+	if( chan->gs_netchan )
+		return chan->incoming_acknowledged > chan->last_reliable_sequence;
+
+	return host.realtime - chan->last_reliable_send_time >= NETCHAN_RELIABLE_RESEND_TIME;
+}
+
 void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 {
 	byte	send_buf[NET_MAX_MESSAGE];
@@ -1585,44 +1599,7 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	// if the remote side dropped the last reliable message, resend it
 	send_reliable = false;
 
-	// GoldSrc reference gate: resend an unacked reliable payload as soon as
-	// the peer acknowledges a packet beyond it. On links with a small uplink
-	// MTU (mobile hotspot) a big payload (e.g. a large file-upload fragment)
-	// never fits into a single datagram: the gate then crams the full payload
-	// into EVERY outgoing packet, every frame, starving the acked
-	// small/unreliable packets until the peer declares a reliable overflow
-	// and disconnects us. Throttle retransmits to NETCHAN_RELIABLE_RESEND_TIME
-	// (same cadence as the lost-packet fallback below) so acks and movement
-	// packets keep flowing between retransmits.
-	if( chan->incoming_acknowledged > chan->last_reliable_sequence && chan->incoming_reliable_acknowledged != chan->reliable_sequence )
-	{
-		if( host.realtime - chan->last_reliable_send_time >= NETCHAN_RELIABLE_RESEND_TIME )
-			send_reliable = true;
-	}
-
-	// Lost-packet fallback for asymmetric/lossy links (WiFi): the reference
-	// GoldSrc gate above requires the peer to cumulatively acknowledge a
-	// packet BEYOND the reliable one before resending. If the reliable
-	// packet itself was dropped, the peer never acks it and the gate stays
-	// locked forever, stranding the reliable queue and overflowing the
-	// peer's outgoing reliable buffer. This is the SAME lock class we see
-	// with a peer that acknowledges packets but never flips the reliable
-	// ack bit (its own reliable queue/fragment path is stuck): incoming_
-	// acknowledged keeps advancing past last_reliable_sequence, so the
-	// "<" gate above can never fire and the reliable payload is stranded
-	// at reliable_length for the whole session (jitter: TXDROP every
-	// frame, reliable_bits pinned at 8192).
-	//
-	// Resend on a timeout instead, whenever the peer demonstrably has NOT
-	// flipped its reliable-ack bit (incoming_reliable_acknowledged !=
-	// reliable_sequence). Whether its cumulative acknowledgment already
-	// passed the reliable packet is irrelevant: if the bit never flipped,
-	// the payload has never been executed on the peer, so re-sending it
-	// can never be re-executed there by this fallback.
-	if( !send_reliable && chan->reliable_length > 0
-		&& chan->incoming_reliable_acknowledged != chan->reliable_sequence
-		&& ( host.realtime - chan->last_reliable_send_time >= NETCHAN_RELIABLE_RESEND_TIME ))
-		send_reliable = true;
+	send_reliable = Netchan_ShouldResendReliable( chan );
 
 	// A packet can have "reliable payload + frag payload + unreliable payload
 	// frag payload can be a file chunk, if so, it needs to be parsed on the receiving end and reliable payload + unreliable payload need
@@ -1871,9 +1848,9 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 	if( send_reliable )
 	{
 		MSG_WriteBits( &send, chan->reliable_buf, chan->reliable_length );
-		// anchor the confirmation gate to the FIRST transmission of this
-		// reliable payload; retransmits must not race the peer's acknowledgements
-		if( reliable_fresh )
+		// GoldSrc must wait for an ACK beyond the latest retry before retrying
+		// again; anchoring this to the first send produces duplicate delivery.
+		if( chan->gs_netchan || reliable_fresh )
 			chan->last_reliable_sequence = chan->outgoing_sequence - 1;
 		// stamp every transmission (first + retransmits) so the lost-packet
 		// fallback keeps a sane resend cadence for a stuck reliable queue
