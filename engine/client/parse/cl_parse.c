@@ -1275,6 +1275,8 @@ void CL_ParseBaseline( sizebuf_t *msg, connprotocol_t proto )
 			MSG_ReadDeltaEntity( msg, &nullstate, &cl.instanced_baseline[i], newnum, false, 1.0f );
 		}
 	}
+	if( proto == PROTO_GOLDSRC && !MSG_CheckOverflow( msg ))
+		CL_GSBaselinesComplete();
 }
 
 /*

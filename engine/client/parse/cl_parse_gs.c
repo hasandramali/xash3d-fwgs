@@ -42,6 +42,17 @@ on-wire Svengine entity index space). Cleared on every CL_ClearState.
 #define GS_BASELINE_SLOTS	( 1 << MAX_GOLDSRC_ENTITY_BITS )
 
 static qboolean gs_baseline_rx[GS_BASELINE_SLOTS];
+static qboolean gs_baselines_ready;
+
+qboolean CL_GSBaselinesReady( void )
+{
+	return gs_baselines_ready;
+}
+
+void CL_GSBaselinesComplete( void )
+{
+	gs_baselines_ready = true;
+}
 
 static void CL_GSGarbageReset( void );
 
@@ -59,6 +70,7 @@ void CL_GSBaselineSet( int entnum )
 
 void CL_GSBaselineResetAll( void )
 {
+	gs_baselines_ready = false;
 	memset( gs_baseline_rx, 0, sizeof( gs_baseline_rx ));
 	CL_GSGarbageReset();
 }
@@ -649,8 +661,16 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	if( frame->num_entities != count )
 		Con_Reportf( S_WARN "CL_Parse%sPacketEntitiesGS: (%i should be %i)\n", delta ? "Delta" : "", frame->num_entities, count );
 
+	// Unreliable entity updates can arrive before the fragmented reliable
+	// baseline stream has been parsed. Never acknowledge those snapshots as
+	// delta bases: omitted model/solid fields would remain zero indefinitely.
+	if( cl_sven_proto && !CL_GSBaselinesReady() )
+		frame->valid = false;
 	if( !frame->valid )
+	{
+		cl.validsequence = 0; // request a full snapshot after baselines arrive
 		return playerbytes;
+	}
 
 	if( dbg >= 4 )
 	{
