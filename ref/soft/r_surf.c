@@ -290,6 +290,139 @@ static texture_t *R_TextureAnimation( msurface_t *s )
 	return base;
 }
 
+// Flashlight fullbright bake (r_dynamic 0): the software renderer reads
+// surf->samples live every frame, so whitening them is sufficient - no
+// texture upload needed. Same walk/throttle/dedup rules as the GL path.
+#define FLASHLIGHT_BAKE_INTERVAL	0.25f
+
+static vec3_t flashBakePos;
+static float flashBakeRadius;
+static qboolean flashBakePending;
+static float flashBakeLastTime;
+
+void R_FlashlightBake( const vec3_t pos, float radius )
+{
+	VectorCopy( pos, flashBakePos );
+	flashBakeRadius = radius;
+	flashBakePending = true;
+}
+
+static qboolean R_SurfCenter( model_t *mod, msurface_t *surf, vec3_t center )
+{
+	int n, i;
+
+	center[0] = center[1] = center[2] = 0.0f;
+	n = surf->numedges < 8 ? surf->numedges : 8;
+	if( n <= 0 )
+		return false;
+	// NOTE: software renderer only supports 16-bit edges (like the rest
+	// of r_bsp.c), so edges16 is correct here unconditionally.
+	for( i = 0; i < n; i++ )
+	{
+		int e = mod->surfedges[surf->firstedge + i];
+		int ie = e >= 0 ? e : -e;
+		medge16_t *edge;
+		int v;
+
+		if( ie <= 0 || ie >= mod->numedges )
+			return false;
+		edge = &mod->edges16[ie];
+		v = edge->v[e >= 0 ? 0 : 1];
+		if( v < 0 || v >= mod->numvertexes )
+			return false;
+		center[0] += mod->vertexes[v].position[0];
+		center[1] += mod->vertexes[v].position[1];
+		center[2] += mod->vertexes[v].position[2];
+	}
+	center[0] /= n; center[1] /= n; center[2] /= n;
+	return true;
+}
+
+static void R_TryBakeSurface( model_t *mod, msurface_t *surf, const vec3_t pos, float radius )
+{
+	vec3_t center, delta;
+	mextrasurf_t *info;
+	int sample_size, smax, tmax, size, map;
+
+	if( !surf->samples )
+		return;
+	if( FBitSet( surf->flags, SURF_DRAWTURB | SURF_DRAWSKY | SURF_DRAWTILED ))
+		return;
+	if( surf->samples[0].r == 255 && surf->samples[0].g == 255 && surf->samples[0].b == 255 )
+		return; // already baked
+	if( !R_SurfCenter( mod, surf, center ))
+		return;
+
+	delta[0] = pos[0] - center[0];
+	delta[1] = pos[1] - center[1];
+	delta[2] = pos[2] - center[2];
+	if( DotProduct( delta, delta ) > radius * radius )
+		return;
+	if( DotProduct( surf->plane->normal, delta ) <= 0.0f )
+		return; // backface: no light bleed through walls
+
+	info = surf->info;
+	sample_size = gEngfuncs.Mod_SampleSizeForFace( surf );
+	smax = ( info->lightextents[0] / sample_size ) + 1;
+	tmax = ( info->lightextents[1] / sample_size ) + 1;
+	size = smax * tmax;
+
+	for( map = 0; map < MAXLIGHTMAPS; map++ )
+	{
+		color24 *lm;
+		int i;
+
+		if( surf->styles[map] >= 255 )
+			break;
+		lm = &surf->samples[map * size];
+		for( i = 0; i < size; i++ )
+			lm[i].r = lm[i].g = lm[i].b = 255;
+	}
+}
+
+void R_ProcessFlashlightBake( void )
+{
+	int i;
+
+	if( !flashBakePending )
+		return;
+	flashBakePending = false;
+
+	if( r_dynamic->value )
+		return; // dynamic path handles the flashlight; nothing to bake
+	if( !WORLDMODEL || !WORLDMODEL->lightdata )
+		return;
+	if( gp_cl->time - flashBakeLastTime < FLASHLIGHT_BAKE_INTERVAL )
+	{
+		flashBakePending = true; // retry when due; newer requests coalesce
+		return;
+	}
+	flashBakeLastTime = gp_cl->time;
+
+	for( i = 0; i < WORLDMODEL->numsurfaces; i++ )
+		R_TryBakeSurface( WORLDMODEL, &WORLDMODEL->surfaces[i], flashBakePos, flashBakeRadius );
+
+	if( tr.draw_list )
+	{
+		for( i = 0; i < (int)tr.draw_list->num_solid_entities; i++ )
+		{
+			cl_entity_t *ent = tr.draw_list->solid_entities[i];
+			model_t *model;
+			matrix4x4 matrix;
+			vec3_t localPos;
+
+			if( !ent || !( model = ent->model ) || model->type != mod_brush )
+				continue;
+
+			Matrix4x4_CreateFromEntity( matrix, ent->angles, ent->origin, 1.0f );
+			Matrix4x4_VectorITransform( matrix, flashBakePos, localPos );
+
+			for( int s = 0; s < model->nummodelsurfaces; s++ )
+				R_TryBakeSurface( model, &model->surfaces[model->firstmodelsurface + s], localPos, flashBakeRadius );
+		}
+	}
+}
+
 /*
 ===============
 R_DrawSurface

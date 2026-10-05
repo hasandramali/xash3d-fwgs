@@ -32,6 +32,7 @@ TEMPENTS MANAGEMENT
 ==============================================================
 */
 #define FLASHLIGHT_DISTANCE		2000	// in units
+#define FLASHLIGHT_BAKE_RADIUS		256.0f	// fullbright bake pool around the hit point (r_dynamic 0)
 #define SHARD_VOLUME		12.0f	// on shard ever n^3 units
 #define MAX_MUZZLEFLASH		3
 
@@ -2636,6 +2637,12 @@ static void CL_UpdateFlashlight( cl_entity_t *ent )
 	VectorMA( vecSrc, FLASHLIGHT_DISTANCE, forward, vecEnd );
 
 	trace = CL_TraceLine( vecSrc, vecEnd, PM_STUDIO_BOX );
+
+	// Flashlight with r_dynamic 0: permanently paint the world lightmaps
+	// fullbright around the hit point (the renderer skips this unless
+	// r_dynamic is off, throttles and dedups internally: ~zero steady cost).
+	// Accepted side effect per design: swept areas stay lit for the session.
+	ref.dllFuncs.R_FlashlightBake( trace.endpos, FLASHLIGHT_BAKE_RADIUS );
 
 	// update flashlight endpos
 	dl = CL_AllocDlight( ent->index );

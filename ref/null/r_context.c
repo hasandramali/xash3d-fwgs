@@ -178,6 +178,11 @@ static int R_CreateDecalList( struct decallist_s *pList )
 	return 0;
 }
 
+static void R_FlashlightBake( const vec3_t pos, float radius )
+{
+	(void)pos; (void)radius; // null renderer bakes nothing
+}
+
 static float R_StudioEstimateFrame( cl_entity_t *e, mstudioseqdesc_t *pseqdesc, double time )
 {
 	return 0.0f;
@@ -376,6 +381,7 @@ static const ref_interface_t gReffuncs =
 	.R_DecalRemoveAll  = R_SimpleStubInt,
 	.R_CreateDecalList = R_CreateDecalList,
 	.R_ClearAllDecals  = R_SimpleStubBool,
+	.R_FlashlightBake  = R_FlashlightBake,
 
 	.R_StudioEstimateFrame = R_StudioEstimateFrame,
 	.R_StudioLerpMovement  = R_StudioLerpMovement,

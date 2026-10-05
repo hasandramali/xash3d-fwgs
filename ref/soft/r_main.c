@@ -1064,6 +1064,10 @@ void GAME_EXPORT R_RenderScene( void )
 	// begin a new frame
 	tr.framecount++;
 
+	// flashlight fullbright bake (r_dynamic 0): process pending client
+	// requests here on the render thread
+	R_ProcessFlashlightBake();
+
 	if( tr.map_unload )
 	{
 		D_FlushCaches();

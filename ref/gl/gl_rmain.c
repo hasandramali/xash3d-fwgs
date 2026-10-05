@@ -974,6 +974,10 @@ void R_RenderScene( void )
 	// begin a new frame
 	tr.framecount++;
 
+	// flashlight fullbright bake (r_dynamic 0): process pending client
+	// requests here on the render thread (owns the GL context)
+	R_ProcessFlashlightBake();
+
 	tr.dlightframecount = R_PushDlights( WORLDMODEL, tr.framecount );
 
 	R_SetupFrustum();

@@ -81,7 +81,9 @@ GNU General Public License for more details.
 // 19. Added R_Set2DOffset. Translates everything drawn in 2D mode, including TriAPI, by the given
 //     screen-space offset until it's changed again. Used to draw VGUI panels in their own coordinates.
 // 20. R_ClearAllDecals now accepts includePermanent argument.
-#define REF_API_VERSION 20
+// 21. Added R_FlashlightBake. Paints world lightmaps fullbright around a
+//     point (flashlight with r_dynamic 0): permanent, no per-frame cost.
+#define REF_API_VERSION 21
 
 #define TF_SKY		(TF_SKYSIDE|TF_NOMIPMAP|TF_ALLOW_NEAREST)
 #define TF_FONT		(TF_NOMIPMAP|TF_CLAMP|TF_ALLOW_NEAREST)
@@ -591,6 +593,10 @@ typedef struct ref_interface_s
 	void (*R_DecalRemoveAll)( int texture );
 	int (*R_CreateDecalList)( struct decallist_s *pList );
 	void (*R_ClearAllDecals)( qboolean includePermanent );
+	// Flashlight with r_dynamic 0: permanently paint the lightmaps
+	// fullbright around pos (world coords) within radius. Renderers that
+	// cannot bake may ignore it. Throttled and deduplicated internally.
+	void (*R_FlashlightBake)( const vec3_t pos, float radius );
 
 	// studio interface
 	float (*R_StudioEstimateFrame)( cl_entity_t *e, mstudioseqdesc_t *pseqdesc, double time );

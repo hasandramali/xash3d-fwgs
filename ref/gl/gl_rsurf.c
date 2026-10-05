@@ -1621,6 +1621,153 @@ static qboolean R_CheckLightMap( msurface_t *fa )
 	return false; // no change
 }
 
+// Flashlight fullbright bake (r_dynamic 0): permanently whiten the
+// lightmap samples of world/brush surfaces near pos, re-uploading each
+// affected lightmap texture once. Repeat walks are throttled and skip
+// already-white surfaces, so the steady-state cost is ~zero (no per-frame
+// dynamic pass). Requested by the client when the flashlight is on;
+// processed on the render thread at the next R_RenderScene.
+#define FLASHLIGHT_BAKE_INTERVAL	0.25f
+
+static vec3_t flashBakePos;
+static float flashBakeRadius;
+static qboolean flashBakePending;
+static float flashBakeLastTime;
+
+void R_FlashlightBake( const vec3_t pos, float radius )
+{
+	VectorCopy( pos, flashBakePos );
+	flashBakeRadius = radius;
+	flashBakePending = true;
+}
+
+// whiten all valid style maps of one surface; true if anything changed.
+// Baking writes whole surfaces atomically, so a white first texel means
+// the surface is already baked.
+static qboolean R_WhitenSurfaceSamples( msurface_t *surf )
+{
+	if( !surf->samples )
+		return false;
+	if( FBitSet( surf->flags, SURF_DRAWTURB | SURF_DRAWSKY | SURF_DRAWTILED ))
+		return false;
+	if( surf->samples[0].r == 255 && surf->samples[0].g == 255 && surf->samples[0].b == 255 )
+		return false;
+
+	mextrasurf_t *info = surf->info;
+	int sample_size = gEngfuncs.Mod_SampleSizeForFace( surf );
+	int smax = ( info->lightextents[0] / sample_size ) + 1;
+	int tmax = ( info->lightextents[1] / sample_size ) + 1;
+	int size = smax * tmax;
+
+	for( int map = 0; map < MAXLIGHTMAPS; map++ )
+	{
+		if( surf->styles[map] >= 255 )
+			break;
+		color24 *lm = &surf->samples[map * size];
+		for( int i = 0; i < size; i++ )
+			lm[i].r = lm[i].g = lm[i].b = 255;
+	}
+	return true;
+}
+
+// rebuild one surface from its (possibly whitened) samples and sub-upload
+// its lightmap rect. Same shape as the style-change path in R_CheckLightMap.
+static void R_UploadSurfaceLightmap( msurface_t *surf )
+{
+	byte temp[132*132*4];
+	mextrasurf_t *info = surf->info;
+	int sample_size = gEngfuncs.Mod_SampleSizeForFace( surf );
+	int smax = ( info->lightextents[0] / sample_size ) + 1;
+	int tmax = ( info->lightextents[1] / sample_size ) + 1;
+
+	if( smax >= 132 || tmax >= 132 )
+		return;
+
+	R_BuildLightMap( surf, temp, smax * 4, false );
+
+#if XASH_WES
+	GL_Bind( XASH_TEXTURE1, tr.lightmapTextures[surf->lightmaptexturenum] );
+	pglTexParameteri( GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE );
+#else
+	GL_Bind( XASH_TEXTURE0, tr.lightmapTextures[surf->lightmaptexturenum] );
+#endif
+	pglTexSubImage2D( GL_TEXTURE_2D, 0, surf->light_s, surf->light_t, smax, tmax, GL_RGBA, GL_UNSIGNED_BYTE, temp );
+
+#if XASH_WES
+	GL_SelectTexture( XASH_TEXTURE0 );
+#endif
+}
+
+static void R_TryBakeSurface( msurface_t *surf, const vec3_t pos, float radius )
+{
+	glpoly2_t *poly = surf->polys;
+	vec3_t center, delta;
+	int i, n;
+
+	if( !poly || poly->numverts <= 0 )
+		return;
+
+	// surface center from the first few verts (all in the same space as
+	// pos: world for the worldmodel, entity-local for brush models)
+	center[0] = center[1] = center[2] = 0.0f;
+	n = poly->numverts < 8 ? poly->numverts : 8;
+	for( i = 0; i < n; i++ )
+		VectorAdd( center, poly->verts[i], center );
+	VectorScale( center, 1.0f / n, center );
+
+	VectorSubtract( pos, center, delta );
+	if( DotProduct( delta, delta ) > radius * radius )
+		return;
+	if( DotProduct( surf->plane->normal, delta ) <= 0.0f )
+		return; // backface: no light bleed through walls
+
+	if( R_WhitenSurfaceSamples( surf ))
+		R_UploadSurfaceLightmap( surf );
+}
+
+void R_ProcessFlashlightBake( void )
+{
+	int i;
+
+	if( !flashBakePending )
+		return;
+	flashBakePending = false;
+
+	if( r_dynamic->value )
+		return; // dynamic path handles the flashlight; nothing to bake
+	if( !WORLDMODEL || !WORLDMODEL->lightdata )
+		return;
+	if( gp_cl->time - flashBakeLastTime < FLASHLIGHT_BAKE_INTERVAL )
+	{
+		flashBakePending = true; // retry when due; newer requests coalesce
+		return;
+	}
+	flashBakeLastTime = gp_cl->time;
+
+	for( i = 0; i < WORLDMODEL->numsurfaces; i++ )
+		R_TryBakeSurface( &WORLDMODEL->surfaces[i], flashBakePos, flashBakeRadius );
+
+	if( tr.draw_list )
+	{
+		for( i = 0; i < (int)tr.draw_list->num_solid_entities; i++ )
+		{
+			cl_entity_t *ent = tr.draw_list->solid_entities[i];
+			model_t *model;
+			matrix4x4 matrix;
+			vec3_t localPos;
+
+			if( !ent || !( model = ent->model ) || model->type != mod_brush )
+				continue;
+
+			Matrix4x4_CreateFromEntity( matrix, ent->angles, ent->origin, 1.0f );
+			Matrix4x4_VectorITransform( matrix, flashBakePos, localPos );
+
+			for( int s = 0; s < model->nummodelsurfaces; s++ )
+				R_TryBakeSurface( &model->surfaces[model->firstmodelsurface + s], localPos, flashBakeRadius );
+		}
+	}
+}
+
 static void R_RenderLightmapForSurface( msurface_t *fa )
 {
 	if( !fa->polys || FBitSet( fa->flags, SURF_DRAWTILED ))

@@ -487,6 +487,8 @@ const ref_interface_t gReffuncs =
 	R_CreateDecalList,
 	R_ClearAllDecals,
 
+	R_FlashlightBake,
+
 	R_StudioEstimateFrame,
 	R_StudioLerpMovement,
 	R_StudioFillAPI,

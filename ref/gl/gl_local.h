@@ -431,6 +431,8 @@ void R_MarkLeaves( void );
 void R_DrawWorld( void );
 void R_DrawWaterSurfaces( void );
 void R_DrawBrushModel( cl_entity_t *e );
+void R_FlashlightBake( const vec3_t pos, float radius );
+void R_ProcessFlashlightBake( void );
 void GL_SubdivideSurface( model_t *mod, msurface_t *fa );
 void GL_SetupFogColorForSurfaces( void );
 void R_DrawAlphaTextureChains( void );
