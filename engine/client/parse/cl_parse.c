@@ -540,7 +540,6 @@ int CL_EstimateNeededResources( void )
 			}
 			break;
 		case t_world:
-			// never a to-download resource (Sven Co-op map/check entries)
 			break;
 		}
 	}
@@ -839,7 +838,6 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 
 		if( !Q_stricmp( gamefolder, "svencoop" ))
 		{
-			// ReHLDS_Sven sends the world CRC unmunged, don't undo what wasn't done
 			cl_sven_proto = true;
 		}
 		else
@@ -1186,11 +1184,6 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 		Delta_ReadGSFields( msg, DT_CLIENTDATA_T, from_cd, to_cd, cl.mtime[0] );
 	else MSG_ReadClientData( msg, from_cd, to_cd, cl.mtime[0] );
 
-	// Sven Co-op enumerates all 256 weapon slots (8-bit index) and closes the
-	// section with a clear present bit; consume that trailing bit as well, else
-	// the byte holding it is read as a command (0x00 -> svc_bad). GoldSrc slots
-	// above MAX_LOCAL_WEAPONS are drained into a scratch slot to keep the bit
-	// cursor aligned without overflowing the frame's weapon array.
 	if( proto == PROTO_GOLDSRC )
 	{
 		for( i = 0; ; i++ )
