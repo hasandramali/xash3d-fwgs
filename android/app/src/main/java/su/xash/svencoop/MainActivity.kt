@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
 
     fun getStoragePath(): String {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        val useInternal = prefs.getBoolean("storage_toggle", false)
+        val useInternal = prefs.getBoolean("storage_toggle", true)
         return if (useInternal) {
             getExternalFilesDir(null)?.absolutePath ?: "/storage/emulated/0/Android/data/su.xash.svencoop/files"
         } else {
@@ -114,7 +114,7 @@ class MainActivity : AppCompatActivity() {
 
     fun getStorageSummary(): String {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        val useInternal = prefs.getBoolean("storage_toggle", false)
+        val useInternal = prefs.getBoolean("storage_toggle", true)
         return if (useInternal) "Internal Storage (Android/data)" else "External Storage (/storage/emulated/0/xash)"
     }
 

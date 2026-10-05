@@ -85,15 +85,13 @@ void *FS_GetNativeObject( const char *obj )
 
 static uint32_t FS_MountFlags( void )
 {
-	uint32_t flags = 0;
-
-	// FIXME: VFS shouldn't care about this, allow engine to mount gamedirs
-	if( fs_mount_lv.value ) SetBits( flags, FS_MOUNT_LV );
-	if( fs_mount_hd.value ) SetBits( flags, FS_MOUNT_HD );
-	if( fs_mount_addon.value ) SetBits( flags, FS_MOUNT_ADDON );
-	if( fs_mount_l10n.value ) SetBits( flags, FS_MOUNT_L10N );
-
-	return flags;
+	// SvenCoop Android policy: never mount the optional variant content
+	// folders (<game>_hd, <game>_addon, <game>_lv, <game>_<lang>). They are
+	// not shipped and never exist here, yet each one adds a searchpath that
+	// every missing-file probe must stat -- pure overhead, and painful
+	// through slow Android storage (FUSE). Returning 0 drops all four
+	// probes from every gamedir.
+	return 0;
 }
 
 void FS_Rescan_f( void )

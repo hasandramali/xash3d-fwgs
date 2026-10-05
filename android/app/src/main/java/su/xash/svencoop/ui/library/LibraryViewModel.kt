@@ -37,24 +37,22 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             withContext(Dispatchers.IO) {
                 val games = mutableListOf<Game>()
 
-                val internalPath = ctx.getExternalFilesDir(null)?.absolutePath
-                val internalDir = File(internalPath ?: "")
+                // Single active storage root only: never scan the other side.
+                val useInternal = defaultPreferences.getBoolean("storage_toggle", true)
+                if (useInternal) {
+                    val internalPath = ctx.getExternalFilesDir(null)?.absolutePath
+                    val internalDir = File(internalPath ?: "")
+                    if (internalDir.exists() && internalDir.isDirectory) {
+                        games.addAll(Game.getGames(ctx, internalDir))
+                    }
+                } else {
+                    val externalPath = Environment.getExternalStorageDirectory().absolutePath + "/xash"
+                    val externalDir = File(externalPath)
 
-                val externalPath = Environment.getExternalStorageDirectory().absolutePath + "/xash"
-                val externalDir = File(externalPath)
+                    Nomedia.ensureNomedia(externalDir)
 
-                Nomedia.ensureNomedia(externalDir)
-
-                if (internalDir.exists() && internalDir.isDirectory) {
-                    games.addAll(Game.getGames(ctx, internalDir))
-                }
-
-                if (externalDir.exists() && externalDir.isDirectory) {
-                    val externalGames = Game.getGames(ctx, externalDir)
-                    externalGames.forEach { externalGame ->
-                        if (!games.any { it.basedir.name == externalGame.basedir.name }) {
-                            games.add(externalGame)
-                        }
+                    if (externalDir.exists() && externalDir.isDirectory) {
+                        games.addAll(Game.getGames(ctx, externalDir))
                     }
                 }
 
@@ -73,7 +71,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun getBaseDir(): File {
-        val useInternal = defaultPreferences.getBoolean("storage_toggle", false)
+        val useInternal = defaultPreferences.getBoolean("storage_toggle", true)
         return if (useInternal) {
             val ctx = getApplication<Application>()
             File(ctx.getExternalFilesDir(null)?.absolutePath

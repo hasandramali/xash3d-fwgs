@@ -29,6 +29,9 @@
     <string name="toggle_storage_location">Toggle Storage Location</string>
     <string name="using_internal_storage">Using: Internal Storage (Android/data)</string>
     <string name="using_external_storage">Using: External Storage (xash folder)</string>
+    <string name="external_storage_warning_title">Switch to External Storage?</string>
+    <string name="external_storage_warning_message">Sven Co-op on External Storage run significantly slower and can be unstable! Please stay on Internal Storage unless you need direct file access.</string>
+    <string name="external_storage_warning_ok">OK, use External</string>
     <string name="internal_storage_path">Internal Storage</string>
     <string name="external_storage_path">External Storage</string>
     <string name="global_settings">Global Settings</string>

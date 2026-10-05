@@ -200,25 +200,20 @@ public class XashActivity extends SDLActivity {
     }
 
     private String findBestBasedir(String gamedir) {
-        File internalDir = new File(getExternalFilesDir(null).getAbsolutePath() + "/" + gamedir);
-        if (internalDir.exists() && internalDir.isDirectory()) {
-            Log.d(TAG, "Game found in internal storage: " + internalDir.getAbsolutePath());
-            return getExternalFilesDir(null).getAbsolutePath();
-        }
-        
-        File externalDir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/xash/" + gamedir);
-        if (externalDir.exists() && externalDir.isDirectory()) {
-            Log.d(TAG, "Game found in external storage: " + externalDir.getAbsolutePath());
-            return Environment.getExternalStorageDirectory().getAbsolutePath() + "/xash";
-        }
-        
-        boolean useInternalStorage = mPreferences.getBoolean("storage_toggle", false);
+        // Single active storage root only: never probe the other side.
+        // Probing both roots doubles slow-storage I/O and can silently
+        // pick content from the inactive location.
+        boolean useInternalStorage = mPreferences.getBoolean("storage_toggle", true);
         if (useInternalStorage) {
-            Log.d(TAG, "Game not found, using internal storage as default");
-            return getExternalFilesDir(null).getAbsolutePath();
+            File filesDir = getExternalFilesDir(null);
+            String internalBase = (filesDir != null) ? filesDir.getAbsolutePath()
+                    : "/storage/emulated/0/Android/data/su.xash.svencoop/files";
+            Log.d(TAG, "Using internal storage basedir: " + internalBase + " for game: " + gamedir);
+            return internalBase;
         } else {
-            Log.d(TAG, "Game not found, using external storage as default");
-            return Environment.getExternalStorageDirectory().getAbsolutePath() + "/xash";
+            String externalBase = Environment.getExternalStorageDirectory().getAbsolutePath() + "/xash";
+            Log.d(TAG, "Using external storage basedir: " + externalBase + " for game: " + gamedir);
+            return externalBase;
         }
     }
 

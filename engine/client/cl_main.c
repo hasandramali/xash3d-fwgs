@@ -332,6 +332,7 @@ with new cls.state
 ===============
 */
 #define CL_STALL_MAXAUTO	2	// fresh auto-reconnects per manual connect
+#define CL_STALL_LOCALBLOCK_TIME	2.0	// seconds of main-loop blockage forgiven as local (slow FS), not server stall
 
 static double	stallProgress = 0.0;	// host.realtime of last real connection progress
 static int	stallSignon = -1;
@@ -476,6 +477,24 @@ static void CL_CheckClientState( void )
 
 		if( timeout > 0.0f && host.realtime - stallProgress > timeout )
 		{
+			// Slow-filesystem heartbeat: if the main loop itself just spent
+			// seconds inside one synchronous block (FS_Rescan, WAD scan, BSP
+			// load on a slow store like /storage/emulated/0), the quiet
+			// window is OUR blackout, not the server's silence -- no packets
+			// could be pumped either way, so no progress surface could move.
+			// Forgive once and re-arm instead of blaming the connection. A
+			// genuinely parked server keeps frames fast (millisecond nops),
+			// so it still trips the watchdog exactly as before. This sends
+			// nothing and changes no connection state: harmless by
+			// construction (a literal packet heartbeat is impossible here --
+			// the same single thread that is blocked in FS is the one that
+			// would have to send it).
+			if( host.pureframetime > CL_STALL_LOCALBLOCK_TIME )
+			{
+				Con_DPrintf( "Signon watchdog: forgiving %.1fs local block (slow filesystem), re-arming\n", host.pureframetime );
+				stallProgress = host.realtime;
+				return;
+			}
 			if( stallAutos >= CL_STALL_MAXAUTO )
 			{
 				Con_Printf( "Server signon did not resume after %d reconnects; disconnecting. Please retry when the server is ready.\n", CL_STALL_MAXAUTO );

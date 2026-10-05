@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.widget.EditText
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SwitchPreferenceCompat
 import su.xash.svencoop.MainActivity
 import su.xash.svencoop.R
 import android.content.SharedPreferences
@@ -17,6 +18,7 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
     private lateinit var gamePathPreference: Preference
     private lateinit var globalArgsPreference: Preference
     private lateinit var renderResolutionPreference: Preference
+    private var storageTogglePreference: SwitchPreferenceCompat? = null
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.app_preferences, rootKey)
@@ -27,6 +29,17 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
         gamePathPreference = findPreference("game_path") ?: return
         globalArgsPreference = findPreference("global_arguments") ?: return
         renderResolutionPreference = findPreference("render_resolution") ?: return
+
+        storageTogglePreference = findPreference<SwitchPreferenceCompat>("storage_toggle")
+        storageTogglePreference?.onPreferenceChangeListener =
+            Preference.OnPreferenceChangeListener { _, newValue ->
+                if (newValue == false) {
+                    showExternalStorageWarning()
+                    false // don't apply yet; applied manually on OK
+                } else {
+                    true
+                }
+            }
 
         globalArgsPreference.setOnPreferenceClickListener {
             showGlobalArgumentsDialog()
@@ -41,6 +54,19 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
         updateGamePathSummary()
         updateGlobalArgsSummary()
         updateRenderResolutionSummary()
+    }
+
+    private fun showExternalStorageWarning() {
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.external_storage_warning_title)
+            .setMessage(R.string.external_storage_warning_message)
+            .setPositiveButton(R.string.external_storage_warning_ok) { _, _ ->
+                preferences.edit().putBoolean("storage_toggle", false).apply()
+                storageTogglePreference?.isChecked = false
+                updateGamePathSummary()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
@@ -61,7 +87,7 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
         (activity as? MainActivity)?.let { mainActivity ->
             gamePathPreference.summary = mainActivity.getStorageSummary()
         } ?: run {
-            val useInternalStorage = preferences.getBoolean("storage_toggle", false)
+            val useInternalStorage = preferences.getBoolean("storage_toggle", true)
             gamePathPreference.summary = if (useInternalStorage) {
                 "Internal Storage (Android/data)"
             } else {

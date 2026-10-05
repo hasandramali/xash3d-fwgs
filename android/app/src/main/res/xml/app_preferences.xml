@@ -13,7 +13,7 @@
             app:title="@string/toggle_storage_location"
             app:summaryOn="@string/using_internal_storage"
             app:summaryOff="@string/using_external_storage"
-            app:defaultValue="false" />
+            app:defaultValue="true" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/global_settings">
