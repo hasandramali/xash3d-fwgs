@@ -19,7 +19,7 @@ GNU General Public License for more details.
 #include "pm_local.h"
 
 CVAR_DEFINE_AUTO( r_dlight_virtual_radius, "1", FCVAR_GLCONFIG, "increase dlight radius virtually by this amount" );
-CVAR_DEFINE_AUTO( r_lighting_extended, "1", FCVAR_GLCONFIG, "allow to get lighting from world and bmodels" );
+CVAR_DEFINE_AUTO( r_lighting_extended, "0", FCVAR_GLCONFIG, "allow to get lighting from world and bmodels" );
 
 /*
 ==================
