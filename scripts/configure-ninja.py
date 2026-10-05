@@ -31,6 +31,39 @@ def check_repo(name, branch, url, path):
 			sys.exit(1)
 
 
+HLSDK_FORK_URL = "https://github.com/hasandramali/hlsdk-portable"
+HLSDK_FORK_BRANCH = "svencoop"
+
+
+def check_hlsdk_repo(path):
+	# Our fork is the only acceptable hlsdk source. FWGS upstream must never
+	# be cloned or built here: that would silently drop every Sven feature
+	# the fork exists for. Fail loudly instead of falling back.
+	if os.path.exists(path):
+		origin = ""
+		try:
+			origin = subprocess.check_output(
+				["git", "-C", path, "remote", "get-url", "origin"],
+				stderr=subprocess.STDOUT).decode("utf-8", "replace").strip()
+		except Exception:
+			origin = ""
+		if "hasandramali/hlsdk-portable" not in origin:
+			print("ERROR: {} exists but is not our hlsdk fork (origin: {!r}).".format(path, origin or "unknown"))
+			print("ERROR: refusing to build a foreign hlsdk tree. Delete the directory and re-run:")
+			print("ERROR:   rm -rf {}".format(path))
+			sys.exit(1)
+		return
+
+	print("hlsdk-portable not found. Cloning our fork ({} {})...".format(HLSDK_FORK_URL, HLSDK_FORK_BRANCH))
+	git_exec = ["git", "clone", "--recursive", "--branch", HLSDK_FORK_BRANCH, HLSDK_FORK_URL, path]
+	git_process = subprocess.Popen(git_exec)
+	git_process.communicate()
+	if git_process.returncode != 0:
+		print("ERROR: git clone hlsdk-portable (our fork) failed with exit code {}".format(git_process.returncode))
+		print("ERROR: refusing to fall back to FWGS upstream. Fix network/access and re-run.")
+		sys.exit(1)
+
+
 def run_cmake(root, out, toolchain, abi, build_type, ndk_root, min_sdk, *args):
 	cmake_exec = ["cmake", "-H{}".format(root),
 		"-DCMAKE_BUILD_TYPE={}".format(build_type),
@@ -79,9 +112,9 @@ def main():
 			  "-DSDL_DUMMYAUDIO=OFF", "-DSDL_DUMMYVIDEO=OFF",
 			  "-DSDL_VULKAN=OFF", "-DSDL_OFFSCREEN=OFF", "-DSDL_STATIC=OFF")
 
-	# configure hlsdk-portable
+	# configure hlsdk-portable (our fork only -- never FWGS upstream)
 	hlsdk_path = os.path.join(args.wscript_path, "3rdparty", "hlsdk-portable")
-	check_repo("hlsdk-portable", "mobile_hacks", "https://github.com/FWGS/hlsdk-portable", hlsdk_path)
+	check_hlsdk_repo(hlsdk_path)
 
 	hlsdk_out_path = os.path.join(args.configuration_dir, "hlsdk-portable")
 
