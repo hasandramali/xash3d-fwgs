@@ -296,8 +296,6 @@ static qboolean CL_WeaponListFix_HasWeapon( const cl_weaponlistfix_weapon_t *wea
 	// authoritative Sven ownership signal for every id.
 	if( weapon->owned_hint )
 		return true;
-	if( weapon->id >= 0 && weapon->id < 32 )
-		return FBitSet( cl.local.weapons, BIT( weapon->id )) ? true : false;
 	return false;
 }
 
@@ -651,12 +649,9 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 			Con_DPrintf( "CL_WeaponListFix: slotkey=%s row=%d -> id=%d %s\n",
 			cmd_name, row, weapon->id, weapon->name );
 
-		// Mode 2: the engine inventory switches AND the key keeps travelling
-		// to the client DLL (pass-through instead of swallow). The client gives
-		// it to open VGUI menus first (buy/vote selections keep working), and
-		// its own HL bucket selector is neutered (CHudAmmo::SlotInput), so no
-		// double weapon switch can happen. Both worlds work at once.
-		CL_WeaponListFix_SelectWeapon( weapon );
+		// Keep slot commands on the client-DLL path. Its menu handler must see
+		// these keys before weapon selection, otherwise ShowMenu closes without
+		// delivering the server's menuselect command.
 		return false;
 	}
 
@@ -2844,7 +2839,8 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 			{ "ClServerInfo", 147, -1 },
 			{ "VoiceMask",  148,  8 },
 			{ "WeaponSpr",  138, -1 },
-			{ "NumDisplay", 141, -1 },
+			{ "NumDisplay", 140, -1 },
+			{ "UpdateNum",  141,  5 },
 		};
 
 		for( int t = 0; t < ARRAYSIZE( svenUsrMsgs ); t++ )
