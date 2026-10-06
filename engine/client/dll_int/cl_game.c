@@ -567,6 +567,7 @@ void CL_WeaponListFix_Reset( void )
 	cl_weaponlistfix_state.selected_weapon = -1;
 	cl_weaponlistfix_state.select_pending = 0;
 	cl_weaponlistfix_state.display_slot = -1;
+	cl_weaponlistfix_state.menu_valid_slots = 0;
 
 	// Scan for unknown weapons after reset (e.g., on map change or connection)
 	if( cl_weaponlistfix.value )
@@ -636,8 +637,14 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 		// visible count stay empty -> vanilla path.
 		int row = cmd_name[4] - '1';
 
-		// mode 2 only: otherwise the slot keys must stay free for the
-		// vanilla/menu path (vote/buy selections)
+		// Server ShowMenu selections stay on the client HUD path. With no
+		// matching server-menu slot, mode 2 routes the key to WeaponListFix.
+		if( cl_weaponlistfix_state.menu_valid_slots & BIT( row ))
+		{
+			cl_weaponlistfix_state.menu_valid_slots = 0;
+			return false;
+		}
+
 		if( cl_weaponlistfix.value < 2.0f )
 			return false;
 
@@ -649,10 +656,8 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 			Con_DPrintf( "CL_WeaponListFix: slotkey=%s row=%d -> id=%d %s\n",
 			cmd_name, row, weapon->id, weapon->name );
 
-		// Keep slot commands on the client-DLL path. Its menu handler must see
-		// these keys before weapon selection, otherwise ShowMenu closes without
-		// delivering the server's menuselect command.
-		return false;
+		CL_WeaponListFix_SelectWeapon( weapon );
+		return true;
 	}
 
 	if( !Q_stricmp( cmd_name, "invnext" ))
@@ -694,6 +699,14 @@ static int CL_WeaponListFix_CompareWeapons( const void *a, const void *b )
 
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf )
 {
+	if( !Q_stricmp( pszName, "ShowMenu" ))
+	{
+		cl_weaponlistfix_msg_t msg;
+		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
+		cl_weaponlistfix_state.menu_valid_slots = CL_WeaponListFix_ReadShort( &msg );
+		return;
+	}
+
 	if( !Q_stricmp( pszName, "WeaponList" ))
 	{
 		cl_weaponlistfix_msg_t msg;

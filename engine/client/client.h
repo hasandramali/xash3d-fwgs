@@ -787,6 +787,7 @@ typedef struct
 	int select_pending;
 	int display_slot;
 	int hidehud_bits;
+	int menu_valid_slots;
 	char pending_name[64];
 	float pending_time;
 	int drop_pending;
