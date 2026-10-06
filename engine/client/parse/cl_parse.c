@@ -2745,38 +2745,10 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			break;
 	}
 
-	// probably unregistered. Under GoldSrc (Sven Co-op) the server sends
-	// engine-level user messages (e.g. "ServerName" at 122, serverinfo at 147)
-	// directly as a raw svc byte, WITHOUT a preceding svc_usermessage (39)
-	// registration record, so they never land in clgame.msg[]. Don't die on
-	// such an unknown optional message: consume its variable-size payload
-	// (size prefix matches the variable-size branch below) and keep parsing.
 	if( i == MAX_USER_MESSAGES ) // probably unregistered
 	{
 		if( proto == PROTO_GOLDSRC )
 		{
-			// Sven Co-op sends these engine/game user messages as plain svc
-			// bytes without a preceding svc_usermessage (39) registration, so
-			// they never land in clgame.msg[] and are "unregistered" here.
-			// hw.dll (Sven engine) parse rule (reverse-verified against the
-			// server.dll REG_USER_MSG table, steam-refs/sven/server.dll):
-			//   - registered size == -1  -> a u16 length prefix precedes payload
-			//   - registered size >= 0   -> FIXED size, NO length in the stream
-			// Small fixed-size ones (ClassicMode=137 @1, ScoreInfo=83 @20,
-			// InvRemove=133 @5, AmmoPickup=88 @5) must be consumed inline
-			// (wire-verified perfect alignment for 137 against buffer.dat).
-			// CustWeapon=77, WeapPickup=89, ServerName=122 and ClServerInfo=147
-			// are VARIABLE (-1), so they fall through to the u16-length path.
-			// Xash must consume those fixed amounts instead of reading a u16
-			// length, otherwise 133's payload low bytes are misread as a
-			// length=0 and the following svc_bad(0x00) kills the connection.
-			// Sven's own REG_USER_MSG table (binary-verified against
-			// steam-refs/sven/server.dll REG_USER_MSG=0x1011E190 call-sites,
-			// index = svc_num - svc_lastmsg). size >= 0 is FIXED payload with
-			// NO length prefix in the stream; size 0xFFFFFFFF(-1) is variable
-			// (u16 length precedes). Handled here inline so a fixed-size one is
-			// never mis-read as a bogus huge u16 length (svc78 ResetHUD 1 byte
-			// used to be misparsed as 0x4f00 == 20224 and crashed the client).
 			switch( svc_num )
 			{
 			case 64: case 69: case 101: // SelAmmo, Health, TimeEnd
