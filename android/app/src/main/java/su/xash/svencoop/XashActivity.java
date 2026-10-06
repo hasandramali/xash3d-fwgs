@@ -256,10 +256,12 @@ public class XashActivity extends SDLActivity {
         String argv = getIntent().getStringExtra("argv");
         if (argv == null) argv = "-console -log";
 
-        // Mandatory background map: keeps the renderer fed from the first
-        // seconds so a wedged first present (black screen) cannot stick.
-        // Hardcoded on purpose: not exposed in settings, must survive any
-        // user arguments (placed first so user +commands still win).
+        // Background map (renderer kick): keeps the renderer fed from the first
+        // seconds so a wedged first present (black screen) cannot stick on
+        // affected devices. The engine embeds _server_start.bsp and extracts
+        // it on first use (BootMap_Ensure), so the file is always available
+        // -- no device probing needed. Placed first so user +commands still
+        // win.
         if (argv.indexOf("map_background") < 0) {
             argv = "+map_background _server_start " + argv;
         }

@@ -425,6 +425,13 @@ void FS_LoadGameInfo( void );
 void FS_SaveVFSConfig( void );
 
 //
+// bootmap.c -- embedded background boot map
+//
+// Ensures maps/_server_start.bsp exists (extracting the embedded copy
+// when absent). Present files are never overwritten.
+qboolean BootMap_Ensure( const char *mapname );
+
+//
 // cmd.c
 //
 typedef struct cmd_s cmd_t;

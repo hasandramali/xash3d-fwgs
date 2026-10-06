@@ -163,6 +163,15 @@ qboolean HTTP_TlsAvailable( void )
 tlsctx_t *HTTP_TlsNew( int socket, const char *hostname )
 {
 	if( !g_tls.inited )
+	{
+		// Lazy first-use init (kept off the boot critical path: the PSA
+		// crypto seed can block for tens of seconds on entropy-starved
+		// devices). Timed so a slow init is attributable in the log.
+		double t0 = Platform_DoubleTime();
+		HTTP_TlsInit();
+		Con_DPrintf( "TLS: lazy crypto init took %.1f seconds\n", Platform_DoubleTime() - t0 );
+	}
+	if( !g_tls.inited )
 		return NULL;
 
 	tlsctx_t *ctx = Mem_Calloc( http_mempool, sizeof( *ctx ));

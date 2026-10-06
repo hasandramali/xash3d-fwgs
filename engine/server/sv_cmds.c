@@ -169,6 +169,12 @@ check map for typically errors
 */
 static qboolean SV_ValidateMap( const char *pMapName )
 {
+	// Embedded boot map: materialize maps/_server_start.bsp on first use
+	// so map/map_background never depend on device data. Covers map,
+	// map_background and nextmap through this single choke point.
+	if( !BootMap_Ensure( pMapName ))
+		return false;
+
 	int	flags = SV_MapIsValid( pMapName, NULL );
 
 	if( FBitSet( flags, MAP_INVALID_VERSION ))

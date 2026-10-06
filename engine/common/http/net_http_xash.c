@@ -1736,7 +1736,11 @@ void HTTP_Init( void )
 	http.first_file = NULL;
 	http_mempool = Mem_AllocPool( "HTTP" );
 
-	HTTP_TlsInit();
+	// NOTE: no HTTP_TlsInit() here on purpose. psa_crypto_init() can block
+	// for tens of seconds on entropy-starved devices (observed ~42s on a
+	// Unisoc phone), stalling the whole boot with a black screen. TLS is
+	// initialized lazily on first HTTPS use instead (see HTTP_TlsNew) --
+	// no engine HTTP traffic exists before signon downloads anyway.
 
 	Cmd_AddRestrictedCommand( "http_download", HTTP_Download_f, "add file to download queue" );
 	Cmd_AddRestrictedCommand( "http_skip", HTTP_Skip_f, "skip current download server" );

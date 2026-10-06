@@ -43,7 +43,7 @@
     <string name="render_resolution_dialog">Enter render resolution</string>
     <string name="stretch_resolution">Fullscreen</string>
     <string name="stretch_resolution_summary">Scale the selected render resolution to fill the screen</string>
-    <string name="keyboard_pans_screen">Keyboard pans screen</string>
+    <string name="keyboard_pans_screen">Keyboard resizes screen</string>
     <string name="keyboard_pans_screen_summary">Pan the game view when the keyboard is shown (keeps the surface size intact)</string>
     <string name="fix_font">Fix font</string>
     <string name="fix_font_summary">Fix con_oldfont and con_fontscale behavior</string>
@@ -145,9 +145,9 @@
     <string name="steam_device_confirm_cancelled">Approval wait cancelled.</string>
     <string name="steam_waiting_elapsed">Waiting %1$s</string>
     <string name="steam_auto_connect">Auto-connect on app start</string>
-    <string name="steam_broker_start">Start broker</string>
-    <string name="steam_broker_stop">Stop broker</string>
-    <string name="steam_broker_starting">Starting broker…</string>
-    <string name="steam_broker_stopping">Stopping broker…</string>
-    <string name="steam_broker_running">Ticket broker running on port %1$d</string>
+    <string name="steam_broker_start">Start steam</string>
+    <string name="steam_broker_stop">Stop steam</string>
+    <string name="steam_broker_starting">Starting steam…</string>
+    <string name="steam_broker_stopping">Stopping steam…</string>
+    <string name="steam_broker_running">Ticket steam running on port %1$d</string>
 </resources>
