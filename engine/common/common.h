@@ -425,10 +425,14 @@ void FS_LoadGameInfo( void );
 void FS_SaveVFSConfig( void );
 
 //
-// bootmap.c -- embedded background boot map
+// bootmap.c -- embedded background boot map (_xashnull)
 //
-// Ensures maps/_server_start.bsp exists (extracting the embedded copy
-// when absent). Present files are never overwritten.
+// Ensures the embedded boot files exist (extracting them when absent).
+// Present files are never overwritten.
+#define BOOTMAP_NAME		"_xashnull"
+#define BOOTMAP_PATH		"maps/_xashnull.bsp"
+#define BOOTMAP_LOADCFG		"_xashnull_load.cfg"
+#define BOOTMAP_SETTLE_FRAMES	30 // rendered world frames before the boot cfg runs
 qboolean BootMap_Ensure( const char *mapname );
 
 //

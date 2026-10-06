@@ -63,7 +63,7 @@ client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS] =
 { .pName = "TextMessage7", .pMessage = cl_textbuffer[7] },
 };
 
-#define CL_WEAPONLISTFIX_DEFAULT_SLOTS 5
+#define CL_WEAPONLISTFIX_DEFAULT_SLOTS 6
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
 #define CL_WEAPONLISTFIX_SUIT_ID 31
 #define CL_WEAPONLISTFIX_PENDING_TIMEOUT 3.0f
@@ -235,7 +235,7 @@ static int CL_WeaponListFix_GetSlotCount( void )
 		return CL_WEAPONLISTFIX_DEFAULT_SLOTS;
 
 	// Sven Co-op's WeaponList uses a tall 9-row layout; squeeze it (and any
-	// other over-tall layout) into the compact 5-row HUD.
+	// other over-tall layout) into the compact 6-row HUD.
 	if( real_range > CL_WEAPONLISTFIX_DEFAULT_SLOTS )
 		return CL_WEAPONLISTFIX_DEFAULT_SLOTS;
 
@@ -868,6 +868,44 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		if( weapon )
 			weapon->owned_hint = true;
+		return;
+	}
+
+	if( !Q_stricmp( pszName, "InvAdd" ))
+	{
+		cl_weaponlistfix_msg_t msg;
+		cl_weaponlistfix_weapon_t *weapon;
+		char name[64];
+		int id;
+
+		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
+		id = CL_WeaponListFix_ReadLong( &msg );
+		for( int i = 0; i < 3; i++ )
+			CL_WeaponListFix_ReadByte( &msg );
+		for( int i = 0; i < 4; i++ )
+			CL_WeaponListFix_ReadByte( &msg );
+		CL_WeaponListFix_ReadString( &msg, name, sizeof( name ));
+		if( id <= 0 || id >= MAX_WEAPONS || id == CL_WEAPONLISTFIX_SUIT_ID || Q_strnicmp( name, "weapon_", 7 ))
+			return;
+		weapon = CL_WeaponListFix_AddNamedWeapon( id, name );
+		if( weapon )
+			weapon->owned_hint = true;
+		return;
+	}
+
+	if( !Q_stricmp( pszName, "InvRemove" ))
+	{
+		cl_weaponlistfix_msg_t msg;
+		int id;
+
+		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
+		id = CL_WeaponListFix_ReadLong( &msg );
+		if( id > 0 && id < MAX_WEAPONS )
+		{
+			cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
+			if( weapon )
+				weapon->owned_hint = false;
+		}
 		return;
 	}
 
@@ -2787,6 +2825,7 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 	{
 		static const struct { const char *name; int number; int size; } svenUsrMsgs[] =
 		{
+			{ "CurWeapon",    65, -1 },
 			{ "Geiger",      66,  1 },
 			{ "Flashlight",  67,  2 },
 			{ "FlashBat",    68,  1 },
@@ -2794,8 +2833,11 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 			{ "Damage",      70, 18 },
 			{ "Battery",     71,  2 },
 			{ "Train",       72,  1 },
+			{ "ShowMenu",    93, -1 },
 			{ "SayText",     74, -1 },
+			{ "TextMsg",     75, -1 },
 			{ "WeaponList",  76, -1 },
+			{ "CustWeapon",  77, -1 },
 			{ "InvAdd",     132, -1 },
 			{ "InvRemove",  133,  5 },
 			{ "ResetHUD",    78,  1 },
@@ -2821,6 +2863,8 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 			{ "ClassicMode", 137,  1 },
 			{ "ClServerInfo", 147, -1 },
 			{ "VoiceMask",  148,  8 },
+			{ "WeaponSpr",  138, -1 },
+			{ "NumDisplay", 141, -1 },
 		};
 
 		for( int t = 0; t < ARRAYSIZE( svenUsrMsgs ); t++ )

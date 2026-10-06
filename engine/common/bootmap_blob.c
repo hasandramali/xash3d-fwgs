@@ -1,8 +1,9 @@
-// Embedded background boot map (minimized _server_start, 2619 bytes).
+// Embedded background boot map (minimized _xashnull, 2619 bytes).
 // Minimal valid BSP30: worldspawn + one info_player_start, full collision
 // hulls, zero render lumps (no textures/faces/lighting) -> pure black.
+// Plus the tiny boot cfg executed once the background settles.
 // DO NOT hand-edit; regenerate from the minimized .bsp.
-const unsigned char g_bootmap_server_start[2619] =
+const unsigned char g_bootmap_xashnull[2619] =
 {
 	0x1e, 0x00, 0x00, 0x00, 0x7c, 0x00, 0x00, 0x00, 0x66, 0x00, 0x00, 0x00,
 	0xe2, 0x00, 0x00, 0x00, 0xac, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -224,4 +225,9 @@ const unsigned char g_bootmap_server_start[2619] =
 	0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00
 };
-const unsigned int g_bootmap_server_start_len = 2619;
+const unsigned int g_bootmap_xashnull_len = 2619;
+const unsigned char g_bootmap_xashnull_cfg[16] =
+{
+	0x77, 0x61, 0x69, 0x74, 0x3b, 0x64, 0x69, 0x73, 0x63, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74, 0x0a
+};
+const unsigned int g_bootmap_xashnull_cfg_len = 16;

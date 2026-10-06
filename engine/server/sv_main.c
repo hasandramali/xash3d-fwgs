@@ -681,6 +681,31 @@ void Host_ServerFrame( void )
 	// if server is not active, do nothing
 	if( !svs.initialized ) return;
 
+	// Embedded boot map (_xashnull) kick-then-drop: once the background is
+	// fully up on BOTH sides (server active + client active, i.e. world
+	// frames are actually rendering), run the boot cfg after a short
+	// settle so it drops back to the menu ("wait;disconnect"). One shot
+	// per load; re-arms automatically on the next load. A missing cfg is
+	// harmless (exec warns, background stays up, renderer still kicked).
+	{
+		static int bootFrames = 0;
+		static qboolean bootFired = false;
+		if( sv.background && sv.state == ss_active && !Q_stricmp( sv.name, BOOTMAP_NAME ) && CL_Active())
+		{
+			if( !bootFired && ++bootFrames >= BOOTMAP_SETTLE_FRAMES )
+			{
+				bootFired = true;
+				Con_Printf( "BootMap: background settled (%d frames), running %s\n", BOOTMAP_SETTLE_FRAMES, BOOTMAP_LOADCFG );
+				Cbuf_AddTextf( "exec %s\n", BOOTMAP_LOADCFG );
+			}
+		}
+		else
+		{
+			bootFrames = 0;
+			bootFired = false;
+		}
+	}
+
 	if( sv_fps.value != 0.0f && ( sv.simulating || sv.state != ss_active ))
 		sv.time_residual += host.frametime;
 

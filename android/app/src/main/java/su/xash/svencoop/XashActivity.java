@@ -258,12 +258,13 @@ public class XashActivity extends SDLActivity {
 
         // Background map (renderer kick): keeps the renderer fed from the first
         // seconds so a wedged first present (black screen) cannot stick on
-        // affected devices. The engine embeds _server_start.bsp and extracts
-        // it on first use (BootMap_Ensure), so the file is always available
-        // -- no device probing needed. Placed first so user +commands still
-        // win.
+        // affected devices. The engine embeds _xashnull (map + load cfg)
+        // and extracts both on first use (BootMap_Ensure), then drops back
+        // to the menu by itself once the background settles -- so the file
+        // is always available and no device probing is needed. Placed first
+        // so user +commands still win.
         if (argv.indexOf("map_background") < 0) {
-            argv = "+map_background _server_start " + argv;
+            argv = "+map_background _xashnull " + argv;
         }
 
         String globalArgs = getGlobalArguments();
