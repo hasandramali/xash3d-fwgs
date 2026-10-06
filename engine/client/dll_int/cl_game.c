@@ -65,8 +65,8 @@ client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS] =
 
 #define CL_WEAPONLISTFIX_DEFAULT_SLOTS 6
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
-#define CL_WEAPONLISTFIX_SUIT_ID 31
 #define CL_WEAPONLISTFIX_PENDING_TIMEOUT 3.0f
+#define CL_WEAPONLISTFIX_DROP_TIMEOUT 1.0f
 #define CL_WEAPONLISTFIX_HIDEHUD_WEAPONS BIT( 0 )
 #define CL_WEAPONLISTFIX_HIDEHUD_ALL BIT( 2 )
 
@@ -265,7 +265,7 @@ static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *wea
 
 static qboolean CL_WeaponListFix_IsUsefulWeapon( const char *name, int id )
 {
-	if( id <= 0 || id >= MAX_WEAPONS )
+	if( id <= 0 || id >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 		return false;
 	if( COM_StringEmpty( name ))
 		return false;
@@ -276,7 +276,7 @@ static qboolean CL_WeaponListFix_IsUsefulWeapon( const char *name, int id )
 
 static cl_weaponlistfix_weapon_t *CL_WeaponListFix_GetWeapon( int id )
 {
-	if( id < 0 || id >= MAX_WEAPONS )
+	if( id < 0 || id >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 		return NULL;
 	if( !cl_weaponlistfix_state.weapons[id].valid )
 		return NULL;
@@ -292,8 +292,8 @@ static qboolean CL_WeaponListFix_HasWeapon( const cl_weaponlistfix_weapon_t *wea
 	// Sven Co-op's server.dll never fills clientdata.weapons (binary-verified:
 	// zero writes in ReHLDS_Sven — the field stays 0 on the wire), so the
 	// bitmask below is always empty on Sven and only the active weapon showed
-	// in the inventory. owned_hint (set by CurWeapon/WeapPickup/CustWeapon/
-	// InvAdd) is the authoritative Sven ownership signal for every id.
+	// in the inventory. owned_hint (set by CurWeapon/WeapPickup) is the
+	// authoritative Sven ownership signal for every id.
 	if( weapon->owned_hint )
 		return true;
 	if( weapon->id >= 0 && weapon->id < 32 )
@@ -306,14 +306,12 @@ static void CL_WeaponListFix_AddUnknownWeapon( int id )
 	cl_weaponlistfix_weapon_t *weapon;
 	char name[64];
 
-	if( id <= 0 || id >= MAX_WEAPONS )
+	if( id <= 0 || id >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 		return;
 	if( cl_weaponlistfix_state.weapons[id].valid )
 		return;
-	if( cl_weaponlistfix_state.count >= MAX_WEAPONS )
+	if( cl_weaponlistfix_state.count >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 		return;
-	if( id == CL_WEAPONLISTFIX_SUIT_ID )
-		return; // suit is not a selectable weapon, skip the weapon_31 fallback
 
 	// Generate weapon name based on ID
 	Q_snprintf( name, sizeof( name ), "weapon_%d", id );
@@ -389,7 +387,7 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_AddNamedWeapon( int id, const
 {
 	cl_weaponlistfix_weapon_t *weapon;
 
-	if( id <= 0 || id >= MAX_WEAPONS )
+	if( id <= 0 || id >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 		return NULL;
 	if( COM_StringEmpty( name ))
 		return NULL;
@@ -398,7 +396,7 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_AddNamedWeapon( int id, const
 
 	if( !weapon->valid )
 	{
-		if( cl_weaponlistfix_state.count >= MAX_WEAPONS )
+		if( cl_weaponlistfix_state.count >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 			return NULL;
 
 		weapon->valid = true;
@@ -484,7 +482,7 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_FindRelative( int current_id,
 static cl_weaponlistfix_weapon_t *CL_WeaponListFix_PickWeaponInSlot( int slot )
 {
 	int i, n = 0, active = -1;
-	int owned[MAX_WEAPONS];
+	int owned[CL_WEAPONLISTFIX_MAX_WEAPONS];
 
 	if( cl_weaponlistfix_state.count <= 0 || slot < 0 )
 		return NULL;
@@ -562,10 +560,12 @@ void CL_WeaponListFix_Reset( void )
 
 	memset( &cl_weaponlistfix_state, 0, sizeof( cl_weaponlistfix_state ));
 
-	for( i = 0; i < MAX_WEAPONS; i++ )
+	for( i = 0; i < CL_WEAPONLISTFIX_MAX_WEAPONS; i++ )
 		cl_weaponlistfix_state.weapons[i].order_index = -1;
 
 	cl_weaponlistfix_state.active_weapon = -1;
+	cl_weaponlistfix_state.drop_pending = 0;
+	cl_weaponlistfix_state.drop_pending_time = 0;
 	cl_weaponlistfix_state.selected_weapon = -1;
 	cl_weaponlistfix_state.select_pending = 0;
 	cl_weaponlistfix_state.display_slot = -1;
@@ -612,12 +612,15 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	if( !Q_stricmp( cmd_name, "drop" ))
 	{
 		int id = cl_weaponlistfix_state.active_weapon;
-		if( id > 0 && id < MAX_WEAPONS )
+		if( id > 0 && id < CL_WEAPONLISTFIX_MAX_WEAPONS )
 		{
 			cl_weaponlistfix_weapon_t *drop = CL_WeaponListFix_GetWeapon( id );
 			if( drop && drop->owned_hint )
 			{
 				drop->owned_hint = false;
+				cl_weaponlistfix_state.drop_pending = id;
+				cl_weaponlistfix_state.drop_pending_time = cl.time;
+				cl_weaponlistfix_state.active_weapon = -1;
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_DPrintf( "CL_WeaponListFix: drop clears %s (ID %d)\n", drop->name, id );
 			}
@@ -730,7 +733,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		if( !weapon->valid )
 		{
-			if( cl_weaponlistfix_state.count >= MAX_WEAPONS )
+			if( cl_weaponlistfix_state.count >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 				return;
 
 			weapon->order_index = cl_weaponlistfix_state.count;
@@ -836,7 +839,19 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		if( ( state & 1 ) )
 		{
-			cl_weaponlistfix_state.active_weapon = id;
+			qboolean suppress_drop = ( cl_weaponlistfix_state.drop_pending == id &&
+				cl.time - cl_weaponlistfix_state.drop_pending_time <= CL_WEAPONLISTFIX_DROP_TIMEOUT );
+			if( suppress_drop )
+			{
+				weapon->owned_hint = false;
+				cl_weaponlistfix_state.active_weapon = -1;
+			}
+			else
+			{
+				cl_weaponlistfix_state.active_weapon = id;
+				if( cl_weaponlistfix_state.drop_pending )
+					cl_weaponlistfix_state.drop_pending = 0;
+			}
 		}
 
 		return;
@@ -860,7 +875,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		// CurWeapon/CustWeapon (e.g. custom weapons granted mid-map). Register
 		// them instead of dropping the message, otherwise they stay invisible
 		// until first wielded.
-		if( !weapon && id > 0 && id < MAX_WEAPONS && id != CL_WEAPONLISTFIX_SUIT_ID )
+		if( !weapon && id > 0 && id < CL_WEAPONLISTFIX_MAX_WEAPONS )
 		{
 			CL_WeaponListFix_AddUnknownWeapon( id );
 			weapon = CL_WeaponListFix_GetWeapon( id );
@@ -868,44 +883,6 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		if( weapon )
 			weapon->owned_hint = true;
-		return;
-	}
-
-	if( !Q_stricmp( pszName, "InvAdd" ))
-	{
-		cl_weaponlistfix_msg_t msg;
-		cl_weaponlistfix_weapon_t *weapon;
-		char name[64];
-		int id;
-
-		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
-		id = CL_WeaponListFix_ReadLong( &msg );
-		for( int i = 0; i < 3; i++ )
-			CL_WeaponListFix_ReadByte( &msg );
-		for( int i = 0; i < 4; i++ )
-			CL_WeaponListFix_ReadByte( &msg );
-		CL_WeaponListFix_ReadString( &msg, name, sizeof( name ));
-		if( id <= 0 || id >= MAX_WEAPONS || id == CL_WEAPONLISTFIX_SUIT_ID || Q_strnicmp( name, "weapon_", 7 ))
-			return;
-		weapon = CL_WeaponListFix_AddNamedWeapon( id, name );
-		if( weapon )
-			weapon->owned_hint = true;
-		return;
-	}
-
-	if( !Q_stricmp( pszName, "InvRemove" ))
-	{
-		cl_weaponlistfix_msg_t msg;
-		int id;
-
-		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
-		id = CL_WeaponListFix_ReadLong( &msg );
-		if( id > 0 && id < MAX_WEAPONS )
-		{
-			cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
-			if( weapon )
-				weapon->owned_hint = false;
-		}
 		return;
 	}
 
@@ -920,7 +897,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		id = CL_WeaponListFix_ReadShort( &msg );
 		CL_WeaponListFix_ReadString( &msg, sprdir, sizeof( sprdir ));
 
-		if( id <= 0 || id >= MAX_WEAPONS )
+		if( id <= 0 || id >= CL_WEAPONLISTFIX_MAX_WEAPONS )
 			return;
 
 		// Stock client.dll (MsgFunc_CustWeapon 0x100047d0) stores this string
@@ -976,9 +953,11 @@ void CL_WeaponListFix_OnResetHUD( void )
 	if( !cl_weaponlistfix.value )
 		return;
 
-	for( i = 0; i < MAX_WEAPONS; i++ )
+	for( i = 0; i < CL_WEAPONLISTFIX_MAX_WEAPONS; i++ )
 		cl_weaponlistfix_state.weapons[i].owned_hint = false;
 	cl_weaponlistfix_state.active_weapon = -1;
+	cl_weaponlistfix_state.drop_pending = 0;
+	cl_weaponlistfix_state.drop_pending_time = 0;
 	cl_weaponlistfix_state.selected_weapon = -1;
 	cl_weaponlistfix_state.select_pending = 0;
 }
@@ -2833,6 +2812,7 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 			{ "Damage",      70, 18 },
 			{ "Battery",     71,  2 },
 			{ "Train",       72,  1 },
+			{ "HideHUD",     91,  2 },
 			{ "ShowMenu",    93, -1 },
 			{ "SayText",     74, -1 },
 			{ "TextMsg",     75, -1 },

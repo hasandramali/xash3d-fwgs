@@ -753,6 +753,8 @@ extern convar_t cl_fixmodelinterpolationartifacts;
 extern convar_t cl_screenfade;
 extern convar_t cl_weaponlistfix;
 
+#define CL_WEAPONLISTFIX_MAX_WEAPONS 256
+
 typedef struct
 {
 	qboolean valid;
@@ -777,8 +779,8 @@ typedef struct
 
 typedef struct
 {
-	cl_weaponlistfix_weapon_t weapons[MAX_WEAPONS];
-	int order[MAX_WEAPONS];
+	cl_weaponlistfix_weapon_t weapons[CL_WEAPONLISTFIX_MAX_WEAPONS];
+	int order[CL_WEAPONLISTFIX_MAX_WEAPONS];
 	int count;
 	int active_weapon;
 	int selected_weapon;
@@ -787,6 +789,8 @@ typedef struct
 	int hidehud_bits;
 	char pending_name[64];
 	float pending_time;
+	int drop_pending;
+	float drop_pending_time;
 	float expire_time;
 } cl_weaponlistfix_t;
 
