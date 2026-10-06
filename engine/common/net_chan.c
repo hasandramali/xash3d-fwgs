@@ -1817,19 +1817,9 @@ void Netchan_TransmitBits( netchan_t *chan, int length, const byte *data )
 				MSG_WriteLong( &send, chan->reliable_fragid[i] );
 				if( chan->gs_netchan )
 				{
-					// GoldSrc clients send fragStart/fragLength as 16-bit byte
-					// counts. Sven server->client packets use 32-bit fields, so
-					// keep this narrow form scoped to outbound client packets.
-					if( chan->sock == NS_CLIENT )
-					{
-						MSG_WriteWord( &send, chan->frag_startpos[i] >> 3 );
-						MSG_WriteWord( &send, chan->frag_length[i] >> 3 );
-					}
-					else
-					{
-						MSG_WriteLong( &send, chan->frag_startpos[i] >> 3 );
-						MSG_WriteLong( &send, chan->frag_length[i] >> 3 );
-					}
+					// Sven's netchan uses 32-bit byte offsets and lengths in both directions.
+					MSG_WriteLong( &send, chan->frag_startpos[i] >> 3 );
+					MSG_WriteLong( &send, chan->frag_length[i] >> 3 );
 				}
 				else
 				{
@@ -2009,18 +1999,9 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 				fragid[i] = MSG_ReadLong( msg );
 				if( chan->gs_netchan )
 				{
-					// GoldSrc client->server packets use 16-bit byte counts,
-					// while Sven server->client packets use 32-bit byte counts.
-					if( chan->sock == NS_SERVER )
-					{
-						frag_offset[i] = MSG_ReadWord( msg ) << 3;
-						frag_length[i] = MSG_ReadWord( msg ) << 3;
-					}
-					else
-					{
-						frag_offset[i] = MSG_ReadLong( msg ) << 3;
-						frag_length[i] = MSG_ReadLong( msg ) << 3;
-					}
+					// Sven's netchan uses 32-bit byte offsets and lengths in both directions.
+					frag_offset[i] = MSG_ReadLong( msg ) << 3;
+					frag_length[i] = MSG_ReadLong( msg ) << 3;
 				}
 				else
 				{
