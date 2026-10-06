@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Base64
 import android.util.Log
+import su.xash.svencoop.R
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -215,6 +216,7 @@ class SteamAuthManager(private val ctx: Context) {
     // logon response future (single in-flight logon at a time)
     private var logonFuture: CompletableFuture<Int>? = null
     @Volatile private var expectDisconnect = false
+    private val reconnectGeneration = AtomicLong(0L)
 
     // ticket state
     @Volatile private var currentGameDir: String? = null
@@ -407,7 +409,11 @@ class SteamAuthManager(private val ctx: Context) {
             } catch (e: AuthException) {
                 Log.w(TAG, "loginModern auth failure: eresult=${e.eresult} ${e.message}")
                 authSession = null
-                LoginState.Failed(e.eresult, e.message ?: "authentication failed")
+                LoginState.Failed(
+                    e.eresult,
+                    if (e.eresult == ER_INVALID_PASSWORD) ctx.getString(R.string.steam_invalid_credentials)
+                    else e.message ?: "authentication failed"
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "loginModern error: ${e.message}")
                 authSession = null
@@ -543,19 +549,25 @@ class SteamAuthManager(private val ctx: Context) {
         }
     }
 
-    fun logout() {
-        try {
-            if (connected) {
-                sendRawMsg(ByteArray(0), 706) // ClientLogOff
+    suspend fun logout() = withContext(Dispatchers.IO) {
+        reconnectGeneration.incrementAndGet()
+        authMutex.withLock {
+            connectLock.withLock {
+                expectDisconnect = true
+                try {
+                    if (connected) sendRawMsg(ByteArray(0), 706) // ClientLogOff
+                } catch (_: Exception) { }
+                prefs.edit()
+                    .putBoolean("logged_in", false)
+                    .putLong("steam_id", 0L)
+                    .putString("refresh_token", null)
+                    .putString("login_key", null)
+                    .putString("guard_data", null)
+                    .apply()
+                stopBroker()
+                disconnect()
             }
-        } catch (_: Exception) { }
-        prefs.edit()
-            .putBoolean("logged_in", false)
-            .putString("refresh_token", null)
-            .apply()
-        loggedIn = false
-        stopBroker()
-        disconnect()
+        }
     }
 
     /**
@@ -976,7 +988,8 @@ class SteamAuthManager(private val ctx: Context) {
 
     private fun startReader() {
         if (readerThread?.isAlive == true) return
-        readerThread = Thread {
+        expectDisconnect = false
+        val currentReader = Thread {
             Log.i(TAG, "reader: thread started (name=${Thread.currentThread().name})")
             try {
                 while (!Thread.interrupted()) {
@@ -991,8 +1004,9 @@ class SteamAuthManager(private val ctx: Context) {
                 if (Thread.interrupted()) return@Thread
                 Log.w(TAG, "reader stopped: ${e.message}", e)
             } finally {
-                readerThread = null
-                if (!expectDisconnect) {
+                val isCurrentReader = readerThread === Thread.currentThread()
+                if (isCurrentReader) readerThread = null
+                if (isCurrentReader && !expectDisconnect) {
                     Log.e(TAG, "reader: UNEXPECTED STOP — marking disconnected (was connected=$connected loggedIn=$loggedIn)")
                     connected = false
                     loggedIn = false
@@ -1005,21 +1019,25 @@ class SteamAuthManager(private val ctx: Context) {
                     // Schedule automatic reconnection with stored credentials
                     scheduleReconnect()
                 } else {
-                    Log.i(TAG, "reader: stopped after expected disconnect")
+                    Log.i(TAG, "reader: stopped after replacement or expected disconnect")
                 }
             }
-        }.apply { isDaemon = true; name = "sbrk-reader"; start() }
+        }.apply { isDaemon = true; name = "sbrk-reader" }
+        readerThread = currentReader
+        currentReader.start()
     }
 
     /** Schedules a reconnection attempt with exponential backoff after an unexpected disconnect. */
     private fun scheduleReconnect() {
+        val generation = reconnectGeneration.get()
         Thread {
             var attempt = 0
             val maxAttempts = 10
             val baseDelayMs = 5000L // 5 seconds initial delay
             var reloggedIn = false
 
-            while (attempt < maxAttempts && !Thread.interrupted() && !reloggedIn) {
+            while (attempt < maxAttempts && !Thread.interrupted() && !reloggedIn &&
+                generation == reconnectGeneration.get()) {
                 attempt++
                 val delayMs = baseDelayMs * (1 shl (attempt - 1)).coerceAtMost(60000) // max 60s
                 Log.i(TAG, "Reconnect attempt $attempt/$maxAttempts in ${delayMs}ms...")
@@ -1031,7 +1049,9 @@ class SteamAuthManager(private val ctx: Context) {
                 
                 // Try to reconnect and re-login
                 kotlinx.coroutines.runBlocking {
+                    if (generation != reconnectGeneration.get()) return@runBlocking
                     connectLock.withLock {
+                        if (generation != reconnectGeneration.get()) return@withLock
                         try {
                             // Close old socket if any
                             try { socket?.close() } catch (_: Exception) { }
@@ -1065,7 +1085,9 @@ class SteamAuthManager(private val ctx: Context) {
                     // and kotlinx.coroutines Mutex is not reentrant; calling it inside the
                     // lock above would deadlock the reconnect and leave the session logged out
                     // forever (ticket requests would then fail with "logged off").
+                    if (generation != reconnectGeneration.get()) return@runBlocking
                     val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
+                    if (generation != reconnectGeneration.get()) return@runBlocking
                     if (state is LoginState.Success) {
                         Log.i(TAG, "Re-login successful after reconnect")
                         reloggedIn = true
@@ -1080,7 +1102,7 @@ class SteamAuthManager(private val ctx: Context) {
                 }
             }
             
-            if (attempt >= maxAttempts) {
+            if (attempt >= maxAttempts && generation == reconnectGeneration.get()) {
                 Log.e(TAG, "All reconnect attempts exhausted. Giving up.")
                 // Mark as fully disconnected so UI can show error
                 connected = false
@@ -1308,7 +1330,7 @@ class SteamAuthManager(private val ctx: Context) {
                 currentGamePlaying = APPID
                 LoginState.Success
             }
-            ER_INVALID_PASSWORD -> LoginState.Failed(result, "Invalid password")
+            ER_INVALID_PASSWORD -> LoginState.Failed(result, ctx.getString(R.string.steam_invalid_credentials))
             ER_ACCOUNT_DISABLED -> LoginState.Failed(result, "Account disabled")
             ER_ACCOUNT_LOGON_DENIED,
             ER_ACCOUNT_LOGON_DENIED_NO_MAIL,
@@ -1334,12 +1356,16 @@ class SteamAuthManager(private val ctx: Context) {
         val jobId = nextJobId.getAndIncrement()
         val future = CompletableFuture<SteamMsg>()
         pendingJobs[jobId] = future
-        sendProtobufMsg(
-            EMsg_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED,
-            body,
-            buildUnifiedHeader(serviceMethod, jobId)
-        )
-        val resp = awaitJob(future, serviceMethod)
+        val resp = try {
+            sendProtobufMsg(
+                EMsg_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED,
+                body,
+                buildUnifiedHeader(serviceMethod, jobId)
+            )
+            awaitJob(future, serviceMethod)
+        } finally {
+            pendingJobs.remove(jobId)
+        }
         val eresult = readHeaderEresult(resp.header)
         if (eresult !in allowedEresults) {
             throw AuthException(eresult, "$serviceMethod failed: eresult=$eresult")
@@ -2009,6 +2035,7 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private fun disconnect() {
+        expectDisconnect = true
         try { heartbeatJob?.interrupt() } catch (_: Exception) { }
         try { readerThread?.interrupt() } catch (_: Exception) { }
         try { socket?.close() } catch (_: Exception) { }

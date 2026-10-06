@@ -80,8 +80,13 @@ class SteamAuthFragment : Fragment() {
             MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.steam_logout_confirm_title)
                 .setPositiveButton(R.string.steam_logout_button) { _, _ ->
-                    auth.logout()
-                    updateUi()
+                    lifecycleScope.launch {
+                        auth.logout()
+                        pendingEmailCode = false
+                        pendingTwoFactor = false
+                        codeLayout.visibility = View.GONE
+                        updateUi()
+                    }
                 }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()

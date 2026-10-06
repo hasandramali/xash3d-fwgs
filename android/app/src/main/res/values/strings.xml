@@ -139,6 +139,7 @@
     <string name="steam_need_twofactor">Enter your Steam Guard two-factor code.</string>
     <string name="steam_need_guard_code">Enter the Steam Guard code first.</string>
     <string name="steam_error">Steam login failed: %1$s</string>
+    <string name="steam_invalid_credentials">Incorrect Steam username or password. Check your credentials and try again.</string>
     <string name="steam_connect_failed">Failed to connect to Steam: %1$s</string>
     <string name="steam_retry">Retry</string>
     <string name="steam_need_device_confirm">Open the Steam app on your phone and tap Approve, then come back here. Waiting up to 5 minutes…</string>
