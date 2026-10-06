@@ -3677,6 +3677,8 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 	{
 		if( successfully_received )
 			ClearBits( p->ucFlags, RES_WASMISSING );
+		else if( p->type == t_model && p->nIndex == -1 )
+			CL_FallbackClientSprite( p->szFileName );
 
 		if( filename[0] == '!' )
 		{
@@ -3945,12 +3947,8 @@ qboolean CL_PrecacheResources( void )
 
 					if( !cl.sound_index[pRes->nIndex] )
 					{
-						if( FBitSet( pRes->ucFlags, RES_FATALIFMISSING ))
-						{
-							S_EndRegistration();
-							CL_Disconnect_f();
-							return false;
-						}
+						Con_Printf( S_ERROR "Could not load sound " DEFAULT_SOUNDPATH "%s; leaving it silent\n", pRes->szFileName );
+						cl.sound_precache[pRes->nIndex][0] = 0;
 					}
 				}
 			}
@@ -3970,11 +3968,17 @@ qboolean CL_PrecacheResources( void )
 				{
 					if( pRes->nIndex != -1 )
 					{
-						cl.models[pRes->nIndex] = Mod_ForName( pRes->szFileName, false, true );
+						if( FBitSet( pRes->ucFlags, RES_WASMISSING ))
+						{
+							Con_Printf( S_ERROR "Missing model %s; using models/error.mdl\n", pRes->szFileName );
+							cl.models[pRes->nIndex] = Mod_ForName( "models/error.mdl", false, true );
+						}
+						else
+							cl.models[pRes->nIndex] = Mod_ForName( pRes->szFileName, false, true );
 
 						if( cl.models[pRes->nIndex] == NULL )
 						{
-							if( FBitSet( pRes->ucFlags, RES_FATALIFMISSING ))
+							if( FBitSet( pRes->ucFlags, RES_FATALIFMISSING ) && !FBitSet( pRes->ucFlags, RES_WASMISSING ))
 							{
 								S_EndRegistration();
 								CL_Disconnect_f();

@@ -2354,6 +2354,29 @@ model_t *CL_LoadClientSprite( const char *filename )
 	return CL_LoadSpriteModel( filename, SPR_CLIENT, 0 );
 }
 
+void CL_FallbackClientSprite( const char *filename )
+{
+	model_t *mod;
+	char name[MAX_QPATH];
+	int i;
+
+	if( COM_StringEmptyOrNULL( filename ))
+		return;
+
+	Q_strncpy( name, filename, sizeof( name ));
+	COM_FixSlashes( name );
+
+	for( i = 0, mod = clgame.sprites; i < MAX_CLIENT_SPRITES; i++, mod++ )
+	{
+		if( Q_stricmp( mod->name, name ) || mod->needload != NL_NEEDS_LOADED )
+			continue;
+
+		if( CL_LoadHudSprite( "models/error.spr", mod, SPR_CLIENT, mod->numtexinfo ))
+			Q_strncpy( mod->name, name, sizeof( mod->name ));
+		return;
+	}
+}
+
 /*
 ===============================================================================
 	CGame Builtin Functions
