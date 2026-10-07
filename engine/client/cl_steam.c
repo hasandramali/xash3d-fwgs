@@ -86,7 +86,7 @@ static steam_broker_t broker;
 
 static int SteamBroker_GetGoldSrcAppId( void );
 static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out );
-static void Steam_MasterlistScanBegin( void );
+void Steam_MasterlistScanBegin( void );
 static qboolean Steam_MasterlistSeenBefore( const netadr_t *adr );
 
 static void SteamBroker_DumpHex( const char *name, const void *data, size_t size )
@@ -550,7 +550,7 @@ static struct { uint8_t ip[4]; uint16_t port; unsigned int gen; } s_masterlist_s
 static unsigned int s_masterlist_gen = 0;
 static int s_masterlist_seen_pos = 0;
 
-static void Steam_MasterlistScanBegin( void )
+void Steam_MasterlistScanBegin( void )
 {
 	s_masterlist_gen++;
 	if( s_masterlist_gen == 0 ) // wrap: invalidate everything
