@@ -93,6 +93,8 @@ class SteamAuthManager(private val ctx: Context) {
         // Unified message (ServiceMethod) EMsg numbers, see JavaSteam emsg.steamd.
         private const val EMsg_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED = 9804
         private const val EMsg_SERVICE_METHOD_RESPONSE = 147
+        private const val EMSG_CLIENT_PERSONA_STATE = 766
+        private const val EMSG_CLIENT_REQUEST_FRIEND_DATA = 815
 
         // CAuthentication_AllowedConfirmation.confirmation_type (EAuthSessionGuardType)
         private const val GUARD_TYPE_NONE = 1
@@ -212,6 +214,7 @@ class SteamAuthManager(private val ctx: Context) {
     // job correlation
     private val nextJobId = AtomicLong(1L)
     private val pendingJobs = ConcurrentHashMap<Long, CompletableFuture<SteamMsg>>()
+    private val pendingFriendServers = ConcurrentHashMap<Long, CompletableFuture<String>>()
 
     // logon response future (single in-flight logon at a time)
     private var logonFuture: CompletableFuture<Int>? = null
@@ -807,6 +810,19 @@ class SteamAuthManager(private val ctx: Context) {
                         val parts = command.split(" ")
                         currentGameDir = if (parts.size > 1) parts[1] else null
                         Log.i(TAG, "sb_gamedir=$currentGameDir")
+                    } else if (command.startsWith("sb_friend ")) {
+                        val steamId = command.substringAfter(' ').trim().toLongOrNull()
+                        if (steamId == null || steamId <= 0L) {
+                            writeSbrkFriendResult(outs, false, "")
+                            continue
+                        }
+                        try {
+                            val address = requestFriendServer(steamId)
+                            writeSbrkFriendResult(outs, true, address)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "$tag: friend server lookup failed for $steamId: ${e.message}")
+                            writeSbrkFriendResult(outs, false, "")
+                        }
                     } else if (command.startsWith("sb_disconnect")) {
                         // Player left a game server but the engine stays connected to the broker
                         // (SBRK_STATE_CONNECTED, ready for the next game/connect). Keep alive.
@@ -899,6 +915,72 @@ class SteamAuthManager(private val ctx: Context) {
         Log.i(TAG, "writeSbrkResponse frame hex: ${frame.toByteArray().joinToString(" ") { "%02x".format(it) }}")
         outs.write(frame.toByteArray())
         outs.flush()
+    }
+
+    private fun writeSbrkFriendResult(outs: OutputStream, found: Boolean, address: String) {
+        val payload = "sb_friend_result\n${if (found) address else ""}".toByteArray(Charsets.US_ASCII)
+        val frame = ByteArrayOutputStream()
+        frame.write("SBRK".toByteArray(Charsets.US_ASCII))
+        frame.write(byteArrayOf((payload.size and 0xFF).toByte(), ((payload.size shr 8) and 0xFF).toByte()))
+        frame.write(payload)
+        outs.write(frame.toByteArray())
+        outs.flush()
+    }
+
+    private fun requestFriendServer(steamId: Long): String {
+        if (!connected || !loggedIn) throw Exception("Steam CM is not logged in")
+        val future = CompletableFuture<String>()
+        pendingFriendServers[steamId] = future
+        try {
+            val body = ByteArrayOutputStream()
+            body.write(Proto.packVarint((1 shl 3) or 0))
+            body.write(Proto.packVarint(20))
+            body.write(Proto.packVarint((2 shl 3) or 1))
+            body.write(Proto.packInt64(steamId))
+            sendProtobufMsg(EMSG_CLIENT_REQUEST_FRIEND_DATA, body.toByteArray(), buildProtoHeader(currentSteamId, currentSessionId))
+            return future.get(12, TimeUnit.SECONDS)
+        } finally {
+            pendingFriendServers.remove(steamId)
+        }
+    }
+
+    private fun handlePersonaState(body: ByteArray) {
+        val reader = ProtoReader(body)
+        while (reader.remaining > 0) {
+            val tag = reader.readVarint()
+            when (tag shr 3) {
+                2 -> {
+                    val length = reader.readVarint()
+                    val friend = ProtoReader(reader.readBytes(length))
+                    var steamId = 0L
+                    var gameAppId = 0
+                    var ip = 0
+                    var port = 0
+                    while (friend.remaining > 0) {
+                        val friendTag = friend.readVarint()
+                        when (friendTag shr 3) {
+                            1 -> if ((friendTag and 7) == 1) steamId = friend.readLongLE() else friend.skipField(friendTag)
+                            3 -> if ((friendTag and 7) == 0) gameAppId = friend.readVarint() else friend.skipField(friendTag)
+                            4 -> if ((friendTag and 7) == 0) ip = friend.readVarint() else friend.skipField(friendTag)
+                            5 -> if ((friendTag and 7) == 0) port = friend.readVarint() else friend.skipField(friendTag)
+                            else -> friend.skipField(friendTag)
+                        }
+                    }
+                    if (steamId != 0L) {
+                        val pending = pendingFriendServers[steamId]
+                        if (pending != null) {
+                            if (gameAppId == APPID && ip != 0 && port in 1..65535) {
+                                val address = "${ip ushr 24 and 255}.${ip ushr 16 and 255}.${ip ushr 8 and 255}.${ip and 255}:$port"
+                                pending.complete(address)
+                            } else {
+                                pending.completeExceptionally(Exception("Friend is not advertising a public game server address"))
+                            }
+                        }
+                    }
+                }
+                else -> reader.skipField(tag)
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1118,6 +1200,7 @@ class SteamAuthManager(private val ctx: Context) {
             when (emsg) {
                 1 -> handleMulti(packet.body)
                 779 -> handleGameConnectTokens(packet.body)
+                EMSG_CLIENT_PERSONA_STATE -> handlePersonaState(packet.body)
                 5463 -> handleNewLoginKey(packet.body)
                 751 -> handleLogonResponse(packet)
                 757 -> {

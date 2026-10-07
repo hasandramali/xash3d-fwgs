@@ -40,6 +40,8 @@ GNU General Public License for more details.
 #define SBRK_FRAME_LENGTH_SIZE		2
 #define SBRK_RESPONSE_HEADER		"sb_connect\n"
 #define SBRK_RESPONSE_HEADER_SIZE	(sizeof(SBRK_RESPONSE_HEADER) - 1)
+#define SBRK_FRIEND_RESPONSE_HEADER	"sb_friend_result\n"
+#define SBRK_FRIEND_RESPONSE_HEADER_SIZE	(sizeof(SBRK_FRIEND_RESPONSE_HEADER) - 1)
 #define SBRK_MAX_FRAME_SIZE			4096
 #define SBRK_CONNECT_TIMEOUT		10.0
 #define SBRK_CONNECT_RETRY_DELAY	5.0
@@ -328,6 +330,32 @@ static qboolean SteamBroker_ProcessFrame( void )
 	if( MSG_GetNumBytesLeft( &sb ) < payload_size )
 		return false; // need more data
 
+	if( payload_size >= SBRK_FRIEND_RESPONSE_HEADER_SIZE &&
+		!memcmp( broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE,
+			SBRK_FRIEND_RESPONSE_HEADER, SBRK_FRIEND_RESPONSE_HEADER_SIZE ))
+	{
+		char address[64];
+		netadr_t adr;
+		size_t address_size = payload_size - SBRK_FRIEND_RESPONSE_HEADER_SIZE;
+		if( address_size > 0 && address_size < sizeof( address ))
+		{
+			memcpy( address, broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE + SBRK_FRIEND_RESPONSE_HEADER_SIZE, address_size );
+			address[address_size] = '\0';
+			if( NET_StringToAdr( address, &adr ) && NET_NetadrType( &adr ) == NA_IP )
+			{
+				Con_Printf( "Steam friend server found: %s; connecting over UDP\n", address );
+				Cbuf_AddTextf( "connect %s\n", address );
+			}
+			else
+				Con_Printf( S_ERROR "Steam friend is not advertising a reachable Sven server address\n" );
+		}
+		else
+			Con_Printf( S_ERROR "Steam friend server lookup returned no address\n" );
+		memmove( broker.rx_buffer, broker.rx_buffer + frame_size, broker.rx_buffer_pos - frame_size );
+		broker.rx_buffer_pos -= frame_size;
+		return true;
+	}
+
 	char response_header[SBRK_RESPONSE_HEADER_SIZE];
 	if( MSG_ReadBytes( &sb, response_header, sizeof( response_header ), SBRK_RESPONSE_HEADER_SIZE ))
 	{
@@ -376,6 +404,35 @@ static qboolean SteamBroker_ProcessFrame( void )
 	broker.rx_buffer_pos -= frame_size;
 
 	return true;
+}
+
+static void SteamBroker_ConnectFriend_f( void )
+{
+	const char *steam_id;
+	char command[64];
+	char *end;
+	unsigned long long parsed;
+
+	if( Cmd_Argc() != 2 )
+	{
+		Con_Printf( S_USAGE "connect_steamid <friend-steamid64>\n" );
+		return;
+	}
+	steam_id = Cmd_Argv( 1 );
+	parsed = strtoull( steam_id, &end, 10 );
+	if( !steam_id[0] || *end || parsed == 0 )
+	{
+		Con_Printf( S_ERROR "Invalid SteamID64\n" );
+		return;
+	}
+	if( broker.state != SBRK_STATE_CONNECTED )
+	{
+		Con_Printf( S_ERROR "Steam login/broker is not connected\n" );
+		return;
+	}
+	Q_snprintf( command, sizeof( command ), "sb_friend %llu", parsed );
+	if( SteamBroker_SendFrame( command, Q_strlen( command )))
+		Con_Printf( "Looking up Steam friend's advertised game server...\n" );
 }
 
 static void SteamBroker_HandleDataTx( void )
@@ -673,6 +730,7 @@ void SteamBroker_Init( void )
 	broker.tx_buffer_pos = 0;
 	broker.ticket_timeout = 0;
 	Cvar_RegisterVariable( &cl_steam_broker_addr );
+	Cmd_AddCommand( "connect_steamid", SteamBroker_ConnectFriend_f, "connect to a Steam friend's advertised game server over UDP" );
 	Cvar_RegisterVariable( &cl_steam_appid );
 	NET_NetadrSetType( &broker.adr, NA_UNDEFINED );
 }

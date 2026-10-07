@@ -2506,7 +2506,7 @@ static void CL_NetRequestComplete( net_request_t *nr, netadr_t from, const char 
 static void CL_ParseGoldSrcStatusMessage( netadr_t from, sizebuf_t *msg, qboolean legacy_format )
 {
 	static char	s[512+8];
-	int p, numcl, maxcl, password, bots;
+	int p, numcl, maxcl, password, secure = 0, bots;
 	string host, map, gamedir, version;
 
 	// set to beginning but skip header
@@ -2565,6 +2565,7 @@ static void CL_ParseGoldSrcStatusMessage( netadr_t from, sizebuf_t *msg, qboolea
 		MSG_ReadByte( msg ); // server type
 		MSG_ReadByte( msg ); // operating system
 		password = MSG_ReadByte( msg );
+		secure = MSG_ReadByte( msg );
 		Q_strncpy( version, MSG_ReadString( msg ), sizeof( version ));
 	}
 
@@ -2589,6 +2590,7 @@ static void CL_ParseGoldSrcStatusMessage( netadr_t from, sizebuf_t *msg, qboolea
 	Info_SetValueForKeyf( s, "maxcl", sizeof( s ), "%i", maxcl );
 	Info_SetValueForKey( s, "gamedir", gamedir, sizeof( s ));
 	Info_SetValueForKey( s, "password", password ? "1" : "0", sizeof( s ));
+	Info_SetValueForKey( s, "secure", secure ? "1" : "0", sizeof( s ));
 
 	// write host last so we can try to cut off too long hostnames
 	// TODO: value size limit for infostrings
