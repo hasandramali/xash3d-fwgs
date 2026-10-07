@@ -2268,13 +2268,16 @@ static void CL_InternetServers_f( void )
 	// the key is dead extension, keep for compatibility until we use UDP based master server protocol
 	cls.internetservers_wait = NET_MasterQuery( 1, cls.internetservers_nat, cls.internetservers_customfilter );
 
-	// Steam path first (authoritative): a connected broker serves the
-	// real Steam list (sb_masterlist). Then the official WebAPI list if
-	// a key is set, otherwise the community HTTPS tracker (on-device,
-	// no Steam needed). All feed addresses through the normal per-server
-	// query path, so the menu fills in exactly like with UDP discovery.
-	if( !SteamBroker_RequestMasterList() && !SteamWebAPI_RequestMasterList())
-		SteamTracker_RequestMasterList();
+	// Happy eyeballs: fire every available source at once (broker Steam
+	// list, official WebAPI list if a key is set, community HTTPS
+	// tracker). Per-scan dedupe makes overlaps free, so a connected but
+	// silent broker can no longer starve the scan. All feed addresses
+	// through the normal per-server query path, so the menu fills in
+	// exactly like with UDP discovery.
+	Steam_MasterlistScanBegin();
+	SteamBroker_RequestMasterList();
+	SteamWebAPI_RequestMasterList();
+	SteamTracker_RequestMasterList();
 }
 
 static void CL_QueryServer_f( void )

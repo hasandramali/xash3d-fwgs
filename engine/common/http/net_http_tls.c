@@ -157,7 +157,13 @@ void HTTP_TlsShutdown( void )
 
 qboolean HTTP_TlsAvailable( void )
 {
-	return g_tls.inited;
+	// Capability, not init state: this TU only exists when XASH_MBEDTLS
+	// is compiled in, so HTTPS is always servable here. The PSA seed
+	// itself still initializes lazily on first HTTPS use (see
+	// HTTP_TlsNew) so boot never blocks on entropy. Reporting inited
+	// here instead would reject every https:// fastdl URL at parse time
+	// (HTTP_ParseURL) and wedge signon with "no servers to download".
+	return true;
 }
 
 tlsctx_t *HTTP_TlsNew( int socket, const char *hostname )

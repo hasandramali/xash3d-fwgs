@@ -86,6 +86,8 @@ static steam_broker_t broker;
 
 static int SteamBroker_GetGoldSrcAppId( void );
 static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out );
+static void Steam_MasterlistScanBegin( void );
+static qboolean Steam_MasterlistSeenBefore( const netadr_t *adr );
 
 static void SteamBroker_DumpHex( const char *name, const void *data, size_t size )
 {
@@ -389,8 +391,15 @@ static qboolean SteamBroker_ProcessFrame( void )
 			address[address_size] = '\0';
 			if( NET_StringToAdr( address, &adr ) && NET_NetadrType( &adr ) == NA_IP )
 			{
-				Con_DPrintf( "%s: Steam server: %s\n", __func__, address );
-				NET_QueryServerByAddress( adr, PROTO_GOLDSRC );
+				if( Steam_MasterlistSeenBefore( &adr ))
+				{
+					Con_DPrintf( "%s: duplicate %s (already queried this scan)\n", __func__, address );
+				}
+				else
+				{
+					Con_DPrintf( "%s: Steam server: %s\n", __func__, address );
+					NET_QueryServerByAddress( adr, PROTO_GOLDSRC );
+				}
 			}
 			else
 				Con_Printf( S_ERROR "%s: broker returned unusable server address \"%s\"\n", __func__, address );
@@ -524,8 +533,50 @@ qboolean SteamBroker_RequestMasterList( void )
 
 static void SteamBroker_MasterList_f( void )
 {
-	if( !SteamBroker_RequestMasterList() && !SteamWebAPI_RequestMasterList() && !SteamTracker_RequestMasterList())
-		Con_Printf( S_ERROR "no masterlist source available (broker offline, no WebAPI key, tracker failed)\n" );
+	Steam_MasterlistScanBegin();
+	// Happy eyeballs: fire every available source at once. The per-scan
+	// dedupe below makes overlaps free, so a silent broker (older builds
+	// that swallow sb_masterlist) can no longer starve the scan.
+	SteamBroker_RequestMasterList();
+	SteamWebAPI_RequestMasterList();
+	SteamTracker_RequestMasterList();
+}
+
+// Per-scan dedupe: parallel sources (broker + webapi + tracker) usually
+// return the same servers; feed each address into the per-server query
+// path at most once per scan so the menu never gets double rows.
+#define MASTERLIST_DEDUPE_SIZE 512
+static struct { uint8_t ip[4]; uint16_t port; unsigned int gen; } s_masterlist_seen[MASTERLIST_DEDUPE_SIZE];
+static unsigned int s_masterlist_gen = 0;
+static int s_masterlist_seen_pos = 0;
+
+static void Steam_MasterlistScanBegin( void )
+{
+	s_masterlist_gen++;
+	if( s_masterlist_gen == 0 ) // wrap: invalidate everything
+	{
+		memset( s_masterlist_seen, 0, sizeof( s_masterlist_seen ));
+		s_masterlist_gen = 1;
+	}
+}
+
+static qboolean Steam_MasterlistSeenBefore( const netadr_t *adr )
+{
+	int i;
+
+	for( i = 0; i < MASTERLIST_DEDUPE_SIZE; i++ )
+	{
+		if( s_masterlist_seen[i].gen == s_masterlist_gen &&
+			s_masterlist_seen[i].port == adr->port &&
+			!memcmp( s_masterlist_seen[i].ip, adr->ip, 4 ))
+			return true;
+	}
+	i = s_masterlist_seen_pos;
+	s_masterlist_seen_pos = ( s_masterlist_seen_pos + 1 ) % MASTERLIST_DEDUPE_SIZE;
+	memcpy( s_masterlist_seen[i].ip, adr->ip, 4 );
+	s_masterlist_seen[i].port = adr->port;
+	s_masterlist_seen[i].gen = s_masterlist_gen;
+	return false;
 }
 
 // Parse a SteamID in either raw 64-bit or classic STEAM_X:Y:Z (also VALVE_)
@@ -603,13 +654,14 @@ void SteamBroker_ConnectBySteamID( const char *text )
 }
 
 // Community tracker fallback (on-device, no Steam needed).
-// gamemonitoring.net exposes a plain HTTPS JSON list:
-//   https://api.gamemonitoring.net/servers?game=<appid>&limit=300
+// gamemonitoring.net exposes a plain HTTPS JSON list (status=online is
+// enforced server-side; the client checks below are belt-and-suspenders):
+//   https://api.gamemonitoring.net/servers?game=<appid>&status=online&limit=300
 //   {"response":{"items":[{..."request":"1.2.3.4:27015","status":true,
 //     "private":false,"hide_address":false,...}, ...]}}
 // Only entries with status=true, private=false, hide_address=false are
 // used; every address is re-queried through the normal per-server path.
-#define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&limit=300"
+#define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&status=online&limit=300"
 #define WEBAPI_MASTERLIST_URL	"https://api.steampowered.com/IGameServersService/GetServerList/v1/?key=%s&filter=%%5Cappid%%5C%d&limit=500"
 #define TRACKER_MASTERLIST_MAX	300
 
@@ -765,6 +817,11 @@ static void SteamTracker_ParseAndFeed( const byte *data, size_t size, masterlist
 
 		if( NET_StringToAdr( address, &adr ) && NET_NetadrType( &adr ) == NA_IP )
 		{
+			if( Steam_MasterlistSeenBefore( &adr ))
+			{
+				Con_DPrintf( "%s: duplicate %s (already queried this scan)\n", __func__, address );
+				continue;
+			}
 			Con_DPrintf( "%s: masterlist server: %s\n", __func__, address );
 			NET_QueryServerByAddress( adr, PROTO_GOLDSRC );
 			count++;

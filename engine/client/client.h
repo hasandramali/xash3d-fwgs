@@ -1303,6 +1303,7 @@ void SteamBroker_TerminateGameConnection( void );
 qboolean SteamBroker_RequestMasterList( void );
 qboolean SteamTracker_RequestMasterList( void );
 qboolean SteamWebAPI_RequestMasterList( void );
+void Steam_MasterlistScanBegin( void );
 void SteamBroker_ConnectBySteamID( const char *text );
 
 //
