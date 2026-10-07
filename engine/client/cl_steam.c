@@ -81,6 +81,8 @@ typedef struct
 
 static steam_broker_t broker;
 
+static int SteamBroker_GetGoldSrcAppId( void );
+
 static void SteamBroker_DumpHex( const char *name, const void *data, size_t size )
 {
 	const uint8_t *bytes = (const uint8_t *)data;
