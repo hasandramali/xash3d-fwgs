@@ -97,12 +97,23 @@ class SteamAuthFragment : Fragment() {
         autoConnectSwitch.isChecked = prefs.getBoolean(SteamAuthManager.PREF_AUTO_CONNECT, true)
         autoConnectSwitch.setOnCheckedChangeListener { _, checked ->
             prefs.edit().putBoolean(SteamAuthManager.PREF_AUTO_CONNECT, checked).apply()
+            if (!checked) {
+                // OFF must actually shut things down: end the CM session
+                // and stop the broker now, not on some later restart.
+                lifecycleScope.launch {
+                    auth.signOut()
+                    updateUi()
+                }
+            }
         }
 
         updateUi()
 
-        // If we already have a stored session, try to restore it.
-        if (auth.hasStoredKey && !auth.isLoggedIn) {
+        // If we already have a stored session, try to restore it --
+        // but only when auto-connect is ON. With OFF, visiting this
+        // screen must not resurrect anything either.
+        if (prefs.getBoolean(SteamAuthManager.PREF_AUTO_CONNECT, true) &&
+            auth.hasStoredKey && !auth.isLoggedIn) {
             lifecycleScope.launch {
                 showBusy(true)
                 statusText.text = getString(R.string.steam_connecting)
@@ -272,7 +283,11 @@ class SteamAuthFragment : Fragment() {
         )
         lifecycleScope.launch {
             if (running) {
-                withContext(Dispatchers.IO) { auth.stopBroker() }
+                // Stop means stop: end the Steam session too (frees the
+                // account for e.g. a PC broker) instead of only closing
+                // the listen socket while the login lingers.
+                withContext(Dispatchers.IO) { auth.signOut() }
+                updateUi()
             } else {
                 auth.startBroker()
                 // startBroker binds async; give it a beat before reading state back.

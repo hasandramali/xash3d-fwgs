@@ -1870,14 +1870,13 @@ static void CL_Connect_f( void )
 
 	Q_strncpy( server, Cmd_Argv( 1 ), sizeof( server ));
 
-	// SteamID (P2P) dialing needs a logged-on Steam endpoint on this
-	// device: stock hw.so tunnels the whole netchan over SteamNetworking,
-	// but this engine speaks direct UDP only. Fail loudly with guidance
-	// instead of a cryptic address error.
+	// SteamID dialing: resolve the friend's advertised game server through
+	// the in-app broker, then connect over direct UDP (internet or
+	// ZeroTier LAN). True Steam-P2P transport would need an on-device
+	// Steam endpoint, which this engine does not have.
 	if( !Q_strnicmp( server, "STEAM_", 6 ) || !Q_strnicmp( server, "VALVE_", 6 ))
 	{
-		Con_Printf( "SteamID (P2P) connect is not supported by this engine: no local Steam endpoint.\n" );
-		Con_Printf( "Connect by IP address instead (Steam server list, ZeroTier LAN, or the server's 'status').\n" );
+		SteamBroker_ConnectBySteamID( server );
 		return;
 	}
 
@@ -2269,11 +2268,13 @@ static void CL_InternetServers_f( void )
 	// the key is dead extension, keep for compatibility until we use UDP based master server protocol
 	cls.internetservers_wait = NET_MasterQuery( 1, cls.internetservers_nat, cls.internetservers_customfilter );
 
-	// Parallel Steam path: the legacy UDP master is long dead, but a
-	// connected broker can serve the real Steam list (sb_masterlist).
-	// Returned addresses flow through the normal per-server query path,
-	// so the menu fills in exactly like with UDP discovery.
-	SteamBroker_RequestMasterList();
+	// Steam path first (authoritative): a connected broker serves the
+	// real Steam list (sb_masterlist). Then the official WebAPI list if
+	// a key is set, otherwise the community HTTPS tracker (on-device,
+	// no Steam needed). All feed addresses through the normal per-server
+	// query path, so the menu fills in exactly like with UDP discovery.
+	if( !SteamBroker_RequestMasterList() && !SteamWebAPI_RequestMasterList())
+		SteamTracker_RequestMasterList();
 }
 
 static void CL_QueryServer_f( void )

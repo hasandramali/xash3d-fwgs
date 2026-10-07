@@ -552,6 +552,31 @@ class SteamAuthManager(private val ctx: Context) {
         }
     }
 
+    /**
+     * Light sign-out: ends the CM session and stops the broker, but KEEPS
+     * stored credentials (username/refresh token/login key) so a later
+     * login needs no password. Unlike logout(), nothing is wiped.
+     * Used by auto-connect OFF and the broker stop button so the account
+     * is actually freed (e.g. for a PC broker) instead of lingering.
+     */
+    suspend fun signOut() = withContext(Dispatchers.IO) {
+        reconnectGeneration.incrementAndGet()
+        authMutex.withLock {
+            connectLock.withLock {
+                expectDisconnect = true
+                try {
+                    if (connected) sendRawMsg(ByteArray(0), 706) // ClientLogOff
+                } catch (_: Exception) { }
+                prefs.edit()
+                    .putBoolean("logged_in", false)
+                    .putLong("steam_id", 0L)
+                    .apply()
+                stopBroker()
+                disconnect()
+            }
+        }
+    }
+
     suspend fun logout() = withContext(Dispatchers.IO) {
         reconnectGeneration.incrementAndGet()
         authMutex.withLock {
@@ -579,6 +604,12 @@ class SteamAuthManager(private val ctx: Context) {
      * still gets tickets.
      */
     fun ensureSessionAsync() {
+        // Auto-connect OFF means hands off: never restore or start anything
+        // behind the user's back (game launch must not resurrect the session).
+        if (!prefs.getBoolean(PREF_AUTO_CONNECT, true)) {
+            Log.i(TAG, "ensureSessionAsync: auto-connect OFF, doing nothing")
+            return
+        }
         Log.i(TAG, "ensureSessionAsync: isLoggedIn=$isLoggedIn hasStoredKey=$hasStoredKey")
         if (isLoggedIn) {
             Log.i(TAG, "ensureSessionAsync: already logged in, starting broker")

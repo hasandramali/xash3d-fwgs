@@ -1301,6 +1301,9 @@ void SteamBroker_Frame( void );
 qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge );
 void SteamBroker_TerminateGameConnection( void );
 qboolean SteamBroker_RequestMasterList( void );
+qboolean SteamTracker_RequestMasterList( void );
+qboolean SteamWebAPI_RequestMasterList( void );
+void SteamBroker_ConnectBySteamID( const char *text );
 
 //
 // cl_video.c

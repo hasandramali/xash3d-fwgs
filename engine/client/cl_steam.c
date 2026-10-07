@@ -508,8 +508,306 @@ qboolean SteamBroker_RequestMasterList( void )
 
 static void SteamBroker_MasterList_f( void )
 {
-	if( !SteamBroker_RequestMasterList())
-		Con_Printf( S_ERROR "Steam login/broker is not connected\n" );
+	if( !SteamBroker_RequestMasterList() && !SteamWebAPI_RequestMasterList() && !SteamTracker_RequestMasterList())
+		Con_Printf( S_ERROR "no masterlist source available (broker offline, no WebAPI key, tracker failed)\n" );
+}
+
+// Parse a SteamID in either raw 64-bit or classic STEAM_X:Y:Z (also VALVE_)
+// form into a 64-bit ID. Classic form: id64 = (universe<<56)|(1<<52)|(1<<32)
+// | (Z*2+Y); legacy universe 0 is mapped to public (1), like stock clients.
+static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out )
+{
+	const char *p = text;
+	uint64_t universe = 0, auth = 0, account = 0;
+
+	if( !Q_strnicmp( p, "STEAM_", 6 ))
+		p += 6;
+	else if( !Q_strnicmp( p, "VALVE_", 6 ))
+		p += 6;
+	else
+	{
+		// raw 64-bit digits?
+		uint64_t id = 0;
+		if( !*p )
+			return false;
+		for( ; *p; p++ )
+		{
+			if( *p < '0' || *p > '9' )
+				return false;
+			id = id * 10 + (uint64_t)( *p - '0' );
+		}
+		if( id == 0 )
+			return false;
+		*out = id;
+		return true;
+	}
+
+	// X:Y:Z triple
+	while( *p == ' ' ) p++;
+	while( *p >= '0' && *p <= '9' ) universe = universe * 10 + (uint64_t)( *p++ - '0' );
+	if( *p++ != ':' )
+		return false;
+	while( *p >= '0' && *p <= '9' ) auth = auth * 10 + (uint64_t)( *p++ - '0' );
+	if( *p++ != ':' )
+		return false;
+	while( *p >= '0' && *p <= '9' ) account = account * 10 + (uint64_t)( *p++ - '0' );
+	if( *p != '\0' || auth > 1 )
+		return false;
+	if( universe == 0 )
+		universe = 1; // legacy STEAM_0 means public in practice
+	if( account == 0 && auth == 0 )
+		return false;
+
+	*out = ( universe << 56 ) | ( (uint64_t)1 << 52 ) | ( (uint64_t)1 << 32 ) | ( account * 2 + auth );
+	return true;
+}
+
+// connect STEAM_... : resolve the friend's advertised server through the
+// broker, then ride the normal UDP path (sb_friend_result auto-connects).
+// True Steam-P2P transport needs an on-device Steam endpoint, which this
+// engine does not have; direct UDP (internet or ZeroTier LAN) is used.
+void SteamBroker_ConnectBySteamID( const char *text )
+{
+	uint64_t steamid;
+
+	if( !SteamBroker_ParseSteamID( text, &steamid ))
+	{
+		Con_Printf( S_USAGE "connect STEAM_X:Y:Z | connect <steamid64>\n" );
+		return;
+	}
+
+	if( broker.state != SBRK_STATE_CONNECTED )
+	{
+		Con_Printf( S_ERROR "Steam broker is not connected (login first); cannot resolve %s\n", text );
+		return;
+	}
+
+	Con_Printf( "Resolving SteamID %"PRIu64" via broker...\n", steamid );
+	Cbuf_AddTextf( "connect_steamid %"PRIu64"\n", steamid );
+}
+
+// Community tracker fallback (on-device, no Steam needed).
+// gamemonitoring.net exposes a plain HTTPS JSON list:
+//   https://api.gamemonitoring.net/servers?game=<appid>&limit=300
+//   {"response":{"items":[{..."request":"1.2.3.4:27015","status":true,
+//     "private":false,"hide_address":false,...}, ...]}}
+// Only entries with status=true, private=false, hide_address=false are
+// used; every address is re-queried through the normal per-server path.
+#define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&limit=300"
+#define WEBAPI_MASTERLIST_URL	"https://api.steampowered.com/IGameServersService/GetServerList/v1/?key=%s&filter=%%5Cappid%%5C%d&limit=500"
+#define TRACKER_MASTERLIST_MAX	300
+
+static CVAR_DEFINE_AUTO( cl_masterlist_webapi_key, "", FCVAR_ARCHIVE, "Steam Web API key for the official IGameServersService masterlist (free at steamcommunity.com/dev/apikey; empty = use community tracker)" );
+
+// Span of one top-level {...} object: string-aware brace matching
+// (server names may contain braces; quoted spans are skipped).
+static qboolean SteamTracker_FindObject( const char *p, const char *end, const char **obj, const char **objend )
+{
+	int depth = 0;
+	qboolean in_string = false;
+	const char *start = NULL;
+
+	for( ; p < end; p++ )
+	{
+		if( in_string )
+		{
+			if( *p == '\\' && p + 1 < end )
+				p++;
+			else if( *p == '"' )
+				in_string = false;
+		}
+		else if( *p == '"' )
+			in_string = true;
+		else if( *p == '{' )
+		{
+			if( depth == 0 )
+				start = p;
+			depth++;
+		}
+		else if( *p == '}' )
+		{
+			if( --depth == 0 && start )
+			{
+				*obj = start;
+				*objend = p + 1;
+				return true;
+			}
+			if( depth < 0 )
+				return false;
+		}
+		else if( *p == ']' && depth == 0 )
+			return false; // end of items[] without an object
+	}
+	return false;
+}
+
+// Skip JSON whitespace (the live API is compact, but caches/proxies
+// may pretty-print; values must never depend on spacing).
+static const char *SteamTracker_SkipWS( const char *p, const char *end )
+{
+	while( p < end && ( *p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' ))
+		p++;
+	return p;
+}
+
+// Bounded literal search: key must match fully inside [span, end).
+static const char *SteamTracker_FindKey( const char *span, const char *end, const char *key )
+{
+	size_t keylen = Q_strlen( key );
+	const char *p = span;
+
+	while( p + keylen <= end )
+	{
+		if( !Q_strncmp( p, key, keylen ))
+			return p + keylen;
+		p++;
+	}
+	return NULL;
+}
+
+typedef enum
+{
+	MASTERLIST_TRACKER, // gamemonitoring JSON: response.items[], "request", freshness filters
+	MASTERLIST_WEBAPI // Valve IGameServersService: response.servers[], "addr", live by construction
+} masterlist_src_t;
+
+static void SteamTracker_ParseAndFeed( const byte *data, size_t size, masterlist_src_t src )
+{
+	const char *p = (const char *)data;
+	const char *end = p + size;
+	const char *items;
+	const char *arraykey = ( src == MASTERLIST_WEBAPI ) ? "\"servers\":" : "\"items\":";
+	const char *addrkey = ( src == MASTERLIST_WEBAPI ) ? "\"addr\":" : "\"request\":";
+	int count = 0;
+
+	// locate the array start
+	items = SteamTracker_FindKey( p, end, arraykey );
+	if( !items )
+	{
+		Con_Printf( S_ERROR "%s: no server array in masterlist response\n", __func__ );
+		return;
+	}
+	while( items < end && *items != '[' )
+		items++;
+	if( items >= end )
+		return;
+	p = items + 1;
+
+	while( count < TRACKER_MASTERLIST_MAX )
+	{
+		const char *obj, *objend, *v;
+		char address[64];
+		size_t alen;
+		netadr_t adr;
+
+		if( !SteamTracker_FindObject( p, end, &obj, &objend ))
+			break;
+		p = objend;
+
+		if( src == MASTERLIST_TRACKER )
+		{
+			// status:true required (absent status counts as not-online)
+			v = SteamTracker_FindKey( obj, objend, "\"status\":" );
+			if( !v )
+				continue;
+			v = SteamTracker_SkipWS( v, objend );
+			if( v + 4 > objend || Q_strncmp( v, "true", 4 ))
+				continue;
+			// private absent, false or null required (the API omits the
+			// key at times and emits explicit nulls elsewhere)
+			v = SteamTracker_FindKey( obj, objend, "\"private\":" );
+			if( v )
+			{
+				v = SteamTracker_SkipWS( v, objend );
+				if( v + 5 > objend || ( Q_strncmp( v, "false", 5 ) && Q_strncmp( v, "null", 4 )))
+					continue;
+			}
+			// hide_address absent, false or null required (same rule)
+			v = SteamTracker_FindKey( obj, objend, "\"hide_address\":" );
+			if( v )
+			{
+				v = SteamTracker_SkipWS( v, objend );
+				if( v + 5 > objend || ( Q_strncmp( v, "false", 5 ) && Q_strncmp( v, "null", 4 )))
+					continue;
+			}
+		}
+		// "request"/"addr" : "ip:port" (spacing tolerant, quote verified)
+		v = SteamTracker_FindKey( obj, objend, addrkey );
+		if( !v )
+			continue;
+		v = SteamTracker_SkipWS( v, objend );
+		if( v >= objend || *v != '"' )
+			continue;
+		v++;
+		alen = 0;
+		while( v + alen < (const char *)objend && v[alen] != '"' && alen < sizeof( address ) - 1 )
+			alen++;
+		if( alen == 0 || alen >= sizeof( address ) - 1 )
+			continue;
+		memcpy( address, v, alen );
+		address[alen] = '\0';
+
+		if( NET_StringToAdr( address, &adr ) && NET_NetadrType( &adr ) == NA_IP )
+		{
+			Con_DPrintf( "%s: masterlist server: %s\n", __func__, address );
+			NET_QueryServerByAddress( adr, PROTO_GOLDSRC );
+			count++;
+		}
+	}
+
+	Con_Printf( "%s server list complete: %d servers\n",
+		src == MASTERLIST_WEBAPI ? "Steam WebAPI" : "Community", count );
+}
+
+static void SteamTracker_MasterListResponse( const char *url, qboolean success, const byte *data, size_t size, void *userdata )
+{
+	masterlist_src_t src = (masterlist_src_t)(intptr_t)userdata;
+	(void)url;
+
+	if( !success || !data || !size )
+	{
+		Con_Printf( S_ERROR "%s: masterlist download failed\n", __func__ );
+		return;
+	}
+
+	SteamTracker_ParseAndFeed( data, size, src );
+}
+
+qboolean SteamTracker_RequestMasterList( void )
+{
+	char url[256];
+	int appid = SteamBroker_GetGoldSrcAppId();
+
+	if( Q_snprintf( url, sizeof( url ), TRACKER_MASTERLIST_URL, appid ) <= 0 )
+		return false;
+
+	if( !HTTP_GetToMemory( url, SteamTracker_MasterListResponse, (void *)(intptr_t)MASTERLIST_TRACKER ))
+		return false;
+
+	Con_Printf( "Requesting community server list for appid %d...\n", appid );
+	return true;
+}
+
+// Official Valve list via IGameServersService. Needs a free Web API key
+// (steamcommunity.com/dev/apikey); without one the community tracker above
+// is used instead. Same feed path, "addr" fields, no freshness filters
+// (entries are live by construction).
+qboolean SteamWebAPI_RequestMasterList( void )
+{
+	char url[512];
+	int appid = SteamBroker_GetGoldSrcAppId();
+
+	if( !cl_masterlist_webapi_key.string[0] )
+		return false;
+
+	if( Q_snprintf( url, sizeof( url ), WEBAPI_MASTERLIST_URL, cl_masterlist_webapi_key.string, appid ) <= 0 )
+		return false;
+
+	if( !HTTP_GetToMemory( url, SteamTracker_MasterListResponse, (void *)(intptr_t)MASTERLIST_WEBAPI ))
+		return false;
+
+	Con_Printf( "Requesting Steam WebAPI server list for appid %d...\n", appid );
+	return true;
 }
 
 static void SteamBroker_HandleDataTx( void )
@@ -810,6 +1108,7 @@ void SteamBroker_Init( void )
 	Cmd_AddCommand( "connect_steamid", SteamBroker_ConnectFriend_f, "connect to a Steam friend's advertised game server over UDP" );
 	Cmd_AddCommand( "steam_masterlist", SteamBroker_MasterList_f, "request Steam internet server list via broker" );
 	Cvar_RegisterVariable( &cl_steam_appid );
+	Cvar_RegisterVariable( &cl_masterlist_webapi_key );
 	NET_NetadrSetType( &broker.adr, NA_UNDEFINED );
 }
 
