@@ -44,7 +44,7 @@ static CVAR_DEFINE_AUTO( sv_verbose_heartbeats, "0", 0, "print every heartbeat t
 
 #define HEARTBEAT_SECONDS               ((sv_nat.value > 0.0f) ? 60.0f : 300.0f) // 1 or 5 minutes
 #define RESOLVE_EXPIRE_SECONDS          (60.0f)  // positive cache: 1 minute
-#define NEGATIVE_RESOLVE_EXPIRE_SECONDS (300.0f) // negative cache: 5 minutes
+#define NEGATIVE_RESOLVE_EXPIRE_SECONDS (10.0f) // retry transient DNS failures promptly
 
 static size_t NET_BuildMasterServerScanRequest( char *buf, size_t size, uint32_t key, qboolean nat, const char *filter, connprotocol_t proto )
 {
@@ -154,7 +154,8 @@ static qboolean NET_SendToMasters( netsrc_t sock, size_t len, const void *data, 
 			wait = true;
 			break;
 		case NET_EAI_NONAME:
-			master->sent = true;
+			master->sent = false;
+			wait = true;
 			break;
 		case NET_EAI_OK:
 			master->sent = true;
