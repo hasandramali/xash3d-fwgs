@@ -852,7 +852,7 @@ class SteamAuthManager(private val ctx: Context) {
                             writeSbrkFriendResult(outs, true, address)
                         } catch (e: Exception) {
                             Log.w(TAG, "$tag: friend server lookup failed for $steamId: ${e.message}")
-                            writeSbrkFriendResult(outs, false, "")
+                            writeSbrkFriendResult(outs, false, "ERR:" + (e.message ?: "lookup failed"))
                         }
                     } else if (command.startsWith("sb_disconnect")) {
                         // Player left a game server but the engine stays connected to the broker
@@ -958,10 +958,16 @@ class SteamAuthManager(private val ctx: Context) {
         outs.flush()
     }
 
+    // Last persona sighting per pending lookup: (gameAppId, ip, port),
+    // (-1,-1,-1) = no data yet. Lets timeouts explain WHY the lookup
+    // failed instead of a bare empty result.
+    private val pendingFriendSeen = ConcurrentHashMap<Long, Triple<Int, Int, Int>>()
+
     private fun requestFriendServer(steamId: Long): String {
         if (!connected || !loggedIn) throw Exception("Steam CM is not logged in")
         val future = CompletableFuture<String>()
         pendingFriendServers[steamId] = future
+        pendingFriendSeen[steamId] = Triple(-1, -1, -1)
         try {
             val body = ByteArrayOutputStream()
             body.write(Proto.packVarint((1 shl 3) or 0))
@@ -969,9 +975,20 @@ class SteamAuthManager(private val ctx: Context) {
             body.write(Proto.packVarint((2 shl 3) or 1))
             body.write(Proto.packInt64(steamId))
             sendProtobufMsg(EMSG_CLIENT_REQUEST_FRIEND_DATA, body.toByteArray(), buildProtoHeader(currentSteamId, currentSessionId))
-            return future.get(12, TimeUnit.SECONDS)
+            try {
+                return future.get(12, TimeUnit.SECONDS)
+            } catch (e: java.util.concurrent.TimeoutException) {
+                val seen = pendingFriendSeen[steamId] ?: Triple(-1, -1, -1)
+                val (gameAppId, ip, port) = seen
+                throw Exception(when {
+                    gameAppId < 0 -> "no persona data (friend offline, invisible, or not on friends list?)"
+                    gameAppId != APPID -> "friend not in Sven Co-op (game appid $gameAppId)"
+                    else -> "no public server address advertised (NAT? private profile? listen host unreachable?) ip=$ip port=$port"
+                })
+            }
         } finally {
             pendingFriendServers.remove(steamId)
+            pendingFriendSeen.remove(steamId)
         }
     }
 
@@ -1001,6 +1018,7 @@ class SteamAuthManager(private val ctx: Context) {
                         val pending = pendingFriendServers[steamId]
                         if (pending != null) {
                             Log.d(TAG, "persona for $steamId: gameAppId=$gameAppId ip=$ip port=$port")
+                            pendingFriendSeen[steamId] = Triple(gameAppId, ip, port)
                             if (gameAppId == APPID && ip != 0 && port in 1..65535) {
                                 val address = "${ip ushr 24 and 255}.${ip ushr 16 and 255}.${ip ushr 8 and 255}.${ip and 255}:$port"
                                 Log.i(TAG, "friend $steamId advertises $address")

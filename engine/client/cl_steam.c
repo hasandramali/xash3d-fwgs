@@ -85,6 +85,7 @@ typedef struct
 static steam_broker_t broker;
 
 static int SteamBroker_GetGoldSrcAppId( void );
+static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out );
 
 static void SteamBroker_DumpHex( const char *name, const void *data, size_t size )
 {
@@ -351,13 +352,19 @@ static qboolean SteamBroker_ProcessFrame( void )
 		{
 			memcpy( address, broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE + SBRK_FRIEND_RESPONSE_HEADER_SIZE, address_size );
 			address[address_size] = '\0';
-			if( NET_StringToAdr( address, &adr ) && NET_NetadrType( &adr ) == NA_IP )
+			if( !Q_strncmp( address, "ERR:", 4 ))
+			{
+				// Broker-side diagnosed failure (offline? wrong game?
+				// no public address?). Surface the reason verbatim.
+				Con_Printf( S_ERROR "Steam friend server lookup: %s\n", address + 4 );
+			}
+			else if( NET_StringToAdr( address, &adr ) && NET_NetadrType( &adr ) == NA_IP )
 			{
 				Con_Printf( "Steam friend server found: %s; connecting over UDP\n", address );
 				Cbuf_AddTextf( "connect %s\n", address );
 			}
 			else
-				Con_Printf( S_ERROR "Steam friend is not advertising a reachable Sven server address\n" );
+				Con_Printf( S_ERROR "Steam friend server lookup returned no address\n" );
 		}
 		else
 			Con_Printf( S_ERROR "Steam friend server lookup returned no address\n" );
@@ -466,19 +473,17 @@ static void SteamBroker_ConnectFriend_f( void )
 {
 	const char *steam_id;
 	char command[64];
-	char *end;
-	unsigned long long parsed;
+	uint64_t parsed;
 
 	if( Cmd_Argc() != 2 )
 	{
-		Con_Printf( S_USAGE "connect_steamid <friend-steamid64>\n" );
+		Con_Printf( S_USAGE "connect_steamid <friend-steamid64 | STEAM_X:Y:Z>\n" );
 		return;
 	}
 	steam_id = Cmd_Argv( 1 );
-	parsed = strtoull( steam_id, &end, 10 );
-	if( !steam_id[0] || *end || parsed == 0 )
+	if( !SteamBroker_ParseSteamID( steam_id, &parsed ))
 	{
-		Con_Printf( S_ERROR "Invalid SteamID64\n" );
+		Con_Printf( S_ERROR "Invalid SteamID (want 64-bit digits or STEAM_X:Y:Z)\n" );
 		return;
 	}
 	if( broker.state != SBRK_STATE_CONNECTED )
@@ -486,7 +491,7 @@ static void SteamBroker_ConnectFriend_f( void )
 		Con_Printf( S_ERROR "Steam login/broker is not connected\n" );
 		return;
 	}
-	Q_snprintf( command, sizeof( command ), "sb_friend %llu", parsed );
+	Q_snprintf( command, sizeof( command ), "sb_friend %llu", (unsigned long long)parsed );
 	if( SteamBroker_SendFrame( command, Q_strlen( command )))
 		Con_Printf( "Looking up Steam friend's advertised game server...\n" );
 }
