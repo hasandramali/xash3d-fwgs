@@ -50,6 +50,7 @@ GNU General Public License for more details.
 #define SBRK_CONNECT_TIMEOUT		10.0
 #define SBRK_CONNECT_RETRY_DELAY	5.0
 #define SBRK_TICKET_RESPONSE_TIMEOUT	15.0
+#define SBRK_MASTERLIST_TIMEOUT	15.0
 #define SBRK_TICKET_SIZE_MAX 		2048
 
 static CVAR_DEFINE_AUTO( cl_steam_broker_addr, "127.0.0.1:27420", FCVAR_PRIVILEGED|FCVAR_ARCHIVE, "address of steam broker instance" );
@@ -73,6 +74,8 @@ typedef struct
 	double connection_timeout;
 	double idle_cycle_timeout;
 	double ticket_timeout;
+	qboolean masterlist_pending;
+	double masterlist_deadline;
 	uint8_t rx_buffer[SBRK_MAX_FRAME_SIZE + 64];
 	uint8_t tx_buffer[SBRK_MAX_FRAME_SIZE + 64];
 	uint32_t rx_buffer_pos;
@@ -206,6 +209,7 @@ static void SteamBroker_Disconnect( void )
 	SteamBroker_CloseSocket();
 	SteamBroker_SetState( SBRK_STATE_IDLE );
 	cls.broker_wait = false; // stop waiting for a ticket; the engine will re-request once we reconnect
+	broker.masterlist_pending = false;
 }
 
 static qboolean SteamBroker_ConnectImpl( void )
@@ -401,6 +405,7 @@ static qboolean SteamBroker_ProcessFrame( void )
 			tail_size = sizeof( tail ) - 1;
 		memcpy( tail, broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE + SBRK_MASTERLIST_END_HEADER_SIZE, tail_size );
 		tail[tail_size] = '\0';
+		broker.masterlist_pending = false; // terminator arrived: no fallback
 		Con_Printf( "Steam server list complete: %s\n", tail );
 		memmove( broker.rx_buffer, broker.rx_buffer + frame_size, broker.rx_buffer_pos - frame_size );
 		broker.rx_buffer_pos -= frame_size;
@@ -501,6 +506,12 @@ qboolean SteamBroker_RequestMasterList( void )
 
 	if( !SteamBroker_SendFrame( buf, len ))
 		return false;
+
+	// Some brokers (e.g. older ones) silently ignore unknown commands.
+	// If no terminator arrives in time, fall through to the next source
+	// instead of waiting forever.
+	broker.masterlist_pending = true;
+	broker.masterlist_deadline = Platform_DoubleTime() + SBRK_MASTERLIST_TIMEOUT;
 
 	Con_Printf( "Requesting Steam server list for %s (appid %d) via broker...\n", GI->gamefolder, appid );
 	return true;
@@ -981,6 +992,17 @@ static void SteamBroker_UpdateConnected( void )
 		Con_Printf( S_WARN "%s: no ticket response within %.0f seconds, reconnecting to broker\n", __func__, SBRK_TICKET_RESPONSE_TIMEOUT );
 		SteamBroker_Disconnect( );
 		return;
+	}
+
+	// Same idea for the server list: a broker that silently ignores
+	// sb_masterlist (older builds) must not wedge the scan forever.
+	// Fall through to the next source instead.
+	if( broker.masterlist_pending && Platform_DoubleTime() > broker.masterlist_deadline )
+	{
+		broker.masterlist_pending = false;
+		Con_Printf( "Broker server list timed out with no reply, trying next source...\n" );
+		if( !SteamWebAPI_RequestMasterList())
+			SteamTracker_RequestMasterList();
 	}
 
 	SteamBroker_HandleDataTx( );

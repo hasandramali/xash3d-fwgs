@@ -1000,12 +1000,16 @@ class SteamAuthManager(private val ctx: Context) {
                     if (steamId != 0L) {
                         val pending = pendingFriendServers[steamId]
                         if (pending != null) {
+                            Log.d(TAG, "persona for $steamId: gameAppId=$gameAppId ip=$ip port=$port")
                             if (gameAppId == APPID && ip != 0 && port in 1..65535) {
                                 val address = "${ip ushr 24 and 255}.${ip ushr 16 and 255}.${ip ushr 8 and 255}.${ip and 255}:$port"
+                                Log.i(TAG, "friend $steamId advertises $address")
                                 pending.complete(address)
-                            } else {
-                                pending.completeExceptionally(Exception("Friend is not advertising a public game server address"))
                             }
+                            // else: keep waiting -- persona arrives incrementally and the
+                            // first entry often carries no game data yet. Completing
+                            // here would kill lookups that a later update would
+                            // satisfy; the 12s request timeout covers true absence.
                         }
                     }
                 }
