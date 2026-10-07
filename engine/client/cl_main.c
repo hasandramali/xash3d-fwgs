@@ -1870,6 +1870,17 @@ static void CL_Connect_f( void )
 
 	Q_strncpy( server, Cmd_Argv( 1 ), sizeof( server ));
 
+	// SteamID (P2P) dialing needs a logged-on Steam endpoint on this
+	// device: stock hw.so tunnels the whole netchan over SteamNetworking,
+	// but this engine speaks direct UDP only. Fail loudly with guidance
+	// instead of a cryptic address error.
+	if( !Q_strnicmp( server, "STEAM_", 6 ) || !Q_strnicmp( server, "VALVE_", 6 ))
+	{
+		Con_Printf( "SteamID (P2P) connect is not supported by this engine: no local Steam endpoint.\n" );
+		Con_Printf( "Connect by IP address instead (Steam server list, ZeroTier LAN, or the server's 'status').\n" );
+		return;
+	}
+
 	// if running a local server, kill it and reissue
 	if( SV_Active( ))
 		SV_Shutdown( "Server was killed due to connection to remote server\n" );
@@ -2257,6 +2268,12 @@ static void CL_InternetServers_f( void )
 
 	// the key is dead extension, keep for compatibility until we use UDP based master server protocol
 	cls.internetservers_wait = NET_MasterQuery( 1, cls.internetservers_nat, cls.internetservers_customfilter );
+
+	// Parallel Steam path: the legacy UDP master is long dead, but a
+	// connected broker can serve the real Steam list (sb_masterlist).
+	// Returned addresses flow through the normal per-server query path,
+	// so the menu fills in exactly like with UDP discovery.
+	SteamBroker_RequestMasterList();
 }
 
 static void CL_QueryServer_f( void )

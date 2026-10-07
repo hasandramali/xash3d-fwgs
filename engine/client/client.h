@@ -1300,6 +1300,7 @@ void SteamBroker_Shutdown( void );
 void SteamBroker_Frame( void );
 qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge );
 void SteamBroker_TerminateGameConnection( void );
+qboolean SteamBroker_RequestMasterList( void );
 
 //
 // cl_video.c

@@ -42,6 +42,10 @@ GNU General Public License for more details.
 #define SBRK_RESPONSE_HEADER_SIZE	(sizeof(SBRK_RESPONSE_HEADER) - 1)
 #define SBRK_FRIEND_RESPONSE_HEADER	"sb_friend_result\n"
 #define SBRK_FRIEND_RESPONSE_HEADER_SIZE	(sizeof(SBRK_FRIEND_RESPONSE_HEADER) - 1)
+#define SBRK_MASTERLIST_ENTRY_HEADER	"sb_masterlist_entry "
+#define SBRK_MASTERLIST_ENTRY_HEADER_SIZE	(sizeof(SBRK_MASTERLIST_ENTRY_HEADER) - 1)
+#define SBRK_MASTERLIST_END_HEADER	"sb_masterlist_end "
+#define SBRK_MASTERLIST_END_HEADER_SIZE	(sizeof(SBRK_MASTERLIST_END_HEADER) - 1)
 #define SBRK_MAX_FRAME_SIZE			4096
 #define SBRK_CONNECT_TIMEOUT		10.0
 #define SBRK_CONNECT_RETRY_DELAY	5.0
@@ -356,6 +360,51 @@ static qboolean SteamBroker_ProcessFrame( void )
 		return true;
 	}
 
+	// Steam masterlist stream: one address per frame plus a terminator.
+	// Every returned address is re-queried through the normal per-server
+	// path, so names/pings/players reach the server-list UI unchanged.
+	if( payload_size >= SBRK_MASTERLIST_ENTRY_HEADER_SIZE &&
+		!memcmp( broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE,
+			SBRK_MASTERLIST_ENTRY_HEADER, SBRK_MASTERLIST_ENTRY_HEADER_SIZE ))
+	{
+		char address[64];
+		netadr_t adr;
+		size_t address_size = payload_size - SBRK_MASTERLIST_ENTRY_HEADER_SIZE;
+		if( address_size > 0 && address_size < sizeof( address ))
+		{
+			memcpy( address, broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE + SBRK_MASTERLIST_ENTRY_HEADER_SIZE, address_size );
+			address[address_size] = '\0';
+			if( NET_StringToAdr( address, &adr ) && NET_NetadrType( &adr ) == NA_IP )
+			{
+				Con_DPrintf( "%s: Steam server: %s\n", __func__, address );
+				NET_QueryServerByAddress( adr, PROTO_GOLDSRC );
+			}
+			else
+				Con_Printf( S_ERROR "%s: broker returned unusable server address \"%s\"\n", __func__, address );
+		}
+		else
+			Con_Printf( S_ERROR "%s: broker returned malformed masterlist entry\n", __func__ );
+		memmove( broker.rx_buffer, broker.rx_buffer + frame_size, broker.rx_buffer_pos - frame_size );
+		broker.rx_buffer_pos -= frame_size;
+		return true;
+	}
+
+	if( payload_size >= SBRK_MASTERLIST_END_HEADER_SIZE &&
+		!memcmp( broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE,
+			SBRK_MASTERLIST_END_HEADER, SBRK_MASTERLIST_END_HEADER_SIZE ))
+	{
+		char tail[64];
+		size_t tail_size = payload_size - SBRK_MASTERLIST_END_HEADER_SIZE;
+		if( tail_size >= sizeof( tail ))
+			tail_size = sizeof( tail ) - 1;
+		memcpy( tail, broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE + SBRK_MASTERLIST_END_HEADER_SIZE, tail_size );
+		tail[tail_size] = '\0';
+		Con_Printf( "Steam server list complete: %s\n", tail );
+		memmove( broker.rx_buffer, broker.rx_buffer + frame_size, broker.rx_buffer_pos - frame_size );
+		broker.rx_buffer_pos -= frame_size;
+		return true;
+	}
+
 	char response_header[SBRK_RESPONSE_HEADER_SIZE];
 	if( MSG_ReadBytes( &sb, response_header, sizeof( response_header ), SBRK_RESPONSE_HEADER_SIZE ))
 	{
@@ -433,6 +482,32 @@ static void SteamBroker_ConnectFriend_f( void )
 	Q_snprintf( command, sizeof( command ), "sb_friend %llu", parsed );
 	if( SteamBroker_SendFrame( command, Q_strlen( command )))
 		Con_Printf( "Looking up Steam friend's advertised game server...\n" );
+}
+
+qboolean SteamBroker_RequestMasterList( void )
+{
+	if( broker.state != SBRK_STATE_CONNECTED )
+		return false;
+
+	// sb_masterlist <gamedir> <appid>
+	char buf[128];
+	int appid = SteamBroker_GetGoldSrcAppId();
+	int len = Q_snprintf( buf, sizeof( buf ), "sb_masterlist %s %d", GI->gamefolder, appid );
+
+	if( len <= 0 )
+		return false;
+
+	if( !SteamBroker_SendFrame( buf, len ))
+		return false;
+
+	Con_Printf( "Requesting Steam server list for %s (appid %d) via broker...\n", GI->gamefolder, appid );
+	return true;
+}
+
+static void SteamBroker_MasterList_f( void )
+{
+	if( !SteamBroker_RequestMasterList())
+		Con_Printf( S_ERROR "Steam login/broker is not connected\n" );
 }
 
 static void SteamBroker_HandleDataTx( void )
@@ -731,6 +806,7 @@ void SteamBroker_Init( void )
 	broker.ticket_timeout = 0;
 	Cvar_RegisterVariable( &cl_steam_broker_addr );
 	Cmd_AddCommand( "connect_steamid", SteamBroker_ConnectFriend_f, "connect to a Steam friend's advertised game server over UDP" );
+	Cmd_AddCommand( "steam_masterlist", SteamBroker_MasterList_f, "request Steam internet server list via broker" );
 	Cvar_RegisterVariable( &cl_steam_appid );
 	NET_NetadrSetType( &broker.adr, NA_UNDEFINED );
 }
