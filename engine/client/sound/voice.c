@@ -24,7 +24,7 @@ GNU General Public License for more details.
 
 voice_state_t voice = { 0 };
 
-static CVAR_DEFINE_AUTO( voice_enable, "0", FCVAR_PRIVILEGED, "enable voice chat" );
+static CVAR_DEFINE_AUTO( voice_enable, "1", FCVAR_PRIVILEGED, "enable voice chat" );
 CVAR_DEFINE_AUTO( voice_loopback, "0", FCVAR_PRIVILEGED, "loopback voice back to the speaker" );
 static CVAR_DEFINE_AUTO( voice_scale, "1.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "incoming voice volume scale" );
 static CVAR_DEFINE_AUTO( voice_transmit_scale, "1.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "outcoming voice volume scale" );
