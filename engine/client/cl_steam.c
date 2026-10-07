@@ -656,12 +656,14 @@ void SteamBroker_ConnectBySteamID( const char *text )
 // Community tracker fallback (on-device, no Steam needed).
 // gamemonitoring.net exposes a plain HTTPS JSON list (status=online is
 // enforced server-side; the client checks below are belt-and-suspenders):
-//   https://api.gamemonitoring.net/servers?game=<appid>&status=online&limit=300
+//   https://api.gamemonitoring.net/servers?game=<appid>&status=online&limit=100
+// NOTE: limit must stay <= 100, the API answers anything above with
+// HTTP 400 ("limit must not exceed 100").
 //   {"response":{"items":[{..."request":"1.2.3.4:27015","status":true,
 //     "private":false,"hide_address":false,...}, ...]}}
 // Only entries with status=true, private=false, hide_address=false are
 // used; every address is re-queried through the normal per-server path.
-#define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&status=online&limit=300"
+#define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&status=online&limit=100"
 #define WEBAPI_MASTERLIST_URL	"https://api.steampowered.com/IGameServersService/GetServerList/v1/?key=%s&filter=%%5Cappid%%5C%d&limit=500"
 #define TRACKER_MASTERLIST_MAX	300
 
