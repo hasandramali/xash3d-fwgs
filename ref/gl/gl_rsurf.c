@@ -1680,18 +1680,31 @@ static qboolean R_WhitenSurfaceSamples( msurface_t *surf )
 
 // rebuild one surface from its (possibly whitened) samples and sub-upload
 // its lightmap rect. Same shape as the style-change path in R_CheckLightMap.
+// Large surfaces (beyond the stack temp) use a transient heap buffer:
+// silently skipping their upload while whitening samples left them
+// permanently dark with dedup thinking them done.
 static void R_UploadSurfaceLightmap( msurface_t *surf )
 {
 	byte temp[132*132*4];
+	byte *buf = temp;
 	mextrasurf_t *info = surf->info;
 	int sample_size = gEngfuncs.Mod_SampleSizeForFace( surf );
 	int smax = ( info->lightextents[0] / sample_size ) + 1;
 	int tmax = ( info->lightextents[1] / sample_size ) + 1;
 
-	if( smax >= 132 || tmax >= 132 )
+	if( smax <= 0 || tmax <= 0 )
 		return;
+	if( smax > BLOCK_SIZE_MAX || tmax > BLOCK_SIZE_MAX )
+		return; // beyond any lightmap atlas; cannot be addressed
 
-	R_BuildLightMap( surf, temp, smax * 4, false );
+	if( (size_t)smax * tmax * 4 > sizeof( temp ))
+	{
+		buf = Mem_Calloc( r_temppool, (size_t)smax * tmax * 4 );
+		if( !buf )
+			return;
+	}
+
+	R_BuildLightMap( surf, buf, smax * 4, false );
 
 #if XASH_WES
 	GL_Bind( XASH_TEXTURE1, tr.lightmapTextures[surf->lightmaptexturenum] );
@@ -1699,11 +1712,14 @@ static void R_UploadSurfaceLightmap( msurface_t *surf )
 #else
 	GL_Bind( XASH_TEXTURE0, tr.lightmapTextures[surf->lightmaptexturenum] );
 #endif
-	pglTexSubImage2D( GL_TEXTURE_2D, 0, surf->light_s, surf->light_t, smax, tmax, GL_RGBA, GL_UNSIGNED_BYTE, temp );
+	pglTexSubImage2D( GL_TEXTURE_2D, 0, surf->light_s, surf->light_t, smax, tmax, GL_RGBA, GL_UNSIGNED_BYTE, buf );
 
 #if XASH_WES
 	GL_SelectTexture( XASH_TEXTURE0 );
 #endif
+
+	if( buf != temp )
+		Mem_Free( buf );
 }
 
 static void R_TryBakeSurface( msurface_t *surf, const vec3_t pos, const vec3_t eye, float radius )

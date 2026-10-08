@@ -752,6 +752,7 @@ extern convar_t	ui_renderworld;
 extern convar_t cl_fixmodelinterpolationartifacts;
 extern convar_t cl_screenfade;
 extern convar_t cl_weaponlistfix;
+extern convar_t wl_pickup_rows;
 
 #define CL_WEAPONLISTFIX_MAX_WEAPONS 256
 
