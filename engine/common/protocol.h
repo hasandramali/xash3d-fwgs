@@ -331,6 +331,7 @@ extern const char *const svc_goldsrc_strings[svc_lastmsg+1];
 #define A2S_GOLDSRC_PLAYERS 'U'
 
 // from server to any
+#define S2A_CHALLENGE       'A'
 #define S2A_GOLDSRC_INFO    'I'
 #define S2A_GOLDSRC_LEGACY_INFO 'm'
 #define S2A_GOLDSRC_RULES   'E'

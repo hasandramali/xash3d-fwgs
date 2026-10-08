@@ -3267,6 +3267,38 @@ static void CL_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	MSG_Clear( msg );
 	MSG_ReadLong( msg ); // skip the -1
 
+	// Binary Source A2S challenge (FF FF FF FF A <4 bytes>): challenge-
+	// enforcing servers (all current Sven 5.x) never answer challengeless
+	// info queries, so re-issue ours echoing the challenge. Without this
+	// those servers stay invisible in the browser even though their
+	// addresses arrived fine. Loop guard: a server answering every retry
+	// with a fresh challenge gets exactly one echo per unique value.
+	if( msg->nDataBits == 9 * 8 && msg->pData[4] == S2A_CHALLENGE )
+	{
+		static netadr_t last_challenge_adr;
+		static byte last_challenge[4];
+		static qboolean have_last = false;
+		char query[sizeof( A2S_GOLDSRC_INFO ) + 4];
+
+		if( have_last && NET_CompareAdr( last_challenge_adr, from ) &&
+			!memcmp( last_challenge, msg->pData + 5, 4 ))
+		{
+			Con_DPrintf( "%s: duplicate A2S challenge from %s, ignoring\n", __func__, NET_AdrToString( from ));
+			return;
+		}
+
+		memcpy( query, A2S_GOLDSRC_INFO, sizeof( A2S_GOLDSRC_INFO ));
+		memcpy( query + sizeof( A2S_GOLDSRC_INFO ), msg->pData + 5, 4 );
+		Netchan_OutOfBand( NS_CLIENT, from, sizeof( query ), (const byte *)query );
+
+		last_challenge_adr = from;
+		memcpy( last_challenge, msg->pData + 5, 4 );
+		have_last = true;
+
+		Con_DPrintf( "%s: echoed A2S challenge to %s\n", __func__, NET_AdrToString( from ));
+		return;
+	}
+
 	args = MSG_ReadStringLine( msg );
 
 	Cmd_TokenizeString( args );
