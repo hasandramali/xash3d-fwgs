@@ -2642,7 +2642,10 @@ static void CL_UpdateFlashlight( cl_entity_t *ent )
 	// fullbright around the hit point (the renderer skips this unless
 	// r_dynamic is off, throttles and dedups internally: ~zero steady cost).
 	// Accepted side effect per design: swept areas stay lit for the session.
-	ref.dllFuncs.R_FlashlightBake( trace.endpos, FLASHLIGHT_BAKE_RADIUS );
+	// vecSrc (the flashlight origin) is passed for a robust front-face test:
+	// testing the hit point itself against the plane rejects surfaces by
+	// float noise, since the hit lies on the plane by construction.
+	ref.dllFuncs.R_FlashlightBake( trace.endpos, FLASHLIGHT_BAKE_RADIUS, vecSrc );
 
 	// update flashlight endpos
 	dl = CL_AllocDlight( ent->index );

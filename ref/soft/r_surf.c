@@ -296,27 +296,32 @@ static texture_t *R_TextureAnimation( msurface_t *s )
 #define FLASHLIGHT_BAKE_INTERVAL	0.25f
 
 static vec3_t flashBakePos;
+static vec3_t flashBakeEye;
 static float flashBakeRadius;
 static qboolean flashBakePending;
 static float flashBakeLastTime;
 
-void R_FlashlightBake( const vec3_t pos, float radius )
+void R_FlashlightBake( const vec3_t pos, float radius, const vec3_t eye )
 {
 	VectorCopy( pos, flashBakePos );
+	VectorCopy( eye, flashBakeEye );
 	flashBakeRadius = radius;
 	flashBakePending = true;
 }
 
-static qboolean R_SurfCenter( model_t *mod, msurface_t *surf, vec3_t center )
+static qboolean R_SurfBounds( model_t *mod, msurface_t *surf, vec3_t mins, vec3_t maxs )
 {
 	int n, i;
 
-	center[0] = center[1] = center[2] = 0.0f;
-	n = surf->numedges < 8 ? surf->numedges : 8;
-	if( n <= 0 )
-		return false;
+	// Full-bounds edge walk (replaces the old ≤8-vert average): the
+	// center-point test missed large surfaces whose center lies outside
+	// the bake radius even when the flashlight hits them.
 	// NOTE: software renderer only supports 16-bit edges (like the rest
 	// of r_bsp.c), so edges16 is correct here unconditionally.
+	ClearBounds( mins, maxs );
+	n = surf->numedges;
+	if( n <= 0 )
+		return false;
 	for( i = 0; i < n; i++ )
 	{
 		int e = mod->surfedges[surf->firstedge + i];
@@ -330,34 +335,40 @@ static qboolean R_SurfCenter( model_t *mod, msurface_t *surf, vec3_t center )
 		v = edge->v[e >= 0 ? 0 : 1];
 		if( v < 0 || v >= mod->numvertexes )
 			return false;
-		center[0] += mod->vertexes[v].position[0];
-		center[1] += mod->vertexes[v].position[1];
-		center[2] += mod->vertexes[v].position[2];
+		AddPointToBounds( mod->vertexes[v].position, mins, maxs );
 	}
-	center[0] /= n; center[1] /= n; center[2] /= n;
 	return true;
 }
 
-static void R_TryBakeSurface( model_t *mod, msurface_t *surf, const vec3_t pos, float radius )
+static void R_TryBakeSurface( model_t *mod, msurface_t *surf, const vec3_t pos, const vec3_t eye, float radius )
 {
-	vec3_t center, delta;
+	vec3_t mins, maxs, closest, delta;
 	mextrasurf_t *info;
 	int sample_size, smax, tmax, size, map;
+	int i;
 
 	if( !surf->samples )
 		return;
 	if( FBitSet( surf->flags, SURF_DRAWTURB | SURF_DRAWSKY | SURF_DRAWTILED ))
 		return;
-	if( surf->samples[0].r == 255 && surf->samples[0].g == 255 && surf->samples[0].b == 255 )
-		return; // already baked
-	if( !R_SurfCenter( mod, surf, center ))
+	if( !R_SurfBounds( mod, surf, mins, maxs ))
 		return;
 
-	delta[0] = pos[0] - center[0];
-	delta[1] = pos[1] - center[1];
-	delta[2] = pos[2] - center[2];
+	// squared distance from pos to the AABB (0 when projecting inside)
+	for( i = 0; i < 3; i++ )
+	{
+		if( pos[i] < mins[i] ) closest[i] = mins[i];
+		else if( pos[i] > maxs[i] ) closest[i] = maxs[i];
+		else closest[i] = pos[i];
+	}
+	VectorSubtract( pos, closest, delta );
 	if( DotProduct( delta, delta ) > radius * radius )
 		return;
+
+	// Front-face test against the EYE: pos lies on the plane itself, so
+	// dot(normal, pos-center) was ~0 by float noise and rejected surfaces
+	// almost at random. The eye is meters off-plane: robust.
+	VectorSubtract( eye, closest, delta );
 	if( DotProduct( surf->plane->normal, delta ) <= 0.0f )
 		return; // backface: no light bleed through walls
 
@@ -370,11 +381,12 @@ static void R_TryBakeSurface( model_t *mod, msurface_t *surf, const vec3_t pos, 
 	for( map = 0; map < MAXLIGHTMAPS; map++ )
 	{
 		color24 *lm;
-		int i;
 
 		if( surf->styles[map] >= 255 )
 			break;
 		lm = &surf->samples[map * size];
+		// soft renders from samples live every frame, so whitening in
+		// place is immediately visible with nothing to re-upload
 		for( i = 0; i < size; i++ )
 			lm[i].r = lm[i].g = lm[i].b = 255;
 	}
@@ -400,7 +412,7 @@ void R_ProcessFlashlightBake( void )
 	flashBakeLastTime = gp_cl->time;
 
 	for( i = 0; i < WORLDMODEL->numsurfaces; i++ )
-		R_TryBakeSurface( WORLDMODEL, &WORLDMODEL->surfaces[i], flashBakePos, flashBakeRadius );
+		R_TryBakeSurface( WORLDMODEL, &WORLDMODEL->surfaces[i], flashBakePos, flashBakeEye, flashBakeRadius );
 
 	if( tr.draw_list )
 	{
@@ -409,16 +421,17 @@ void R_ProcessFlashlightBake( void )
 			cl_entity_t *ent = tr.draw_list->solid_entities[i];
 			model_t *model;
 			matrix4x4 matrix;
-			vec3_t localPos;
+			vec3_t localPos, localEye;
 
 			if( !ent || !( model = ent->model ) || model->type != mod_brush )
 				continue;
 
 			Matrix4x4_CreateFromEntity( matrix, ent->angles, ent->origin, 1.0f );
 			Matrix4x4_VectorITransform( matrix, flashBakePos, localPos );
+			Matrix4x4_VectorITransform( matrix, flashBakeEye, localEye );
 
 			for( int s = 0; s < model->nummodelsurfaces; s++ )
-				R_TryBakeSurface( model, &model->surfaces[model->firstmodelsurface + s], localPos, flashBakeRadius );
+				R_TryBakeSurface( model, &model->surfaces[model->firstmodelsurface + s], localPos, localEye, flashBakeRadius );
 		}
 	}
 }

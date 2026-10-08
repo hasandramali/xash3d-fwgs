@@ -64,6 +64,56 @@ client_textmessage_t cl_textmessage[MAX_TEXTCHANNELS] =
 };
 
 #define CL_WEAPONLISTFIX_DEFAULT_SLOTS 6
+
+// Fixed inventory rows for stock weapons (requested): these always land on
+// the listed row (0-based) instead of round-robin. Unknown weapons keep the
+// round-robin behavior below. Matched by class name, case-insensitive; ids
+// vary per server/mod so names are the stable key.
+typedef struct { const char *name; int row; } weaponlistfix_fixedslot_t;
+static const weaponlistfix_fixedslot_t CL_WEAPONLISTFIX_FIXED_SLOTS[] =
+{
+	{ "weapon_crowbar", 0 }, { "weapon_pipewrench", 0 }, { "weapon_medkit", 0 },
+	{ "weapon_knife", 0 }, { "weapon_grapple", 0 },
+	{ "weapon_9mmhandgun", 1 }, { "weapon_357", 1 }, { "weapon_eagle", 1 },
+	{ "weapon_uzi", 1 },
+	{ "weapon_9mmAR", 2 }, { "weapon_shotgun", 2 }, { "weapon_crossbow", 2 },
+	{ "weapon_m16", 2 },
+	{ "weapon_rpg", 3 }, { "weapon_gauss", 3 }, { "weapon_egon", 3 },
+	{ "weapon_hornetgun", 3 },
+	{ "weapon_handgrenade", 4 }, { "weapon_satchel", 4 }, { "weapon_tripmine", 4 },
+	{ "weapon_snark", 4 },
+	{ "weapon_sniperrifle", 5 }, { "weapon_m249", 5 }, { "weapon_sporelauncher", 5 },
+	{ "weapon_displacer", 5 },
+};
+
+// Fixed row lookup: row = table row, pos = order among same-row fixed
+// entries (keeps slot_pos distinct so nav cycling/sorting stay defined).
+static qboolean CL_WeaponListFix_FixedRow( const char *name, int *row, int *pos )
+{
+	int count = sizeof( CL_WEAPONLISTFIX_FIXED_SLOTS ) / sizeof( CL_WEAPONLISTFIX_FIXED_SLOTS[0] );
+	int found = -1, p = 0, i;
+
+	if( COM_StringEmpty( name ))
+		return false;
+	for( i = 0; i < count; i++ )
+	{
+		if( !Q_stricmp( CL_WEAPONLISTFIX_FIXED_SLOTS[i].name, name ))
+		{
+			found = i;
+			break;
+		}
+	}
+	if( found < 0 )
+		return false;
+	for( i = 0; i < found; i++ )
+	{
+		if( CL_WEAPONLISTFIX_FIXED_SLOTS[i].row == CL_WEAPONLISTFIX_FIXED_SLOTS[found].row )
+			p++;
+	}
+	if( row ) *row = CL_WEAPONLISTFIX_FIXED_SLOTS[found].row;
+	if( pos ) *pos = p;
+	return true;
+}
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
 #define CL_WEAPONLISTFIX_PENDING_TIMEOUT 3.0f
 #define CL_WEAPONLISTFIX_DROP_TIMEOUT 1.0f
@@ -227,19 +277,43 @@ static int CL_WeaponListFix_GetRealSlotRange( void )
 	return max_slot + 1;
 }
 
+static int CL_WeaponListFix_TopFixedRow( void )
+{
+	int top = -1, i;
+
+	// Highest fixed row among OWNED weapons; only those need visible rows.
+	for( i = 0; i < cl_weaponlistfix_state.count; i++ )
+	{
+		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.order[i] );
+		int row, pos;
+
+		if( !weapon || !CL_WeaponListFix_HasWeapon( weapon ))
+			continue;
+		if( CL_WeaponListFix_FixedRow( weapon->name, &row, &pos ) && row > top )
+			top = row;
+	}
+	return top;
+}
+
 static int CL_WeaponListFix_GetSlotCount( void )
 {
 	int real_range = CL_WeaponListFix_GetRealSlotRange();
+	int count;
 
 	if( real_range <= 0 )
-		return CL_WEAPONLISTFIX_DEFAULT_SLOTS;
-
+		count = CL_WEAPONLISTFIX_DEFAULT_SLOTS;
 	// Sven Co-op's WeaponList uses a tall 9-row layout; squeeze it (and any
 	// other over-tall layout) into the compact 6-row HUD.
-	if( real_range > CL_WEAPONLISTFIX_DEFAULT_SLOTS )
-		return CL_WEAPONLISTFIX_DEFAULT_SLOTS;
+	else if( real_range > CL_WEAPONLISTFIX_DEFAULT_SLOTS )
+		count = CL_WEAPONLISTFIX_DEFAULT_SLOTS;
+	else count = real_range;
 
-	return real_range;
+	// Fixed rows live on rows 0..5: never hide a row that owns weapons
+	// (matters on modded servers whose wire slots sit below our rows).
+	if( CL_WeaponListFix_TopFixedRow() + 1 > count )
+		count = CL_WeaponListFix_TopFixedRow() + 1;
+
+	return count;
 }
 
 static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *weapon, int *slot, int *slot_pos )
@@ -248,6 +322,19 @@ static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *wea
 
 	if( !weapon || !weapon->valid || weapon->order_index < 0 )
 		return false;
+
+	// Fixed rows for stock weapons first; everything else keeps the
+	// round-robin distribution below.
+	{
+		int fixed_row, fixed_pos;
+
+		if( CL_WeaponListFix_FixedRow( weapon->name, &fixed_row, &fixed_pos ))
+		{
+			if( slot ) *slot = fixed_row;
+			if( slot_pos ) *slot_pos = fixed_pos;
+			return true;
+		}
+	}
 
 	// Distribute round-robin by arrival order (like upstream master), NOT by
 	// server slot: Sven's tall 0..9 layout has gaps (no weapons at 4,6,7,8),
@@ -261,6 +348,61 @@ static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *wea
 		*slot_pos = weapon->order_index / slot_count;
 
 	return true;
+}
+
+// Last pickup rows for the client HUD notifier ("[3] weapon_famas").
+// The client resolves rows lazily at draw time from this cvar, so the
+// engine (the layout authority) publishes id->row pairs here on every
+// pickup: "id:row id:row ..." (newest last, capped). Rows are looked up
+// by weapon id, which survives WeaponList renames (auto weapon_<id> ->
+// real class name). Stale on slot-count redistribution, but fixed-table
+// weapons (the common case) never move, and new pickups refresh the rest.
+#define WL_PICKUP_ROWS_MAX 4
+static int wl_pickup_ids[WL_PICKUP_ROWS_MAX];
+static int wl_pickup_rows[WL_PICKUP_ROWS_MAX];
+static int wl_pickup_count = 0;
+
+static void CL_WeaponListFix_ClearPickupRows( void )
+{
+	wl_pickup_count = 0;
+	Cvar_Set( "wl_pickup_rows", "" );
+}
+
+static void CL_WeaponListFix_NotePickupRow( int id )
+{
+	cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
+	int row, pos, i;
+	char buf[64];
+
+	if( !weapon || !CL_WeaponListFix_GetLayout( weapon, &row, &pos ))
+		return;
+	if( row < 0 )
+		row = 0;
+	if( row >= CL_WEAPONLISTFIX_DEFAULT_SLOTS )
+		row = CL_WEAPONLISTFIX_DEFAULT_SLOTS - 1;
+
+	for( i = 0; i < wl_pickup_count; i++ )
+	{
+		if( wl_pickup_ids[i] == id )
+			break;
+	}
+	if( i >= wl_pickup_count )
+	{
+		if( wl_pickup_count >= WL_PICKUP_ROWS_MAX )
+		{
+			memmove( wl_pickup_ids, wl_pickup_ids + 1, sizeof( wl_pickup_ids ) - sizeof( wl_pickup_ids[0] ));
+			memmove( wl_pickup_rows, wl_pickup_rows + 1, sizeof( wl_pickup_rows ) - sizeof( wl_pickup_rows[0] ));
+			i = WL_PICKUP_ROWS_MAX - 1;
+		}
+		else i = wl_pickup_count++;
+		wl_pickup_ids[i] = id;
+	}
+	wl_pickup_rows[i] = row;
+
+	buf[0] = 0;
+	for( i = 0; i < wl_pickup_count; i++ )
+		Q_snprintf( buf + Q_strlen( buf ), sizeof( buf ) - Q_strlen( buf ), "%s%d:%d", i ? " " : "", wl_pickup_ids[i], wl_pickup_rows[i] );
+	Cvar_Set( "wl_pickup_rows", buf );
 }
 
 static qboolean CL_WeaponListFix_IsUsefulWeapon( const char *name, int id )
@@ -569,6 +711,9 @@ void CL_WeaponListFix_Reset( void )
 	cl_weaponlistfix_state.display_slot = -1;
 	cl_weaponlistfix_state.menu_valid_slots = 0;
 
+	// Fresh session: stale id->row pairs would mislabel new weapons.
+	CL_WeaponListFix_ClearPickupRows();
+
 	// Scan for unknown weapons after reset (e.g., on map change or connection)
 	if( cl_weaponlistfix.value )
 		CL_WeaponListFix_ScanForUnknownWeapons();
@@ -681,6 +826,13 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	return false;
 }
 
+static qboolean CL_WeaponListFix_IsFixed( const char *name )
+{
+	int row, pos;
+
+	return CL_WeaponListFix_FixedRow( name, &row, &pos );
+}
+
 static int CL_WeaponListFix_CompareWeapons( const void *a, const void *b )
 {
 	int id1 = *(const int *)a;
@@ -688,13 +840,24 @@ static int CL_WeaponListFix_CompareWeapons( const void *a, const void *b )
 	cl_weaponlistfix_weapon_t *w1 = &cl_weaponlistfix_state.weapons[id1];
 	cl_weaponlistfix_weapon_t *w2 = &cl_weaponlistfix_state.weapons[id2];
 	int slot1, pos1, slot2, pos2;
+	qboolean fixed1, fixed2;
 
 	CL_WeaponListFix_GetLayout( w1, &slot1, &pos1 );
 	CL_WeaponListFix_GetLayout( w2, &slot2, &pos2 );
 
 	if( slot1 != slot2 )
 		return slot1 - slot2;
-	return pos1 - pos2;
+	if( pos1 != pos2 )
+		return pos1 - pos2;
+	// Same cell (a round-robin weapon can land on a fixed weapon's
+	// coordinates): fixed-table weapons always come first, so e.g.
+	// weapon_crowbar is unconditionally first in slot 1. Final tiebreak
+	// is arrival order: fully deterministic, no qsort coin flips.
+	fixed1 = CL_WeaponListFix_IsFixed( w1->name );
+	fixed2 = CL_WeaponListFix_IsFixed( w2->name );
+	if( fixed1 != fixed2 )
+		return fixed2 - fixed1;
+	return w1->order_index - w2->order_index;
 }
 
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf )
@@ -890,7 +1053,10 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		}
 
 		if( weapon )
+		{
 			weapon->owned_hint = true;
+			CL_WeaponListFix_NotePickupRow( id );
+		}
 		return;
 	}
 

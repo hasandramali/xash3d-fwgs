@@ -83,7 +83,11 @@ GNU General Public License for more details.
 // 20. R_ClearAllDecals now accepts includePermanent argument.
 // 21. Added R_FlashlightBake. Paints world lightmaps fullbright around a
 //     point (flashlight with r_dynamic 0): permanent, no per-frame cost.
-#define REF_API_VERSION 21
+// 22. R_FlashlightBake takes the viewer (flashlight) origin for a correct
+//     front-face test; the old hit-point-only test rejected surfaces by
+//     float noise (the hit point lies on the plane, so the facing dot was
+//     ~0 and almost always <= 0).
+#define REF_API_VERSION 22
 
 #define TF_SKY		(TF_SKYSIDE|TF_NOMIPMAP|TF_ALLOW_NEAREST)
 #define TF_FONT		(TF_NOMIPMAP|TF_CLAMP|TF_ALLOW_NEAREST)
@@ -594,9 +598,10 @@ typedef struct ref_interface_s
 	int (*R_CreateDecalList)( struct decallist_s *pList );
 	void (*R_ClearAllDecals)( qboolean includePermanent );
 	// Flashlight with r_dynamic 0: permanently paint the lightmaps
-	// fullbright around pos (world coords) within radius. Renderers that
-	// cannot bake may ignore it. Throttled and deduplicated internally.
-	void (*R_FlashlightBake)( const vec3_t pos, float radius );
+	// fullbright around pos (surface coords) within radius, for surfaces
+	// facing eye (flashlight origin, same coords). Renderers that cannot
+	// bake may ignore it. Throttled and deduplicated internally.
+	void (*R_FlashlightBake)( const vec3_t pos, float radius, const vec3_t eye );
 
 	// studio interface
 	float (*R_StudioEstimateFrame)( cl_entity_t *e, mstudioseqdesc_t *pseqdesc, double time );

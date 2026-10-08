@@ -178,9 +178,9 @@ static int R_CreateDecalList( struct decallist_s *pList )
 	return 0;
 }
 
-static void R_FlashlightBake( const vec3_t pos, float radius )
+static void R_FlashlightBake( const vec3_t pos, float radius, const vec3_t eye )
 {
-	(void)pos; (void)radius; // null renderer bakes nothing
+	(void)pos; (void)radius; (void)eye; // null renderer bakes nothing
 }
 
 static float R_StudioEstimateFrame( cl_entity_t *e, mstudioseqdesc_t *pseqdesc, double time )

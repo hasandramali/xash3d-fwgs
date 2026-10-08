@@ -216,6 +216,15 @@ void R_DrawSpriteModel( cl_entity_t *e )
 
 	int type = psprite->type;
 
+	// Sven orientation override (hw.so sprite helper): the server stuffs
+	// the effective sprite orientation into curstate.sequence with effects
+	// bit 0x400 (repurposed EF_FIBERCAMERA). Sprites animate via frame,
+	// never via sequence, so the field is a safe side-channel. Without
+	// this, server-pinned sprites (e.g. mapvote boards) billboard instead
+	// of staying fixed. Out-of-table values keep the file type.
+	if( FBitSet( e->curstate.effects, 0x400 ) && e->curstate.sequence >= 0 && e->curstate.sequence <= 4 )
+		type = e->curstate.sequence;
+
 	// automatically roll parallel sprites if requested
 	if( e->angles[ROLL] != 0.0f && type == SPR_FWD_PARALLEL )
 		type = SPR_FWD_PARALLEL_ORIENTED;

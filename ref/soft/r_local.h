@@ -861,7 +861,7 @@ void D_ViewChanged( void );
 extern drawsurf_t r_drawsurf;
 
 void R_DrawSurface( void );
-void R_FlashlightBake( const vec3_t pos, float radius );
+void R_FlashlightBake( const vec3_t pos, float radius, const vec3_t eye );
 void R_ProcessFlashlightBake( void );
 
 // extern int              c_surf;

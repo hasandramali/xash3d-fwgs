@@ -84,10 +84,17 @@ typedef struct
 
 static steam_broker_t broker;
 
+// Tracker paging chain: offset pages are fetched sequentially until a
+// short page arrives. Generation guards against overlapping scans.
+static int s_tracker_page = 0;
+static int s_tracker_total = 0;
+static unsigned int s_tracker_gen = 0;
+
 static int SteamBroker_GetGoldSrcAppId( void );
 static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out );
 void Steam_MasterlistScanBegin( void );
 static qboolean Steam_MasterlistSeenBefore( const netadr_t *adr );
+static qboolean SteamTracker_RequestPage( int page );
 
 static void SteamBroker_DumpHex( const char *name, const void *data, size_t size )
 {
@@ -552,6 +559,11 @@ static int s_masterlist_seen_pos = 0;
 
 void Steam_MasterlistScanBegin( void )
 {
+	// New scan: fresh dedupe window and a fresh tracker page chain.
+	// In-flight pages from an older scan are ignored by generation.
+	s_tracker_page = 0;
+	s_tracker_total = 0;
+	s_tracker_gen++;
 	s_masterlist_gen++;
 	if( s_masterlist_gen == 0 ) // wrap: invalidate everything
 	{
@@ -663,9 +675,10 @@ void SteamBroker_ConnectBySteamID( const char *text )
 //     "private":false,"hide_address":false,...}, ...]}}
 // Only entries with status=true, private=false, hide_address=false are
 // used; every address is re-queried through the normal per-server path.
-#define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&status=online&limit=100"
+#define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&status=online&limit=100&offset=%d"
 #define WEBAPI_MASTERLIST_URL	"https://api.steampowered.com/IGameServersService/GetServerList/v1/?key=%s&filter=%%5Cappid%%5C%d&limit=500"
 #define TRACKER_MASTERLIST_MAX	300
+#define TRACKER_MASTERLIST_PAGES	10 // 10 x 100 = up to 1000 servers per scan
 
 static CVAR_DEFINE_AUTO( cl_masterlist_webapi_key, "", FCVAR_ARCHIVE, "Steam Web API key for the official IGameServersService masterlist (free at steamcommunity.com/dev/apikey; empty = use community tracker)" );
 
@@ -741,7 +754,9 @@ typedef enum
 	MASTERLIST_WEBAPI // Valve IGameServersService: response.servers[], "addr", live by construction
 } masterlist_src_t;
 
-static void SteamTracker_ParseAndFeed( const byte *data, size_t size, masterlist_src_t src )
+// Returns servers fed this page; *raw_items counts objects seen (used
+// for paging: a full page means more may follow).
+static int SteamTracker_ParseAndFeed( const byte *data, size_t size, masterlist_src_t src, int *raw_items )
 {
 	const char *p = (const char *)data;
 	const char *end = p + size;
@@ -750,17 +765,19 @@ static void SteamTracker_ParseAndFeed( const byte *data, size_t size, masterlist
 	const char *addrkey = ( src == MASTERLIST_WEBAPI ) ? "\"addr\":" : "\"request\":";
 	int count = 0;
 
+	*raw_items = 0;
+
 	// locate the array start
 	items = SteamTracker_FindKey( p, end, arraykey );
 	if( !items )
 	{
 		Con_Printf( S_ERROR "%s: no server array in masterlist response\n", __func__ );
-		return;
+		return 0;
 	}
 	while( items < end && *items != '[' )
 		items++;
 	if( items >= end )
-		return;
+		return 0;
 	p = items + 1;
 
 	while( count < TRACKER_MASTERLIST_MAX )
@@ -773,6 +790,7 @@ static void SteamTracker_ParseAndFeed( const byte *data, size_t size, masterlist
 		if( !SteamTracker_FindObject( p, end, &obj, &objend ))
 			break;
 		p = objend;
+		( *raw_items )++;
 
 		if( src == MASTERLIST_TRACKER )
 		{
@@ -830,14 +848,18 @@ static void SteamTracker_ParseAndFeed( const byte *data, size_t size, masterlist
 		}
 	}
 
-	Con_Printf( "%s server list complete: %d servers\n",
-		src == MASTERLIST_WEBAPI ? "Steam WebAPI" : "Community", count );
+	return count;
 }
 
 static void SteamTracker_MasterListResponse( const char *url, qboolean success, const byte *data, size_t size, void *userdata )
 {
-	masterlist_src_t src = (masterlist_src_t)(intptr_t)userdata;
+	uintptr_t tag = (uintptr_t)userdata;
+	masterlist_src_t src = (masterlist_src_t)( tag & 3 );
+	unsigned int gen = (unsigned int)( tag >> 2 );
 	(void)url;
+
+	if( gen != s_tracker_gen )
+		return; // stale chain from an older scan
 
 	if( !success || !data || !size )
 	{
@@ -845,22 +867,57 @@ static void SteamTracker_MasterListResponse( const char *url, qboolean success, 
 		return;
 	}
 
-	SteamTracker_ParseAndFeed( data, size, src );
+	{
+		int raw = 0;
+		int fed = SteamTracker_ParseAndFeed( data, size, src, &raw );
+
+		if( src == MASTERLIST_WEBAPI )
+		{
+			Con_Printf( "Steam WebAPI server list complete: %d servers\n", fed );
+			return;
+		}
+
+		s_tracker_total += fed;
+		s_tracker_page++;
+
+		if( raw >= 100 && s_tracker_page < TRACKER_MASTERLIST_PAGES )
+		{
+			// Full page: more may follow on the next offset.
+			SteamTracker_RequestPage( s_tracker_page );
+		}
+		else
+		{
+			Con_Printf( "Community server list complete: %d servers (%d pages)\n",
+				s_tracker_total, s_tracker_page );
+		}
+	}
+}
+
+// Fetch one tracker offset page (page 0 = offset 0) inside the current chain.
+static qboolean SteamTracker_RequestPage( int page )
+{
+	char url[256];
+	int appid = SteamBroker_GetGoldSrcAppId();
+	uintptr_t tag = ( (uintptr_t)s_tracker_gen << 2 ) | (uintptr_t)MASTERLIST_TRACKER;
+
+	if( Q_snprintf( url, sizeof( url ), TRACKER_MASTERLIST_URL, appid, page * 100 ) <= 0 )
+		return false;
+
+	if( page == 0 )
+		Con_Printf( "Requesting community server list for appid %d...\n", appid );
+	else
+		Con_DPrintf( "%s: requesting page %d (offset %d)\n", __func__, page, page * 100 );
+
+	if( !HTTP_GetToMemory( url, SteamTracker_MasterListResponse, (void *)tag ))
+		return false;
+	return true;
 }
 
 qboolean SteamTracker_RequestMasterList( void )
 {
-	char url[256];
-	int appid = SteamBroker_GetGoldSrcAppId();
-
-	if( Q_snprintf( url, sizeof( url ), TRACKER_MASTERLIST_URL, appid ) <= 0 )
-		return false;
-
-	if( !HTTP_GetToMemory( url, SteamTracker_MasterListResponse, (void *)(intptr_t)MASTERLIST_TRACKER ))
-		return false;
-
-	Con_Printf( "Requesting community server list for appid %d...\n", appid );
-	return true;
+	// Chain state is (re)initialized by Steam_MasterlistScanBegin; start
+	// the first page of the current chain here.
+	return SteamTracker_RequestPage( s_tracker_page );
 }
 
 // Official Valve list via IGameServersService. Needs a free Web API key
