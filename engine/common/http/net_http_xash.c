@@ -1202,10 +1202,21 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 				begin += 4;
 
-				if( res - ( begin - curfile->buf ) > 0 )
+				// NOTE: the body length must count the previously
+				// accumulated header bytes too. Using just `res` here
+				// drops the tail of this recv's body whenever headers
+				// arrived over multiple recvs (typical with long
+				// Cloudflare headers), desyncing chunk framing and
+				// fatally wedging chunked downloads.
 				{
-					if( !HTTP_FileSaveReceivedData( curfile, begin - curfile->buf, res - ( begin - curfile->buf )))
-						return 0;
+					int body_off = begin - curfile->buf;
+					int body_len = ( curfile->header_size + res ) - body_off;
+
+					if( body_len > 0 )
+					{
+						if( !HTTP_FileSaveReceivedData( curfile, body_off, body_len ))
+							return 0;
+					}
 				}
 			}
 			else
