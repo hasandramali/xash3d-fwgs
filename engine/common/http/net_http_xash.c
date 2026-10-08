@@ -145,6 +145,10 @@ typedef struct httpfile_s
 	qboolean compressed;
 	qboolean chunked;
 	int chunksize;
+	// Split chunk-size lines span TCP segments: stash the incomplete
+	// prefix here until its terminating CRLF arrives (see SaveReceivedData).
+	char chunkhead[64];
+	int chunkhead_len;
 	resource_t *resource;
 	http_process_fn_t pfn_process;
 	struct sockaddr_storage addr;
@@ -334,6 +338,7 @@ static int HTTP_FileQueue( httpfile_t *file )
 
 	file->pfn_process = HTTP_FileResolveNS;
 	file->blocktime = file->downloaded = file->lastchecksize = file->checktime = 0;
+	file->chunkhead_len = 0; // drop any stale partial header (fresh socket below)
 	return 1;
 }
 
@@ -848,19 +853,76 @@ static int HTTP_FileSaveReceivedData( httpfile_t *file, int pos, int length )
 {
 	while( length > 0 )
 	{
-		int oldpos = pos;
 		int len_to_write;
 
 		if( file->chunked && file->chunksize <= 0 )
 		{
-			char *begin = &file->buf[pos];
+			// Assemble one complete chunk-size line from the stashed
+			// prefix (if a previous recv ended mid-header) plus fresh
+			// input. Everything is bounded by received bytes: unlike the
+			// old code this never scans into stale buffer contents and
+			// never treats a TCP-split header as fatal.
+			char line[sizeof( file->chunkhead ) + 64];
+			int have = file->chunkhead_len, total, off, eol, i;
+			int consumed_fresh;
 
-			if( begin[0] == '\r' && begin[1] == '\n' )
-				begin += 2;
+			if( have < 0 || have >= (int)sizeof( file->chunkhead ))
+				have = 0;
+			memcpy( line, file->chunkhead, have );
 
-			file->chunksize = Q_atoi_hex( 1, begin );
+			i = Q_min( length, (int)sizeof( line ) - 1 - have );
+			memcpy( line + have, &file->buf[pos], i );
+			total = have + i;
+			line[total] = 0;
 
-			if( !file->chunksize && begin[0] == '0' ) // actually an end, not Q_atoi being stupid
+			off = 0;
+			if( total >= 2 && line[0] == '\r' && line[1] == '\n' )
+				off = 2; // tail of previous chunk data
+
+			eol = -1;
+			for( i = off; i + 1 < total; i++ )
+			{
+				if( line[i] == '\r' && line[i+1] == '\n' )
+				{
+					eol = i;
+					break;
+				}
+			}
+
+			if( eol < 0 )
+			{
+				// Split header: stash everything and wait for more data.
+				// A chunk-size line is a few dozen bytes at most.
+				if( total >= (int)sizeof( file->chunkhead ))
+				{
+					Con_Printf( S_ERROR "chunked header too long for %s\n", file->to_memory ? file->url : file->path );
+					HTTP_FreeFile( file, true );
+					return 0;
+				}
+				memcpy( file->chunkhead, line, total );
+				file->chunkhead_len = total;
+				return 1; // consumed all input; continue when more arrives
+			}
+
+			line[eol] = 0;
+			file->chunksize = Q_atoi_hex( 1, line + off );
+			file->chunkhead_len = 0;
+
+			if( file->chunksize < 0 || ( file->chunksize == 0 && line[off] != '0' ))
+			{
+				// Corrupt framing (not a size, not the terminator): fail
+				// instead of spinning the frame loop on zero-length writes.
+				Con_Printf( S_ERROR "bad chunk size for %s\n", file->to_memory ? file->url : file->path );
+				HTTP_FreeFile( file, true );
+				return 0;
+			}
+
+			// advance past the header bytes that came from fresh input
+			consumed_fresh = ( eol + 2 ) - have;
+			pos += consumed_fresh;
+			length -= consumed_fresh;
+
+			if( !file->chunksize && line[off] == '0' ) // actually an end, not Q_atoi being stupid
 			{
 				if( file->compressed )
 				{
@@ -892,28 +954,6 @@ static int HTTP_FileSaveReceivedData( httpfile_t *file, int pos, int length )
 
 					return 1;
 				}
-			}
-
-			begin = Q_strstr( begin, "\r\n" );
-			if( !begin )
-			{
-				Con_Printf( S_ERROR "can't parse chunked transfer encoding header for %s\n", file->path );
-				if( http_show_headers.value )
-					Con_Reportf( "Request headers: %s", file->query_backup );
-				HTTP_FreeFile( file, true );
-				return 0;
-			}
-
-			pos = ( begin + 2 ) - file->buf;
-			length -= pos - oldpos;
-
-			if( length < 0 )
-			{
-				Con_Printf( S_ERROR "can't parse chunked transfer encoding header 2 for %s\n", file->path );
-				if( http_show_headers.value )
-					Con_Reportf( "Request headers: %s", file->query_backup );
-				HTTP_FreeFile( file, true );
-				return 0;
 			}
 		}
 
