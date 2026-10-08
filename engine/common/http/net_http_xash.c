@@ -895,7 +895,13 @@ static int HTTP_FileSaveReceivedData( httpfile_t *file, int pos, int length )
 				// A chunk-size line is a few dozen bytes at most.
 				if( total >= (int)sizeof( file->chunkhead ))
 				{
-					Con_Printf( S_ERROR "chunked header too long for %s\n", file->to_memory ? file->url : file->path );
+					char hex[sizeof( file->chunkhead ) * 3 + 1];
+					int hi;
+					for( hi = 0; hi < total && hi < (int)sizeof( file->chunkhead ); hi++ )
+						Q_snprintf( hex + hi * 3, 4, "%02x ", line[hi] & 0xff );
+					hex[hi * 3] = 0;
+					Con_Printf( S_ERROR "chunked header too long for %s (have=%d take=%d len=%d downloaded=%d): %s\n",
+						file->to_memory ? file->url : file->path, have, total - have, length, file->downloaded, hex );
 					HTTP_FreeFile( file, true );
 					return 0;
 				}
