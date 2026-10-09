@@ -358,13 +358,13 @@ static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *wea
 // real class name). Stale on slot-count redistribution, but fixed-table
 // weapons (the common case) never move, and new pickups refresh the rest.
 #define WL_PICKUP_ROWS_MAX 4
-static int wl_pickup_ids[WL_PICKUP_ROWS_MAX];
-static int wl_pickup_rows[WL_PICKUP_ROWS_MAX];
-static int wl_pickup_count = 0;
+static int wl_pickup_hist_ids[WL_PICKUP_ROWS_MAX];
+static int wl_pickup_hist_rows[WL_PICKUP_ROWS_MAX];
+static int wl_pickup_hist_count = 0;
 
 static void CL_WeaponListFix_ClearPickupRows( void )
 {
-	wl_pickup_count = 0;
+	wl_pickup_hist_count = 0;
 	Cvar_Set( "wl_pickup_rows", "" );
 }
 
@@ -381,27 +381,27 @@ static void CL_WeaponListFix_NotePickupRow( int id )
 	if( row >= CL_WEAPONLISTFIX_DEFAULT_SLOTS )
 		row = CL_WEAPONLISTFIX_DEFAULT_SLOTS - 1;
 
-	for( i = 0; i < wl_pickup_count; i++ )
+	for( i = 0; i < wl_pickup_hist_count; i++ )
 	{
-		if( wl_pickup_ids[i] == id )
+		if( wl_pickup_hist_ids[i] == id )
 			break;
 	}
-	if( i >= wl_pickup_count )
+	if( i >= wl_pickup_hist_count )
 	{
-		if( wl_pickup_count >= WL_PICKUP_ROWS_MAX )
+		if( wl_pickup_hist_count >= WL_PICKUP_ROWS_MAX )
 		{
-			memmove( wl_pickup_ids, wl_pickup_ids + 1, sizeof( wl_pickup_ids ) - sizeof( wl_pickup_ids[0] ));
-			memmove( wl_pickup_rows, wl_pickup_rows + 1, sizeof( wl_pickup_rows ) - sizeof( wl_pickup_rows[0] ));
+			memmove( wl_pickup_hist_ids, wl_pickup_hist_ids + 1, sizeof( wl_pickup_hist_ids ) - sizeof( wl_pickup_hist_ids[0] ));
+			memmove( wl_pickup_hist_rows, wl_pickup_hist_rows + 1, sizeof( wl_pickup_hist_rows ) - sizeof( wl_pickup_hist_rows[0] ));
 			i = WL_PICKUP_ROWS_MAX - 1;
 		}
-		else i = wl_pickup_count++;
-		wl_pickup_ids[i] = id;
+		else i = wl_pickup_hist_count++;
+		wl_pickup_hist_ids[i] = id;
 	}
-	wl_pickup_rows[i] = row;
+	wl_pickup_hist_rows[i] = row;
 
 	buf[0] = 0;
-	for( i = 0; i < wl_pickup_count; i++ )
-		Q_snprintf( buf + Q_strlen( buf ), sizeof( buf ) - Q_strlen( buf ), "%s%d:%d", i ? " " : "", wl_pickup_ids[i], wl_pickup_rows[i] );
+	for( i = 0; i < wl_pickup_hist_count; i++ )
+		Q_snprintf( buf + Q_strlen( buf ), sizeof( buf ) - Q_strlen( buf ), "%s%d:%d", i ? " " : "", wl_pickup_hist_ids[i], wl_pickup_hist_rows[i] );
 	Cvar_Set( "wl_pickup_rows", buf );
 }
 
