@@ -306,6 +306,7 @@ typedef struct host_parm_s
 
 	host_redirect_t rd; // remote console
 
+	float window_insets[4]; // safe area insets: left, top, right, bottom fractions of the window
 	void   *hWnd;          // main window
 
 	// command line parms
