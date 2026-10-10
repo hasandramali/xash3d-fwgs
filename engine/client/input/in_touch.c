@@ -18,7 +18,6 @@ GNU General Public License for more details.
 #include "math.h"
 #include "vgui_draw.h"
 #include "mobility_int.h"
-#include "keydefs.h"
 
 #if !XASH_NO_TOUCH
 
@@ -228,18 +227,10 @@ static inline float Touch_AspectRatio( void )
 	return ratio;
 }
 
-// -stretch_resolution maps profile coordinates straight to raw pixels
-// (historic behavior); otherwise the safe-area-aware upstream mapping is
-// used. The helpers below keep the same stretch decision for profile-space
-// aspect math (button textures, editor grid, event normalization).
-static qboolean Touch_StretchPixels( void )
-{
-	return Sys_CheckParm( "-stretch_resolution" ) && refState.width > 0 && refState.height > 0;
-}
-
 static inline float Touch_ButtonAspectRatio( void )
 {
-	if( Touch_StretchPixels() && refState.scale_x > 0.0f && refState.scale_y > 0.0f )
+	if( Sys_CheckParm( "-stretch_resolution" ) && refState.width &&
+		refState.scale_x > 0.0f && refState.scale_y > 0.0f )
 	{
 		float aspect = (float)refState.height / refState.width * refState.scale_x / refState.scale_y;
 		if( aspect >= 0.25f )
@@ -251,7 +242,7 @@ static inline float Touch_ButtonAspectRatio( void )
 
 static inline float Touch_DrawAspectRatio( void )
 {
-	if( Touch_StretchPixels() )
+	if( Sys_CheckParm( "-stretch_resolution" ) && refState.width && refState.height )
 		return (float)refState.height / refState.width;
 
 	return Touch_AspectRatio();
@@ -259,8 +250,9 @@ static inline float Touch_DrawAspectRatio( void )
 
 #undef TO_SCRN_Y
 #undef TO_SCRN_X
-#define TO_SCRN_X(x) (Touch_StretchPixels() ? (float)refState.width * (x) : touch.view_x + touch.view_width * (x))
-#define TO_SCRN_Y(x) (Touch_StretchPixels() ? (float)refState.height * (x) : touch.view_y + touch.view_width * (x) * Touch_AspectRatio())
+#define TO_SCRN_Y(x) (refState.width * (x) * Touch_DrawAspectRatio())
+#define TO_SCRN_X(x) (refState.width * (x))
+
 static void Touch_ConfigAspectRatio_f( void )
 {
 	touch.config_aspect_ratio = Q_atof( Cmd_Argv( 1 ));
@@ -605,23 +597,6 @@ void Touch_SetClientOnly( byte state )
 	// client.dll, locking user in edit state, so disable it first
 	Touch_DisableEdit_f();
 
-	if( state && ( Cvar_VariableInteger( "cl_sven_camera_mouse" ) || Cvar_VariableInteger( "cl_sven_ui_capture" )))
-	{
-		// A held +use/+attack must receive its release before its button is hidden.
-		for( touch_button_t *button = touch.list_user.first; button; button = button->next )
-		{
-			if( button->finger >= 0 && button->type == touch_command && button->command[0] == '+' )
-			{
-				char command[256];
-				Q_snprintf( command, sizeof( command ), "-%s\n", button->command + 1 );
-				if( FBitSet( button->flags, TOUCH_FL_UNPRIVILEGED )) Cbuf_AddFilteredText( command );
-				else Cbuf_AddText( command );
-			}
-			button->finger = -1;
-		}
-		touch.pitch = touch.yaw = 0;
-		touch.precision = false;
-	}
 	touch.clientonly = state;
 
 	touch.resize_finger = touch.move_finger = touch.look_finger = touch.wheel_finger = -1;
@@ -1650,8 +1625,6 @@ static void Touch_DrawButtons( touchbuttonlist_t *list )
 
 void Touch_Draw( void )
 {
-	if( cls.state == ca_active && Cvar_VariableInteger( "cl_sven_camera_mouse" ))
-		return; // Client VGUI draws the interactive camera controls.
 	if( !touch.initialized || ( !touch_enable.value && !touch.clientonly ))
 		return;
 
@@ -2298,56 +2271,6 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 		{
 			static float x1 = 0.0f;
 			x1 += dx;
-			static qboolean scrollHappened = false;
-
-			// tap counting for TAB/UPARROW in console mode
-			if( cls.key_dest == key_console )
-			{
-				static double lastTapTime = 0.0;
-				static int tapCount = 0;
-
-				if( type == event_down )
-				{
-					scrollHappened = false;
-
-					if( lastTapTime > 0.0 && (host.realtime - lastTapTime) < 0.9 )
-					{
-						tapCount++;
-
-						if( tapCount == 2 && !Con_InputIsEmpty() )
-						{
-							// double-tap with input → TAB auto-complete
-							Key_Console( K_TAB );
-							tapCount = 0;
-							lastTapTime = 0.0;
-							return 0;
-						}
-						else if( tapCount >= 3 && Con_InputIsEmpty() )
-						{
-							// triple-tap on empty input → recall last command
-							Key_Console( K_UPARROW );
-							tapCount = 0;
-							lastTapTime = 0.0;
-							return 0;
-						}
-						// tapCount == 2 && empty: wait for 3rd tap
-						// tapCount >= 3 && non-empty: no-op, will reset below
-					}
-					else
-					{
-						tapCount = 1; // first tap or timeout
-					}
-
-					if( tapCount > 3 )
-						tapCount = 0;
-					lastTapTime = 0.0; // reset, will be set on event_up
-				}
-				else if( type == event_up )
-				{
-					if( !scrollHappened && tapCount > 0 )
-						lastTapTime = host.realtime;
-				}
-			}
 
 			if( type == event_up ) // don't show keyboard on every tap
 			{
@@ -2366,13 +2289,11 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 				{
 					Con_PageUp( 1 );
 					y1 = 0;
-					scrollHappened = true;
 				}
 				if( y1 < -0.01f )
 				{
 					Con_PageDown( 1 );
 					y1 = 0;
-					scrollHappened = true;
 				}
 			}
 
@@ -2410,14 +2331,6 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 	}
 
 
-	// Camera touchpad consumes normalized screen coordinates before VGUI's
-	// absolute tap emulation; otherwise dragging would also click the world.
-	if( cls.state == ca_active && Cvar_VariableInteger( "cl_sven_camera_mouse" ) &&
-		clgame.dllFuncs.pfnTouchEvent && clgame.dllFuncs.pfnTouchEvent( type, fingerID, x, y, dx, dy ))
-		return true;
-
-	const qboolean capture = Cvar_VariableInteger( "cl_sven_ui_capture" );
-
 	if( VGui_IsActive() )
 	{
 		VGui_MouseMove( x * refState.width, y * refState.height );
@@ -2435,15 +2348,11 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 		}
 	}
 
-	if( capture ) return true; // Never turn a menu tap into a gameplay command.
-
 	if( !touch.initialized || ( !touch_enable.value && !touch.clientonly ))
 		return false;
 
 	Touch_UpdateViewport();
-	// Stretch mode passes y through unchanged (raw pixels, historic behavior);
-	// otherwise use the upstream profile ratio for client event normalization.
-	float screen_y = y * (float)refState.height / refState.width / ( Touch_StretchPixels() ? (float)refState.height / refState.width : Touch_ProfileAspectRatio());
+	float screen_y = y * (float)refState.height / refState.width / Touch_ProfileAspectRatio();
 
 	if( clgame.dllFuncs.pfnTouchEvent && clgame.dllFuncs.pfnTouchEvent( type, fingerID, x, screen_y, dx, dy ) )
 		return true;
