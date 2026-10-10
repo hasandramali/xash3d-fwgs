@@ -1174,7 +1174,16 @@ static void Touch_AddButton_f( void )
 static void Touch_EnableEdit_f( void )
 {
 	Touch_ResetSticks();
+	// Editor rescale must follow the WINDOW aspect, not the render aspect:
+	// on Android the scene may render low-res (640x480) on an unchanged
+	// window (2400x1080) and the fitted draw mapping shows the same profile
+	// correctly at any render size. Rescaling by the render aspect (0.75 vs
+	// the profile's 0.45) would compress every button upward (x0.6 here) and
+	// persist the damage via configchanged. refState.scale_* holds
+	// render/window ratios, so window = render / scale.
 	float current_ratio = (float)refState.height / refState.width;
+	if( refState.scale_x > 0.0f && refState.scale_y > 0.0f )
+		current_ratio = ( refState.height / refState.scale_y ) / ( refState.width / refState.scale_x );
 
 	if( touch.state == state_none )
 		touch.state = state_edit;

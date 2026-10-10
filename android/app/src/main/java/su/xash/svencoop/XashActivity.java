@@ -353,7 +353,10 @@ public class XashActivity extends SDLActivity {
 
         String resolution = mPreferences.getString("render_resolution", "");
         if (resolution == null || resolution.trim().isEmpty()) {
-            return "";
+            // Empty means native: without explicit -width/-height the engine
+            // falls back to its 640x480 default mode, which is never what a
+            // fullscreen Android device wants.
+            return getNativeResolutionArguments();
         }
 
         String[] parts = resolution.trim().split("[xX,\\s]+");
@@ -376,6 +379,21 @@ public class XashActivity extends SDLActivity {
             Log.w(TAG, "Invalid render resolution: " + resolution);
             return "";
         }
+    }
+
+    private String getNativeResolutionArguments() {
+        try {
+            DisplayMetrics metrics = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
+            int width = metrics.widthPixels, height = metrics.heightPixels;
+            if (width >= MIN_SURFACE_WIDTH && height >= MIN_SURFACE_HEIGHT) {
+                return "-width " + width + " -height " + height;
+            }
+            Log.w(TAG, "Native resolution is too small: " + width + "x" + height);
+        } catch (Exception e) {
+            Log.w(TAG, "Unable to query native resolution", e);
+        }
+        return "";
     }
 
     private void setStretchResolutionEnvironment() {
