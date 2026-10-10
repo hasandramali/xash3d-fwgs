@@ -25,19 +25,12 @@ class AppUpdater(private val context: Context) {
 	data class UpdateInfo(val buildNum: Int, val tagName: String)
 	data class CommitInfo(val sha: String, val subject: String)
 
-	sealed interface UpdateCheck {
-		data class Available(val info: UpdateInfo) : UpdateCheck
-		object UpToDate : UpdateCheck
-		object Disabled : UpdateCheck
-		data class Failed(val reason: String?) : UpdateCheck
-	}
-
 	fun canInstall(): Boolean =
 		Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
 			context.packageManager.canRequestPackageInstalls()
 
-	suspend fun checkForUpdate(): UpdateCheck {
-		if (!BuildConfig.ENABLE_AUTO_UPDATE) return UpdateCheck.Disabled
+	suspend fun checkForUpdate(): UpdateInfo? {
+		if (!BuildConfig.ENABLE_AUTO_UPDATE) return null
 		return withContext(Dispatchers.IO) {
 			var connection: HttpURLConnection? = null
 			try {
@@ -49,7 +42,7 @@ class AppUpdater(private val context: Context) {
 
 				if (connection.responseCode != HttpURLConnection.HTTP_OK) {
 					Log.w(TAG, "Release API check failed: HTTP ${connection.responseCode}")
-					return@withContext UpdateCheck.Failed("HTTP ${connection.responseCode}")
+					return@withContext null
 				}
 
 				val release = JSONObject(connection.inputStream.bufferedReader().readText())
@@ -62,17 +55,17 @@ class AppUpdater(private val context: Context) {
 				Log.i(TAG, "Remote buildnum: $remote (tag=$tagName), local: $localDays")
 
 				if (remote != null && remote - localDays >= STALENESS_DAYS)
-					UpdateCheck.Available(UpdateInfo(remote, tagName))
+					UpdateInfo(remote, tagName)
 				else
-					UpdateCheck.UpToDate
+					null
 			} catch (e: CancellationException) {
 				throw e
 			} catch (e: IOException) {
 				Log.w(TAG, "Update check failed: ${e.message}")
-				UpdateCheck.Failed(e.message)
+				null
 			} catch (e: JSONException) {
 				Log.w(TAG, "Update check parse failed: ${e.message}")
-				UpdateCheck.Failed(e.message)
+				null
 			} finally {
 				connection?.disconnect()
 			}
