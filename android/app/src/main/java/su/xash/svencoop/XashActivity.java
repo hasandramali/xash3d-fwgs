@@ -151,11 +151,38 @@ public class XashActivity extends SDLActivity {
     private String[] getAssetsList(boolean isEngine, String path) {
         AssetManager am = getAssets(isEngine);
         try {
-            return am.list(path);
+            String[] list = am.list(path);
+            return list != null ? list : new String[]{};
         } catch (Exception e) {
             e.printStackTrace();
         }
         return new String[]{};
+    }
+
+    // Safe-area insets as fractions of the window: left, top, right, bottom.
+    // Called from native code on the engine thread; only reads view state,
+    // never throws.
+    @SuppressLint("NewApi")
+    private float[] getWindowInsets() {
+        float[] insets = new float[]{ 0, 0, 0, 0 };
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+                View decor = getWindow().getDecorView();
+                if (decor != null) {
+                    android.view.WindowInsets wi = decor.getRootWindowInsets();
+                    int w = decor.getWidth(), h = decor.getHeight();
+                    if (wi != null && w > 0 && h > 0) {
+                        insets[0] = (float) wi.getSystemWindowInsetLeft() / w;
+                        insets[1] = (float) wi.getSystemWindowInsetTop() / h;
+                        insets[2] = (float) wi.getSystemWindowInsetRight() / w;
+                        insets[3] = (float) wi.getSystemWindowInsetBottom() / h;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getWindowInsets failed, using zeros");
+        }
+        return insets;
     }
 
     @Override

@@ -49,6 +49,11 @@ void Android_Init( void )
 	jni.getAndroidID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "getAndroidID", "()Ljava/lang/String;" );
 	jni.saveAndroidID = (*jni.env)->GetMethodID( jni.env, jni.actcls, "saveAndroidID", "(Ljava/lang/String;)V" );
 	jni.getWindowInsets = (*jni.env)->GetMethodID( jni.env, jni.actcls, "getWindowInsets", "()[F" );
+	// Fork launchers may lack newer methods (e.g. getWindowInsets). A failed
+	// lookup leaves a NoSuchMethodError pending which would abort the *next*
+	// JNI call (SIGABRT in ART), so it must be cleared here.
+	if( (*jni.env)->ExceptionCheck( jni.env ))
+		(*jni.env)->ExceptionClear( jni.env );
 #endif // !XASH_SDL
 }
 
@@ -141,7 +146,22 @@ Android_GetWindowInsets
 */
 void Android_GetWindowInsets( float insets[4] )
 {
-	jfloatArray result = (*jni.env)->CallObjectMethod( jni.env, jni.activity, jni.getWindowInsets );
-	(*jni.env)->GetFloatArrayRegion( jni.env, result, 0, 4, insets );
+	jfloatArray result;
+
+	insets[0] = insets[1] = insets[2] = insets[3] = 0.0f;
+
+	if( !jni.env || !jni.activity || !jni.getWindowInsets )
+		return; // launcher without getWindowInsets(): no safe-area info
+
+	result = (*jni.env)->CallObjectMethod( jni.env, jni.activity, jni.getWindowInsets );
+	if( !result || (*jni.env)->ExceptionCheck( jni.env ))
+	{
+		if( (*jni.env)->ExceptionCheck( jni.env ))
+			(*jni.env)->ExceptionClear( jni.env );
+		return;
+	}
+
+	if( (*jni.env)->GetArrayLength( jni.env, result ) >= 4 )
+		(*jni.env)->GetFloatArrayRegion( jni.env, result, 0, 4, insets );
 	(*jni.env)->DeleteLocalRef( jni.env, result );
 }

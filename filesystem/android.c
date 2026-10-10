@@ -84,6 +84,18 @@ static void Android_ListDirectory( stringlist_t *list, const char *path, qboolea
 {
 	jstring JStr = (*jni.env)->NewStringUTF( jni.env, path );
 	jobjectArray JNIArray = (*jni.env)->CallObjectMethod( jni.env, jni.activity, jni.getAssetsList, engine, JStr );
+
+	// AssetManager.list() returns null for non-directory paths and any failed
+	// lookup above leaves a pending exception; either would SIGABRT ART on
+	// the GetArrayLength below, so bail out cleanly instead.
+	if( !JNIArray || (*jni.env)->ExceptionCheck( jni.env ))
+	{
+		if( (*jni.env)->ExceptionCheck( jni.env ))
+			(*jni.env)->ExceptionClear( jni.env );
+		(*jni.env)->DeleteLocalRef( jni.env, JStr );
+		return;
+	}
+
 	int JNIArraySize = (*jni.env)->GetArrayLength( jni.env, JNIArray );
 
 	for( int i = 0; i < JNIArraySize; i++ )
@@ -351,6 +363,11 @@ void FS_InitAndroid( void )
 
 	if( !jni.getPackageName || !jni.getCallingPackage || !jni.getAssetsList || !jni.getAssets )
 		Con_Reportf( S_WARN "%s: unable to find required JNI interfaces to load Android assets\n", __func__ );
+
+	// Same as above: a failed GetMethodID leaves NoSuchMethodError pending
+	// which would abort the next JNI call made by the filesystem.
+	if( (*jni.env)->ExceptionCheck( jni.env ))
+		(*jni.env)->ExceptionClear( jni.env );
 }
 
 #endif // XASH_ANDROID
