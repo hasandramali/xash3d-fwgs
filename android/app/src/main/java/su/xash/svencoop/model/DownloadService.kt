@@ -130,8 +130,9 @@ class DownloadService : Service() {
 
     /**
      * Deletes foreign binaries shipped inside Steam depots (Windows/Linux
-     * game DLLs, installers, scripts). They are useless on Android and must
-     * never be loadable from the game dir. Returns the removed file count.
+     * game DLLs, static libs, installers, scripts). They are useless on
+     * Android and must never be loadable from the game dir. Returns the
+     * removed file count.
      */
     private fun purgeForeignBinaries(dir: File): Int {
         var removed = 0
@@ -139,6 +140,7 @@ class DownloadService : Service() {
             if (!file.isFile) return@forEach
             val name = file.name.lowercase()
             if (name.endsWith(".dll") || name.endsWith(".so") ||
+                name.endsWith(".a") ||
                 name.endsWith(".exe") || name.endsWith(".bat")) {
                 try {
                     if (file.delete()) removed++
