@@ -20,7 +20,8 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
--keep class su.xash.svencoop.XashActivity {
+-keep class su.xash.engine.XashActivity {
+    float[] getWindowInsets();
     java.lang.String loadAndroidID();
     java.lang.String getAndroidID();
     void saveAndroidID(java.lang.String);

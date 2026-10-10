@@ -9,12 +9,12 @@ plugins {
 }
 
 extensions.configure<ApplicationExtension> {
-	namespace = "su.xash.svencoop"
+	namespace = "su.xash.engine"
 	ndkVersion = "29.0.14206865"
 	compileSdk = 35
 
 	defaultConfig {
-		applicationId = "su.xash.svencoop"
+		applicationId = "su.xash.engine"
 		versionName = "0.21-" + getGitHash()
 		versionCode = getBuildNum()
 		minSdk = 21
@@ -98,9 +98,11 @@ extensions.configure<ApplicationExtension> {
 			isMinifyEnabled = false
 			isShrinkResources = false
 			isDebuggable = true
+			applicationIdSuffix = ".test"
 			proguardFiles(
 				getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
 			)
+			buildConfigField("boolean", "ENABLE_AUTO_UPDATE", "false")
 		}
 
 		release {
@@ -109,6 +111,7 @@ extensions.configure<ApplicationExtension> {
 			proguardFiles(
 				getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
 			)
+			buildConfigField("boolean", "ENABLE_AUTO_UPDATE", "false")
 		}
 
 		register("asan") {
@@ -117,6 +120,8 @@ extensions.configure<ApplicationExtension> {
 
 		register("continuous") {
 			initWith(getByName("release"))
+			applicationIdSuffix = ".test"
+			buildConfigField("boolean", "ENABLE_AUTO_UPDATE", "true")
 			signingConfig = signingConfigs.getByName("androidDebugKey")
 		}
 	}
@@ -133,7 +138,6 @@ dependencies {
 	implementation(libs.swiperefreshlayout)
 
 	implementation(libs.acra.http)
-	implementation(libs.xz)
 }
 
 fun getBuildNum(): Int {

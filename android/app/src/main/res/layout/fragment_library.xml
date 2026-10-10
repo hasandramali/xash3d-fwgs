@@ -14,45 +14,10 @@
 			android:id="@+id/gamesList"
 			android:layout_width="match_parent"
 			android:layout_height="match_parent"
-			android:layout_above="@id/downloadProgressContainer"
 			android:clipToPadding="false"
 			android:paddingHorizontal="8dp"
 			app:layoutManager="LinearLayoutManager"
 			tools:listitem="@layout/card_game" />
-
-		<LinearLayout
-			android:id="@+id/downloadProgressContainer"
-			android:layout_width="match_parent"
-			android:layout_height="wrap_content"
-			android:layout_alignParentBottom="true"
-			android:gravity="center"
-			android:orientation="vertical"
-			android:padding="16dp"
-			android:visibility="gone">
-
-			<com.google.android.material.textview.MaterialTextView
-				android:id="@+id/downloaderStatus"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:gravity="center"
-				android:textAppearance="?attr/textAppearanceBodyMedium" />
-
-			<com.google.android.material.progressindicator.LinearProgressIndicator
-				android:id="@+id/downloaderProgress"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="16dp"
-				android:indeterminate="true" />
-
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/cancelButton"
-				android:layout_width="wrap_content"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="16dp"
-				android:text="@string/cancel"
-				style="@style/Widget.Material3.Button.TextButton" />
-
-		</LinearLayout>
 	</RelativeLayout>
 
 </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
