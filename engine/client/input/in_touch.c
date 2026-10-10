@@ -173,15 +173,34 @@ static CVAR_DEFINE_AUTO( touch_stick_texture, "gfx/touch/stick_thumb", FCVAR_FIL
 static CVAR_DEFINE_AUTO( touch_safearea, "1", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "keep touch controls inside the screen safe area, away from display cutouts" );
 static CVAR_DEFINE( touch_emulate, "_touch_emulate", "0", FCVAR_PRIVILEGED, "emulate touch with mouse" );
 
+// Touch overlay is laid out in NATIVE window pixels, not render pixels: the
+// 3D scene may render low-res (e.g. 640x480 stretched over a 2400x1080
+// window) but buttons must not move or resize with it. refState.scale_*
+// holds render/window ratios (R_SaveVideoMode), so window = render / scale.
+static inline float Touch_NativeWidth( void )
+{
+	if( refState.scale_x > 0.0f )
+		return refState.width / refState.scale_x;
+	return (float)refState.width;
+}
+
+static inline float Touch_NativeHeight( void )
+{
+	if( refState.scale_y > 0.0f )
+		return refState.height / refState.scale_y;
+	return (float)refState.height;
+}
+
 static void Touch_UpdateViewport( void )
 {
 	const float none[4] = { 0 };
 	const float *insets = touch_safearea.value ? host.window_insets : none;
+	const float native_w = Touch_NativeWidth(), native_h = Touch_NativeHeight();
 
-	touch.view_x = refState.width * insets[0];
-	touch.view_y = refState.height * insets[1];
-	touch.view_width = Q_max( 1, refState.width * ( 1 - insets[0] - insets[2] ));
-	touch.view_height = Q_max( 1, refState.height * ( 1 - insets[1] - insets[3] ));
+	touch.view_x = native_w * insets[0];
+	touch.view_y = native_h * insets[1];
+	touch.view_width = Q_max( 1, native_w * ( 1 - insets[0] - insets[2] ));
+	touch.view_height = Q_max( 1, native_h * ( 1 - insets[1] - insets[3] ));
 }
 
 #define SCRN_WIDTH(x) (touch.view_width * (x))
@@ -197,9 +216,10 @@ static void Touch_ResetSticks( void );
 void Touch_NotifyResize( void )
 {
 	Touch_UpdateViewport();
-	if( refState.width && refState.height && ( !touch.configchanged || !touch.actual_aspect_ratio ))
+	const float native_w = Touch_NativeWidth(), native_h = Touch_NativeHeight();
+	if( native_w > 0 && native_h > 0 && ( !touch.configchanged || !touch.actual_aspect_ratio ))
 	{
-		float aspect_ratio = (float)refState.height / refState.width;
+		float aspect_ratio = native_h / native_w;
 		if( aspect_ratio < 0.99 && aspect_ratio > touch.actual_aspect_ratio )
 			touch.actual_aspect_ratio = aspect_ratio;
 	}
@@ -213,8 +233,8 @@ static inline float Touch_ProfileAspectRatio( void )
 	if( touch.actual_aspect_ratio >= 0.25f )
 		return touch.actual_aspect_ratio;
 
-	if( refState.width && refState.height )
-		return (float)refState.height / refState.width;
+	if( Touch_NativeWidth() > 0 && Touch_NativeHeight() > 0 )
+		return Touch_NativeHeight() / Touch_NativeWidth();
 
 	return 9.0f / 16.0f;
 }
@@ -222,9 +242,10 @@ static inline float Touch_ProfileAspectRatio( void )
 static inline float Touch_AspectRatio( void )
 {
 	float ratio = Touch_ProfileAspectRatio();
+	const float native_w = Touch_NativeWidth(), native_h = Touch_NativeHeight();
 
-	if( refState.width > 0 && refState.height > 0 && touch.view_width > 0 )
-		ratio *= touch.view_height * refState.width / ( touch.view_width * refState.height );
+	if( native_w > 0 && native_h > 0 && touch.view_width > 0 )
+		ratio *= touch.view_height * native_w / ( touch.view_width * native_h );
 	return ratio;
 }
 
@@ -239,11 +260,15 @@ static qboolean Touch_StretchPixels( void )
 
 static inline float Touch_ButtonAspectRatio( void )
 {
-	if( Touch_StretchPixels() && refState.scale_x > 0.0f && refState.scale_y > 0.0f )
+	if( Touch_StretchPixels() )
 	{
-		float aspect = (float)refState.height / refState.width * refState.scale_x / refState.scale_y;
-		if( aspect >= 0.25f )
-			return aspect;
+		const float native_w = Touch_NativeWidth(), native_h = Touch_NativeHeight();
+		if( native_w > 0 && native_h > 0 )
+		{
+			float aspect = native_h / native_w;
+			if( aspect >= 0.25f )
+				return aspect;
+		}
 	}
 
 	return Touch_AspectRatio();
@@ -252,15 +277,15 @@ static inline float Touch_ButtonAspectRatio( void )
 static inline float Touch_DrawAspectRatio( void )
 {
 	if( Touch_StretchPixels() )
-		return (float)refState.height / refState.width;
+		return Touch_NativeHeight() / Touch_NativeWidth();
 
 	return Touch_AspectRatio();
 }
 
 #undef TO_SCRN_Y
 #undef TO_SCRN_X
-#define TO_SCRN_X(x) (Touch_StretchPixels() ? (float)refState.width * (x) : touch.view_x + touch.view_width * (x))
-#define TO_SCRN_Y(x) (Touch_StretchPixels() ? (float)refState.height * (x) : touch.view_y + touch.view_width * (x) * Touch_AspectRatio())
+#define TO_SCRN_X(x) (Touch_StretchPixels() ? Touch_NativeWidth() * (x) : touch.view_x + touch.view_width * (x))
+#define TO_SCRN_Y(x) (Touch_StretchPixels() ? Touch_NativeHeight() * (x) : touch.view_y + touch.view_width * (x) * Touch_AspectRatio())
 static void Touch_ConfigAspectRatio_f( void )
 {
 	touch.config_aspect_ratio = Q_atof( Cmd_Argv( 1 ));
@@ -1002,7 +1027,7 @@ static void Touch_LoadDefaults_f( void )
 		if( g_DefaultButtons[i].aspect && g_DefaultButtons[i].round == round_aspect )
 		{
 			if( g_DefaultButtons[i].texture[0] == '#' )
-				y2 = y1 + ( (float)clgame.scrInfo.iCharHeight / (float)clgame.scrInfo.iHeight ) * g_DefaultButtons[i].aspect + touch.swidth * 2.0f / refState.height;
+				y2 = y1 + ( (float)clgame.scrInfo.iCharHeight / (float)clgame.scrInfo.iHeight ) * g_DefaultButtons[i].aspect + touch.swidth * 2.0f / Touch_NativeHeight();
 			else
 				y2 = y1 + (( x2 - x1 ) / Touch_ButtonAspectRatio( )) * g_DefaultButtons[i].aspect;
 		}
@@ -1113,7 +1138,7 @@ static void Touch_AddButton_f( void )
 static void Touch_EnableEdit_f( void )
 {
 	Touch_ResetSticks();
-	float current_ratio = (float)refState.height / refState.width;
+	float current_ratio = Touch_NativeHeight() / Touch_NativeWidth();
 
 	if( touch.state == state_none )
 		touch.state = state_edit;
@@ -1575,8 +1600,8 @@ static void Touch_DrawButtons( touchbuttonlist_t *list )
 			if( b->texture[0] == '#' )
 			{
 				Touch_DrawText(
-					touch.swidth / (float)refState.width + b->x1,
-					touch.swidth / (float)refState.height + b->y1,
+					touch.swidth / Touch_NativeWidth() + b->x1,
+					touch.swidth / Touch_NativeHeight() + b->y1,
 					b->x2, b->y2, b->texture + 1, color, b->aspect ? b->aspect : 1 );
 			}
 			else if( b->texture[0] )
@@ -2242,8 +2267,8 @@ static int Touch_ControlsEvent( touchEventType type, int fingerID, float x, floa
 	if( touch.state == state_edit_move )
 	{
 		// buttons are positioned in safe area units, unlike look and wheel
-		dx *= (float)refState.width / touch.view_width;
-		dy *= (float)refState.height / touch.view_height;
+		dx *= Touch_NativeWidth() / touch.view_width;
+		dy *= Touch_NativeHeight() / touch.view_height;
 		Touch_EditMove( type, fingerID, x, y, dx, dy );
 		return true;
 	}
@@ -2441,17 +2466,19 @@ int IN_TouchEvent( touchEventType type, int fingerID, float x, float y, float dx
 		return false;
 
 	Touch_UpdateViewport();
+	// Event coordinates are normalized to the native window; keep client
+	// normalization in window space too so taps land where buttons draw.
 	// Stretch mode passes y through unchanged (raw pixels, historic behavior);
 	// otherwise use the upstream profile ratio for client event normalization.
-	float screen_y = y * (float)refState.height / refState.width / ( Touch_StretchPixels() ? (float)refState.height / refState.width : Touch_ProfileAspectRatio());
+	float screen_y = y * Touch_NativeHeight() / Touch_NativeWidth() / ( Touch_StretchPixels() ? Touch_NativeHeight() / Touch_NativeWidth() : Touch_ProfileAspectRatio());
 
 	if( clgame.dllFuncs.pfnTouchEvent && clgame.dllFuncs.pfnTouchEvent( type, fingerID, x, screen_y, dx, dy ) )
 		return true;
 
 	// Do not clamp outside touches onto an edge button. Keep up/motion events
 	// flowing so a finger released outside the safe rectangle cannot stick.
-	x = ( x * refState.width - touch.view_x ) / touch.view_width;
-	y = ( y * refState.height - touch.view_y ) / SCRN_HEIGHT( 1 );
+	x = ( x * Touch_NativeWidth() - touch.view_x ) / touch.view_width;
+	y = ( y * Touch_NativeHeight() - touch.view_y ) / SCRN_HEIGHT( 1 );
 	return Touch_ControlsEvent( type, fingerID, x, y, dx, dy );
 }
 
@@ -2506,8 +2533,8 @@ void Touch_KeyEvent( int key, int down )
 
 	Platform_GetMousePos( &xi, &yi );
 
-	x = xi / (float)refState.width;
-	y = yi / (float)refState.height;
+	x = xi / Touch_NativeWidth();
+	y = yi / Touch_NativeHeight();
 
 	// Con_DPrintf( "event %d %.2f %.2f %.2f %.2f\n", event, x, y, x - lx, y - ly );
 
@@ -2621,14 +2648,18 @@ static void Test_TouchStick( void )
 
 	// Save/reload retains the profile's original aspect even with nonzero insets.
 	int old_width = refState.width, old_height = refState.height;
+	float old_scale_x = refState.scale_x, old_scale_y = refState.scale_y;
 	refState.width = 1000;
 	refState.height = 500;
+	refState.scale_x = refState.scale_y = 1.0f; // render == window here
 	touch.config_aspect_ratio = 0.5f;
 	touch.view_width = 900;
 	touch.view_height = 480;
 	float aspect = Touch_AspectRatio();
 	touch.config_aspect_ratio = Touch_ProfileAspectRatio();
 	TASSERT( fabsf( Touch_AspectRatio() - aspect ) < 0.0001f );
+	refState.scale_x = old_scale_x;
+	refState.scale_y = old_scale_y;
 	refState.width = old_width;
 	refState.height = old_height;
 
