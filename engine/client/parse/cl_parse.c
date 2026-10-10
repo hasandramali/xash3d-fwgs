@@ -1153,8 +1153,6 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 			if( age == 0 || age >= CL_UPDATE_BACKUP || base->clientdata_sequence <= 0
 				|| base->clientdata_sequence != cls.netchan.incoming_sequence - age )
 			{
-				// The stream is delta-coded against data we no longer own.
-				// Discard it rather than synthesize a position from a reused slot.
 				static double nextReport;
 				if( host.realtime >= nextReport )
 				{
