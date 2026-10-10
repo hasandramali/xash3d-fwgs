@@ -265,7 +265,23 @@ static inline float Touch_DrawAspectRatio( void )
 #undef TO_SCRN_Y
 #undef TO_SCRN_X
 #define TO_SCRN_X(x) (Touch_StretchPixels() ? (float)refState.width * (x) : touch.view_x + touch.view_width * (x))
-#define TO_SCRN_Y(x) (Touch_StretchPixels() ? (float)refState.height * (x) : touch.view_y + touch.view_width * (x) * Touch_AspectRatio())
+#define TO_SCRN_Y(x) (Touch_StretchPixels() ? (float)refState.height * (x) : touch.view_y + touch.view_width * (x) * Touch_ViewAspect())
+
+// Fitted draw ratio: the visible viewport's own aspect. Touch_AspectRatio()
+// above carries the profile's design aspect (touch_aspectratio, learned at
+// native res), which goes stale when the render aspect changes (e.g.
+// 640x480) and then gathers buttons at the top. The view aspect always maps
+// y=1 to exactly the view bottom; it equals the old expression whenever the
+// profile aspect matches the render aspect (the normal native case), so
+// native layout is pixel-identical.
+static inline float Touch_ViewAspect( void )
+{
+	if( touch.view_width > 0 )
+		return (float)touch.view_height / (float)touch.view_width;
+	if( refState.width > 0 )
+		return (float)refState.height / (float)refState.width;
+	return 9.0f / 16.0f;
+}
 
 // Sizes must live in the same space as positions. The view-based macros
 // above ignore stretch mode, which used to draw stretch-mode buttons with
