@@ -174,6 +174,7 @@ static CVAR_DEFINE_AUTO( touch_safearea, "1", FCVAR_ARCHIVE | FCVAR_FILTERABLE, 
 static CVAR_DEFINE( touch_emulate, "_touch_emulate", "0", FCVAR_PRIVILEGED, "emulate touch with mouse" );
 
 static qboolean Touch_StretchPixels( void );
+static void Touch_ViewportDiag( void );
 
 static void Touch_UpdateViewport( void )
 {
@@ -187,6 +188,8 @@ static void Touch_UpdateViewport( void )
 	touch.view_y = refState.height * insets[1];
 	touch.view_width = Q_max( 1, refState.width * ( 1 - insets[0] - insets[2] ));
 	touch.view_height = Q_max( 1, refState.height * ( 1 - insets[1] - insets[3] ));
+
+	Touch_ViewportDiag();
 }
 
 #define SCRN_WIDTH(x) (touch.view_width * (x))
@@ -281,6 +284,31 @@ static inline float Touch_ViewAspect( void )
 	if( refState.width > 0 )
 		return (float)refState.height / (float)refState.width;
 	return 9.0f / 16.0f;
+}
+
+// One-shot layout diagnostic per distinct configuration (visible with
+// -dev). Y(0.5)/Y(1) fully determine the vertical mapping: fitted means
+// Y(1) == render height and Y(0.5) == half of it.
+static void Touch_ViewportDiag( void )
+{
+	static int dbg_rw = -1, dbg_rh = -1, dbg_st = -1, dbg_sa = -1;
+	static float dbg_sx = -1, dbg_sy = -1, dbg_in[4] = { -1, -1, -1, -1 };
+	if( dbg_rw != refState.width || dbg_rh != refState.height ||
+		dbg_sx != refState.scale_x || dbg_sy != refState.scale_y ||
+		dbg_st != Touch_StretchPixels() || dbg_sa != ( touch_safearea.value ? 1 : 0 ) ||
+		memcmp( dbg_in, host.window_insets, sizeof( dbg_in )))
+	{
+		dbg_rw = refState.width; dbg_rh = refState.height;
+		dbg_sx = refState.scale_x; dbg_sy = refState.scale_y;
+		dbg_st = Touch_StretchPixels(); dbg_sa = touch_safearea.value ? 1 : 0;
+		memcpy( dbg_in, host.window_insets, sizeof( dbg_in ));
+		Con_DPrintf( "Touch viewport: render %dx%d scale %.4f/%.4f stretch %d safearea %d insets %.3f %.3f %.3f %.3f view %.0f %.0f %.0f %.0f Y(0.5)=%.1f Y(1)=%.1f H(1)=%.1f aspectP=%.3f aspectV=%.3f\n",
+			refState.width, refState.height, refState.scale_x, refState.scale_y, dbg_st, dbg_sa,
+			host.window_insets[0], host.window_insets[1], host.window_insets[2], host.window_insets[3],
+			touch.view_x, touch.view_y, touch.view_width, touch.view_height,
+			TO_SCRN_Y( 0.5f ), TO_SCRN_Y( 1.0f ), SCRN_HEIGHT( 1.0f ),
+			Touch_AspectRatio(), Touch_ViewAspect());
+	}
 }
 
 // Sizes must live in the same space as positions. The view-based macros
