@@ -493,7 +493,7 @@ static void SteamBroker_ConnectFriend_f( void )
 
 	if( Cmd_Argc() != 2 )
 	{
-		Con_Printf( S_USAGE "connect_steamid <friend-steamid64 | STEAM_X:Y:Z>\n" );
+		Con_Printf( S_USAGE "@connect_steamid <friend-steamid64 | STEAM_X:Y:Z>\n" );
 		return;
 	}
 	steam_id = Cmd_Argv( 1 );
@@ -641,10 +641,6 @@ static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out )
 	return true;
 }
 
-// connect STEAM_... : resolve the friend's advertised server through the
-// broker, then ride the normal UDP path (sb_friend_result auto-connects).
-// True Steam-P2P transport needs an on-device Steam endpoint, which this
-// engine does not have; direct UDP (internet or ZeroTier LAN) is used.
 void SteamBroker_ConnectBySteamID( const char *text )
 {
 	uint64_t steamid;
@@ -662,19 +658,9 @@ void SteamBroker_ConnectBySteamID( const char *text )
 	}
 
 	Con_Printf( "Resolving SteamID %"PRIu64" via broker...\n", steamid );
-	Cbuf_AddTextf( "connect_steamid %"PRIu64"\n", steamid );
+	Cbuf_AddTextf( "@connect_steamid %"PRIu64"\n", steamid );
 }
 
-// Community tracker fallback (on-device, no Steam needed).
-// gamemonitoring.net exposes a plain HTTPS JSON list (status=online is
-// enforced server-side; the client checks below are belt-and-suspenders):
-//   https://api.gamemonitoring.net/servers?game=<appid>&status=online&limit=100
-// NOTE: limit must stay <= 100, the API answers anything above with
-// HTTP 400 ("limit must not exceed 100").
-//   {"response":{"items":[{..."request":"1.2.3.4:27015","status":true,
-//     "private":false,"hide_address":false,...}, ...]}}
-// Only entries with status=true, private=false, hide_address=false are
-// used; every address is re-queried through the normal per-server path.
 #define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&status=online&limit=100&offset=%d"
 #define WEBAPI_MASTERLIST_URL	"https://api.steampowered.com/IGameServersService/GetServerList/v1/?key=%s&filter=%%5Cappid%%5C%d&limit=500"
 #define TRACKER_MASTERLIST_MAX	300
@@ -682,8 +668,6 @@ void SteamBroker_ConnectBySteamID( const char *text )
 
 static CVAR_DEFINE_AUTO( cl_masterlist_webapi_key, "", FCVAR_ARCHIVE, "Steam Web API key for the official IGameServersService masterlist (free at steamcommunity.com/dev/apikey; empty = use community tracker)" );
 
-// Span of one top-level {...} object: string-aware brace matching
-// (server names may contain braces; quoted spans are skipped).
 static qboolean SteamTracker_FindObject( const char *p, const char *end, const char **obj, const char **objend )
 {
 	int depth = 0;
@@ -1248,8 +1232,8 @@ void SteamBroker_Init( void )
 	broker.tx_buffer_pos = 0;
 	broker.ticket_timeout = 0;
 	Cvar_RegisterVariable( &cl_steam_broker_addr );
-	Cmd_AddCommand( "connect_steamid", SteamBroker_ConnectFriend_f, "connect to a Steam friend's advertised game server over UDP" );
-	Cmd_AddCommand( "steam_masterlist", SteamBroker_MasterList_f, "request Steam internet server list via broker" );
+	Cmd_AddCommand( "@connect_steamid", SteamBroker_ConnectFriend_f, "connect to a Steam friend's advertised game server over UDP" );
+	Cmd_AddCommand( "steam_masterlist", SteamBroker_MasterList_f, "request Steam internet server list" );
 	Cvar_RegisterVariable( &cl_steam_appid );
 	Cvar_RegisterVariable( &cl_masterlist_webapi_key );
 	NET_NetadrSetType( &broker.adr, NA_UNDEFINED );
