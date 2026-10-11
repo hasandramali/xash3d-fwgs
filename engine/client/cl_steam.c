@@ -919,7 +919,8 @@ qboolean SteamWebAPI_RequestMasterList( void )
 	if( Q_snprintf( url, sizeof( url ), WEBAPI_MASTERLIST_URL, cl_masterlist_webapi_key.string, appid ) <= 0 )
 		return false;
 
-	if( !HTTP_GetToMemory( url, SteamTracker_MasterListResponse, (void *)(intptr_t)MASTERLIST_WEBAPI ))
+	uintptr_t tag = ((uintptr_t)s_tracker_gen << 2 ) | (uintptr_t)MASTERLIST_WEBAPI;
+	if( !HTTP_GetToMemory( url, SteamTracker_MasterListResponse, (void *)tag ))
 		return false;
 
 	Con_Printf( "Requesting Steam WebAPI server list for appid %d...\n", appid );

@@ -841,6 +841,21 @@ class SteamAuthManager(private val ctx: Context) {
                         val parts = command.split(" ")
                         currentGameDir = if (parts.size > 1) parts[1] else null
                         Log.i(TAG, "sb_gamedir=$currentGameDir")
+                    } else if (command.startsWith("sb_masterlist ")) {
+                        val parts = command.trim().split(Regex("\\s+"))
+                        val appid = parts.getOrNull(2)?.toIntOrNull() ?: 0
+                        if (parts.size != 3 || parts[1] != "svencoop" || appid != APPID) {
+                            writeSbrkText(outs, "sb_masterlist_end 0 invalid_request")
+                            continue
+                        }
+                        try {
+                            val servers = requestMasterList(appid)
+                            for (address in servers) writeSbrkText(outs, "sb_masterlist_entry $address")
+                            writeSbrkText(outs, "sb_masterlist_end ${servers.size} ok")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "$tag: Steam masterlist query failed", e)
+                            writeSbrkText(outs, "sb_masterlist_end 0 error")
+                        }
                     } else if (command.startsWith("sb_friend ")) {
                         val steamId = command.substringAfter(' ').trim().toLongOrNull()
                         if (steamId == null || steamId <= 0L) {
@@ -948,14 +963,35 @@ class SteamAuthManager(private val ctx: Context) {
         outs.flush()
     }
 
-    private fun writeSbrkFriendResult(outs: OutputStream, found: Boolean, address: String) {
-        val payload = "sb_friend_result\n${if (found) address else ""}".toByteArray(Charsets.US_ASCII)
+    private fun writeSbrkText(outs: OutputStream, text: String) {
+        val payload = text.toByteArray(Charsets.US_ASCII)
+        require(payload.size <= 65535)
         val frame = ByteArrayOutputStream()
         frame.write("SBRK".toByteArray(Charsets.US_ASCII))
         frame.write(byteArrayOf((payload.size and 0xFF).toByte(), ((payload.size shr 8) and 0xFF).toByte()))
         frame.write(payload)
         outs.write(frame.toByteArray())
         outs.flush()
+    }
+
+    private fun writeSbrkFriendResult(outs: OutputStream, found: Boolean, address: String) {
+        writeSbrkText(outs, "sb_friend_result\n${if (found) address else ""}")
+    }
+
+    private fun requestMasterList(appid: Int): List<String> {
+        check(connected && loggedIn) { "Steam login required for server list" }
+        val jobId = nextJobId.getAndIncrement()
+        val future = CompletableFuture<SteamMsg>()
+        pendingJobs[jobId] = future
+        try {
+            sendProtobufMsg(6403, SteamServerListProtocol.query(appid),
+                buildProtoHeader(currentSteamId, currentSessionId, jobId))
+            val response = future.get(15, TimeUnit.SECONDS)
+            check(response.emsg == 6404) { "Unexpected Steam server list response: ${response.emsg}" }
+            return SteamServerListProtocol.servers(response.body)
+        } finally {
+            pendingJobs.remove(jobId, future)
+        }
     }
 
     // Last persona sighting per pending lookup: (gameAppId, ip, port),

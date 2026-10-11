@@ -154,8 +154,7 @@ static qboolean NET_SendToMasters( netsrc_t sock, size_t len, const void *data, 
 			wait = true;
 			break;
 		case NET_EAI_NONAME:
-			master->sent = false;
-			wait = true;
+			master->sent = true;
 			break;
 		case NET_EAI_OK:
 			master->sent = true;

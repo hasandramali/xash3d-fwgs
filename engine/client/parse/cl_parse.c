@@ -857,6 +857,8 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 		s = MSG_ReadString( msg );
 		if( !COM_StringEmpty( s ))
 			Con_Printf( "Server map cycle: %s\n", s ); // VALVEWHY?
+		if( cl_sven_proto )
+			CL_DispatchUserMessage( "ServerMapList", Q_strlen( s ) + 1, (void *)s );
 
 		if( MSG_ReadByte( msg ))
 			Con_Printf( "Uh, server says it's VAC2 secured.\n" );
