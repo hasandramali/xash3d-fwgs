@@ -1227,6 +1227,7 @@ R_NewMap
 void GAME_EXPORT R_NewMap( void )
 {
 	model_t *world = WORLDMODEL;
+	R_ResetFlashlightBake();
 
 	r_viewcluster = -1;
 
@@ -1526,4 +1527,3 @@ int CL_FxBlend( cl_entity_t *e )
 
 	return blend;
 }
-

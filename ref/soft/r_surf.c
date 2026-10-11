@@ -301,6 +301,15 @@ static float flashBakeRadius;
 static qboolean flashBakePending;
 static float flashBakeLastTime;
 
+void R_ResetFlashlightBake( void )
+{
+	VectorClear( flashBakePos );
+	VectorClear( flashBakeEye );
+	flashBakeRadius = 0.0f;
+	flashBakePending = false;
+	flashBakeLastTime = -FLASHLIGHT_BAKE_INTERVAL;
+}
+
 void R_FlashlightBake( const vec3_t pos, float radius, const vec3_t eye )
 {
 	VectorCopy( pos, flashBakePos );
@@ -406,7 +415,7 @@ void R_ProcessFlashlightBake( void )
 		return; // dynamic path handles the flashlight; nothing to bake
 	if( !WORLDMODEL || !WORLDMODEL->lightdata )
 		return;
-	if( gp_cl->time - flashBakeLastTime < FLASHLIGHT_BAKE_INTERVAL )
+	if( gp_cl->time >= flashBakeLastTime && gp_cl->time - flashBakeLastTime < FLASHLIGHT_BAKE_INTERVAL )
 	{
 		flashBakePending = true; // retry when due; newer requests coalesce
 		return;
@@ -1330,4 +1339,3 @@ surfcache_t *D_CacheSurface( msurface_t *surface, int miplevel )
 
 	return cache;
 }
-

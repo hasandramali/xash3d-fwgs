@@ -404,6 +404,7 @@ static const char *R_GetConfigName( void )
 
 static void R_NewMap( void )
 {
+	R_ResetFlashlightBake();
 	tr.worldmodel = gp_cl->models[1];
 
 	R_ClearDecals(); // clear all level decals
