@@ -622,10 +622,18 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_FindRelative( int current_id,
 static cl_weaponlistfix_weapon_t *CL_WeaponListFix_PickWeaponInSlot( int slot )
 {
 	int i, n = 0, active = -1;
+	int current = cl_weaponlistfix_state.active_weapon;
 	int owned[CL_WEAPONLISTFIX_MAX_WEAPONS];
 
 	if( cl_weaponlistfix_state.count <= 0 || slot < 0 )
 		return NULL;
+	if( cl_weaponlistfix_state.expire_time > cl.time || cl_weaponlistfix_state.selected_weapon != current )
+	{
+		int selected_slot;
+		cl_weaponlistfix_weapon_t *selected = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.selected_weapon );
+		if( CL_WeaponListFix_HasWeapon( selected ) && CL_WeaponListFix_GetLayout( selected, &selected_slot, NULL ) && selected_slot == slot )
+			current = selected->id;
+	}
 
 	for( i = 0; i < cl_weaponlistfix_state.count; i++ )
 	{
@@ -638,7 +646,7 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_PickWeaponInSlot( int slot )
 			continue;
 
 		owned[n++] = weapon->id;
-		if( weapon->id == cl_weaponlistfix_state.active_weapon )
+		if( weapon->id == current )
 			active = n - 1;
 	}
 
@@ -651,6 +659,55 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_PickWeaponInSlot( int slot )
 
 	return CL_WeaponListFix_GetWeapon( owned[0] );
 }
+
+#if XASH_ENGINE_TESTS
+#include "tests.h"
+
+void Test_RunWeaponListFix( void )
+{
+	cl_weaponlistfix_t saved = cl_weaponlistfix_state;
+	double savedTime = cl.time;
+	const char *names[] = { "weapon_handgrenade", "weapon_satchel", "weapon_tripmine", "weapon_knife" };
+	memset( &cl_weaponlistfix_state, 0, sizeof( cl_weaponlistfix_state ));
+	cl_weaponlistfix_state.count = ARRAYSIZE( names );
+	for( int index = 0; index < ARRAYSIZE( names ); index++ )
+	{
+		int id = index + 1;
+		cl_weaponlistfix_weapon_t *weapon = &cl_weaponlistfix_state.weapons[id];
+		weapon->id = id;
+		weapon->valid = weapon->owned_hint = true;
+		weapon->order_index = index;
+		weapon->slot = 4;
+		Q_strncpy( weapon->name, names[index], sizeof( weapon->name ));
+		cl_weaponlistfix_state.order[index] = id;
+	}
+	cl.time = 10;
+	cl_weaponlistfix_state.active_weapon = 1;
+	cl_weaponlistfix_state.selected_weapon = 2;
+	cl_weaponlistfix_state.expire_time = 12;
+	cl_weaponlistfix_state.weapons[2].clip = cl_weaponlistfix_state.weapons[2].ammo = 0;
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( 4 ), &cl_weaponlistfix_state.weapons[3] );
+	cl_weaponlistfix_state.selected_weapon = 3;
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( 4 ), &cl_weaponlistfix_state.weapons[1] );
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( 0 ), &cl_weaponlistfix_state.weapons[4] );
+	cl_weaponlistfix_state.selected_weapon = 4;
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( 4 ), &cl_weaponlistfix_state.weapons[2] );
+	cl_weaponlistfix_state.selected_weapon = 2;
+	cl.time = 12;
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( 4 ), &cl_weaponlistfix_state.weapons[3] );
+	cl_weaponlistfix_state.selected_weapon = 1;
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( 4 ), &cl_weaponlistfix_state.weapons[2] );
+	cl_weaponlistfix_state.selected_weapon = 2;
+	cl.time = 10;
+	cl_weaponlistfix_state.weapons[2].owned_hint = false;
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( 4 ), &cl_weaponlistfix_state.weapons[3] );
+	TASSERT( !CL_WeaponListFix_PickWeaponInSlot( 5 ));
+	cl_weaponlistfix_state.count = 0;
+	TASSERT( !CL_WeaponListFix_PickWeaponInSlot( 4 ));
+	cl_weaponlistfix_state = saved;
+	cl.time = savedTime;
+}
+#endif
 
 static void CL_WeaponListFix_ShowMenu( const cl_weaponlistfix_weapon_t *weapon )
 {
@@ -1019,6 +1076,8 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 			}
 			else
 			{
+				if( cl_weaponlistfix_state.active_weapon != id )
+					cl_weaponlistfix_state.selected_weapon = id;
 				cl_weaponlistfix_state.active_weapon = id;
 				if( cl_weaponlistfix_state.drop_pending )
 					cl_weaponlistfix_state.drop_pending = 0;
