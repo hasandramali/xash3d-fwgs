@@ -239,16 +239,19 @@ const char *CL_SvenSentenceText( int index )
 
 static qboolean CL_SvenReadSound( int size, void *buffer, sven_sound_event_t *event )
 {
+	byte data[32] = { 0 };
 	sizebuf_t message;
 	if( !buffer || size < 5 || size > 27 ) return false;
+	memcpy( data, buffer, size );
 	memset( event, 0, sizeof( *event ));
 	event->index = -1;
+	event->entity = -1;
 	event->volume = VOL_NORM;
 	event->pitch = PITCH_NORM;
 	event->attenuation = ATTN_NORM;
-	MSG_Init( &message, "SvenStartSound", buffer, size );
+	MSG_Init( &message, "SvenStartSound", data, size );
 	event->flags = (unsigned short)MSG_ReadShort( &message );
-	if( event->flags & SVEN_SND_INDEX ) event->index = MSG_ReadShort( &message );
+	if( event->flags & SVEN_SND_ENTITY ) event->entity = MSG_ReadShort( &message );
 	if( event->flags & SVEN_SND_VOLUME ) event->volume = MSG_ReadByte( &message ) / 255.0f;
 	if( event->flags & SVEN_SND_PITCH ) event->pitch = MSG_ReadByte( &message );
 	if( event->flags & SVEN_SND_ATTN )
@@ -262,9 +265,9 @@ static qboolean CL_SvenReadSound( int size, void *buffer, sven_sound_event_t *ev
 	}
 	if( event->flags & SVEN_SND_OFFSET ) event->offset = MSG_ReadFloat( &message );
 	event->channel = MSG_ReadByte( &message );
-	event->entity = MSG_ReadShort( &message );
+	event->index = MSG_ReadShort( &message );
 	return !MSG_CheckOverflow( &message ) && MSG_GetNumBytesRead( &message ) == size
-		&& event->entity >= 0 && isfinite( event->offset ) && event->offset >= 0;
+		&& event->entity >= -1 && isfinite( event->offset ) && event->offset >= 0;
 }
 
 static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed )
@@ -275,7 +278,7 @@ static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed )
 	sfx_t *sfx;
 	if( event->flags & SVEN_SND_SENTENCE )
 	{
-		if( event->entity >= 2048 || !CL_SvenSentenceText( event->index ) || elapsed > 1.0 ) return;
+		if( !CL_SvenSentenceText( event->index ) || elapsed > 1.0 ) return;
 		Q_snprintf( sentence, sizeof( sentence ), "!@%d", event->index );
 		sample = sentence;
 	}
@@ -301,7 +304,7 @@ static void CL_SvenQueueSound( const sven_sound_event_t *event )
 
 static qboolean CL_SvenControlPending( const sven_sound_event_t *event )
 {
-	if( event->channel || ( event->flags & SVEN_SND_STOP ))
+	if( event->entity >= 0 && ( event->channel || ( event->flags & SVEN_SND_STOP )))
 	{
 		for( int index = 0; index < svenPendingCount; )
 		{
@@ -379,22 +382,33 @@ static void Test_SvenSoundTable( void )
 
 static void Test_SvenSoundPacket( void )
 {
+	byte crowbar[] = { 0x1a, 0, 1, 0, 96, 0x80, 0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0xff, 0xff, 1, 129, 0 };
+	byte unbound[] = { 0, 0, 6, 0x8a, 1 };
 	byte data[32];
 	sizebuf_t message;
 	sven_sound_event_t event;
 	uint savedFeatures = host.features;
+	TASSERT( CL_SvenReadSound( sizeof( crowbar ), crowbar, &event ));
+	TASSERT_EQi( event.entity, 1 );
+	TASSERT_EQi( event.index, 129 );
+	TASSERT_EQi( event.pitch, 96 );
+	TASSERT( event.origin[0] == 16 && event.origin[1] == 0 && event.origin[2] == -16 );
+	TASSERT( CL_SvenReadSound( sizeof( unbound ), unbound, &event ));
+	TASSERT_EQi( event.entity, -1 );
+	TASSERT_EQi( event.index, 394 );
 	MSG_Init( &message, "test", data, sizeof( data ));
-	MSG_WriteShort( &message, SVEN_SND_STOP );
-	MSG_WriteByte( &message, CHAN_WEAPON );
+	MSG_WriteShort( &message, SVEN_SND_STOP | SVEN_SND_ENTITY );
 	MSG_WriteShort( &message, 7 );
-	TASSERT( CL_SvenReadSound( 5, data, &event ));
+	MSG_WriteByte( &message, CHAN_WEAPON );
+	MSG_WriteShort( &message, -1 );
+	TASSERT( CL_SvenReadSound( 7, data, &event ));
 	TASSERT_EQi( event.index, -1 );
 	TASSERT_EQi( event.entity, 7 );
 	TASSERT_EQi( event.channel, CHAN_WEAPON );
 	TASSERT( !CL_SvenReadSound( 4, data, &event ));
 	MSG_Clear( &message );
-	MSG_WriteWord( &message, SVEN_SND_INDEX | SVEN_SND_VOLUME | SVEN_SND_PITCH | SVEN_SND_ATTN | SVEN_SND_ORIGIN | SVEN_SND_LINEAR | SVEN_SND_OFFSET );
-	MSG_WriteShort( &message, 0 );
+	MSG_WriteWord( &message, SVEN_SND_ENTITY | SVEN_SND_VOLUME | SVEN_SND_PITCH | SVEN_SND_ATTN | SVEN_SND_ORIGIN | SVEN_SND_LINEAR | SVEN_SND_OFFSET );
+	MSG_WriteShort( &message, 1024 );
 	MSG_WriteByte( &message, 128 );
 	MSG_WriteByte( &message, 85 );
 	MSG_WriteByte( &message, 0xf2 );
@@ -402,9 +416,10 @@ static void Test_SvenSoundPacket( void )
 	for( int axis = 0; axis < 3; axis++ ) MSG_WriteCoord( &message, 16.0f * axis - 16 );
 	MSG_WriteFloat( &message, 2.25f );
 	MSG_WriteByte( &message, CHAN_STATIC );
-	MSG_WriteShort( &message, 1024 );
+	MSG_WriteShort( &message, 0 );
 	TASSERT( CL_SvenReadSound( MSG_GetNumBytesWritten( &message ), data, &event ));
 	TASSERT_EQi( event.index, 0 );
+	TASSERT_EQi( event.entity, 1024 );
 	TASSERT_EQi( event.pitch, 85 );
 	TASSERT( fabsf( event.volume - 128.0f / 255 ) < 0.0001f );
 	TASSERT_EQi( event.attenuation, 242 );
@@ -437,6 +452,13 @@ static void Test_SvenSoundPending( void )
 	event.index = -1;
 	TASSERT( !CL_SvenControlPending( &event ));
 	TASSERT_EQi( svenPendingCount, 0 );
+	event.entity = -1;
+	event.flags = SVEN_SND_LOOP;
+	CL_SvenQueueSound( &event );
+	event.flags = SVEN_SND_STOP;
+	TASSERT( !CL_SvenControlPending( &event ));
+	TASSERT_EQi( svenPendingCount, 1 );
+	CL_SvenSoundCacheReset();
 	for( int index = 0; index < 132; index++ )
 	{
 		event.index = index;

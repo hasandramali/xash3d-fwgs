@@ -27,6 +27,66 @@ static void Sound_Reset( void )
 	sound.size = 0;
 }
 
+static const char *Sound_DetectFormat( const byte *buffer, size_t size )
+{
+	if( !buffer ) return NULL;
+	if( size >= 12 && !memcmp( buffer, "RIFF", 4 ) && !memcmp( buffer + 8, "WAVE", 4 )) return "wav";
+	if( size >= 4 && !memcmp( buffer, "OggS", 4 ))
+	{
+		if( size >= 27 )
+		{
+			size_t packet = 27 + buffer[26];
+			if( buffer[26] && packet <= size && size - packet >= 8 && !memcmp( buffer + packet, "OpusHead", 8 )) return "opus";
+		}
+		return "ogg";
+	}
+	if(( size >= 3 && !memcmp( buffer, "ID3", 3 ))
+		|| ( size >= 4 && buffer[0] == 0xff && ( buffer[1] & 0xe0 ) == 0xe0
+			&& ( buffer[1] & 0x18 ) != 0x08 && ( buffer[1] & 6 ))) return "mp3";
+	return NULL;
+}
+
+#if XASH_ENGINE_TESTS
+#include "tests.h"
+
+void Test_RunSoundFormats( void )
+{
+	byte opus[36] = { 'O', 'g', 'g', 'S' };
+	byte mpeg[] = { 0xff, 0xfb, 0x90, 0 };
+	byte reserved[] = { 0xff, 0xe8, 0x90, 0 };
+	opus[26] = 1;
+	opus[27] = 8;
+	memcpy( opus + 28, "OpusHead", 8 );
+	TASSERT_STR( Sound_DetectFormat((const byte *)"RIFF1234WAVE", 12 ), "wav" );
+	TASSERT_STR( Sound_DetectFormat((const byte *)"OggS", 4 ), "ogg" );
+	TASSERT_STR( Sound_DetectFormat( opus, sizeof( opus )), "opus" );
+	TASSERT_STR( Sound_DetectFormat( opus, sizeof( opus ) - 1 ), "ogg" );
+	TASSERT_STR( Sound_DetectFormat((const byte *)"ID3", 3 ), "mp3" );
+	TASSERT_STR( Sound_DetectFormat( mpeg, sizeof( mpeg )), "mp3" );
+	TASSERT( !Sound_DetectFormat( reserved, sizeof( reserved )));
+	TASSERT( !Sound_DetectFormat((const byte *)"Ogg", 3 ));
+	TASSERT( !Sound_DetectFormat((const byte *)"RIFF1234", 8 ));
+	TASSERT( !Sound_DetectFormat( NULL, 12 ));
+}
+#endif
+
+static qboolean Sound_LoadBuffer( const loadwavfmt_t *fallback, const char *name, const byte *buffer, size_t size )
+{
+	const char *detected = Sound_DetectFormat( buffer, size );
+	const loadwavfmt_t *selected = fallback;
+	if( detected )
+	{
+		for( selected = sound.loadformats; selected && selected->ext; selected++ )
+			if( !Q_stricmp( selected->ext, detected )) break;
+		if( !selected || !selected->ext ) return false;
+	}
+	Sound_Reset();
+	if( selected->loadfunc( name, buffer, size )) return true;
+	if( sound.wav ) Mem_Free( sound.wav );
+	Sound_Reset();
+	return false;
+}
+
 static MALLOC_LIKE( FS_FreeSound, 1 ) wavdata_t *SoundPack( void )
 {
 	wavdata_t *pack = Mem_Malloc( host.soundpool, sizeof( *pack ) + sound.size );
@@ -96,7 +156,7 @@ wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 			byte *f = FS_LoadFile( path, &filesize, false );
 			if( f && filesize > 0 )
 			{
-				success = format->loadfunc( path, f, filesize );
+				success = Sound_LoadBuffer( format, path, f, filesize );
 				Mem_Free( f ); // release buffer
 			}
 
@@ -107,7 +167,7 @@ wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 			f = FS_LoadFile( path, &filesize, false );
 			if( f && filesize > 0 )
 			{
-				success = format->loadfunc( path, f, filesize );
+				success = Sound_LoadBuffer( format, path, f, filesize );
 				Mem_Free( f ); // release buffer
 			}
 
@@ -123,7 +183,7 @@ load_internal:
 		{
 			if( buffer && size > 0  )
 			{
-				if( format->loadfunc( loadname, buffer, size ))
+				if( Sound_LoadBuffer( format, loadname, buffer, size ))
 					return SoundPack(); // loaded
 			}
 		}

@@ -44,6 +44,7 @@ void Test_RunCon( void );
 void Test_RunVOX( void );
 void Test_RunSvenSound( void );
 void Test_RunSvenSoundMixer( void );
+void Test_RunSoundFormats( void );
 void Test_RunIPFilter( void );
 void Test_RunQueryRateLimit( void );
 void Test_RunChallenge( void );
@@ -89,6 +90,7 @@ void Test_RunWindowInsets( void );
 #define TEST_LIST_1_CLIENT \
 	Test_RunSvenSound(); \
 	Test_RunSvenSoundMixer(); \
+	Test_RunSoundFormats(); \
 	Test_RunVOX(); \
 	Test_RunTitles();
 

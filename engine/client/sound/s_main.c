@@ -716,7 +716,7 @@ static void S_StartSoundEx( const vec3_t pos, int ent, int chan, sound_t handle,
 	if( chan == CHAN_STATIC )
 		target_chan = SND_PickStaticChannel( pos, sfx );
 	else
-		target_chan = SND_PickDynamicChannel( ent, chan, sfx, &bIgnore );
+		target_chan = SND_PickDynamicChannel( ent, event && ent < 0 ? CHAN_AUTO : chan, sfx, &bIgnore );
 
 	if( !target_chan )
 	{
@@ -842,6 +842,7 @@ void S_StartSvenSound( const sven_sound_event_t *event, sound_t handle )
 	if( channel >= 8 ) channel = CHAN_VOICE;
 	if( event->flags & SVEN_SND_STOP )
 	{
+		if( event->entity < 0 ) return;
 		for( int index = 0; index < snd.total_channels; index++ )
 		{
 			channel_t *active = &snd.channels[index];
@@ -850,7 +851,7 @@ void S_StartSvenSound( const sven_sound_event_t *event, sound_t handle )
 		return;
 	}
 	sfx = S_GetSfxByHandle( handle );
-	if( event->flags & ( SVEN_SND_CHANGE_VOL | SVEN_SND_CHANGE_PITCH ))
+	if( event->entity >= 0 && ( event->flags & ( SVEN_SND_CHANGE_VOL | SVEN_SND_CHANGE_PITCH )))
 	{
 		for( int index = 0; index < snd.total_channels; index++ )
 		{
@@ -870,7 +871,7 @@ void S_StartSvenSound( const sven_sound_event_t *event, sound_t handle )
 	if( !sfx ) return;
 	if(( event->flags & ( SVEN_SND_LOOP_ONLY | SVEN_SND_LOOP )) == SVEN_SND_LOOP_ONLY
 		&& !S_TestSoundChar( sfx->name, '!' ) && ( !sfx->cache || !FBitSet( sfx->cache->flags, SOUND_LOOPED ))) return;
-	if( channel == CHAN_AUTO )
+	if( channel == CHAN_AUTO && event->entity >= 0 )
 	{
 		for( int candidate = 1; candidate <= 6; candidate++ )
 		{
@@ -887,7 +888,7 @@ void S_StartSvenSound( const sven_sound_event_t *event, sound_t handle )
 			}
 		}
 	}
-	if( channel != CHAN_AUTO )
+	if( channel != CHAN_AUTO && event->entity >= 0 )
 	{
 		for( int index = 0; index < snd.total_channels; index++ )
 		{
