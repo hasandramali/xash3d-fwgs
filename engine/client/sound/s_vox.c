@@ -15,6 +15,7 @@ GNU General Public License for more details.
 
 #include "common.h"
 #include "sound.h"
+#include "sven_sound.h"
 #include "const.h"
 #include <ctype.h>
 
@@ -254,6 +255,8 @@ static const char *VOX_GetDirectory( char *szpath, const char *psz, int nsize )
 static const char *VOX_LookupString( const char *pszin )
 {
 	int i = -1;
+	if( *pszin == '@' )
+		return CL_SvenSentenceText( Q_atoi( pszin + 1 ));
 
 	// check if we are an immediate sentence
 	if( *pszin == '#' )

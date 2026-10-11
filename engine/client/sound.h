@@ -47,10 +47,9 @@ extern poolhandle_t sndpool;
 #define MAX_RAW_SAMPLES      16384
 #define SND_CLIP_DISTANCE    1000.0f
 
-// FMOD-style inverse rolloff for Sven sessions (see SND_Spatialize): full
-// volume inside this radius (footsteps/huddle range), inverse falloff beyond.
-#define SVEN_ROLLOFF_MIN	48.0f
-#define SVEN_ROLLOFF_K		3.0f
+#define FL_CHAN_SVEN BIT( 6 )
+#define FL_CHAN_FORCE_LOOP BIT( 7 )
+#define FL_CHAN_NO_REVERB BIT( 8 )
 
 extern int idsp_room;
 extern snd_globals_t snd;
@@ -71,6 +70,8 @@ float S_GetMusicVolume( void );
 // s_main.c
 //
 int S_RetrieveAudioSamples( const wavdata_t *source, const void **output_buffer, int start_position, int num_samples, qboolean enable_looping );
+int S_RetrieveChannelSamples( const channel_t *channel, const void **output, int start, int count );
+qboolean S_ChannelLoops( const channel_t *channel );
 void S_FreeChannel( channel_t *ch );
 
 //
@@ -94,7 +95,9 @@ static inline const char *S_SkipSoundChar( const char *pch )
 }
 
 sfx_t *S_FindName( const char *name, qboolean *pfInCache );
+const char *S_SoundName( const sfx_t *sfx );
 sound_t S_RegisterSound( const char *name );
+sound_t S_RegisterSvenSound( const char *name );
 void S_FreeSound( sfx_t *sfx );
 void S_InitSounds( void );
 

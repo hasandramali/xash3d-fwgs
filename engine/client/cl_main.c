@@ -16,6 +16,7 @@ GNU General Public License for more details.
 #include <inttypes.h>
 #include "common.h"
 #include "client.h"
+#include "sven_sound.h"
 #include "net_encode.h"
 #include "cl_tent.h"
 #include "input.h"
@@ -105,11 +106,7 @@ static CVAR_DEFINE_AUTO( cl_log_outofband, "0", FCVAR_ARCHIVE, "log out of band 
 static CVAR_DEFINE_AUTO( cl_autorecord, "0", 0, "automatically start recording a demo after joining the server" );
 
 void CL_PredictSvenMelee( void );
-extern const char *CL_SvenSoundName( int idx );
-void CL_SvenPredictMapSounds( void );
 void CL_SvenPlayTextureHit( vec3_t start, vec3_t end, int physent, const char *raw );
-void CL_SvenSoundCacheOnDownload( const char *filename );
-void CL_SvenSoundCache_Init( void );
 
 client_t		cl;
 client_static_t	cls;
@@ -991,15 +988,9 @@ static void CL_CreateCmd( void )
 	// predict all unacknowledged movements
 	CL_PredictMovement( false );
 
-	// Sven sound system master switch (cl_sven_soundcache): the whole
-	// client-side Sven audio layer (own melee, map/entity prediction and
-	// svc107 resolution) stays silent while it is off.
 	if( Cvar_VariableInteger( "cl_sven_soundcache" ))
 	{
 		CL_PredictSvenMelee();
-
-		// Sven map/entity sound prediction (materials, doors, ambient loops)
-		CL_SvenPredictMapSounds();
 	}
 }
 
@@ -1040,8 +1031,7 @@ static void CL_SvenMeleeSwing( const char *modelbuf )
 	tr = CL_TraceLine( start, end, 0 ); // PM_NORMAL, hit whatever is there
 	if( tr.fraction >= 1.0f )
 	{
-		sndname = CL_SvenSoundName( 129 );
-		if( !sndname ) sndname = "weapons/cbar_miss1.wav";
+		sndname = "weapons/cbar_miss1.wav";
 		S_StartLocalSound( sndname, 1.0f, false );
 		return;
 	}
@@ -1055,8 +1045,7 @@ static void CL_SvenMeleeSwing( const char *modelbuf )
 
 	if( isbrush )
 	{
-		sndname = CL_SvenSoundName( 124 );	// cbar_hit1
-		if( !sndname ) sndname = "weapons/cbar_hit1.wav";
+		sndname = "weapons/cbar_hit1.wav";
 		S_StartLocalSound( sndname, 1.0f, false );
 
 		// material debris sound at the impact point (hlsdk
@@ -1066,8 +1055,7 @@ static void CL_SvenMeleeSwing( const char *modelbuf )
 	}
 	else
 	{
-		sndname = CL_SvenSoundName( 126 );	// cbar_hitbod1
-		if( !sndname ) sndname = "weapons/cbar_hitbod1.wav";
+		sndname = "weapons/cbar_hitbod1.wav";
 		S_StartLocalSound( sndname, 1.0f, false );
 	}
 }
@@ -1979,6 +1967,7 @@ void CL_ClearState( void )
 		COM_ClearCustomizationList( &cl.players[i].customdata, false );
 
 	S_StopAllSounds ( true );
+	CL_SvenSoundCacheReset();
 	CL_ClearEffects ();
 	CL_FreeEdicts ();
 	CL_GSBaselineResetAll();
@@ -3698,8 +3687,6 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 		COM_NoteMissingRemoteFile( filename );
 	}
 
-	// Sven soundcache (maps/soundcache/<map>.txt) requested via "dlfile" from
-	// CL_SvenSoundCacheRequestFile; reload the sound table once it arrives.
 	if( successfully_received && filename && filename[0] != '!' )
 		CL_SvenSoundCacheOnDownload( filename );
 
@@ -4430,6 +4417,7 @@ void Host_ClientFrame( void )
 	SCR_UpdateScreen ();
 
 	// update audio
+	CL_SvenSoundFrame();
 	SND_UpdateSound ();
 
 	// play avi-files

@@ -16,6 +16,7 @@ GNU General Public License for more details.
 #include "common.h"
 #include "sound.h"
 #include "client.h"
+#include "sven_sound.h"
 #include "con_nprint.h"
 #include "pm_local.h"
 #include "platform/platform.h"
@@ -80,6 +81,26 @@ static int S_AdjustLoopedSamplePosition( const wavdata_t *source, int current_sa
 	}
 
 	return current_sample;
+}
+
+qboolean S_ChannelLoops( const channel_t *channel )
+{
+	return channel->sfx && channel->sfx->cache && FBitSet( channel->flags, FL_CHAN_USE_LOOP )
+		&& ( FBitSet( channel->flags, FL_CHAN_FORCE_LOOP ) || FBitSet( channel->sfx->cache->flags, SOUND_LOOPED ));
+}
+
+static int S_ChannelSamplePosition( const channel_t *channel, int position )
+{
+	const wavdata_t *source = channel->sfx->cache;
+	if( S_ChannelLoops( channel ) && FBitSet( channel->flags, FL_CHAN_FORCE_LOOP )
+		&& !FBitSet( source->flags, SOUND_LOOPED ) && source->samples )
+		return position % source->samples;
+	return S_AdjustLoopedSamplePosition( source, position, FBitSet( channel->flags, FL_CHAN_USE_LOOP ));
+}
+
+int S_RetrieveChannelSamples( const channel_t *channel, const void **output, int start, int count )
+{
+	return S_RetrieveAudioSamples( channel->sfx->cache, output, S_ChannelSamplePosition( channel, start ), count, false );
 }
 
 int S_RetrieveAudioSamples( const wavdata_t *source, const void **output_buffer, int start_position, int num_samples, qboolean enable_looping )
@@ -322,7 +343,7 @@ static int SND_GetChannelTimeLeft( const channel_t *ch )
 	else
 	{
 		int samples = ch->sfx->cache->samples;
-		int curpos = S_AdjustLoopedSamplePosition( ch->sfx->cache, ch->sample, FBitSet( ch->flags, FL_CHAN_USE_LOOP ));
+		int curpos = S_ChannelSamplePosition( ch, ch->sample );
 
 		remaining = bound( 0, samples - curpos, samples );
 	}
@@ -596,25 +617,14 @@ static void SND_Spatialize( channel_t *ch )
 		if( ch->dist_mult <= 0.0f ) dot = 0.0f;
 	}
 
-	// fill out channel volumes for single location.
-	// Sven servers (soundcache active) use FMOD-style inverse distance rolloff:
-	// the real client plays 107 sounds through FMOD itself, whose default
-	// inverse curve melts distant sounds into background (500u battle ~= 4%),
-	// while our linear falloff keeps them at 60%+ ("random loud sounds
-	// everywhere", e.g. a far gauss fight drowning the door you just opened).
-	// Vanilla servers keep the classic linear curve (local test validated it).
 	{
 		float frac = dist * ch->dist_mult;
-		extern qboolean CL_SvenSoundActive( void );
-		if( CL_SvenSoundActive() && ch->dist_mult > 0.0f )
+		if( FBitSet( ch->flags, FL_CHAN_SVEN ))
 		{
-			// eff = distance in attn-scaled units (dist_mult = attn/1000).
-			// Full volume inside SVEN_ROLLOFF_MIN (footsteps/huddle range),
-			// inverse falloff beyond: 64/(64 + (eff-64)*3).
-			float eff = dist * ch->dist_mult * SND_CLIP_DISTANCE;
-			if( eff > SVEN_ROLLOFF_MIN )
-				frac = 1.0f - ( SVEN_ROLLOFF_MIN / ( SVEN_ROLLOFF_MIN + ( eff - SVEN_ROLLOFF_MIN ) * SVEN_ROLLOFF_K ));
-			else frac = 0.0f;
+			float distances[2];
+			memcpy( distances, ch->engine_reserved, sizeof( distances ));
+			frac = dist <= distances[0] ? 0.0f : dist >= distances[1] ? 1.0f
+				: ( dist - distances[0] ) / ( distances[1] - distances[0] );
 		}
 		S_SpatializeChannel( &ch->leftvol, &ch->rightvol, ch->master_vol, dot, frac );
 	}
@@ -639,7 +649,22 @@ it will never be restarted.  Use StartStaticSound (pass CHAN_STATIC to EMIT_SOUN
 SV_StartSound.
 ====================
 */
-void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float fvol, float attn, int pitch, int flags )
+static void S_SvenSoundDistances( const sven_sound_event_t *event, float distances[2] )
+{
+	if( event->flags & SVEN_SND_LINEAR )
+	{
+		int encoded = (int)event->attenuation;
+		distances[0] = ( encoded & 15 ) * 256.0f;
+		distances[1] = ( encoded >> 4 ) * 256.0f + 32.0f;
+	}
+	else
+	{
+		distances[0] = event->attenuation > 0 ? 64.0f : 10000.0f;
+		distances[1] = event->attenuation > 0 ? 1024.0f / event->attenuation : 10000.0f;
+	}
+}
+
+static void S_StartSoundEx( const vec3_t pos, int ent, int chan, sound_t handle, float fvol, float attn, int pitch, int flags, const sven_sound_event_t *event )
 {
 	wavdata_t	*pSource;
 	sfx_t	*sfx = NULL;
@@ -720,6 +745,16 @@ void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float fv
 	target_chan->entchannel = chan;
 	target_chan->basePitch = pitch;
 	target_chan->sfx = sfx;
+	if( event )
+	{
+		float distances[2];
+		SetBits( target_chan->flags, FL_CHAN_SVEN );
+		S_SvenSoundDistances( event, distances );
+		memcpy( target_chan->engine_reserved, distances, sizeof( distances ));
+		if(( event->flags & ( SVEN_SND_LOOP | SVEN_SND_SINGLE )) == SVEN_SND_LOOP ) SetBits( target_chan->flags, FL_CHAN_FORCE_LOOP | FL_CHAN_USE_LOOP );
+		if((( event->flags & SVEN_SND_ORIGIN ) && !( event->flags & SVEN_SND_USE_ENTITY )) || chan == CHAN_STATIC ) SetBits( target_chan->flags, FL_CHAN_STATIC_SOUND );
+		if( event->flags & SVEN_SND_NO_REVERB ) SetBits( target_chan->flags, FL_CHAN_NO_REVERB );
+	}
 
 	pSource = NULL;
 
@@ -747,6 +782,26 @@ void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float fv
 		S_FreeChannel( target_chan );
 		return;
 	}
+	if( event && ( event->flags & SVEN_SND_LOOP_ONLY ) && !( event->flags & SVEN_SND_LOOP )
+		&& !FBitSet( pSource->flags, SOUND_LOOPED ))
+	{
+		S_FreeChannel( target_chan );
+		return;
+	}
+	if( event && event->offset > 0 )
+	{
+		double sample = floor( event->offset * 1000.0 ) * pSource->rate / 1000.0;
+		if( sample >= pSource->samples )
+		{
+			if( !S_ChannelLoops( target_chan ) || !pSource->samples )
+			{
+				S_FreeChannel( target_chan );
+				return;
+			}
+			sample = fmod( sample, pSource->samples );
+		}
+		target_chan->sample = sample;
+	}
 
 	SND_Spatialize( target_chan );
 
@@ -756,7 +811,7 @@ void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float fv
 	if( !target_chan->leftvol && !target_chan->rightvol )
 	{
 		// looping sounds don't use this optimization because they should stick around until they're killed.
-		if( !sfx->cache || !FBitSet( sfx->cache->flags, SOUND_LOOPED ))
+		if( !S_ChannelLoops( target_chan ))
 		{
 			// if this is a streaming sound, play the whole thing.
 			if( chan != CHAN_STREAM )
@@ -771,6 +826,79 @@ void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float fv
 
 	// Init client entity mouth movement vars
 	SND_InitMouth( ent, chan );
+}
+
+void S_StartSound( const vec3_t pos, int ent, int chan, sound_t handle, float volume, float attenuation, int pitch, int flags )
+{
+	S_StartSoundEx( pos, ent, chan, handle, volume, attenuation, pitch, flags, NULL );
+}
+
+void S_StartSvenSound( const sven_sound_event_t *event, sound_t handle )
+{
+	sfx_t *sfx;
+	int channel = event->channel;
+	int flags = event->flags & SVEN_SND_SINGLE ? SND_STOP_LOOPING : 0;
+	if( !snd.initialized ) return;
+	if( channel >= 8 ) channel = CHAN_VOICE;
+	if( event->flags & SVEN_SND_STOP )
+	{
+		for( int index = 0; index < snd.total_channels; index++ )
+		{
+			channel_t *active = &snd.channels[index];
+			if( active->sfx && active->entnum == event->entity && active->entchannel == channel ) S_FreeChannel( active );
+		}
+		return;
+	}
+	sfx = S_GetSfxByHandle( handle );
+	if( event->flags & ( SVEN_SND_CHANGE_VOL | SVEN_SND_CHANGE_PITCH ))
+	{
+		for( int index = 0; index < snd.total_channels; index++ )
+		{
+			channel_t *active = &snd.channels[index];
+			if( !active->sfx || active->entnum != event->entity || active->entchannel != channel ) continue;
+			if( !sfx || active->sfx == sfx || ( active->words && !Q_strcmp( active->name, sfx->name )))
+			{
+				if( event->flags & SVEN_SND_CHANGE_VOL ) active->master_vol = bound( 0, event->volume * 255, 255 );
+				if( event->flags & SVEN_SND_CHANGE_PITCH ) active->basePitch = event->pitch;
+				SND_Spatialize( active );
+				S_NotifyChannelUpdate( index, active, handle );
+				return;
+			}
+			S_FreeChannel( active );
+		}
+	}
+	if( !sfx ) return;
+	if(( event->flags & ( SVEN_SND_LOOP_ONLY | SVEN_SND_LOOP )) == SVEN_SND_LOOP_ONLY
+		&& !S_TestSoundChar( sfx->name, '!' ) && ( !sfx->cache || !FBitSet( sfx->cache->flags, SOUND_LOOPED ))) return;
+	if( channel == CHAN_AUTO )
+	{
+		for( int candidate = 1; candidate <= 6; candidate++ )
+		{
+			qboolean occupied = false;
+			for( int index = 0; index < snd.total_channels; index++ )
+			{
+				channel_t *active = &snd.channels[index];
+				if( active->sfx && active->entnum == event->entity && active->entchannel == candidate ) occupied = true;
+			}
+			if( !occupied )
+			{
+				channel = candidate;
+				break;
+			}
+		}
+	}
+	if( channel != CHAN_AUTO )
+	{
+		for( int index = 0; index < snd.total_channels; index++ )
+		{
+			channel_t *active = &snd.channels[index];
+			if( !active->sfx || active->entnum != event->entity || active->entchannel != channel ) continue;
+			if( channel == CHAN_STATIC && !event->entity && !VectorCompare( active->origin, event->origin )) continue;
+			S_FreeChannel( active );
+		}
+	}
+	S_StartSoundEx( event->origin, event->entity, channel, handle, event->volume,
+		event->attenuation, event->pitch, flags, event );
 }
 
 /*
@@ -1063,7 +1191,7 @@ int S_GetCurrentStaticSounds( soundlist_t *pout, int size )
 		VectorCopy( ch->origin, pout->origin );
 		pout->volume = (float)ch->master_vol / 255.0f;
 		pout->attenuation = ch->dist_mult * SND_CLIP_DISTANCE;
-		pout->looping = ( FBitSet( ch->flags, FL_CHAN_USE_LOOP ) && FBitSet( ch->sfx->cache->flags, SOUND_LOOPED ));
+		pout->looping = S_ChannelLoops( ch );
 		pout->pitch = ch->basePitch;
 		pout->channel = ch->entchannel;
 		pout->wordIndex = ch->word_index;
@@ -1099,7 +1227,7 @@ int S_GetCurrentDynamicSounds( soundlist_t *pout, int size )
 		if( !ch->sfx || !ch->sfx->name[0] || !Q_stricmp( ch->sfx->name, "*default" ))
 			continue;	// don't serialize default sounds
 
-		looped = ( FBitSet( ch->flags, FL_CHAN_USE_LOOP ) && FBitSet( ch->sfx->cache->flags, SOUND_LOOPED ));
+		looped = S_ChannelLoops( ch );
 
 		if( ch->entchannel == CHAN_STATIC && looped && !Host_IsQuakeCompatible())
 			continue;	// never serialize static looped sounds. It will be restoring in game code
@@ -2129,3 +2257,64 @@ void S_Shutdown( void )
 	SNDDMA_Shutdown ();
 	Mem_FreePool( &sndpool );
 }
+
+#if XASH_ENGINE_TESTS
+#include "tests.h"
+
+static void Test_SvenSoundLooping( void )
+{
+	union
+	{
+		wavdata_t alignment;
+		byte bytes[sizeof( wavdata_t ) + 8];
+	} storage;
+	wavdata_t *source = (wavdata_t *)storage.bytes;
+	sfx_t effect = { 0 };
+	channel_t channel = { 0 };
+	const void *audio = NULL;
+	memset( &storage, 0, sizeof( storage ));
+	source->samples = 8;
+	source->width = source->channels = 1;
+	effect.cache = source;
+	channel.sfx = &effect;
+	channel.flags = FL_CHAN_USE_LOOP;
+	TASSERT( !S_ChannelLoops( &channel ));
+	TASSERT_EQi( S_RetrieveChannelSamples( &channel, &audio, 9, 4 ), 0 );
+	channel.flags |= FL_CHAN_FORCE_LOOP;
+	TASSERT( S_ChannelLoops( &channel ));
+	TASSERT_EQi( S_RetrieveChannelSamples( &channel, &audio, 9, 4 ), 4 );
+	TASSERT_EQp( audio, source->buffer + 1 );
+	TASSERT_EQi( source->flags, 0 );
+	source->flags |= SOUND_LOOPED;
+	source->loop_start = 3;
+	TASSERT_EQi( S_ChannelSamplePosition( &channel, 9 ), 4 );
+	channel.flags &= ~FL_CHAN_USE_LOOP;
+	TASSERT( !S_ChannelLoops( &channel ));
+	TASSERT_EQi( S_RetrieveChannelSamples( &channel, &audio, 9, 4 ), 0 );
+}
+
+static void Test_SvenSoundDistances( void )
+{
+	sven_sound_event_t event = { 0 };
+	float distances[2];
+	event.attenuation = 1;
+	S_SvenSoundDistances( &event, distances );
+	TASSERT( distances[0] == 64 && distances[1] == 1024 );
+	event.attenuation = 0.5f;
+	S_SvenSoundDistances( &event, distances );
+	TASSERT( distances[0] == 64 && distances[1] == 2048 );
+	event.attenuation = 0;
+	S_SvenSoundDistances( &event, distances );
+	TASSERT( distances[0] == 10000 && distances[1] == 10000 );
+	event.flags = SVEN_SND_LINEAR;
+	event.attenuation = 0xf2;
+	S_SvenSoundDistances( &event, distances );
+	TASSERT( distances[0] == 512 && distances[1] == 3872 );
+}
+
+void Test_RunSvenSoundMixer( void )
+{
+	TRUN( Test_SvenSoundLooping() );
+	TRUN( Test_SvenSoundDistances() );
+}
+#endif

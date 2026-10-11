@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "client.h"
 
 static portable_samplepair_t roombuffer[(PAINTBUFFER_SIZE+1)], paintbuffer[(PAINTBUFFER_SIZE+1)];
+static portable_samplepair_t drybuffer[PAINTBUFFER_SIZE + 1];
 
 #define S_MakeMixMono( x ) \
 	static void S_MixMono ## x( portable_samplepair_t *pbuf, const int *volume, const void *buf, int num_samples ) \
@@ -230,7 +231,7 @@ static int S_MixChannelToBuffer( portable_samplepair_t *pbuf, channel_t *chan, i
 
 		// get sample pointer and also amount of samples available
 		const void *audio = NULL;
-		int available = S_RetrieveAudioSamples( chan->sfx->cache, &audio, chan->sample, request_num_samples, FBitSet( chan->flags, FL_CHAN_USE_LOOP ));
+		int available = S_RetrieveChannelSamples( chan, &audio, chan->sample, request_num_samples );
 
 		// no samples available, exit
 		if( !available )
@@ -363,7 +364,7 @@ static int S_MixNormalChannelsToRoombuffer( portable_samplepair_t *dst, int end 
 		// if it's also not looping, free it
 		if( ch->leftvol < 8 && ch->rightvol < 8 )
 		{
-			if( !FBitSet( sc->flags, SOUND_LOOPED ) || !FBitSet( ch->flags, FL_CHAN_USE_LOOP ))
+			if( !S_ChannelLoops( ch ))
 			{
 				if( ch->inauduble_free_time == 0.0f )
 					ch->inauduble_free_time = host.realtime + MAX_CHANNEL_INAUDIBLE_TIME;
@@ -393,18 +394,19 @@ static int S_MixNormalChannelsToRoombuffer( portable_samplepair_t *dst, int end 
 
 		double pitch = VOX_ModifyPitch( ch, ch->basePitch * 0.01 ) * pitch_mult;
 
-		num_mixed_channels++;
+		portable_samplepair_t *target = FBitSet( ch->flags, FL_CHAN_NO_REVERB ) ? drybuffer : dst;
+		if( target == dst ) num_mixed_channels++;
 
 		if( ch->words )
 		{
-			VOX_MixChannelToBuffer( dst, ch, num_samples, out_rate, pitch );
+			VOX_MixChannelToBuffer( target, ch, num_samples, out_rate, pitch );
 
 			if( FBitSet( ch->flags, FL_CHAN_SENTENCE_FINISHED ))
 				S_FreeChannel( ch );
 		}
 		else
 		{
-			S_MixChannelToBuffer( dst, ch, num_samples, out_rate, pitch, 0, 0 );
+			S_MixChannelToBuffer( target, ch, num_samples, out_rate, pitch, 0, 0 );
 
 			if( FBitSet( ch->flags, FL_CHAN_FINISHED ))
 				S_FreeChannel( ch );
@@ -540,6 +542,7 @@ void S_ClearBuffers( int num_samples )
 
 	memset( roombuffer, 0, num_bytes );
 	memset( paintbuffer, 0, num_bytes );
+	memset( drybuffer, 0, num_bytes );
 }
 
 void S_PaintChannels( int endtime )
@@ -567,6 +570,7 @@ void S_PaintChannels( int endtime )
 
 		if( room_channels > 0 || cls.key_dest != key_menu )
 			S_MixBufferWithGain( paintbuffer, roombuffer, num_samples, gain );
+		S_MixBufferWithGain( paintbuffer, drybuffer, num_samples, gain );
 
 		// transfer out according to DMA format
 		S_TransferPaintBuffer( paintbuffer, end );

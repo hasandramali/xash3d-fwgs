@@ -16,6 +16,7 @@ GNU General Public License for more details.
 #include "common.h"
 #include "client.h"
 #include "sound.h"
+#include "sven_sound.h"
 
 // during registration it is possible to have more sounds
 // than could actually be referenced during gameplay,
@@ -26,6 +27,7 @@ GNU General Public License for more details.
 
 static int      s_numSfx = 0;
 static sfx_t    s_knownSfx[MAX_SFX];
+static char     *s_fullSfxNames[MAX_SFX];
 static sfx_t    *s_sfxHashList[MAX_SFX_HASH];
 static qboolean s_registering = false;
 
@@ -99,7 +101,13 @@ static wavdata_t *S_CreateDefaultSound( void )
 S_LoadSound
 =================
 */
-wavdata_t *S_LoadSound( sfx_t *sfx )
+const char *S_SoundName( const sfx_t *sfx )
+{
+	int index = sfx - s_knownSfx;
+	return s_fullSfxNames[index] ? s_fullSfxNames[index] : sfx->name;
+}
+
+static wavdata_t *S_LoadSoundInternal( sfx_t *sfx, qboolean allowDefault )
 {
 	wavdata_t	*sc = NULL;
 
@@ -113,19 +121,24 @@ wavdata_t *S_LoadSound( sfx_t *sfx )
 		return NULL;
 
 	// load it from disk
-	if( Q_stricmp( sfx->name, "*default" ))
+	const char *name = S_SoundName( sfx );
+	if( Q_stricmp( name, "*default" ))
 	{
 		// load it from disk
 		if( s_warn_late_precache.value > 0 && cls.state == ca_active )
 			Con_Printf( S_WARN "%s: late precache of %s\n", __func__, sfx->name );
 
-		if( sfx->name[0] == '*' )
-			sc = FS_LoadSound( sfx->name + 1, NULL, 0 );
+		if( name[0] == '*' )
+			sc = FS_LoadSound( name + 1, NULL, 0 );
 		else
-			sc = FS_LoadSound( sfx->name, NULL, 0 );
+			sc = FS_LoadSound( name, NULL, 0 );
 	}
 
-	if( !sc ) sc = S_CreateDefaultSound();
+	if( !sc )
+	{
+		if( !allowDefault ) return NULL;
+		sc = S_CreateDefaultSound();
+	}
 
 	if( sc->rate < SOUND_11k ) // some bad sounds
 		Sound_Process( &sc, SOUND_11k, sc->width, sc->channels, SOUND_RESAMPLE );
@@ -139,6 +152,11 @@ wavdata_t *S_LoadSound( sfx_t *sfx )
 	return sfx->cache;
 }
 
+wavdata_t *S_LoadSound( sfx_t *sfx )
+{
+	return S_LoadSoundInternal( sfx, true );
+}
+
 /*
 ==================
 S_FindName
@@ -149,12 +167,12 @@ sfx_t *S_FindName( const char *pname, qboolean *pfInCache )
 {
 	sfx_t	*sfx;
 	uint	i;
-	string	name;
+	char	name[SVEN_SOUND_PATH];
 
 	if( COM_StringEmptyOrNULL( pname ) || !snd.initialized )
 		return NULL;
 
-	if( Q_strlen( pname ) >= sizeof( sfx->name ))
+	if( Q_strlen( pname ) >= sizeof( name ))
 		return NULL;
 
 	Q_strncpy( name, pname, sizeof( name ));
@@ -164,7 +182,7 @@ sfx_t *S_FindName( const char *pname, qboolean *pfInCache )
 	uint hash = COM_HashKey( name, MAX_SFX_HASH );
 	for( sfx = s_sfxHashList[hash]; sfx; sfx = sfx->hashNext )
 	{
-		if( !Q_strcmp( sfx->name, name ))
+		if( !Q_strcmp( S_SoundName( sfx ), name ))
 		{
 			if( pfInCache )
 			{
@@ -192,8 +210,13 @@ sfx_t *S_FindName( const char *pname, qboolean *pfInCache )
 	memset( sfx, 0, sizeof( *sfx ));
 	if( pfInCache ) *pfInCache = false;
 	Q_strncpy( sfx->name, name, sizeof( sfx->name ));
+	if( Q_strlen( name ) >= sizeof( sfx->name ))
+	{
+		s_fullSfxNames[i] = Mem_Malloc( sndpool, Q_strlen( name ) + 1 );
+		Q_strncpy( s_fullSfxNames[i], name, Q_strlen( name ) + 1 );
+	}
 	sfx->servercount = cl.servercount;
-	sfx->hashValue = COM_HashKey( sfx->name, MAX_SFX_HASH );
+	sfx->hashValue = hash;
 
 	// link it in
 	sfx->hashNext = s_sfxHashList[sfx->hashValue];
@@ -231,11 +254,12 @@ void S_FreeSound( sfx_t *sfx )
 	if( clgame.soundFuncs.pfnS_FreeSound )
 	{
 		clgame.soundFuncs.pfnS_FreeSound( sfx, sfx - s_knownSfx );
-		return;
 	}
-
-	if( sfx->cache )
+	else if( sfx->cache )
 		FS_FreeSound( sfx->cache );
+	if( s_fullSfxNames[sfx - s_knownSfx] )
+		Mem_Free( s_fullSfxNames[sfx - s_knownSfx] );
+	s_fullSfxNames[sfx - s_knownSfx] = NULL;
 	memset( sfx, 0, sizeof( *sfx ));
 }
 
@@ -329,6 +353,13 @@ sound_t S_RegisterSound( const char *name )
 	return sfx - s_knownSfx;
 }
 
+sound_t S_RegisterSvenSound( const char *name )
+{
+	sfx_t *sfx = S_FindName( name, NULL );
+	if( !sfx || !S_LoadSoundInternal( sfx, false )) return -1;
+	return sfx - s_knownSfx;
+}
+
 sfx_t *S_GetSfxByHandle( sound_t handle )
 {
 	if( !snd.initialized )
@@ -372,6 +403,7 @@ void S_FreeSounds( void )
 
 	if( !snd.initialized )
 		return;
+	CL_SvenSoundCacheInvalidate();
 
 	// stop all sounds
 	S_StopAllSounds( true );

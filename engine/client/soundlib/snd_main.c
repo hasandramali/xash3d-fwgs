@@ -57,7 +57,7 @@ loading and unpack to wav any known sound
 wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 {
 	const char *ext = COM_FileExtension( filename );
-	string loadname;
+	char loadname[MAX_OSPATH];
 	qboolean anyformat = true;
 
 	Sound_Reset(); // clear old sounddata
@@ -89,7 +89,7 @@ wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 		{
 			qboolean success = false;
 			fs_offset_t filesize = 0;
-			string path;
+			char path[MAX_OSPATH + 32];
 
 			Q_snprintf( path, sizeof( path ), DEFAULT_SOUNDPATH "%s.%s", loadname, format->ext );
 
