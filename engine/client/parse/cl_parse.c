@@ -1960,7 +1960,8 @@ static void CL_ParseVoiceInit( sizebuf_t *msg )
 	char *pszCodec = MSG_ReadString( msg );
 	int quality = MSG_ReadByte( msg );
 
-	Voice_Init( pszCodec, quality, false ); // init requested codec and the device
+	if( !MSG_CheckOverflow( msg ))
+		Voice_Init( pszCodec, quality, false );
 }
 
 /*
@@ -1976,41 +1977,41 @@ static void CL_ParseVoiceData( sizebuf_t *msg, connprotocol_t proto )
 
 	idx = MSG_ReadByte( msg ) + 1;
 
-	if ( idx <= 0 || idx > cl.maxclients )
-		return;
-
 	// must notify client.dll about server ack'ing our local client voice data
 	if( idx == cl.playernum + 1 )
 		Voice_LoopbackAck();
 
 	if( proto == PROTO_GOLDSRC )
 	{
-		size = MSG_ReadShort( msg );
+		size = MSG_ReadWord( msg );
 		if( size > VOICE_MAX_GS_DATA_SIZE )
 		{
 			Con_Printf( S_ERROR "Voice data size is too large: %d bytes (max: %d)\n", size, VOICE_MAX_GS_DATA_SIZE );
+			for( int skipped = 0; skipped < size && !MSG_CheckOverflow( msg ); skipped++ )
+				MSG_ReadByte( msg );
 			return;
 		}
 	}
 	else
 	{
 		frames = MSG_ReadByte( msg );
-		size = MSG_ReadShort( msg );
+		size = MSG_ReadWord( msg );
 		if( size > VOICE_MAX_DATA_SIZE )
 		{
 			Con_Printf( S_ERROR "Voice data size is too large: %d bytes (max: %d)\n", size, VOICE_MAX_DATA_SIZE );
+			for( int skipped = 0; skipped < size && !MSG_CheckOverflow( msg ); skipped++ )
+				MSG_ReadByte( msg );
 			return;
 		}
 	}
 
-	size = Q_min( size, sizeof( received ));
-
-	if ( !size )
+	if( size <= 0 )
 		return;
 
 	MSG_ReadBytes( msg, received, sizeof( received ), size );
 
-	Voice_AddIncomingData( idx, received, size, frames );
+	if( idx > 0 && idx <= cl.maxclients && !MSG_CheckOverflow( msg ))
+		Voice_AddIncomingData( idx, received, size, frames );
 }
 
 /*
@@ -2438,10 +2439,9 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			                             // are the 64-bit voice mask, wire-verified against
 			                             // buffer.dat: cmd 0x95 followed by 01 00 00 00 00
 			                             // 00 00 00 then svc_roomtype(37) + u16 room)
-				for( int k = 0; k < 8; k++ )
-					MSG_ReadByte( msg );
-				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven VoiceMask fixed 8-byte msg)\n", svc_num );
+				MSG_ReadBytes( msg, pbuf, sizeof( pbuf ), 8 );
+				if( !MSG_CheckOverflow( msg ))
+					CL_DispatchUserMessage( "VoiceMask", 8, pbuf );
 				return;
 			case 94:                     // ScreenShake
 				for( int k = 0; k < 6; k++ )

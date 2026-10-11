@@ -106,7 +106,7 @@ typedef struct voice_state_s
 	// buffers
 	byte input_buffer[MAX_RAW_SAMPLES];
 	byte compress_buffer[MAX_RAW_SAMPLES];
-	byte decompress_buffer[MAX_RAW_SAMPLES];
+	byte decompress_buffer[GS_MAX_DECOMPRESSED_SAMPLES * sizeof( int16_t )];
 	fs_offset_t      input_buffer_pos; // in bytes
 
 	// input from file

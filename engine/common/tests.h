@@ -46,6 +46,7 @@ void Test_RunSvenSound( void );
 void Test_RunSvenSoundMixer( void );
 void Test_RunSoundFormats( void );
 void Test_RunWeaponListFix( void );
+void Test_RunVoice( void );
 void Test_RunIPFilter( void );
 void Test_RunQueryRateLimit( void );
 void Test_RunChallenge( void );
@@ -93,6 +94,7 @@ void Test_RunWindowInsets( void );
 	Test_RunSvenSoundMixer(); \
 	Test_RunSoundFormats(); \
 	Test_RunWeaponListFix(); \
+	Test_RunVoice(); \
 	Test_RunVOX(); \
 	Test_RunTitles();
 

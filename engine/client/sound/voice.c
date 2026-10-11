@@ -21,12 +21,19 @@ GNU General Public License for more details.
 #include "client.h"
 #include "voice.h"
 #include "crclib.h"
+#include "tests.h"
 
 voice_state_t voice = { 0 };
 
-static CVAR_DEFINE_AUTO( voice_enable, "0", FCVAR_PRIVILEGED, "enable voice chat" );
+static CVAR_DEFINE_AUTO( voice_enable, "1", FCVAR_PRIVILEGED, "enable voice chat reception" );
+#if XASH_ANDROID
+static CVAR_DEFINE_AUTO( voice_receiveonly, "1", FCVAR_PRIVILEGED, "receive voice without opening a microphone" );
+#else
+static CVAR_DEFINE_AUTO( voice_receiveonly, "0", FCVAR_PRIVILEGED, "receive voice without opening a microphone" );
+#endif
 CVAR_DEFINE_AUTO( voice_loopback, "0", FCVAR_PRIVILEGED, "loopback voice back to the speaker" );
 static CVAR_DEFINE_AUTO( voice_scale, "1.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "incoming voice volume scale" );
+static CVAR_DEFINE_AUTO( voice_showincoming, "0", FCVAR_PRIVILEGED, "print incoming voice packet sizes and decoded samples" );
 static CVAR_DEFINE_AUTO( voice_transmit_scale, "1.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "outcoming voice volume scale" );
 static CVAR_DEFINE_AUTO( voice_avggain, "0.5", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "automatic voice gain control (average)" );
 static CVAR_DEFINE_AUTO( voice_maxgain, "5.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "automatic voice gain control (maximum)" );
@@ -298,7 +305,7 @@ static qboolean Voice_InitGoldSrcMode( int quality )
 		return false;
 	}
 
-	if( !Voice_InitOpusEncoder( quality ))
+	if( !voice_receiveonly.value && !Voice_InitOpusEncoder( quality ))
 	{
 		Con_Printf( S_WARN "Other players will not be able to hear you.\n" );
 		return false;
@@ -328,7 +335,7 @@ static qboolean Voice_InitOpusCustomMode( int quality )
 		return false;
 	}
 
-	if( !Voice_InitOpusEncoder( quality ))
+	if( !voice_receiveonly.value && !Voice_InitOpusEncoder( quality ))
 	{
 		Con_Printf( S_WARN "Other players will not be able to hear you.\n" );
 		return false;
@@ -592,16 +599,21 @@ Process GoldSrc voice data and return number of samples
 */
 static int Voice_ProcessGSData( int ent, const uint8_t *data, uint32_t size )
 {
-	size_t      samples;
-	uint8_t     vpc_type;
-	uint16_t    data_len;
+	uint samples = 0;
+	uint offset = sizeof( uint64_t );
+	uint source_rate = GS_DEFAULT_SAMPLE_RATE;
+	uint payload_end;
+	uint32_t crc_in_packet;
+	uint32_t crc = CRC32_INIT_VALUE;
+	OpusDecoder *decoder;
 
-	if( !data || ent <= 0 || ent > cl.maxclients )
+	if( !data || size < sizeof( uint64_t ) + sizeof( uint32_t ) || ent <= 0 || ent > cl.maxclients )
 		return 0;
 
-	uint32_t crc_in_packet = LittleLong( *(uint32_t *)( data + size - sizeof( uint32_t )));
-	uint32_t crc = CRC32_INIT_VALUE;
-	CRC32_ProcessBuffer( &crc, data, size - sizeof( uint32_t ));
+	payload_end = size - sizeof( uint32_t );
+	memcpy( &crc_in_packet, data + payload_end, sizeof( crc_in_packet ));
+	crc_in_packet = LittleLong( crc_in_packet );
+	CRC32_ProcessBuffer( &crc, data, payload_end );
 	crc = CRC32_Final( crc );
 
 	if( crc != crc_in_packet )
@@ -610,88 +622,82 @@ static int Voice_ProcessGSData( int ent, const uint8_t *data, uint32_t size )
 		return 0;
 	}
 
-	size_t offset = sizeof( uint64_t );
-	samples = 0;
-
-	if( offset >= size - sizeof( uint32_t ) || data[offset] != GS_VPC_SETSAMPLERATE )
-	{
-		Con_Printf( S_WARN "Invalid voice packet type: %d\n", data[offset] );
-		return 0;
-	}
-	offset++;
-
-	if( offset + sizeof( uint32_t ) > size - sizeof( uint32_t ))
+	decoder = voice.gs_decoders[ent - 1];
+	if( !decoder )
 		return 0;
 
-	offset += sizeof( uint16_t );
-
-	vpc_type = data[offset++];
-	data_len = LittleShort( *(uint16_t *)( data + offset ));
-	offset += sizeof( uint16_t );
-
-	if( vpc_type == GS_VPC_VDATA_OPUS_PLC )
+	while( offset < payload_end )
 	{
-		OpusDecoder *decoder = voice.gs_decoders[ent - 1];
-		size_t opus_offset;
+		uint vpc_type = data[offset++];
+		uint16_t data_len;
+		uint chunk_end;
 
-		if( !decoder )
+		if( payload_end - offset < sizeof( data_len ))
+			return 0;
+		memcpy( &data_len, data + offset, sizeof( data_len ));
+		data_len = (uint16_t)LittleShort( data_len );
+		offset += sizeof( data_len );
+
+		if( vpc_type == GS_VPC_SETSAMPLERATE )
 		{
-			Con_Printf( S_WARN "No decoder available for entity %d\n", ent );
+			if( !data_len )
+				return 0;
+			source_rate = data_len;
+			continue;
+		}
+		if( vpc_type == GS_VPC_VDATA_SILENCE )
+		{
+			uint silence_samples = (uint)data_len * GS_DEFAULT_SAMPLE_RATE / source_rate;
+			if( silence_samples > GS_MAX_DECOMPRESSED_SAMPLES - samples )
+				return 0;
+			memset( (int16_t *)voice.decompress_buffer + samples, 0, silence_samples * sizeof( int16_t ));
+			samples += silence_samples;
+			continue;
+		}
+
+		if( data_len > payload_end - offset )
+			return 0;
+		chunk_end = offset + data_len;
+		if( vpc_type != GS_VPC_VDATA_OPUS_PLC )
+		{
+			Con_Printf( S_WARN "Unsupported Steam voice data type: %u\n", vpc_type );
 			return 0;
 		}
-		opus_offset = 0;
-		while( opus_offset + sizeof( uint32_t ) <= data_len )
+
+		while( offset < chunk_end )
 		{
-			uint16_t frame_size = LittleShort( *(uint16_t *)( data + offset + opus_offset ));
-			opus_offset += sizeof( uint32_t );
-			// if frame size is 0, it means silence
-			if( frame_size == 0 )
-			{
-				if( samples + VOICE_DEFAULT_SILENCE_FRAME_SIZE > GS_MAX_DECOMPRESSED_SAMPLES )
-				{
-					Con_Printf( S_WARN "Voice buffer overflow\n" );
-					return 0;
-				}
-				memset( ( (int16_t *)voice.decompress_buffer ) + samples, 0, VOICE_DEFAULT_SILENCE_FRAME_SIZE * sizeof( int16_t ));
-				samples += VOICE_DEFAULT_SILENCE_FRAME_SIZE;
-				continue;
-			}
+			uint16_t frame_size;
+			int decoded;
+			if( chunk_end - offset < sizeof( uint32_t ))
+				return 0;
+			memcpy( &frame_size, data + offset, sizeof( frame_size ));
+			frame_size = (uint16_t)LittleShort( frame_size );
+			offset += sizeof( uint32_t );
 			if( frame_size == 0xFFFF )
 			{
 				opus_decoder_ctl( decoder, OPUS_RESET_STATE );
-				break;
+				continue;
 			}
-			if( opus_offset + frame_size > data_len )
-			{
-				Con_Printf( S_WARN "Opus frame size exceeds data length\n" );
+			if( frame_size > chunk_end - offset || samples == GS_MAX_DECOMPRESSED_SAMPLES )
 				return 0;
+			if( !frame_size )
+			{
+				if( GS_DEFAULT_FRAME_SIZE > GS_MAX_DECOMPRESSED_SAMPLES - samples )
+					return 0;
+				memset( (int16_t *)voice.decompress_buffer + samples, 0, GS_DEFAULT_FRAME_SIZE * sizeof( int16_t ));
+				samples += GS_DEFAULT_FRAME_SIZE;
+				continue;
 			}
-			int decoded = opus_decode( decoder, data + offset + opus_offset, frame_size,
-					       ( (int16_t *)voice.decompress_buffer ) + samples, voice.frame_size, 0 );
+			decoded = opus_decode( decoder, data + offset, frame_size,
+				(int16_t *)voice.decompress_buffer + samples, GS_MAX_DECOMPRESSED_SAMPLES - samples, 0 );
 			if( decoded < 0 )
 			{
 				Con_Printf( S_WARN "Opus decode error: %s\n", opus_strerror( decoded ));
 				return 0;
 			}
 			samples += decoded;
-			opus_offset += frame_size;
+			offset += frame_size;
 		}
-	}
-	else if( vpc_type == GS_VPC_VDATA_SILENCE )
-	{
-		size_t silence_samples = data_len / 2;
-		if( silence_samples > GS_MAX_DECOMPRESSED_SAMPLES )
-		{
-			Con_Printf( S_WARN "Silence data too large\n" );
-			return 0;
-		}
-		memset( voice.decompress_buffer, 0, silence_samples * sizeof( int16_t ));
-		samples = silence_samples;
-	}
-	else
-	{
-		Con_Printf( S_WARN "Unsupported voice data type: %d\n", vpc_type );
-		return 0;
 	}
 
 	return samples;
@@ -856,7 +862,7 @@ void Voice_RecordStart( void )
 {
 	Voice_RecordStop();
 
-	if( !voice.initialized )
+	if( !voice.initialized || voice_receiveonly.value )
 		return;
 
 	if( voice_inputfromfile.value )
@@ -913,6 +919,8 @@ void Voice_Disconnect( void )
 		Voice_ShutdownGoldSrcMode();
 	else
 		Voice_ShutdownOpusCustomMode();
+
+	voice.initialized = false;
 }
 
 /*
@@ -996,15 +1004,20 @@ void Voice_AddIncomingData( int ent, const byte *data, uint size, uint frames )
 			if( ofs + sizeof( uint16_t ) > size )
 				break;
 
-			compressed_size = *(const uint16_t *)( data + ofs );
+			memcpy( &compressed_size, data + ofs, sizeof( compressed_size ));
+			compressed_size = (uint16_t)LittleShort( compressed_size );
 			ofs += sizeof( uint16_t );
 
 			// no frame data
 			if( ofs + compressed_size > size )
 				break;
+			if( voice.frame_size > GS_MAX_DECOMPRESSED_SAMPLES - samples )
+				break;
 
 			frame_samples = opus_custom_decode( voice.decoders[playernum], data + ofs, compressed_size,
 							    (int16_t *)voice.decompress_buffer + samples, voice.frame_size );
+			if( frame_samples <= 0 )
+				break;
 
 			ofs += compressed_size;
 			samples += frame_samples;
@@ -1013,6 +1026,8 @@ void Voice_AddIncomingData( int ent, const byte *data, uint size, uint frames )
 
 	if( samples > 0 )
 		Voice_StartChannel( samples, voice.decompress_buffer, ent );
+	if( voice_showincoming.value )
+		Con_Printf( "Voice: player %d, %u bytes, %d samples\n", ent, size, samples );
 }
 
 /*
@@ -1070,6 +1085,8 @@ Register voice related cvars and commands
 void Voice_RegisterCvars( void )
 {
 	Cvar_RegisterVariable( &voice_enable );
+	Cvar_RegisterVariable( &voice_receiveonly );
+	Cvar_RegisterVariable( &voice_showincoming );
 	Cvar_RegisterVariable( &voice_loopback );
 	Cvar_RegisterVariable( &voice_scale );
 	Cvar_RegisterVariable( &voice_transmit_scale );
@@ -1115,9 +1132,10 @@ Run timeout for clients
 */
 void Voice_Idle( double frametime )
 {
-	if( FBitSet( voice_enable.flags, FCVAR_CHANGED ))
+	if( FBitSet( voice_enable.flags | voice_receiveonly.flags, FCVAR_CHANGED ))
 	{
 		ClearBits( voice_enable.flags, FCVAR_CHANGED );
+		ClearBits( voice_receiveonly.flags, FCVAR_CHANGED );
 
 		if( voice_enable.value )
 		{
@@ -1141,6 +1159,9 @@ Initialize the voice subsystem
 */
 qboolean Voice_Init( const char *pszCodecName, int quality, qboolean preinit )
 {
+	string codec;
+	Q_strncpy( codec, pszCodecName, sizeof( codec ));
+	pszCodecName = codec;
 	Q_strncpy( voice.codec, pszCodecName, sizeof( voice.codec ));
 	voice.quality = quality;
 
@@ -1149,6 +1170,8 @@ qboolean Voice_Init( const char *pszCodecName, int quality, qboolean preinit )
 
 	if( preinit )
 		return true;
+
+	Voice_Disconnect();
 
 	if( Voice_IsGoldSrcMode( pszCodecName ))
 	{
@@ -1174,12 +1197,14 @@ qboolean Voice_Init( const char *pszCodecName, int quality, qboolean preinit )
 		return false;
 	}
 
-	voice.device_opened = VoiceCapture_Init();
+	voice.device_opened = !voice_receiveonly.value && VoiceCapture_Init();
 
-	if( !voice.device_opened )
+	if( !voice.device_opened && !voice_receiveonly.value )
 		Con_Printf( S_WARN "No microphone is available.\n" );
 
 	voice.initialized = true;
+	Con_Printf( "Voice initialized: %s, %u Hz%s\n", voice.goldsrc ? "Steam/Opus" : voice.codec,
+		voice.samplerate, voice_receiveonly.value ? ", receive only" : "" );
 	return true;
 }
 
@@ -1194,3 +1219,95 @@ voice_audio_info_t Voice_GetAudioInfo( void )
 
 	return info;
 }
+
+#if XASH_ENGINE_TESTS
+static uint Voice_TestPacketCRC( byte *packet, uint payload_size )
+{
+	uint32_t checksum = CRC32_INIT_VALUE;
+	CRC32_ProcessBuffer( &checksum, packet, payload_size );
+	checksum = LittleLong( CRC32_Final( checksum ));
+	memcpy( packet + payload_size, &checksum, sizeof( checksum ));
+	return payload_size + sizeof( checksum );
+}
+
+void Test_RunVoice( void )
+{
+	voice_state_t saved_voice = voice;
+	int saved_maxclients = cl.maxclients;
+	int error = 0;
+	int16_t pcm[960];
+	byte packet[VOICE_MAX_GS_DATA_SIZE] = { 0 };
+	OpusEncoder *encoder = opus_encoder_create( GS_DEFAULT_SAMPLE_RATE, 1, OPUS_APPLICATION_VOIP, &error );
+	int encoded;
+	uint size;
+	uint chunk_size;
+
+	memset( &voice, 0, sizeof( voice ));
+	cl.maxclients = 1;
+	voice.gs_decoders[0] = opus_decoder_create( GS_DEFAULT_SAMPLE_RATE, 1, &error );
+	TASSERT( encoder && voice.gs_decoders[0] );
+	if( !encoder || !voice.gs_decoders[0] )
+		goto cleanup;
+
+	for( uint index = 0; index < sizeof( pcm ) / sizeof( pcm[0] ); index++ )
+		pcm[index] = ((int)(index % 80) - 40) * 200;
+	encoded = opus_encode( encoder, pcm, 960, packet + 18, sizeof( packet ) - 18 );
+	TASSERT( encoded > 0 );
+	if( encoded <= 0 )
+		goto cleanup;
+	packet[8] = GS_VPC_SETSAMPLERATE;
+	packet[9] = GS_DEFAULT_SAMPLE_RATE & 255;
+	packet[10] = GS_DEFAULT_SAMPLE_RATE >> 8;
+	packet[11] = GS_VPC_VDATA_OPUS_PLC;
+	packet[12] = (encoded + 4) & 255;
+	packet[13] = (encoded + 4) >> 8;
+	packet[14] = encoded & 255;
+	packet[15] = encoded >> 8;
+	size = Voice_TestPacketCRC( packet, 18 + encoded );
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), 960 );
+	TASSERT_EQi( Voice_ProcessGSData( 0, packet, size ), 0 );
+	TASSERT_EQi( Voice_ProcessGSData( 2, packet, size ), 0 );
+	TASSERT_EQi( Voice_ProcessGSData( 1, NULL, size ), 0 );
+	for( uint truncated = 0; truncated < 12; truncated++ )
+		TASSERT_EQi( Voice_ProcessGSData( 1, packet, truncated ), 0 );
+	packet[size - 1] ^= 1;
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), 0 );
+	packet[size - 1] ^= 1;
+	chunk_size = 7 + encoded;
+	memcpy( packet + 18 + encoded, packet + 11, chunk_size );
+	size = Voice_TestPacketCRC( packet, 11 + chunk_size * 2 );
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), 1920 );
+	packet[12] = 255;
+	packet[13] = 255;
+	size = Voice_TestPacketCRC( packet, 11 + chunk_size * 2 );
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), 0 );
+	packet[11] = GS_VPC_VDATA_SILENCE;
+	packet[12] = 240;
+	packet[13] = 0;
+	size = Voice_TestPacketCRC( packet, 14 );
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), 240 );
+	packet[12] = 255;
+	packet[13] = 255;
+	size = Voice_TestPacketCRC( packet, 14 );
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), 0 );
+	packet[11] = GS_VPC_VDATA_OPUS_PLC;
+	packet[12] = 4;
+	packet[13] = 0;
+	packet[14] = 255;
+	packet[15] = 255;
+	size = Voice_TestPacketCRC( packet, 18 );
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), 0 );
+	packet[14] = 0;
+	packet[15] = 0;
+	size = Voice_TestPacketCRC( packet, 18 );
+	TASSERT_EQi( Voice_ProcessGSData( 1, packet, size ), GS_DEFAULT_FRAME_SIZE );
+
+cleanup:
+	if( encoder )
+		opus_encoder_destroy( encoder );
+	if( voice.gs_decoders[0] )
+		opus_decoder_destroy( voice.gs_decoders[0] );
+	voice = saved_voice;
+	cl.maxclients = saved_maxclients;
+}
+#endif
