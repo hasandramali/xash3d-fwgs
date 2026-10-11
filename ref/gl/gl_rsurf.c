@@ -1754,8 +1754,10 @@ static void R_TryBakeSurface( msurface_t *surf, const vec3_t pos, const vec3_t e
 	// plane itself, so the old dot(normal, pos-center) was ~0 by float
 	// noise and rejected surfaces almost at random (the "sometimes lit,
 	// sometimes not" bug). The eye is meters off-plane: robust.
-	VectorSubtract( eye, closest, delta );
-	if( DotProduct( surf->plane->normal, delta ) <= 0.0f )
+	float planeDistance = DotProduct( surf->plane->normal, eye ) - surf->plane->dist;
+	if( FBitSet( surf->flags, SURF_PLANEBACK ))
+		planeDistance = -planeDistance;
+	if( planeDistance <= 0.0f )
 		return; // backface: no light bleed through walls
 
 	if( R_WhitenSurfaceSamples( surf ))
@@ -4313,4 +4315,3 @@ void GL_BuildLightmaps( void )
 		gEngfuncs.drawFuncs->GL_BuildLightmaps( );
 	}
 }
-

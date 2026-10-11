@@ -368,8 +368,10 @@ static void R_TryBakeSurface( model_t *mod, msurface_t *surf, const vec3_t pos, 
 	// Front-face test against the EYE: pos lies on the plane itself, so
 	// dot(normal, pos-center) was ~0 by float noise and rejected surfaces
 	// almost at random. The eye is meters off-plane: robust.
-	VectorSubtract( eye, closest, delta );
-	if( DotProduct( surf->plane->normal, delta ) <= 0.0f )
+	float planeDistance = DotProduct( surf->plane->normal, eye ) - surf->plane->dist;
+	if( FBitSet( surf->flags, SURF_PLANEBACK ))
+		planeDistance = -planeDistance;
+	if( planeDistance <= 0.0f )
 		return; // backface: no light bleed through walls
 
 	info = surf->info;
@@ -1328,5 +1330,4 @@ surfcache_t *D_CacheSurface( msurface_t *surface, int miplevel )
 
 	return cache;
 }
-
 
