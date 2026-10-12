@@ -35,6 +35,10 @@ public final class SteamP2PSession implements AutoCloseable {
     private long lastConnectivity = System.nanoTime();
     private Path selected;
     private int signalCount, rejectedSignals;
+    private final SteamP2PStream stream;
+    private boolean ready, receivedGame;
+    private boolean reportedPeerStream;
+    private long streamStarted;
 
     private static final class Path {
         InetSocketAddress address;
@@ -54,6 +58,13 @@ public final class SteamP2PSession implements AutoCloseable {
         this.progress = progress;
         socket = new DatagramSocket(new InetSocketAddress("0.0.0.0", 0));
         socket.setSoTimeout(100);
+        stream = new SteamP2PStream(data -> {
+            if (selected != null) transmit(data, selected.address);
+        }, application -> {
+            byte[] datagram = new byte[application.length + 1];
+            System.arraycopy(application, 0, datagram, 1, application.length);
+            deliver(datagram);
+        });
     }
 
     private String token() {
@@ -114,12 +125,25 @@ public final class SteamP2PSession implements AutoCloseable {
     public synchronized void send(byte[] payload) throws Exception {
         if (closed) throw new IllegalStateException("P2P session closed");
         byte[] data = SteamP2PWire.datagram(payload);
-        if (selected != null && System.nanoTime() - selected.proven < 10_000_000_000L) transmit(data, selected.address);
+        if (ready && selected != null && System.nanoTime() - selected.proven < 10_000_000_000L) sendGame(data);
         else if (queued.size() < 32) queued.add(data);
     }
 
     private void transmit(byte[] data, InetSocketAddress address) throws Exception {
         socket.send(new DatagramPacket(data, data.length, address));
+    }
+
+    private void sendGame(byte[] datagram) throws Exception {
+        if (receivedGame) transmit(datagram, selected.address);
+        else { stream.send(Arrays.copyOfRange(datagram, 1, datagram.length)); stream.tick(System.nanoTime()); }
+    }
+
+    private void deliver(byte[] datagram) throws Exception {
+        byte[] payload = SteamP2PWire.gamePayload(datagram);
+        if (payload != null) {
+            if (!receivedGame) progress.update("peer_game_data");
+            receivedGame = true; packets.receive(payload);
+        }
     }
 
     private void gather() throws Exception {
@@ -151,10 +175,22 @@ public final class SteamP2PSession implements AutoCloseable {
         }
         if (selected != null && now - selected.proven >= 10_000_000_000L) {
             selected = null;
+            ready = false;
             progress.update("rechecking");
         }
         if (selected == null && now - lastConnectivity > 45_000_000_000L)
             fail("Steam P2P ICE timed out: signals=" + signalCount + " rejected=" + rejectedSignals + " candidates=" + paths.size());
+        if (selected != null) stream.tick(now);
+        if (selected != null && !stream.isOpen() && streamStarted != 0 && now - streamStarted > 45_000_000_000L)
+            fail("Steam P2P stream handshake timed out after ICE connectivity");
+        updateReady();
+    }
+
+    private void updateReady() throws Exception {
+        if (!ready && selected != null && stream.isOpen()) {
+            ready = true; progress.update("ready");
+            while (!queued.isEmpty()) sendGame(queued.remove());
+        }
     }
 
     private synchronized void incoming(byte[] data, InetSocketAddress address) throws Exception {
@@ -182,15 +218,22 @@ public final class SteamP2PSession implements AutoCloseable {
             lastConnectivity = accepted.proven;
             boolean newlyConnected = selected == null;
             if (selected == null || selected.address.equals(address)) selected = accepted;
-            if (newlyConnected) progress.update("ready");
-            while (selected != null && !queued.isEmpty()) transmit(queued.remove(), selected.address);
+            if (newlyConnected) {
+                if (streamStarted == 0) streamStarted = System.nanoTime();
+                progress.update("ice_ready opening_stream");
+            }
             return;
         }
         boolean proven = false;
         for (Path path : paths) if (path.address.equals(address) && System.nanoTime() - path.proven < 10_000_000_000L) proven = true;
         if (!proven) return;
-        byte[] payload = SteamP2PWire.gamePayload(data);
-        if (payload != null) packets.receive(payload);
+        if (data.length > 0 && data[0] == 1) {
+            stream.receive(data);
+            if (!reportedPeerStream && stream.hasPeerHandshake()) {
+                reportedPeerStream = true; progress.update("stream_peer_handshake");
+            }
+            updateReady();
+        } else deliver(data);
     }
 
     private void run() {
@@ -206,7 +249,10 @@ public final class SteamP2PSession implements AutoCloseable {
                 incoming(Arrays.copyOf(buffer, packet.getLength()), (InetSocketAddress)packet.getSocketAddress());
             }
         } catch (Exception failure) {
-            if (!closed) fail("Steam P2P transport failed: " + failure.getClass().getSimpleName());
+            if (!closed) {
+                String reason = failure instanceof IllegalStateException ? failure.getMessage() : null;
+                fail("Steam P2P transport failed: " + (reason == null ? failure.getClass().getSimpleName() : reason));
+            }
         } finally { close(); }
     }
 
@@ -216,6 +262,9 @@ public final class SteamP2PSession implements AutoCloseable {
     }
 
     @Override public synchronized void close() {
+        if (!closed && selected != null && streamStarted != 0) {
+            try { stream.close(); } catch (Exception unavailable) {}
+        }
         closed = true; socket.close(); queued.clear(); paths.clear(); selected = null;
     }
 }
