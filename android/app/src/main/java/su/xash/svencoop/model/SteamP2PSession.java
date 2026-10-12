@@ -71,11 +71,12 @@ public final class SteamP2PSession implements AutoCloseable {
         signalCount++;
         try {
             SteamP2PWire.Signal signal = SteamP2PWire.decodeSignal(data, message == 5435);
-            if (signal.source != peer || signal.destination != local ||
+            boolean wrongDestination = signal.hasDestination && signal.destination != 0 && signal.destination != local;
+            if (signal.source != peer || wrongDestination ||
                     signal.app != app || (signal.secondaryApp != 0 && signal.secondaryApp != app)) {
                 rejectedSignals++;
                 if (signal.source != peer) progress.update("signal_rejected peer_identity");
-                else if (signal.destination != local) progress.update("signal_rejected local_identity");
+                else if (wrongDestination) progress.update("signal_rejected local_identity destination=" + signal.destination + " expected=" + local);
                 else progress.update("signal_rejected app=" + signal.app + " secondary=" + signal.secondaryApp);
                 return;
             }

@@ -101,6 +101,7 @@ public final class SteamP2PWire {
 
     public static final class Signal {
         public long source, destination;
+        public boolean hasDestination;
         public int app, secondaryApp, error;
         public byte[] candidate;
     }
@@ -132,7 +133,10 @@ public final class SteamP2PWire {
             if (field == 1 || field == 2) {
                 if (wire != 1) throw new IllegalArgumentException("signal identity");
                 long value = input.getLong();
-                if (field == 1) result.destination = value; else result.source = value;
+                if (field == 1) {
+                    result.destination = value;
+                    result.hasDestination = true;
+                } else result.source = value;
             } else if (field == 3 || (!failure && field == 7) || (failure && field == 4)) {
                 if (wire != 0) throw new IllegalArgumentException("signal integer");
                 long value = varint(input);
