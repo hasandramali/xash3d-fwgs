@@ -1670,6 +1670,17 @@ static void CL_CheckForResend( void )
 
 	if( adr.port == 0 ) adr.port = MSG_BigShort( PORT_SERVER );
 
+	if( NET_NetadrType( &adr ) == NA_STEAM_P2P )
+	{
+		cls.net_protocol = PROTO_GOLDSRC;
+		cls.bandwidth_test.started = false;
+		if( !SteamBroker_StartP2P( adr ))
+		{
+			CL_Disconnect();
+			return;
+		}
+	}
+
 	if( cls.bandwidth_test.started )
 	{
 		if( cls.bandwidth_test.retry >= CL_TEST_RETRIES )
@@ -1754,11 +1765,8 @@ static void CL_Connect_f( void )
 
 	Q_strncpy( server, Cmd_Argv( 1 ), sizeof( server ));
 
-	// SteamID dialing: resolve the friend's advertised game server through
-	// the in-app broker, then connect over direct UDP (internet or
-	// ZeroTier LAN). True Steam-P2P transport would need an on-device
-	// Steam endpoint, which this engine does not have.
-	if( !Q_strnicmp( server, "STEAM_", 6 ) || !Q_strnicmp( server, "VALVE_", 6 ))
+	if( !Q_strnicmp( server, "STEAM_", 6 ) || !Q_strnicmp( server, "VALVE_", 6 ) ||
+		( Q_strlen( server ) == 17 && strspn( server, "0123456789" ) == 17 ))
 	{
 		SteamBroker_ConnectBySteamID( server );
 		return;
@@ -1787,6 +1795,11 @@ static void CL_Connect_f( void )
 	memset( &cls.bandwidth_test, 0, sizeof( cls.bandwidth_test ));
 	cls.spectator = false;
 	cls.signon = 0;
+	if( !Q_strncmp( server, "steam:", 6 ))
+	{
+		if( !NET_StringToAdr( server, &cls.serveradr ) || !SteamBroker_StartP2P( cls.serveradr ))
+			CL_Disconnect();
+	}
 }
 
 /*
@@ -1914,15 +1927,26 @@ static void CL_SendDisconnectMessage( connprotocol_t proto )
 	byte	data[32];
 
 	if( cls.state == ca_disconnected ) return;
+	if( cls.demoplayback || cls.state == ca_cinematic ) return;
+
+	if( cls.state == ca_connecting && proto == PROTO_GOLDSRC )
+	{
+		if( NET_NetadrType( &cls.serveradr ) == NA_UNDEFINED )
+			return;
+		Netchan_Setup( NS_CLIENT, &cls.netchan, cls.serveradr,
+			Cvar_VariableInteger( "net_qport" ), NULL, CL_GetGoldSrcFragmentSize,
+			NETCHAN_USE_BZIP2 | NETCHAN_GOLDSRC );
+	}
+	if( !cls.netchan.pfnBlockSize )
+		return;
+	Netchan_Clear( &cls.netchan );
+	MSG_Clear( &cls.netchan.message );
 
 	MSG_Init( &buf, "LastMessage", data, sizeof( data ));
 	MSG_BeginClientCmd( &buf, clc_stringcmd );
 	if( proto == PROTO_GOLDSRC )
 		MSG_WriteString( &buf, "dropclient\n" );
 	else MSG_WriteString( &buf, "disconnect" );
-
-	if( NET_NetadrType( &cls.netchan.remote_address ) == NA_UNDEFINED )
-		NET_NetadrSetType( &cls.netchan.remote_address, NA_LOOPBACK );
 
 	// make sure message will be delivered
 	Netchan_TransmitBits( &cls.netchan, MSG_GetNumBitsWritten( &buf ), MSG_GetData( &buf ));

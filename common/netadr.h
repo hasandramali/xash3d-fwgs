@@ -37,7 +37,8 @@ typedef enum netadrtype_e
 	NA_IPX,
 	NA_BROADCAST_IPX,
 	NA_IP6,
-	NA_MULTICAST_IP6
+	NA_MULTICAST_IP6,
+	NA_STEAM_P2P
 } netadrtype_t;
 
 /*

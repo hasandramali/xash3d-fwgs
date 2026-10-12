@@ -47,6 +47,8 @@ void Test_RunSvenSoundMixer( void );
 void Test_RunSoundFormats( void );
 void Test_RunWeaponListFix( void );
 void Test_RunVoice( void );
+void Test_RunSteamConnection( void );
+void Test_RunSteamP2PProtocol( void );
 void Test_RunIPFilter( void );
 void Test_RunQueryRateLimit( void );
 void Test_RunChallenge( void );
@@ -95,6 +97,8 @@ void Test_RunWindowInsets( void );
 	Test_RunSoundFormats(); \
 	Test_RunWeaponListFix(); \
 	Test_RunVoice(); \
+	Test_RunSteamConnection(); \
+	Test_RunSteamP2PProtocol(); \
 	Test_RunVOX(); \
 	Test_RunTitles();
 

@@ -241,6 +241,73 @@ class SteamAuthManager(private val ctx: Context) {
     // broker
     private var brokerServer: ServerSocket? = null
     private var brokerThread: Thread? = null
+    private data class P2PBinding(val owner: Socket, val request: Long, val peer: Long, val session: SteamP2PSession)
+    @Volatile private var p2pBinding: P2PBinding? = null
+    private val p2pLock = Any()
+
+    private fun closeP2P(owner: Socket? = null, request: Long? = null) = synchronized(p2pLock) {
+        val binding = p2pBinding
+        if (binding != null && (owner == null || binding.owner === owner) && (request == null || binding.request == request)) {
+            p2pBinding = null
+            binding.session.close()
+        }
+    }
+
+    private fun startP2P(owner: Socket, outs: OutputStream, command: String) {
+        val parts = command.trim().split(Regex("\\s+"))
+        val request = parts.getOrNull(1)?.toLongOrNull()?.takeIf { it in 1L..0xffffffffL } ?: return
+        val peer = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+        val app = parts.getOrNull(3)?.toIntOrNull() ?: 0
+        if (parts.size != 4 || !connected || !loggedIn || peer <= 0 || peer == currentSteamId || app != APPID) {
+            writeSbrkText(outs, "sb_p2p_error $request invalid_session")
+            return
+        }
+        closeP2P()
+        try {
+            val steamId = currentSteamId
+            val session = SteamP2PSession(steamId, peer, app,
+                { signal ->
+                    val binding = p2pBinding
+                    if (!connected || !loggedIn || currentSteamId != steamId || binding == null ||
+                        binding.owner !== owner || binding.request != request || binding.peer != peer)
+                        throw IllegalStateException("Steam P2P session replaced")
+                    sendProtobufMsg(5434, signal, buildProtoHeader(steamId, currentSessionId))
+                },
+                { packet ->
+                    val binding = p2pBinding
+                    if (binding != null && binding.owner === owner && binding.request == request && binding.peer == peer) {
+                        val body = "sb_p2p_data\n".toByteArray(Charsets.US_ASCII) + Proto.packInt32(request.toInt()) + Proto.packInt64(peer) + packet
+                        writeSbrkBinary(outs, body)
+                    }
+                },
+                { reason ->
+                    try { writeSbrkText(outs, "sb_p2p_error $request $reason") } catch (_: Exception) {}
+                })
+            synchronized(p2pLock) {
+                if (!connected || !loggedIn || currentSteamId != steamId) {
+                    session.close()
+                    throw IllegalStateException("Steam disconnected")
+                }
+                p2pBinding = P2PBinding(owner, request, peer, session)
+            }
+            sendGamesPlayed(app)
+            currentGamePlaying = app
+            session.start()
+        } catch (failure: Exception) {
+            closeP2P(owner, request)
+            writeSbrkText(outs, "sb_p2p_error $request ${failure.javaClass.simpleName}")
+        }
+    }
+
+    private fun sendP2P(owner: Socket, payload: ByteArray) {
+        if (payload.size <= 24 || payload.size > 1224) return
+        val input = java.nio.ByteBuffer.wrap(payload, 12, payload.size - 12).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val request = input.int.toLong() and 0xffffffffL
+        val peer = input.long
+        val binding = p2pBinding ?: return
+        if (binding.owner !== owner || binding.request != request || binding.peer != peer) return
+        binding.session.send(payload.copyOfRange(24, payload.size))
+    }
 
     // stored session
     val accountName: String? get() = prefs.getString("account_name", null)
@@ -783,6 +850,7 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     fun stopBroker() {
+        closeP2P()
         Log.i(TAG, "stopBroker: closing broker")
         try { brokerServer?.close() } catch (e: Exception) { Log.w(TAG, "stopBroker close: ${e.message}", e) }
         brokerServer = null
@@ -810,17 +878,26 @@ class SteamAuthManager(private val ctx: Context) {
                         Log.w(TAG, "$tag: readSbrkFrame returned null (EOF/bad header), closing client")
                         break
                     }
+                    if (payload.size >= 12 && payload.copyOfRange(0, 12).contentEquals("sb_p2p_send\n".toByteArray(Charsets.US_ASCII))) {
+                        sendP2P(c, payload)
+                        continue
+                    }
                     val command = String(payload, Charsets.UTF_8)
                     Log.i(TAG, "$tag: frame payload(${payload.size}): \"$command\" hex=${payload.joinToString(" ") { "%02x".format(it) }}")
-                    if (command.startsWith("sb_connect")) {
+                    if (command.startsWith("sb_p2p_start ")) {
+                        startP2P(c, outs, command)
+                    } else if (command.startsWith("sb_p2p_stop ")) {
+                        command.substringAfter(' ').trim().toLongOrNull()?.let { closeP2P(c, it) }
+                    } else if (command.startsWith("sb_connect")) {
                         val parts = command.split(" ")
                         val serverAddr = if (parts.size > 1) parts[1] else ""
-                        val serverIp = serverAddr.substringBefore(':')
-                        val serverPort = serverAddr.substringAfter(':', "").toIntOrNull() ?: 0
+                        val serverIp = if (serverAddr.startsWith("steam:")) "" else serverAddr.substringBefore(':')
+                        val serverPort = if (serverAddr.startsWith("steam:")) 0 else serverAddr.substringAfter(':', "").toIntOrNull() ?: 0
                         val serverSteamId = if (parts.size > 2) parts[2].toLongOrNull() ?: 0L else 0L
                         val secure = if (parts.size > 3) parts[3] != "0" else false
                         val challenge = if (parts.size > 4) parts[4].toIntOrNull() ?: 0 else 0
                         val reqAppid = if (parts.size > 5) parts[5].toIntOrNull() ?: 0 else 0
+                        val requestId = parts.getOrNull(6)?.toLongOrNull()?.takeIf { it in 1L..0xffffffffL }
                         val effectiveAppid = if (reqAppid > 0) reqAppid else (appidFromGameDir(currentGameDir) ?: APPID)
                         Log.i(TAG, "sb_connect server=$serverAddr serverSteamId=$serverSteamId secure=$secure challenge=$challenge reqAppid=$reqAppid effectiveAppid=$effectiveAppid gamedir=$currentGameDir parts=${parts.toList()}")
                         Log.d(TAG, "$tag: connected=${connected} loggedIn=$loggedIn tokens=${gameConnectTokens.size} steamId=$currentSteamId")
@@ -835,7 +912,7 @@ class SteamAuthManager(private val ctx: Context) {
                         val steamId = currentSteamId
                         Log.i(TAG, "Sending ticket size=${ticket.size} steamId=$steamId appid=$effectiveAppid")
                         Log.i(TAG, "Ticket hex: ${ticket.joinToString(" ") { "%02x".format(it) }}")
-                        writeSbrkResponse(outs, challenge, steamId, ticket)
+                        writeSbrkResponse(outs, challenge, steamId, ticket, requestId)
                         Log.i(TAG, "$tag: response written")
                     } else if (command.startsWith("sb_gamedir")) {
                         val parts = command.split(" ")
@@ -870,6 +947,7 @@ class SteamAuthManager(private val ctx: Context) {
                             writeSbrkFriendResult(outs, false, "ERR:" + (e.message ?: "lookup failed"))
                         }
                     } else if (command.startsWith("sb_disconnect")) {
+                        closeP2P(c)
                         // Player left a game server but the engine stays connected to the broker
                         // (SBRK_STATE_CONNECTED, ready for the next game/connect). Keep alive.
                         // Drop the server binding so the periodic heartbeat advertises plain
@@ -891,6 +969,8 @@ class SteamAuthManager(private val ctx: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "$tag: broker client error: ${e.message}", e)
+        } finally {
+            closeP2P(client)
         }
         Log.i(TAG, "$tag: handler exiting")
     }
@@ -944,11 +1024,12 @@ class SteamAuthManager(private val ctx: Context) {
         return payload
     }
 
-    private fun writeSbrkResponse(outs: OutputStream, challenge: Int, steamId: Long, ticket: ByteArray) {
-        val responseHeader = "sb_connect\n".toByteArray(Charsets.UTF_8)
+    private fun writeSbrkResponse(outs: OutputStream, challenge: Int, steamId: Long, ticket: ByteArray, requestId: Long? = null) {
+        val responseHeader = (if (requestId != null) "sb_connect2\n" else "sb_connect\n").toByteArray(Charsets.UTF_8)
         val payload = ByteArrayOutputStream()
         payload.write(responseHeader)
         payload.write(Proto.packInt32(challenge))
+        if (requestId != null) payload.write(Proto.packInt32(requestId.toInt()))
         payload.write(Proto.packInt64(steamId))
         payload.write(Proto.packInt32(ticket.size))
         payload.write(ticket)
@@ -959,19 +1040,26 @@ class SteamAuthManager(private val ctx: Context) {
         frame.write(body)
         Log.i(TAG, "writeSbrkResponse: header=${String(responseHeader, Charsets.UTF_8).trim()} challenge=$challenge steamId=$steamId ticketSize=${ticket.size} bodySize=${body.size} frameSize=${body.size + 6}")
         Log.i(TAG, "writeSbrkResponse frame hex: ${frame.toByteArray().joinToString(" ") { "%02x".format(it) }}")
-        outs.write(frame.toByteArray())
-        outs.flush()
+        synchronized(outs) {
+            outs.write(frame.toByteArray())
+            outs.flush()
+        }
     }
 
     private fun writeSbrkText(outs: OutputStream, text: String) {
-        val payload = text.toByteArray(Charsets.US_ASCII)
+        writeSbrkBinary(outs, text.toByteArray(Charsets.US_ASCII))
+    }
+
+    private fun writeSbrkBinary(outs: OutputStream, payload: ByteArray) {
         require(payload.size <= 65535)
         val frame = ByteArrayOutputStream()
         frame.write("SBRK".toByteArray(Charsets.US_ASCII))
         frame.write(byteArrayOf((payload.size and 0xFF).toByte(), ((payload.size shr 8) and 0xFF).toByte()))
         frame.write(payload)
-        outs.write(frame.toByteArray())
-        outs.flush()
+        synchronized(outs) {
+            outs.write(frame.toByteArray())
+            outs.flush()
+        }
     }
 
     private fun writeSbrkFriendResult(outs: OutputStream, found: Boolean, address: String) {
@@ -1178,6 +1266,7 @@ class SteamAuthManager(private val ctx: Context) {
                 val isCurrentReader = readerThread === Thread.currentThread()
                 if (isCurrentReader) readerThread = null
                 if (isCurrentReader && !expectDisconnect) {
+                    closeP2P()
                     Log.e(TAG, "reader: UNEXPECTED STOP — marking disconnected (was connected=$connected loggedIn=$loggedIn)")
                     connected = false
                     loggedIn = false
@@ -1291,8 +1380,13 @@ class SteamAuthManager(private val ctx: Context) {
                 779 -> handleGameConnectTokens(packet.body)
                 EMSG_CLIENT_PERSONA_STATE -> handlePersonaState(packet.body)
                 5463 -> handleNewLoginKey(packet.body)
+                5434, 5435 -> {
+                    Log.d(TAG, "Steam P2P signal emsg=$emsg bytes=${packet.body.size} active=${p2pBinding != null}")
+                    if (connected && loggedIn && packet.isProto) p2pBinding?.session?.receiveSignal(emsg, packet.body)
+                }
                 751 -> handleLogonResponse(packet)
                 757 -> {
+                    closeP2P()
                     Log.i(TAG, "logged off (eresult=${readEresult(packet.body)})")
                     connected = false
                     loggedIn = false
@@ -2158,8 +2252,11 @@ class SteamAuthManager(private val ctx: Context) {
         Proto.packInt32(data.size).copyInto(final, 0)
         Proto.packInt32(TCP_MAGIC).copyInto(final, 4)
         data.copyInto(final, 8)
-        output!!.write(final)
-        output!!.flush()
+        val stream = output ?: throw IllegalStateException("Steam disconnected")
+        synchronized(stream) {
+            stream.write(final)
+            stream.flush()
+        }
     }
 
     private fun sendRawMsg(body: ByteArray, emsg: Int) {
@@ -2207,6 +2304,7 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private fun disconnect() {
+        closeP2P()
         expectDisconnect = true
         try { heartbeatJob?.interrupt() } catch (_: Exception) { }
         try { readerThread?.interrupt() } catch (_: Exception) { }

@@ -20,6 +20,39 @@ GNU General Public License for more details.
 #include "ipv6text.h"
 #include "net_ws_private.h"
 #include "server.h" // sv_cheats
+#include <inttypes.h>
+
+static qboolean NET_ParseSteamAddress( const char *text, netadr_t *address )
+{
+	uint64_t identity = 0;
+	const char *digits;
+	if( Q_strncmp( text, "steam:", 6 ))
+		return false;
+	digits = text + 6;
+	if( !*digits )
+		return false;
+	for( ; *digits; digits++ )
+	{
+		if( *digits < '0' || *digits > '9' || identity > ( UINT64_MAX - ( *digits - '0' )) / 10 )
+			return false;
+		identity = identity * 10 + ( *digits - '0' );
+	}
+	if( !identity )
+		return false;
+	memset( address, 0, sizeof( *address ));
+	NET_NetadrSetType( address, NA_STEAM_P2P );
+	memcpy( address->ip6_1, &identity, sizeof( identity ));
+	return true;
+}
+
+static const char *NET_SteamAddressString( netadr_t address )
+{
+	static char result[32];
+	uint64_t identity;
+	memcpy( &identity, address.ip6_1, sizeof( identity ));
+	Q_snprintf( result, sizeof( result ), "steam:%"PRIu64, identity );
+	return result;
+}
 
 #if XASH_SDL == 2
 #include <SDL_thread.h>
@@ -629,6 +662,8 @@ const char *NET_AdrToString( const netadr_t a )
 {
 	static char s[64];
 	netadrtype_t type = NET_NetadrType( &a );
+	if( type == NA_STEAM_P2P )
+		return NET_SteamAddressString( a );
 
 	if( type == NA_LOOPBACK )
 		return "loopback";
@@ -657,6 +692,8 @@ const char *NET_BaseAdrToString( const netadr_t a )
 {
 	static char s[64];
 	netadrtype_t type = NET_NetadrType( &a );
+	if( type == NA_STEAM_P2P )
+		return NET_SteamAddressString( a );
 
 	if( type == NA_LOOPBACK )
 		return "loopback";
@@ -690,6 +727,8 @@ qboolean NET_CompareBaseAdr( const netadr_t a, const netadr_t b )
 
 	if( type_a != type_b )
 		return false;
+	if( type_a == NA_STEAM_P2P )
+		return !memcmp( a.ip6_1, b.ip6_1, sizeof( uint64_t ));
 
 	if( type_a == NA_LOOPBACK )
 		return true;
@@ -825,6 +864,8 @@ qboolean NET_CompareAdr( const netadr_t a, const netadr_t b )
 
 	if( type_a != type_b )
 		return false;
+	if( type_a == NA_STEAM_P2P )
+		return NET_CompareBaseAdr( a, b );
 
 	if( type_a == NA_LOOPBACK )
 		return true;
@@ -878,6 +919,8 @@ int NET_CompareAdrSort( const void *_a, const void *_b )
 
 	switch( type_a )
 	{
+	case NA_STEAM_P2P:
+		return memcmp( a->ip6_1, b->ip6_1, sizeof( uint64_t ));
 	case NA_IP6:
 		if(( addrdiff = NET_NetadrIP6Compare( a, b )))
 			return addrdiff;
@@ -916,6 +959,8 @@ static qboolean NET_StringToAdrEx( const char *string, netadr_t *adr, int family
 	struct sockaddr_storage s;
 
 	memset( adr, 0, sizeof( netadr_t ));
+	if( !Q_strncmp( string, "steam:", 6 ))
+		return NET_ParseSteamAddress( string, adr );
 
 	if( !Q_stricmp( string, "localhost" ) || !Q_stricmp( string, "loopback" ))
 	{
@@ -940,6 +985,8 @@ net_gai_state_t NET_StringToAdrNB( const char *string, netadr_t *adr, qboolean v
 	struct sockaddr_storage s;
 
 	memset( adr, 0, sizeof( netadr_t ));
+	if( !Q_strncmp( string, "steam:", 6 ))
+		return NET_ParseSteamAddress( string, adr ) ? NET_EAI_OK : NET_EAI_NONAME;
 
 	if( !Q_stricmp( string, "localhost" ) || !Q_stricmp( string, "loopback" ))
 	{
@@ -1398,6 +1445,16 @@ qboolean NET_GetPacket( netsrc_t sock, netadr_t *from, byte *data, size_t *lengt
 {
 	if( !data || !length )
 		return false;
+#if !XASH_DEDICATED
+	if( sock == NS_CLIENT && SteamBroker_GetP2P( from, data, length ))
+	{
+		int header = 0;
+		if( *length >= sizeof( header )) memcpy( &header, data, sizeof( header ));
+		if( header == NET_HEADER_SPLITPACKET )
+			return CL_IsFromConnectingServer( *from ) && NET_GetLong( data, *length, length, CL_GetSplitSize(), CL_Protocol() );
+		return true;
+	}
+#endif
 
 	NET_AdjustLag();
 
@@ -1498,6 +1555,14 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 	struct sockaddr_storage	addr = { 0 };
 	SOCKET		net_socket = 0;
 	netadrtype_t type = NET_NetadrType( &to );
+	if( type == NA_STEAM_P2P )
+	{
+#if !XASH_DEDICATED
+		if( sock == NS_CLIENT )
+			SteamBroker_SendP2P( to, data, length );
+#endif
+		return;
+	}
 
 	// TXPROBE: prove whether client datagrams actually reach the local wire
 	// and from which source port (catches silent socket rebinds / ring drops)
@@ -2125,5 +2190,3 @@ void NET_Shutdown( void )
 #endif
 	net.initialized = false;
 }
-
-

@@ -1306,6 +1306,9 @@ qboolean SteamTracker_RequestMasterList( void );
 qboolean SteamWebAPI_RequestMasterList( void );
 void Steam_MasterlistScanBegin( void );
 void SteamBroker_ConnectBySteamID( const char *text );
+qboolean SteamBroker_StartP2P( netadr_t peer );
+void SteamBroker_SendP2P( netadr_t peer, const void *data, size_t length );
+qboolean SteamBroker_GetP2P( netadr_t *peer, byte *data, size_t *length );
 
 //
 // cl_video.c

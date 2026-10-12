@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "client.h"
 #include "net_ws.h"
 #include "net_ws_private.h"
+#include "tests.h"
 
 // What is a broker?
 // From Wikipedia, the free encyclopedia:
@@ -40,6 +41,8 @@ GNU General Public License for more details.
 #define SBRK_FRAME_LENGTH_SIZE		2
 #define SBRK_RESPONSE_HEADER		"sb_connect\n"
 #define SBRK_RESPONSE_HEADER_SIZE	(sizeof(SBRK_RESPONSE_HEADER) - 1)
+#define SBRK_RESPONSE_V2_HEADER		"sb_connect2\n"
+#define SBRK_RESPONSE_V2_HEADER_SIZE	(sizeof(SBRK_RESPONSE_V2_HEADER) - 1)
 #define SBRK_FRIEND_RESPONSE_HEADER	"sb_friend_result\n"
 #define SBRK_FRIEND_RESPONSE_HEADER_SIZE	(sizeof(SBRK_FRIEND_RESPONSE_HEADER) - 1)
 #define SBRK_MASTERLIST_ENTRY_HEADER	"sb_masterlist_entry "
@@ -70,6 +73,7 @@ typedef struct
 	int socket;
 	sbrk_state_t state;
 	int challenge;
+	uint32_t ticket_request_id;
 	netadr_t serveradr;
 	double connection_timeout;
 	double idle_cycle_timeout;
@@ -83,6 +87,22 @@ typedef struct
 } steam_broker_t;
 
 static steam_broker_t broker;
+static uint32_t ticket_request_serial;
+
+static qboolean SteamBroker_IsTicketCurrent( int challenge, uint32_t request_id )
+{
+	return cls.state == ca_connecting && cls.broker_wait && broker.ticket_request_id &&
+		request_id == broker.ticket_request_id && challenge == broker.challenge &&
+		NET_CompareAdr( cls.serveradr, broker.serveradr );
+}
+
+static void SteamBroker_CancelTicket( void )
+{
+	cls.broker_wait = false;
+	broker.ticket_request_id = 0;
+	broker.ticket_timeout = 0;
+	memset( &broker.serveradr, 0, sizeof( broker.serveradr ));
+}
 
 // Tracker paging chain: offset pages are fetched sequentially until a
 // short page arrives. Generation guards against overlapping scans.
@@ -92,6 +112,39 @@ static unsigned int s_tracker_gen = 0;
 
 static int SteamBroker_GetGoldSrcAppId( void );
 static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out );
+
+static netadr_t p2p_peer;
+static uint32_t p2p_serial, p2p_request;
+static unsigned int p2p_read, p2p_write;
+typedef struct
+{
+	size_t length;
+	byte data[4000];
+} p2p_packet_t;
+static p2p_packet_t p2p_packets[64];
+
+static void SteamBroker_ClearP2P( void )
+{
+	p2p_request = 0;
+	p2p_read = p2p_write = 0;
+	memset( &p2p_peer, 0, sizeof( p2p_peer ));
+}
+
+static void SteamBroker_ReceiveP2P( const byte *payload, size_t size )
+{
+	uint32_t request = 0;
+	uint64_t identity = 0, expected;
+	if( size <= 24 || size - 24 > sizeof( p2p_packets[0].data ) || memcmp( payload, "sb_p2p_data\n", 12 ))
+		return;
+	for( int index = 0; index < 4; index++ ) request |= (uint32_t)payload[12 + index] << ( index * 8 );
+	for( int index = 0; index < 8; index++ ) identity |= (uint64_t)payload[16 + index] << ( index * 8 );
+	memcpy( &expected, p2p_peer.ip6_1, sizeof( expected ));
+	if( !p2p_request || request != p2p_request || identity != expected || p2p_write - p2p_read >= ARRAYSIZE( p2p_packets ))
+		return;
+	unsigned int slot = p2p_write++ % ARRAYSIZE( p2p_packets );
+	p2p_packets[slot].length = size - 24;
+	memcpy( p2p_packets[slot].data, payload + 24, size - 24 );
+}
 void Steam_MasterlistScanBegin( void );
 static qboolean Steam_MasterlistSeenBefore( const netadr_t *adr );
 static qboolean SteamTracker_RequestPage( int page );
@@ -216,6 +269,7 @@ static void SteamBroker_CloseSocket( void )
 
 static void SteamBroker_Disconnect( void )
 {
+	SteamBroker_ClearP2P();
 	SteamBroker_CloseSocket();
 	SteamBroker_SetState( SBRK_STATE_IDLE );
 	cls.broker_wait = false; // stop waiting for a ticket; the engine will re-request once we reconnect
@@ -346,11 +400,35 @@ static qboolean SteamBroker_ProcessFrame( void )
 
 	uint16_t payload_size = MSG_ReadShort( &sb );
 	uint32_t frame_size = SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE + payload_size;
+	if( payload_size > SBRK_MAX_FRAME_SIZE )
+	{
+		SteamBroker_Disconnect();
+		return false;
+	}
 
 	if( MSG_GetNumBytesLeft( &sb ) < payload_size )
 		return false; // need more data
 
-	if( payload_size >= SBRK_FRIEND_RESPONSE_HEADER_SIZE &&
+	const byte *payload = broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE;
+	if( payload_size >= 24 && !memcmp( payload, "sb_p2p_data\n", 12 ))
+	{
+		SteamBroker_ReceiveP2P( payload, payload_size );
+	}
+	else if( payload_size > 13 && !memcmp( payload, "sb_p2p_error ", 13 ))
+	{
+		char error[512];
+		size_t size = Q_min( payload_size, sizeof( error ) - 1 );
+		memcpy( error, payload, size );
+		error[size] = 0;
+		unsigned int request;
+		if( sscanf( error + 13, "%u", &request ) == 1 && request == p2p_request && p2p_request )
+		{
+			Con_Printf( S_ERROR "%s\n", error );
+			SteamBroker_ClearP2P();
+			Cbuf_AddText( "disconnect\n" );
+		}
+	}
+	else if( payload_size >= SBRK_FRIEND_RESPONSE_HEADER_SIZE &&
 		!memcmp( broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE,
 			SBRK_FRIEND_RESPONSE_HEADER, SBRK_FRIEND_RESPONSE_HEADER_SIZE ))
 	{
@@ -435,18 +513,21 @@ static qboolean SteamBroker_ProcessFrame( void )
 		return true;
 	}
 
-	char response_header[SBRK_RESPONSE_HEADER_SIZE];
-	if( MSG_ReadBytes( &sb, response_header, sizeof( response_header ), SBRK_RESPONSE_HEADER_SIZE ))
+	qboolean response_v2 = payload_size >= SBRK_RESPONSE_V2_HEADER_SIZE &&
+		!memcmp( broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE,
+			SBRK_RESPONSE_V2_HEADER, SBRK_RESPONSE_V2_HEADER_SIZE );
+	uint response_header_size = response_v2 ? SBRK_RESPONSE_V2_HEADER_SIZE : SBRK_RESPONSE_HEADER_SIZE;
+	char response_header[SBRK_RESPONSE_V2_HEADER_SIZE];
+	if( MSG_ReadBytes( &sb, response_header, sizeof( response_header ), response_header_size ))
 	{
-		broker.ticket_timeout = 0; // broker replied, it is alive: cancel the ticket watchdog
-
-		if( memcmp( response_header, SBRK_RESPONSE_HEADER, SBRK_RESPONSE_HEADER_SIZE ) == 0 )
+		if( payload_size >= response_header_size + (response_v2 ? 20 : 16) &&
+			(response_v2 || memcmp( response_header, SBRK_RESPONSE_HEADER, SBRK_RESPONSE_HEADER_SIZE ) == 0) )
 		{
 			int32_t challenge = MSG_ReadLong( &sb );
-			if( broker.challenge != challenge )
+			uint32_t request_id = response_v2 ? MSG_ReadDword( &sb ) : broker.ticket_request_id;
+			if( MSG_CheckOverflow( &sb ) || !SteamBroker_IsTicketCurrent( challenge, request_id ))
 			{
-				Con_Printf( S_ERROR "%s: challenge mismatch\n", __func__ );
-				cls.broker_wait = false; // let the engine re-request with the fresh challenge
+				Con_DPrintf( "%s: ignoring cancelled or superseded ticket response\n", __func__ );
 			}
 			else
 			{
@@ -455,13 +536,15 @@ static qboolean SteamBroker_ProcessFrame( void )
 				uint32_t ticket_size = MSG_ReadDword( &sb );
 				uint8_t ticket_data[SBRK_TICKET_SIZE_MAX];
 
-				if( ticket_size > SBRK_TICKET_SIZE_MAX )
+				if( MSG_CheckOverflow( &sb ) || !ticket_size || ticket_size > SBRK_TICKET_SIZE_MAX ||
+					ticket_size > payload_size - response_header_size - (response_v2 ? 20 : 16) )
 				{
 					Con_Printf( S_ERROR "%s: ticket size exceeds limit (%u)\n", __func__, ticket_size );
 				}
 				else if( MSG_ReadBytes( &sb, ticket_data, sizeof( ticket_data ), ticket_size ))
 				{
-					Con_Printf( "%s: SteamID: %"PRIu64", ticket: [%d, %d, %d, %d...]\n", __func__, steam_id, ticket_data[0], ticket_data[1], ticket_data[2], ticket_data[3] );
+					broker.ticket_timeout = 0;
+					Con_Printf( "%s: SteamID: %"PRIu64", ticket size: %u\n", __func__, steam_id, ticket_size );
 					Con_DPrintf( "%s: server %s, challenge=%d, steam_id=%"PRIu64", ticket_size=%u\n", __func__, NET_AdrToString( broker.serveradr ), challenge, steam_id, ticket_size );
 					SteamBroker_DumpHex( "ticket", ticket_data, ticket_size );
 					SteamBroker_DumpLegacyTicket( "SteamBroker", ticket_data, ticket_size );
@@ -613,6 +696,8 @@ static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out )
 		{
 			if( *p < '0' || *p > '9' )
 				return false;
+			if( id > ( UINT64_MAX - ( *p - '0' )) / 10 )
+				return false;
 			id = id * 10 + (uint64_t)( *p - '0' );
 		}
 		if( id == 0 )
@@ -623,13 +708,30 @@ static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out )
 
 	// X:Y:Z triple
 	while( *p == ' ' ) p++;
-	while( *p >= '0' && *p <= '9' ) universe = universe * 10 + (uint64_t)( *p++ - '0' );
-	if( *p++ != ':' )
+	if( *p < '0' || *p > '9' ) return false;
+	while( *p >= '0' && *p <= '9' )
+	{
+		universe = universe * 10 + (uint64_t)( *p++ - '0' );
+		if( universe > 255 ) return false;
+	}
+	if( *p != ':' )
 		return false;
-	while( *p >= '0' && *p <= '9' ) auth = auth * 10 + (uint64_t)( *p++ - '0' );
-	if( *p++ != ':' )
+	p++;
+	if( *p < '0' || *p > '9' ) return false;
+	while( *p >= '0' && *p <= '9' )
+	{
+		auth = auth * 10 + (uint64_t)( *p++ - '0' );
+		if( auth > 1 ) return false;
+	}
+	if( *p != ':' || auth > 1 )
 		return false;
-	while( *p >= '0' && *p <= '9' ) account = account * 10 + (uint64_t)( *p++ - '0' );
+	p++;
+	if( *p < '0' || *p > '9' ) return false;
+	while( *p >= '0' && *p <= '9' )
+	{
+		account = account * 10 + (uint64_t)( *p++ - '0' );
+		if( account > UINT32_MAX / 2 ) return false;
+	}
 	if( *p != '\0' || auth > 1 )
 		return false;
 	if( universe == 0 )
@@ -657,8 +759,60 @@ void SteamBroker_ConnectBySteamID( const char *text )
 		return;
 	}
 
-	Con_Printf( "Resolving SteamID %"PRIu64" via broker...\n", steamid );
-	Cbuf_AddTextf( "@connect_steamid %"PRIu64"\n", steamid );
+	Cbuf_AddTextf( "connect steam:%"PRIu64"\n", steamid );
+}
+
+qboolean SteamBroker_StartP2P( netadr_t peer )
+{
+	char command[128];
+	uint64_t identity;
+	if( broker.state != SBRK_STATE_CONNECTED || NET_NetadrType( &peer ) != NA_STEAM_P2P )
+		return false;
+	if( p2p_request && NET_CompareAdr( peer, p2p_peer ))
+		return true;
+	SteamBroker_ClearP2P();
+	p2p_peer = peer;
+	p2p_request = ++p2p_serial;
+	if( !p2p_request ) p2p_request = ++p2p_serial;
+	memcpy( &identity, peer.ip6_1, sizeof( identity ));
+	int length = Q_snprintf( command, sizeof( command ), "sb_p2p_start %u %"PRIu64" %d", p2p_request, identity, SteamBroker_GetGoldSrcAppId() );
+	if( SteamBroker_SendFrame( command, length ))
+	{
+		Con_Printf( "Steam P2P: negotiating %"PRIu64"\n", identity );
+		return true;
+	}
+	SteamBroker_ClearP2P();
+	return false;
+}
+
+void SteamBroker_SendP2P( netadr_t peer, const void *data, size_t length )
+{
+	byte payload[SBRK_MAX_FRAME_SIZE];
+	uint64_t identity;
+	if( !p2p_request || !NET_CompareAdr( peer, p2p_peer ) || !length )
+		return;
+	if( length > 1200 )
+	{
+		Con_DPrintf( S_WARN "Steam P2P: packet exceeds unreliable MTU (%zu)\n", length );
+		return;
+	}
+	memcpy( payload, "sb_p2p_send\n", 12 );
+	for( int index = 0; index < 4; index++ ) payload[12 + index] = p2p_request >> ( index * 8 );
+	memcpy( &identity, peer.ip6_1, sizeof( identity ));
+	for( int index = 0; index < 8; index++ ) payload[16 + index] = identity >> ( index * 8 );
+	memcpy( payload + 24, data, length );
+	SteamBroker_SendFrame( (const char *)payload, length + 24 );
+}
+
+qboolean SteamBroker_GetP2P( netadr_t *peer, byte *data, size_t *length )
+{
+	if( !p2p_request || p2p_read == p2p_write )
+		return false;
+	unsigned int slot = p2p_read++ % ARRAYSIZE( p2p_packets );
+	*peer = p2p_peer;
+	*length = p2p_packets[slot].length;
+	memcpy( data, p2p_packets[slot].data, *length );
+	return true;
 }
 
 #define TRACKER_MASTERLIST_URL	"https://api.gamemonitoring.net/servers?game=%d&status=online&limit=100&offset=%d"
@@ -1143,7 +1297,7 @@ static int SteamBroker_GetGoldSrcAppId( void )
 qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 {
 	// only ipv4 supported
-	if( NET_NetadrType( &serveradr ) != NA_IP )
+	if( NET_NetadrType( &serveradr ) != NA_IP && NET_NetadrType( &serveradr ) != NA_STEAM_P2P )
 		return false;
 
 	if( broker.state != SBRK_STATE_CONNECTED )
@@ -1154,11 +1308,14 @@ qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 
 	broker.challenge = challenge;
 	broker.serveradr = serveradr;
+	broker.ticket_request_id = ++ticket_request_serial;
+	if( !broker.ticket_request_id )
+		broker.ticket_request_id = ++ticket_request_serial;
 
 	// sb_connect <ip:port> <server_steamid> <secure> <challenge> <appid>
 	char buf[512];
 	int appid = SteamBroker_GetGoldSrcAppId();
-	int len = Q_snprintf( buf, sizeof( buf ), "sb_connect %s %"PRIu64" %d %d %d", NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge, appid );
+	int len = Q_snprintf( buf, sizeof( buf ), "sb_connect %s %"PRIu64" %d %d %d %u", NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge, appid, broker.ticket_request_id );
 
 	Con_DPrintf( "%s: requesting ticket (server %s, steamid %"PRIu64", secure %d, challenge %d, appid %d)\n", __func__, NET_AdrToString( serveradr ), cls.server_steamid, cls.vac2_secure ? 1 : 0, challenge, appid );
 	Con_DPrintf( "%s: sb_connect request: %s\n", __func__, buf );
@@ -1175,6 +1332,14 @@ qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 
 void SteamBroker_TerminateGameConnection( void )
 {
+	SteamBroker_CancelTicket();
+	if( p2p_request )
+	{
+		char command[64];
+		int length = Q_snprintf( command, sizeof( command ), "sb_p2p_stop %u", p2p_request );
+		SteamBroker_SendFrame( command, length );
+		SteamBroker_ClearP2P();
+	}
 	if( broker.state != SBRK_STATE_CONNECTED )
 		return;
 
@@ -1187,6 +1352,114 @@ void SteamBroker_TerminateGameConnection( void )
 
 	SteamBroker_SendFrame( buf, len );
 }
+
+#if XASH_ENGINE_TESTS
+void Test_RunSteamConnection( void )
+{
+	p2p_packet_t saved_packets[64];
+	netadr_t saved_peer = p2p_peer;
+	uint32_t saved_request = p2p_request;
+	unsigned int saved_read = p2p_read, saved_write = p2p_write;
+	memcpy( saved_packets, p2p_packets, sizeof( saved_packets ));
+	SteamBroker_ClearP2P();
+	uint64_t test_peer = UINT64_C( 76561198000000002 );
+	NET_NetadrSetType( &p2p_peer, NA_STEAM_P2P );
+	memcpy( p2p_peer.ip6_1, &test_peer, sizeof( test_peer ));
+	p2p_request = 7;
+	byte payload[25] = { 0 }, received[4000];
+	netadr_t received_peer;
+	size_t received_size = 0;
+	memcpy( payload, "sb_p2p_data\n", 12 );
+	payload[12] = 7;
+	for( int index = 0; index < 8; index++ ) payload[16 + index] = test_peer >> ( index * 8 );
+	payload[24] = 123;
+	SteamBroker_ReceiveP2P( payload, 24 );
+	TASSERT( !SteamBroker_GetP2P( &received_peer, received, &received_size ));
+	payload[12] = 6;
+	SteamBroker_ReceiveP2P( payload, sizeof( payload ));
+	TASSERT( !SteamBroker_GetP2P( &received_peer, received, &received_size ));
+	payload[12] = 7;
+	payload[16] ^= 1;
+	SteamBroker_ReceiveP2P( payload, sizeof( payload ));
+	TASSERT( !SteamBroker_GetP2P( &received_peer, received, &received_size ));
+	payload[16] ^= 1;
+	SteamBroker_ReceiveP2P( payload, sizeof( payload ));
+	TASSERT( SteamBroker_GetP2P( &received_peer, received, &received_size ));
+	TASSERT( NET_CompareAdr( received_peer, p2p_peer ));
+	TASSERT( !NET_IsLocalAddress( received_peer ));
+	TASSERT( received_size == 1 && received[0] == 123 );
+	TASSERT( !SteamBroker_GetP2P( &received_peer, received, &received_size ));
+	for( int index = 0; index < 65; index++ ) SteamBroker_ReceiveP2P( payload, sizeof( payload ));
+	TASSERT_EQi( p2p_write - p2p_read, 64 );
+	SteamBroker_ClearP2P();
+	TASSERT( !SteamBroker_GetP2P( &received_peer, received, &received_size ));
+	p2p_peer = saved_peer;
+	p2p_request = saved_request;
+	p2p_read = saved_read;
+	p2p_write = saved_write;
+	memcpy( p2p_packets, saved_packets, sizeof( saved_packets ));
+	uint64_t identity;
+	TASSERT( SteamBroker_ParseSteamID( "STEAM_0:0:564129898", &identity ));
+	TASSERT( identity == UINT64_C( 76561199088525524 ));
+	TASSERT( SteamBroker_ParseSteamID( "76561198000000001", &identity ));
+	TASSERT( identity == UINT64_C( 76561198000000001 ));
+	TASSERT( SteamBroker_ParseSteamID( "STEAM_0:1:123", &identity ));
+	TASSERT( identity == UINT64_C( 76561197960265975 ));
+	TASSERT( !SteamBroker_ParseSteamID( "18446744073709551616", &identity ));
+	TASSERT( !SteamBroker_ParseSteamID( "STEAM_256:1:123", &identity ));
+	TASSERT( !SteamBroker_ParseSteamID( "STEAM_0:99999999999999999999:123", &identity ));
+	TASSERT( !SteamBroker_ParseSteamID( "STEAM_0:1:2147483648", &identity ));
+	TASSERT( !SteamBroker_ParseSteamID( "STEAM_0::1", &identity ));
+	TASSERT( !SteamBroker_ParseSteamID( "STEAM_0:1:", &identity ));
+	TASSERT( !SteamBroker_ParseSteamID( "0", &identity ));
+	TASSERT( !SteamBroker_ParseSteamID( "", &identity ));
+	steam_broker_t saved_broker = broker;
+	connstate_t saved_state = cls.state;
+	qboolean saved_wait = cls.broker_wait;
+	netadr_t saved_address = cls.serveradr;
+
+	memset( &broker, 0, sizeof( broker ));
+	memset( &cls.serveradr, 0, sizeof( cls.serveradr ));
+	NET_NetadrSetType( &cls.serveradr, NA_IP );
+	cls.serveradr.port = 27015;
+	cls.state = ca_connecting;
+	cls.broker_wait = true;
+	broker.serveradr = cls.serveradr;
+	broker.challenge = 42;
+	broker.ticket_request_id = 7;
+	broker.ticket_timeout = 123;
+	TASSERT( SteamBroker_IsTicketCurrent( 42, 7 ));
+	TASSERT( !SteamBroker_IsTicketCurrent( 42, 6 ));
+	TASSERT( !SteamBroker_IsTicketCurrent( 41, 7 ));
+	cls.serveradr.port++;
+	TASSERT( !SteamBroker_IsTicketCurrent( 42, 7 ));
+	cls.serveradr = broker.serveradr;
+	cls.state = ca_disconnected;
+	TASSERT( !SteamBroker_IsTicketCurrent( 42, 7 ));
+	cls.state = ca_connected;
+	TASSERT( !SteamBroker_IsTicketCurrent( 42, 7 ));
+	cls.state = ca_connecting;
+	cls.broker_wait = false;
+	TASSERT( !SteamBroker_IsTicketCurrent( 42, 7 ));
+	cls.broker_wait = true;
+	SteamBroker_CancelTicket();
+	TASSERT( !cls.broker_wait );
+	TASSERT_EQi( broker.ticket_request_id, 0 );
+	TASSERT( broker.ticket_timeout == 0 );
+	TASSERT_EQi( NET_NetadrType( &broker.serveradr ), NA_UNDEFINED );
+	cls.broker_wait = true;
+	TASSERT( !SteamBroker_IsTicketCurrent( 42, 7 ));
+	broker.serveradr = cls.serveradr;
+	broker.ticket_request_id = 8;
+	TASSERT( !SteamBroker_IsTicketCurrent( 42, 7 ));
+	TASSERT( SteamBroker_IsTicketCurrent( 42, 8 ));
+
+	broker = saved_broker;
+	cls.state = saved_state;
+	cls.broker_wait = saved_wait;
+	cls.serveradr = saved_address;
+}
+#endif
 
 void SteamBroker_Frame( void )
 {
