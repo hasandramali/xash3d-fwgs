@@ -42,10 +42,10 @@ size_t SteamP2P_EncodeCandidate( const steam_p2p_candidate_t *candidate, byte *o
 	fields[0] = candidate->name;
 	fields[1] = candidate->protocol;
 	fields[2] = candidate->address;
-	fields[3] = candidate->type;
-	fields[4] = candidate->network;
-	fields[5] = candidate->username;
-	fields[6] = candidate->password;
+	fields[3] = candidate->username;
+	fields[4] = candidate->password;
+	fields[5] = candidate->type;
+	fields[6] = candidate->network;
 	for( uint index = 0; index < 7; index++ )
 	{
 		const char *terminator = memchr( fields[index], 0, STEAM_P2P_CANDIDATE_STRING );
@@ -90,10 +90,10 @@ qboolean SteamP2P_DecodeCandidate( const byte *data, size_t size, steam_p2p_cand
 	preference = SteamP2P_ReadBE32( data + offset + 2 );
 	memcpy( &parsed.preference, &preference, sizeof( preference ));
 	offset += 6;
-	if( !SteamP2P_ReadCandidateString( data, size, &offset, parsed.type ) ||
-		!SteamP2P_ReadCandidateString( data, size, &offset, parsed.network ) ||
-		!SteamP2P_ReadCandidateString( data, size, &offset, parsed.username ) ||
-		!SteamP2P_ReadCandidateString( data, size, &offset, parsed.password ) || size - offset < 4 )
+	if( !SteamP2P_ReadCandidateString( data, size, &offset, parsed.username ) ||
+		!SteamP2P_ReadCandidateString( data, size, &offset, parsed.password ) ||
+		!SteamP2P_ReadCandidateString( data, size, &offset, parsed.type ) ||
+		!SteamP2P_ReadCandidateString( data, size, &offset, parsed.network ) || size - offset < 4 )
 		return false;
 	parsed.generation = SteamP2P_ReadBE32( data + offset );
 	offset += 4;
@@ -151,9 +151,9 @@ void Test_RunSteamP2PProtocol( void )
 {
 	static const byte native_candidate[] = {
 		0x64,0x61,0x74,0x61,0x00,0x75,0x64,0x70,0x00,0x31,0x39,0x32,0x2e,0x30,0x2e,0x32,
-		0x2e,0x31,0x30,0x00,0x69,0x87,0x3f,0x40,0x00,0x00,0x6c,0x6f,0x63,0x61,0x6c,0x00,
-		0x65,0x74,0x68,0x65,0x72,0x6e,0x65,0x74,0x00,0x74,0x65,0x73,0x74,0x2d,0x75,0x73,
-		0x65,0x72,0x00,0x74,0x65,0x73,0x74,0x2d,0x70,0x61,0x73,0x73,0x77,0x6f,0x72,0x64,
+		0x2e,0x31,0x30,0x00,0x69,0x87,0x3f,0x40,0x00,0x00,0x74,0x65,0x73,0x74,0x2d,0x75,
+		0x73,0x65,0x72,0x00,0x74,0x65,0x73,0x74,0x2d,0x70,0x61,0x73,0x73,0x77,0x6f,0x72,
+		0x64,0x00,0x6c,0x6f,0x63,0x61,0x6c,0x00,0x65,0x74,0x68,0x65,0x72,0x6e,0x65,0x74,
 		0x00,0x00,0x00,0x00,0x07,0x05 };
 	static const byte server_packet[] = { 0, 1, 1, 0, 0, 0, 1, 0, 0, 0 };
 	steam_p2p_candidate_t candidate = { 0 }, sentinel;
@@ -176,6 +176,17 @@ void Test_RunSteamP2PProtocol( void )
 	TASSERT_EQi( candidate.extension, 5 );
 	TASSERT_EQi( SteamP2P_EncodeCandidate( &candidate, encoded, sizeof( encoded )), sizeof( native_candidate ));
 	TASSERT( !memcmp( encoded, native_candidate, sizeof( native_candidate )));
+	steam_p2p_candidate_t empty_credentials = candidate, decoded_empty;
+	Q_strncpy( empty_credentials.username, "abcdefghijklmnop", sizeof( empty_credentials.username ));
+	empty_credentials.password[0] = 0;
+	empty_credentials.network[0] = 0;
+	size_t empty_size = SteamP2P_EncodeCandidate( &empty_credentials, encoded, sizeof( encoded ));
+	TASSERT( empty_size > 0 );
+	TASSERT( !memcmp( encoded + 26, "abcdefghijklmnop", 17 ));
+	TASSERT( SteamP2P_DecodeCandidate( encoded, empty_size, &decoded_empty ));
+	TASSERT_STR( decoded_empty.username, "abcdefghijklmnop" );
+	TASSERT_STR( decoded_empty.type, "local" );
+	TASSERT( !decoded_empty.password[0] && !decoded_empty.network[0] );
 	sentinel = candidate;
 	for( size_t truncated = 0; truncated < sizeof( native_candidate ) - 1; truncated++ )
 	{

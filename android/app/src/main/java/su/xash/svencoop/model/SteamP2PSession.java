@@ -86,9 +86,19 @@ public final class SteamP2PSession implements AutoCloseable {
                 return;
             }
             SteamP2PWire.Candidate candidate = SteamP2PWire.decodeCandidate(signal.candidate);
-            if (!"udp".equals(candidate.protocol) || candidate.username.length() != 16 || paths.size() >= 32) {
+            if (!"udp".equals(candidate.protocol)) {
                 rejectedSignals++;
-                progress.update("candidate_rejected protocol_credentials_or_limit");
+                progress.update("candidate_rejected protocol=" + ("tcp".equals(candidate.protocol) ? "tcp" : "unsupported") + " length=" + candidate.protocol.length());
+                return;
+            }
+            if (!SteamP2PWire.validUsernameFragment(candidate.username)) {
+                rejectedSignals++;
+                progress.update("candidate_rejected username_invalid length=" + candidate.username.length());
+                return;
+            }
+            if (paths.size() >= 32) {
+                rejectedSignals++;
+                progress.update("candidate_rejected path_limit");
                 return;
             }
             InetSocketAddress address = SteamP2PWire.endpoint(candidate);

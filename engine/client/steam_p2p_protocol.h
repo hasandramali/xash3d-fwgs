@@ -11,10 +11,10 @@ typedef struct steam_p2p_candidate_s
 	char address[STEAM_P2P_CANDIDATE_STRING];
 	uint16_t port;
 	float preference;
-	char type[STEAM_P2P_CANDIDATE_STRING];
-	char network[STEAM_P2P_CANDIDATE_STRING];
 	char username[STEAM_P2P_CANDIDATE_STRING];
 	char password[STEAM_P2P_CANDIDATE_STRING];
+	char type[STEAM_P2P_CANDIDATE_STRING];
+	char network[STEAM_P2P_CANDIDATE_STRING];
 	uint32_t generation;
 	byte extension;
 } steam_p2p_candidate_t;

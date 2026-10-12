@@ -11,6 +11,20 @@ import java.util.Arrays;
 public final class SteamP2PWire {
     private SteamP2PWire() {}
 
+    private static boolean base64Token(String value) {
+        for (int index = 0; index < value.length(); index++)
+            if ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(value.charAt(index)) < 0) return false;
+        return true;
+    }
+
+    public static boolean validUsernameFragment(String value) {
+        return value != null && !value.isEmpty() && value.length() <= 16 && base64Token(value);
+    }
+
+    private static boolean validStunUsername(String value) {
+        return value != null && value.length() >= 2 && value.length() <= 32 && base64Token(value);
+    }
+
     public static final class Candidate {
         public final String name, protocol, address, type, network, username, password;
         public final int port, generation, extension;
@@ -45,7 +59,7 @@ public final class SteamP2PWire {
         string(output, candidate.name); string(output, candidate.protocol); string(output, candidate.address);
         byte[] numeric = ByteBuffer.allocate(6).putShort((short)candidate.port).putFloat(candidate.preference).array();
         output.write(numeric, 0, numeric.length);
-        string(output, candidate.type); string(output, candidate.network); string(output, candidate.username); string(output, candidate.password);
+        string(output, candidate.username); string(output, candidate.password); string(output, candidate.type); string(output, candidate.network);
         numeric = ByteBuffer.allocate(4).putInt(candidate.generation).array();
         output.write(numeric, 0, numeric.length); output.write(candidate.extension);
         return output.toByteArray();
@@ -56,7 +70,7 @@ public final class SteamP2PWire {
         ByteBuffer input = ByteBuffer.wrap(data);
         String name = string(input), protocol = string(input), address = string(input);
         int port = input.getShort() & 65535; float preference = input.getFloat();
-        String type = string(input), network = string(input), username = string(input), password = string(input);
+        String username = string(input), password = string(input), type = string(input), network = string(input);
         int generation = input.getInt();
         if (input.remaining() > 1) throw new IllegalArgumentException("candidate trailing data");
         int extension = input.hasRemaining() ? Math.min(input.get() & 255, 9) : 0;
@@ -197,8 +211,9 @@ public final class SteamP2PWire {
             int padded = (length + 3) & ~3;
             if (padded > input.remaining()) return null;
             if (attribute == 6) {
-                if (result.username != null || length != 32) return null;
+                if (result.username != null || length < 2 || length > 32) return null;
                 result.username = new String(data, input.position(), length, StandardCharsets.US_ASCII);
+                if (!validStunUsername(result.username)) return null;
             }
             input.position(input.position() + padded);
         }
@@ -212,7 +227,7 @@ public final class SteamP2PWire {
     }
 
     public static byte[] binding(int type, byte[] transaction, String username, InetSocketAddress mapped) {
-        if (transaction.length != 16 || username.length() != 32) throw new IllegalArgumentException("STUN identity");
+        if (transaction.length != 16 || !validStunUsername(username)) throw new IllegalArgumentException("STUN identity");
         ByteArrayOutputStream attributes = new ByteArrayOutputStream();
         attribute(attributes, 6, username.getBytes(StandardCharsets.US_ASCII));
         if (mapped != null) {
