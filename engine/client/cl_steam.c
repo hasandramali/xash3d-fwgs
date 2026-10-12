@@ -115,6 +115,8 @@ static qboolean SteamBroker_ParseSteamID( const char *text, uint64_t *out );
 
 static netadr_t p2p_peer;
 static uint32_t p2p_serial, p2p_request;
+static qboolean p2p_ready;
+static double p2p_deadline;
 static unsigned int p2p_read, p2p_write;
 typedef struct
 {
@@ -126,6 +128,8 @@ static p2p_packet_t p2p_packets[64];
 static void SteamBroker_ClearP2P( void )
 {
 	p2p_request = 0;
+	p2p_ready = false;
+	p2p_deadline = 0;
 	p2p_read = p2p_write = 0;
 	memset( &p2p_peer, 0, sizeof( p2p_peer ));
 }
@@ -144,6 +148,28 @@ static void SteamBroker_ReceiveP2P( const byte *payload, size_t size )
 	unsigned int slot = p2p_write++ % ARRAYSIZE( p2p_packets );
 	p2p_packets[slot].length = size - 24;
 	memcpy( p2p_packets[slot].data, payload + 24, size - 24 );
+}
+
+static void SteamBroker_P2PState( uint32_t request, const char *state )
+{
+	if( !p2p_request || request != p2p_request )
+		return;
+	Con_Printf( "Steam P2P: %s\n", state );
+	if( !Q_strcmp( state, "ready" ))
+	{
+		p2p_ready = true;
+		p2p_deadline = 0;
+		if( cls.state == ca_connecting )
+		{
+			cls.connect_retry = 0;
+			cls.connect_time = MAX_HEARTBEAT;
+		}
+	}
+	else if( !Q_strcmp( state, "rechecking" ))
+	{
+		p2p_ready = false;
+		p2p_deadline = Platform_DoubleTime() + 60.0;
+	}
 }
 void Steam_MasterlistScanBegin( void );
 static qboolean Steam_MasterlistSeenBefore( const netadr_t *adr );
@@ -413,6 +439,17 @@ static qboolean SteamBroker_ProcessFrame( void )
 	if( payload_size >= 24 && !memcmp( payload, "sb_p2p_data\n", 12 ))
 	{
 		SteamBroker_ReceiveP2P( payload, payload_size );
+	}
+	else if( payload_size > 13 && !memcmp( payload, "sb_p2p_state ", 13 ))
+	{
+		char status[256];
+		size_t size = Q_min( payload_size, sizeof( status ) - 1 );
+		memcpy( status, payload, size );
+		status[size] = 0;
+		unsigned int request;
+		int offset = 0;
+		if( sscanf( status + 13, "%u %n", &request, &offset ) == 1 && offset > 0 )
+			SteamBroker_P2PState( request, status + 13 + offset );
 	}
 	else if( payload_size > 13 && !memcmp( payload, "sb_p2p_error ", 13 ))
 	{
@@ -774,6 +811,7 @@ qboolean SteamBroker_StartP2P( netadr_t peer )
 	p2p_peer = peer;
 	p2p_request = ++p2p_serial;
 	if( !p2p_request ) p2p_request = ++p2p_serial;
+	p2p_deadline = Platform_DoubleTime() + 60.0;
 	memcpy( &identity, peer.ip6_1, sizeof( identity ));
 	int length = Q_snprintf( command, sizeof( command ), "sb_p2p_start %u %"PRIu64" %d", p2p_request, identity, SteamBroker_GetGoldSrcAppId() );
 	if( SteamBroker_SendFrame( command, length ))
@@ -783,6 +821,11 @@ qboolean SteamBroker_StartP2P( netadr_t peer )
 	}
 	SteamBroker_ClearP2P();
 	return false;
+}
+
+qboolean SteamBroker_P2PReady( netadr_t peer )
+{
+	return p2p_request && p2p_ready && NET_CompareAdr( peer, p2p_peer );
 }
 
 void SteamBroker_SendP2P( netadr_t peer, const void *data, size_t length )
@@ -1359,6 +1402,11 @@ void Test_RunSteamConnection( void )
 	p2p_packet_t saved_packets[64];
 	netadr_t saved_peer = p2p_peer;
 	uint32_t saved_request = p2p_request;
+	qboolean saved_ready = p2p_ready;
+	double saved_deadline = p2p_deadline;
+	connstate_t saved_p2p_state = cls.state;
+	int saved_retry = cls.connect_retry;
+	double saved_connect_time = cls.connect_time;
 	unsigned int saved_read = p2p_read, saved_write = p2p_write;
 	memcpy( saved_packets, p2p_packets, sizeof( saved_packets ));
 	SteamBroker_ClearP2P();
@@ -1366,6 +1414,22 @@ void Test_RunSteamConnection( void )
 	NET_NetadrSetType( &p2p_peer, NA_STEAM_P2P );
 	memcpy( p2p_peer.ip6_1, &test_peer, sizeof( test_peer ));
 	p2p_request = 7;
+	cls.state = ca_connecting;
+	cls.connect_retry = 5;
+	TASSERT( !SteamBroker_P2PReady( p2p_peer ));
+	SteamBroker_P2PState( 6, "ready" );
+	TASSERT( !SteamBroker_P2PReady( p2p_peer ));
+	TASSERT_EQi( cls.connect_retry, 5 );
+	SteamBroker_P2PState( 7, "gathered local_candidates=1" );
+	TASSERT( !SteamBroker_P2PReady( p2p_peer ));
+	SteamBroker_P2PState( 7, "ready" );
+	TASSERT( SteamBroker_P2PReady( p2p_peer ));
+	TASSERT_EQi( cls.connect_retry, 0 );
+	TASSERT( cls.connect_time == MAX_HEARTBEAT );
+	TASSERT( p2p_deadline == 0 );
+	SteamBroker_P2PState( 7, "rechecking" );
+	TASSERT( !SteamBroker_P2PReady( p2p_peer ));
+	TASSERT( p2p_deadline > 0 );
 	byte payload[25] = { 0 }, received[4000];
 	netadr_t received_peer;
 	size_t received_size = 0;
@@ -1392,9 +1456,15 @@ void Test_RunSteamConnection( void )
 	for( int index = 0; index < 65; index++ ) SteamBroker_ReceiveP2P( payload, sizeof( payload ));
 	TASSERT_EQi( p2p_write - p2p_read, 64 );
 	SteamBroker_ClearP2P();
+	TASSERT( !p2p_ready && p2p_deadline == 0 );
 	TASSERT( !SteamBroker_GetP2P( &received_peer, received, &received_size ));
 	p2p_peer = saved_peer;
 	p2p_request = saved_request;
+	p2p_ready = saved_ready;
+	p2p_deadline = saved_deadline;
+	cls.state = saved_p2p_state;
+	cls.connect_retry = saved_retry;
+	cls.connect_time = saved_connect_time;
 	p2p_read = saved_read;
 	p2p_write = saved_write;
 	memcpy( p2p_packets, saved_packets, sizeof( saved_packets ));
@@ -1495,6 +1565,12 @@ void SteamBroker_Frame( void )
 	case SBRK_STATE_GAMESHUTDOWN:
 		// do nothing, just wait for game shutdown
 		break;
+	}
+	if( p2p_request && !p2p_ready && p2p_deadline && Platform_DoubleTime() >= p2p_deadline )
+	{
+		Con_Printf( S_ERROR "Steam P2P: broker negotiation timed out\n" );
+		SteamBroker_TerminateGameConnection();
+		Cbuf_AddText( "disconnect\n" );
 	}
 }
 

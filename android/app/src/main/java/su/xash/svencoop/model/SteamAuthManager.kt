@@ -258,10 +258,18 @@ class SteamAuthManager(private val ctx: Context) {
         val request = parts.getOrNull(1)?.toLongOrNull()?.takeIf { it in 1L..0xffffffffL } ?: return
         val peer = parts.getOrNull(2)?.toLongOrNull() ?: 0L
         val app = parts.getOrNull(3)?.toIntOrNull() ?: 0
-        if (parts.size != 4 || !connected || !loggedIn || peer <= 0 || peer == currentSteamId || app != APPID) {
-            writeSbrkText(outs, "sb_p2p_error $request invalid_session")
+        val invalid = when {
+            parts.size != 4 || peer <= 0 -> "invalid_request"
+            !connected || !loggedIn -> "steam_not_logged_in"
+            peer == currentSteamId -> "self_target: use the hosting friend's SteamID, not the logged-in account"
+            app != APPID -> "unsupported_app"
+            else -> null
+        }
+        if (invalid != null) {
+            writeSbrkText(outs, "sb_p2p_error $request $invalid")
             return
         }
+        writeSbrkText(outs, "sb_p2p_state $request starting")
         closeP2P()
         try {
             val steamId = currentSteamId
@@ -282,6 +290,11 @@ class SteamAuthManager(private val ctx: Context) {
                 },
                 { reason ->
                     try { writeSbrkText(outs, "sb_p2p_error $request $reason") } catch (_: Exception) {}
+                },
+                { state ->
+                    val binding = p2pBinding
+                    if (binding != null && binding.owner === owner && binding.request == request && binding.peer == peer)
+                        writeSbrkText(outs, "sb_p2p_state $request $state")
                 })
             synchronized(p2pLock) {
                 if (!connected || !loggedIn || currentSteamId != steamId) {

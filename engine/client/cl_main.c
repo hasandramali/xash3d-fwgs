@@ -1679,6 +1679,8 @@ static void CL_CheckForResend( void )
 			CL_Disconnect();
 			return;
 		}
+		if( !SteamBroker_P2PReady( adr ))
+			return;
 	}
 
 	if( cls.bandwidth_test.started )

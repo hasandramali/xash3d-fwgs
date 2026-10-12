@@ -18,12 +18,14 @@ public final class SteamP2PSession implements AutoCloseable {
     public interface SignalSink { void send(byte[] signal) throws Exception; }
     public interface PacketSink { void receive(byte[] payload) throws Exception; }
     public interface FailureSink { void fail(String reason); }
+    public interface ProgressSink { void update(String state) throws Exception; }
     private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     private final long local, peer;
     private final int app;
     private final SignalSink signaling;
     private final PacketSink packets;
     private final FailureSink failures;
+    private final ProgressSink progress;
     private final SecureRandom random = new SecureRandom();
     private final String username = token(), password = token();
     private final DatagramSocket socket;
@@ -32,6 +34,7 @@ public final class SteamP2PSession implements AutoCloseable {
     private volatile boolean closed;
     private long lastConnectivity = System.nanoTime();
     private Path selected;
+    private int signalCount, rejectedSignals;
 
     private static final class Path {
         InetSocketAddress address;
@@ -41,9 +44,14 @@ public final class SteamP2PSession implements AutoCloseable {
     }
 
     public SteamP2PSession(long local, long peer, int app, SignalSink signaling, PacketSink packets, FailureSink failures) throws Exception {
+        this(local, peer, app, signaling, packets, failures, state -> {});
+    }
+
+    public SteamP2PSession(long local, long peer, int app, SignalSink signaling, PacketSink packets, FailureSink failures, ProgressSink progress) throws Exception {
         if (local <= 0 || peer <= 0 || peer == local) throw new IllegalArgumentException("P2P identity");
         this.local = local; this.peer = peer; this.app = app;
         this.signaling = signaling; this.packets = packets; this.failures = failures;
+        this.progress = progress;
         socket = new DatagramSocket(new InetSocketAddress("0.0.0.0", 0));
         socket.setSoTimeout(100);
     }
@@ -60,18 +68,36 @@ public final class SteamP2PSession implements AutoCloseable {
 
     public synchronized void receiveSignal(int message, byte[] data) {
         if (closed) return;
+        signalCount++;
         try {
             SteamP2PWire.Signal signal = SteamP2PWire.decodeSignal(data, message == 5435);
             if (signal.source != peer || signal.destination != local ||
-                    signal.app != app || (signal.secondaryApp != 0 && signal.secondaryApp != app)) return;
+                    signal.app != app || (signal.secondaryApp != 0 && signal.secondaryApp != app)) {
+                rejectedSignals++;
+                if (signal.source != peer) progress.update("signal_rejected peer_identity");
+                else if (signal.destination != local) progress.update("signal_rejected local_identity");
+                else progress.update("signal_rejected app=" + signal.app + " secondary=" + signal.secondaryApp);
+                return;
+            }
             if (message == 5435) { fail("Steam peer rejected the session (" + signal.error + ")"); return; }
-            if (signal.candidate == null) return;
+            if (signal.candidate == null) {
+                progress.update("signal_without_candidate");
+                return;
+            }
             SteamP2PWire.Candidate candidate = SteamP2PWire.decodeCandidate(signal.candidate);
-            if (!"udp".equals(candidate.protocol) || candidate.username.length() != 16 || paths.size() >= 32) return;
+            if (!"udp".equals(candidate.protocol) || candidate.username.length() != 16 || paths.size() >= 32) {
+                rejectedSignals++;
+                progress.update("candidate_rejected protocol_credentials_or_limit");
+                return;
+            }
             InetSocketAddress address = SteamP2PWire.endpoint(candidate);
             for (Path path : paths) if (path.address.equals(address) && path.username.equals(candidate.username)) return;
             Path path = new Path(); path.address = address; path.username = candidate.username; paths.add(path);
-        } catch (Exception ignored) {}
+            progress.update("checking remote_candidates=" + paths.size());
+        } catch (Exception ignored) {
+            rejectedSignals++;
+            try { progress.update("signal_rejected invalid_encoding_or_endpoint"); } catch (Exception unavailable) {}
+        }
     }
 
     public synchronized void send(byte[] payload) throws Exception {
@@ -101,6 +127,7 @@ public final class SteamP2PSession implements AutoCloseable {
             }
         }
         if (!closed && count == 0) throw new IllegalStateException("No IPv4 interface for Steam P2P");
+        if (!closed) progress.update("gathered local_candidates=" + count);
     }
 
     private synchronized void tick() throws Exception {
@@ -111,8 +138,12 @@ public final class SteamP2PSession implements AutoCloseable {
             path.sent = now;
             transmit(SteamP2PWire.binding(1, path.transaction, path.username + username, null), path.address);
         }
-        if (selected != null && now - selected.proven >= 10_000_000_000L) selected = null;
-        if (selected == null && now - lastConnectivity > 45_000_000_000L) fail("Steam P2P ICE connectivity checks timed out");
+        if (selected != null && now - selected.proven >= 10_000_000_000L) {
+            selected = null;
+            progress.update("rechecking");
+        }
+        if (selected == null && now - lastConnectivity > 45_000_000_000L)
+            fail("Steam P2P ICE timed out: signals=" + signalCount + " rejected=" + rejectedSignals + " candidates=" + paths.size());
     }
 
     private synchronized void incoming(byte[] data, InetSocketAddress address) throws Exception {
@@ -138,7 +169,9 @@ public final class SteamP2PSession implements AutoCloseable {
             }
             accepted.proven = System.nanoTime();
             lastConnectivity = accepted.proven;
+            boolean newlyConnected = selected == null;
             if (selected == null || selected.address.equals(address)) selected = accepted;
+            if (newlyConnected) progress.update("ready");
             while (selected != null && !queued.isEmpty()) transmit(queued.remove(), selected.address);
             return;
         }
