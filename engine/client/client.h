@@ -929,6 +929,7 @@ int CL_DrawStringf( cl_font_t *font, float x, float y, const rgba_t color, int f
 void CL_UnloadProgs( void );
 qboolean CL_LoadProgs( const char *name );
 void CL_LinkUserMessage( char *pszName, const int svc_num, int iSize );
+void CL_RestoreSvenUserMessages( void );
 void CL_DrawHUD( int state );
 void CL_InitEdicts( int maxclients );
 void CL_FreeEdicts( void );

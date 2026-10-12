@@ -808,6 +808,8 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 
 	cls.timestart = Platform_DoubleTime();
 	cls.demowaiting = false;	// server is changed
+	cl_sven_proto = false;
+	CL_SvenSoundCacheReset();
 
 	// wipe the client_t struct
 	if( !cls.changelevel && !cls.changedemo )
@@ -836,10 +838,11 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 		MSG_SeekToBit( msg, sizeof( uint8_t ) << 3, SEEK_CUR ); // quake leftover, coop flag
 
 		Q_strncpy( gamefolder, MSG_ReadString( msg ), sizeof( gamefolder ));
+		cl_sven_proto = !Q_stricmp( gamefolder, "svencoop" );
 
-		if( !Q_stricmp( gamefolder, "svencoop" ))
+		if( cl_sven_proto )
 		{
-			cl_sven_proto = true;
+			CL_RestoreSvenUserMessages();
 		}
 		else
 		{

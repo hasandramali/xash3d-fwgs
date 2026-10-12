@@ -2186,6 +2186,84 @@ void CL_DrawHUD( int state )
 	hud_trace_drawing = false;
 }
 
+static const struct { const char *name; int number; int size; } svenUsrMsgs[] =
+{
+	{ "SelAmmo", 64, 4 }, { "CurWeapon", 65, -1 },
+	{ "Geiger", 66, 1 }, { "Flashlight", 67, 2 }, { "FlashBat", 68, 1 },
+	{ "Health", 69, 4 }, { "Damage", 70, 18 }, { "Battery", 71, 2 },
+	{ "Train", 72, 1 }, { "HudText", 73, -1 }, { "SayText", 74, -1 },
+	{ "TextMsg", 75, -1 }, { "WeaponList", 76, -1 }, { "CustWeapon", 77, -1 },
+	{ "ResetHUD", 78, 1 }, { "InitHUD", 79, -1 }, { "CdAudio", 80, 1 },
+	{ "GameTitle", 81, 1 }, { "DeathMsg", 82, -1 }, { "ScoreInfo", 83, 20 },
+	{ "TeamInfo", 84, -1 }, { "TeamScore", 85, -1 }, { "GameMode", 86, 1 },
+	{ "MOTD", 87, -1 }, { "AmmoPickup", 88, 5 }, { "WeapPickup", 89, -1 },
+	{ "ItemPickup", 90, -1 }, { "HideHUD", 91, 2 }, { "SetFOV", 92, 1 },
+	{ "ShowMenu", 93, -1 }, { "ScreenShake", 94, 6 }, { "ScreenFade", 95, 10 },
+	{ "AmmoX", 96, 5 }, { "Gib", 97, -1 }, { "Spectator", 98, 2 },
+	{ "TE_CUSTOM", 99, -1 }, { "Speaksent", 100, -1 }, { "TimeEnd", 101, 4 },
+	{ "MapList", 102, -1 }, { "CbElec", 103, 1 }, { "EndVote", 104, 0 },
+	{ "VoteMenu", 105, -1 }, { "NextMap", 106, -1 }, { "StartSound", 107, -1 },
+	{ "SoundList", 108, -1 }, { "ToxicCloud", 109, -1 }, { "ShkFlash", 110, 13 },
+	{ "CreateBlood", 111, 14 }, { "GargSplash", 112, 12 }, { "SporeTrail", 113, 3 },
+	{ "TracerDecal", 114, -1 }, { "SRDetonate", 115, 13 }, { "SRPrimed", 116, 5 },
+	{ "SRPrimedOff", 117, 1 }, { "RampSprite", 118, -1 }, { "ShieldRic", 119, 12 },
+	{ "Playlist", 120, -1 }, { "VGUIMenu", 121, 1 }, { "ServerName", 122, -1 },
+	{ "TeamNames", 123, -1 }, { "ServerVer", 124, -1 }, { "ServerBuild", 125, -1 },
+	{ "WeatherFX", 126, 68 }, { "CameraMouse", 127, -1 }, { "Fog", 128, 24 },
+	{ "PrtlUpdt", 129, -1 }, { "ASScriptName", 130, -1 }, { "PrintKB", 131, -1 },
+	{ "InvAdd", 132, -1 }, { "InvRemove", 133, 5 },
+	{ "ViewMode", 134, 1 }, { "ClassicMode", 137, 1 }, { "WeaponSpr", 138, -1 },
+	{ "NumDisplay", 140, -1 }, { "UpdateNum", 141, 5 },
+	{ "ClServerInfo", 147, -1 }, { "VoiceMask", 148, 8 },
+};
+
+void CL_RestoreSvenUserMessages( void )
+{
+	for( int index = 0; index < MAX_USER_MESSAGES; index++ )
+		clgame.msg[index].number = 0;
+	for( int index = 0; index < ARRAYSIZE( svenUsrMsgs ); index++ )
+		CL_LinkUserMessage( (char *)svenUsrMsgs[index].name, svenUsrMsgs[index].number, svenUsrMsgs[index].size );
+}
+
+#if XASH_ENGINE_TESTS
+static int CL_TestSvenMessageHook( const char *name, int size, void *data )
+{
+	return 1;
+}
+
+void Test_RunSvenUserMessages( void )
+{
+	cl_user_message_t saved[MAX_USER_MESSAGES];
+	memcpy( saved, clgame.msg, sizeof( saved ));
+	memset( clgame.msg, 0, sizeof( clgame.msg ));
+	CL_LinkUserMessage( "InitHUD", 74, 0 );
+	CL_LinkUserMessage( "SayText", 73, -1 );
+	CL_LinkUserMessage( "StartSound", 200, -1 );
+	CL_LinkUserMessage( "InvAdd", 201, -1 );
+	CL_LinkUserMessage( "LocalOnly", 202, 2 );
+	clgame.msg[3].func = CL_TestSvenMessageHook;
+	for( int pass = 0; pass < 2; pass++ )
+	{
+		CL_RestoreSvenUserMessages();
+		TASSERT_EQi( clgame.msg[0].number, 79 );
+		TASSERT_EQi( clgame.msg[0].size, -1 );
+		TASSERT_EQi( clgame.msg[1].number, 74 );
+		TASSERT_EQi( clgame.msg[2].number, 107 );
+		TASSERT_EQi( clgame.msg[3].number, 132 );
+		TASSERT( clgame.msg[3].func == CL_TestSvenMessageHook );
+		TASSERT_EQi( clgame.msg[4].number, 0 );
+		for( int index = 0; index < ARRAYSIZE( svenUsrMsgs ); index++ )
+		{
+			int matches = 0;
+			for( int slot = 0; slot < MAX_USER_MESSAGES; slot++ )
+				if( clgame.msg[slot].number == svenUsrMsgs[index].number ) matches++;
+			TASSERT_EQi( matches, 1 );
+		}
+	}
+	memcpy( clgame.msg, saved, sizeof( saved ));
+}
+#endif
+
 static void CL_ClearUserMessage( char *pszName, int svc_num )
 {
 	for( int i = 0; i < MAX_USER_MESSAGES && clgame.msg[i].name[0]; i++ )
@@ -3046,75 +3124,15 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 		return 0;
 	}
 
-	// Sven Co-op servers never send svc_usermessage(39) registrations: they
-	// stream user messages as raw svc bytes (REG_USER_MSG counter starts at
-	// svc_lastmsg=63). Without a registration, clgame.msg[].number stays 0 and
-	// CL_ParseUserMessage's number lookup can never match -> every message fell
-	// into the "unregistered" skip branch and the client DLL handlers (health,
-	// ammo, HUD, MOTD...) were never called. Backfill number/size from the
-	// binary-verified Sven REG_USER_MSG table (steam-refs/sven/server.dll,
-	// wire-anchored in engine.log / buffer.dat decodes) so a hooked message
-	// dispatches to its registered handler. Numbers here are the absolute
-	// svc_num values Sven assigns (index == svc_num - svc_lastmsg); sizes
-	// follow the server table (-1 == variable, u16 length prefix).
+	for( int index = 0; index < ARRAYSIZE( svenUsrMsgs ); index++ )
 	{
-		static const struct { const char *name; int number; int size; } svenUsrMsgs[] =
+		if( !Q_stricmp( svenUsrMsgs[index].name, pszName ))
 		{
-			{ "CurWeapon",    65, -1 },
-			{ "Geiger",      66,  1 },
-			{ "Flashlight",  67,  2 },
-			{ "FlashBat",    68,  1 },
-			{ "Health",      69,  4 },
-			{ "Damage",      70, 18 },
-			{ "Battery",     71,  2 },
-			{ "Train",       72,  1 },
-			{ "HideHUD",     91,  2 },
-			{ "ShowMenu",    93, -1 },
-			{ "SayText",     74, -1 },
-			{ "TextMsg",     75, -1 },
-			{ "WeaponList",  76, -1 },
-			{ "CustWeapon",  77, -1 },
-			{ "InvAdd",     132, -1 },
-			{ "InvRemove",  133,  5 },
-			{ "ResetHUD",    78,  1 },
-			{ "CdAudio",     80,  1 },
-			{ "GameTitle",   81,  1 },
-			{ "ScoreInfo",   83, 20 },
-			{ "GameMode",    86,  1 },
-			{ "MOTD",        87, -1 },
-			{ "AmmoPickup",  88,  5 },
-			{ "WeapPickup",  89, -1 },
-			{ "SetFOV",      92,  1 },
-			{ "ScreenShake", 94,  6 },
-			{ "ScreenFade",  95, 10 },
-			{ "AmmoX",       96,  5 },
-			{ "Spectator",   98,  2 },
-			{ "TimeEnd",    101,  4 },
-			{ "MapList",    102, -1 },
-			{ "NextMap",    106, -1 },
-			{ "SoundList",  107, -1 },
-			{ "VGUIMenu",   121,  1 },
-			{ "ServerName", 122, -1 },
-			{ "ViewMode",   134,  1 },
-			{ "ClassicMode", 137,  1 },
-			{ "ClServerInfo", 147, -1 },
-			{ "VoiceMask",  148,  8 },
-			{ "WeaponSpr",  138, -1 },
-			{ "NumDisplay", 140, -1 },
-			{ "UpdateNum",  141,  5 },
-		};
-
-		for( int t = 0; t < ARRAYSIZE( svenUsrMsgs ); t++ )
-		{
-			if( !Q_stricmp( svenUsrMsgs[t].name, pszName ))
-			{
-				clgame.msg[i].number = svenUsrMsgs[t].number;
-				clgame.msg[i].size   = svenUsrMsgs[t].size;
-				break;
-			}
+			clgame.msg[i].number = svenUsrMsgs[index].number;
+			clgame.msg[i].size = svenUsrMsgs[index].size;
+			break;
 		}
 	}
-
 	// hook new message
 	Q_strncpy( clgame.msg[i].name, pszName, sizeof( clgame.msg[i].name ));
 	clgame.msg[i].func = pfn;
