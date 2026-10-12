@@ -1959,6 +1959,8 @@ static void CL_SendDisconnectMessage( connprotocol_t proto )
 size_t CL_GetSplitSize( void )
 {
 	size_t splitsize = (int)cl_dlmax.value;
+	if( NET_NetadrType( &cls.serveradr ) == NA_STEAM_P2P )
+		return NET_STEAM_P2P_MTU;
 
 	if( !FBitSet( cls.extensions, NET_EXT_SPLITSIZE ))
 		return 1400;

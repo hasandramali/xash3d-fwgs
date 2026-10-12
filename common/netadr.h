@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // a1ba: copied from Quake-2/qcommon/qcommon.h and modified to support IPv6
 
 #define	PORT_ANY	-1
+#define NET_STEAM_P2P_MTU 1200
 
 typedef enum netadrtype_e
 {

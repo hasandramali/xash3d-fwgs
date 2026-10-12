@@ -837,7 +837,7 @@ void SteamBroker_SendP2P( netadr_t peer, const void *data, size_t length )
 	uint64_t identity;
 	if( !p2p_request || !NET_CompareAdr( peer, p2p_peer ) || !length )
 		return;
-	if( length > 1200 )
+	if( length > NET_STEAM_P2P_MTU )
 	{
 		Con_DPrintf( S_WARN "Steam P2P: packet exceeds unreliable MTU (%zu)\n", length );
 		return;

@@ -20,6 +20,7 @@ GNU General Public License for more details.
 #include "ipv6text.h"
 #include "net_ws_private.h"
 #include "server.h" // sv_cheats
+#include "tests.h"
 #include <inttypes.h>
 
 static qboolean NET_ParseSteamAddress( const char *text, netadr_t *address )
@@ -1359,6 +1360,56 @@ static qboolean NET_GetLong( byte *pData, size_t size, size_t *outSize, size_t s
 
 	return false;
 }
+
+#if XASH_ENGINE_TESTS && !XASH_DEDICATED
+void Test_RunSteamSplitPackets( void )
+{
+	LONGPACKET saved_split = net.split;
+	int saved_flags[NET_MAX_FRAGMENTS];
+	netadr_t saved_address = cls.serveradr;
+	uint saved_extensions = cls.extensions;
+	byte payload[2068], packet[NET_MAX_FRAGMENT];
+	memcpy( saved_flags, net.split_flags, sizeof( saved_flags ));
+	cls.extensions = 0;
+	for( size_t index = 0; index < sizeof( payload ); index++ ) payload[index] = (byte)( index * 17 + 3 );
+	for( int transport = 0; transport < 2; transport++ )
+	{
+		NET_NetadrSetType( &cls.serveradr, transport ? NA_IP : NA_STEAM_P2P );
+		size_t mtu = CL_GetSplitSize();
+		TASSERT_EQi( mtu, transport ? 1400 : NET_STEAM_P2P_MTU );
+		size_t body_size = ( transport ? 1400 : 1200 ) - sizeof( SPLITPACKET );
+		for( int order = 0; order < 2; order++ )
+		{
+			net.split.current_sequence = -1;
+			size_t result_size = 0;
+			for( int arrival = 0; arrival < 2; arrival++ )
+			{
+				int fragment = order ? 1 - arrival : arrival;
+				size_t offset = fragment * body_size;
+				size_t size = Q_min( body_size, sizeof( payload ) - offset );
+				SPLITPACKET header = { NET_HEADER_SPLITPACKET, 100 + order + transport * 2, ( fragment << 8 ) | 2 };
+				memcpy( packet, &header, sizeof( header ));
+				memcpy( packet + sizeof( header ), payload + offset, size );
+				if( arrival == 0 )
+				{
+					TASSERT( !NET_GetLong( packet, size + sizeof( header ), &result_size, mtu, PROTO_GOLDSRC ));
+					TASSERT( !NET_GetLong( packet, size + sizeof( header ), &result_size, mtu, PROTO_GOLDSRC ));
+				}
+				else
+				{
+					TASSERT( NET_GetLong( packet, size + sizeof( header ), &result_size, mtu, PROTO_GOLDSRC ));
+					TASSERT_EQi( result_size, sizeof( payload ));
+					TASSERT( !memcmp( packet, payload, sizeof( payload )));
+				}
+			}
+		}
+	}
+	net.split = saved_split;
+	memcpy( net.split_flags, saved_flags, sizeof( saved_flags ));
+	cls.serveradr = saved_address;
+	cls.extensions = saved_extensions;
+}
+#endif
 
 /*
 ==================

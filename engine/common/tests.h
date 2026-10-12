@@ -49,6 +49,7 @@ void Test_RunWeaponListFix( void );
 void Test_RunVoice( void );
 void Test_RunSteamConnection( void );
 void Test_RunSteamP2PProtocol( void );
+void Test_RunSteamSplitPackets( void );
 void Test_RunIPFilter( void );
 void Test_RunQueryRateLimit( void );
 void Test_RunChallenge( void );
@@ -99,6 +100,7 @@ void Test_RunWindowInsets( void );
 	Test_RunVoice(); \
 	Test_RunSteamConnection(); \
 	Test_RunSteamP2PProtocol(); \
+	Test_RunSteamSplitPackets(); \
 	Test_RunVOX(); \
 	Test_RunTitles();
 
