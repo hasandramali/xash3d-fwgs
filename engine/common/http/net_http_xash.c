@@ -1214,7 +1214,8 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 					if( body_len > 0 )
 					{
-						if( !HTTP_FileSaveReceivedData( curfile, body_off, body_len ))
+						if( !HTTP_FileSaveReceivedData( curfile, body_off, body_len ) ||
+							curfile->pfn_process != HTTP_FileProcessStream )
 							return 0;
 					}
 				}
@@ -1227,7 +1228,8 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 			memcpy( curfile->buf, buf, res );
 
 			// data download
-			if( !HTTP_FileSaveReceivedData( curfile, 0, res ))
+			if( !HTTP_FileSaveReceivedData( curfile, 0, res ) ||
+				curfile->pfn_process != HTTP_FileProcessStream )
 				return 0;
 
 			// as after it will run in same frame
@@ -1286,7 +1288,7 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 			if( err != WSAEWOULDBLOCK && err != WSAEINPROGRESS )
 			{
-				Con_Reportf( "problem downloading %s: %s\n", curfile->path, NET_ErrorString( ));
+				Con_Reportf( "problem downloading %s: %s\n", curfile->to_memory ? curfile->url : curfile->path, NET_ErrorString( ));
 				HTTP_FreeFile( curfile, true );
 				return 0;
 			}
