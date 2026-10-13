@@ -1010,6 +1010,11 @@ pfnCheckGameDll
 */
 static int GAME_EXPORT pfnCheckGameDll( void )
 {
+	int developer = DEV_NONE;
+
+	if( !Sys_GetIntFromCmdLine( "-dev", &developer ) || developer < DEV_EXTENDED )
+		return false;
+
 #ifdef XASH_INTERNAL_GAMELIBS
 	return true;
 #else

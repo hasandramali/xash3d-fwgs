@@ -128,6 +128,7 @@ static struct touch_s
 
 	// other features
 	qboolean clientonly;
+	qboolean numericalmenu;
 	rgba_t scolor;
 	int swidth;
 	qboolean precision;
@@ -198,6 +199,7 @@ static void IN_TouchCheckCoords( float *x1, float *y1, float *x2, float *y2  );
 static void IN_TouchEditClear( void );
 static void Touch_InitConfig( void );
 static void Touch_ResetSticks( void );
+static void Touch_NumericalMenuExit_f( void );
 
 void Touch_NotifyResize( void )
 {
@@ -630,6 +632,9 @@ static void Touch_DisableEdit_f( void )
 
 void Touch_SetClientOnly( byte state )
 {
+	if( touch.numericalmenu )
+		Touch_NumericalMenuExit_f();
+
 	// TODO: fix clash with vgui cursors
 	if( touch.clientonly == state )
 		return;
@@ -777,6 +782,7 @@ static void Touch_ClearList( touchbuttonlist_t *list )
 
 static void Touch_RemoveAll_f( void )
 {
+	Touch_NumericalMenuExit_f();
 	IN_TouchEditClear();
 	Touch_ClearList( &touch.list_user );
 	touch.config_aspect_ratio = 0.0f;
@@ -1146,6 +1152,94 @@ static void Touch_AddButton_f( void )
 	}
 }
 
+static void Touch_NumericalMenuRelease( void )
+{
+	for( touch_button_t *button = touch.list_user.first; button; button = button->next )
+	{
+		if( button->finger >= 0 && button->type == touch_command && button->command[0] == '+' && !button->latched )
+		{
+			char command[256];
+			Q_snprintf( command, sizeof( command ), "-%s\n", button->command + 1 );
+			Touch_AddButtonCommand( button, command );
+		}
+		Touch_ReleaseStick( button );
+		Touch_ReleaseLatch( button );
+		button->finger = -1;
+	}
+}
+
+static void Touch_NumericalMenuExit_f( void )
+{
+	if( !touch.numericalmenu )
+		return;
+
+	touch.numericalmenu = false;
+	Touch_NumericalMenuRelease();
+	Touch_RemoveButton( "_numbers_*", true );
+	Touch_SetClientOnly( false );
+}
+
+static void Touch_NumericalMenu_f( void )
+{
+	rgba_t color;
+	touch_button_t *button;
+
+	if( !touch.initialized || touch.numericalmenu || touch.clientonly )
+		return;
+
+	Touch_InitConfig();
+	Touch_NumericalMenuRelease();
+	Touch_SetClientOnly( true );
+	touch.numericalmenu = true;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot1", "touch_default/key_1", "slot1", 0.360000, 0.142222, 0.460000, 0.320000, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot2", "touch_default/key_2", "slot2", 0.460000, 0.142222, 0.560000, 0.320000, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot3", "touch_default/key_3", "slot3", 0.560000, 0.142222, 0.660000, 0.320000, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot4", "touch_default/key_4", "slot4", 0.360000, 0.320000, 0.460000, 0.497778, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot5", "touch_default/key_5", "slot5", 0.460000, 0.320000, 0.560000, 0.497778, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot6", "touch_default/key_6", "slot6", 0.560000, 0.320000, 0.660000, 0.497778, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot7", "touch_default/key_7", "slot7", 0.360000, 0.497778, 0.460000, 0.675556, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot8", "touch_default/key_8", "slot8", 0.460000, 0.497778, 0.560000, 0.675556, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot9", "touch_default/key_9", "slot9", 0.560000, 0.497778, 0.660000, 0.675556, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 150 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_slot10", "touch_default/key_0", "slot10", 0.460000, 0.675556, 0.560000, 0.853333, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 255 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_hide", "touch_default/next_weap", "numericalmenu_exit", 0.440000, 0.879260, 0.520000, 1, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	button->aspect = 1;
+	button->y2 = button->y1 + ( button->x2 - button->x1 ) / Touch_ButtonAspectRatio() * button->aspect;
+	MakeRGBA( color, 255, 255, 255, 255 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_look", "", "_look", 0.66, -0.0454545, 1, 1, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 255, 255, 255, 255 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_move", "", "_move", 0, 0, 0.34, 1, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 200, 200, 200, 200 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_duck", "touch_default/crouch", "+duck", 0.88, 0.727273, 1, 1, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+	MakeRGBA( color, 200, 200, 200, 200 );
+	button = Touch_AddButton( &touch.list_user, "_numbers_jump", "touch_default/jump", "+jump", 0.88, 0.545455, 1, 0.818182, color, true );
+	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
+}
+
 static void Touch_EnableEdit_f( void )
 {
 	Touch_ResetSticks();
@@ -1253,6 +1347,7 @@ void Touch_Init( void )
 	touch.state = state_none;
 	touch.showeditbuttons = true;
 	touch.clientonly = false;
+	touch.numericalmenu = false;
 	touch.precision = false;
 	MakeRGBA( touch.scolor, 255, 255, 255, 255 );
 	touch.swidth = 1;
@@ -1265,23 +1360,9 @@ void Touch_Init( void )
 
 	// fill default buttons list
 	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "look", "", "_look", 0.52, -0.0454545, 1, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "move", "", "_move", 0, -0, 0.5, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "attack", "touch_default/shoot", "+attack", 0.76, 0.545455, 0.88, 0.818182, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "duck", "touch_default/crouch", "+duck", 0.88, 0.727273, 1, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "edit", "touch_default/settings", "touch_enableedit", 0.48, 0, 0.56, 0.181818, color, 0, 0, 32 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "menu", "touch_default/menu", "cancelselect", 0.4, 0, 0.48, 0.181818, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "tduck", "touch_default/tduck", ";+duck", 0.82, 0.863636, 0.88, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "jump", "touch_default/jump", "+jump", 0.88, 0.545455, 1, 0.818182, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "messagemode", "touch_default/keyboard", "messagemode", 0.56, 0, 0.64, 0.181818, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "attack2", "touch_default/shoot_alt", "+attack2", 0.9, 0.318182, 1, 0.545455, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 255 );
@@ -1294,20 +1375,38 @@ void Touch_Init( void )
 	Touch_AddDefaultButton( "invprev", "touch_default/prev_weap", "invprev", 0.82, 0, 0.9, 0.136364, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 51 );
 	Touch_AddDefaultButton( "altattack", "gfx/touch/alt_fire.png", "+alt1", 0.72, 0, 0.8, 0.181818, color, 0, 0, 128 );
-	MakeRGBA( color, 255, 255, 255, 67 );
-	Touch_AddDefaultButton( "cmdmenu", "touch_default/cmdmenu.png", "+commandmenu", 0.32, 0, 0.4, 0.181818, color, 0, 0, 128 );
 	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "medic", "touch_default/microphone", "medic", 0.34, 0.863636, 0.4, 1, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 70 );
 	Touch_AddDefaultButton( "drop", "touch_default/edit_close.png", "drop", 0.4, 0.818182, 0.48, 1, color, 0, 0, 128 );
 	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "show_numbers", "touch_default/show_weapons", "exec touch_default/numbers.cfg", 0.48, 0.818182, 0.56, 1, color, 0, 0, 0 );
+	Touch_AddDefaultButton( "show_numbers", "touch_default/show_weapons", "numericalmenu", 0.48, 0.818182, 0.56, 1, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "scores", "touch_default/map", "+showscores", 0.56, 0.818182, 0.64, 1, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "flashlight", "touch_default/flash_light_filled", "impulse 100", 0.64, 0.863636, 0.7, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "messagemode", "touch_default/keyboard", "messagemode", 0.58, 0, 0.66, 0.181818, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "edit", "touch_default/settings", "touch_enableedit", 0.5, 0, 0.58, 0.181818, color, 0, 0, 32 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "menu", "touch_default/menu", "cancelselect", 0.42, 0, 0.5, 0.181818, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 67 );
+	Touch_AddDefaultButton( "cmdmenu", "touch_default/cmdmenu.png", "+commandmenu", 0.34, 0, 0.42, 0.181818, color, 0, 0, 128 );
+	MakeRGBA( color, 255, 255, 255, 67 );
+	Touch_AddDefaultButton( "sc_chassecam", "touch_default/edit_show.png", "sc_chasecam", 0.26, 0, 0.34, 0.181818, color, 0, 0, 160 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "look", "", "_look", 0.66, -0.0454545, 1, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "move", "", "_move", 0, 0, 0.34, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 200, 200, 200, 200 );
+	Touch_AddDefaultButton( "duck", "touch_default/crouch", "+duck", 0.88, 0.727273, 1, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 200, 200, 200, 200 );
+	Touch_AddDefaultButton( "jump", "touch_default/jump", "+jump", 0.88, 0.545455, 1, 0.818182, color, 0, 0, 0 );
 
 	Cmd_AddCommand( "touch_addbutton", Touch_AddButton_f, "add native touch button" );
+	Cmd_AddRestrictedCommand( "numericalmenu", Touch_NumericalMenu_f, "open the touch slot menu" );
+	Cmd_AddRestrictedCommand( "numericalmenu_exit", Touch_NumericalMenuExit_f, "close the touch slot menu" );
 	Cmd_AddCommand( "touch_removebutton", IN_TouchRemoveButton_f, "remove native touch button" );
 	Cmd_AddRestrictedCommand( "touch_enableedit", Touch_EnableEdit_f, "enable button editing mode" );
 	Cmd_AddRestrictedCommand( "touch_disableedit", Touch_DisableEdit_f, "disable button editing mode" );
@@ -2593,6 +2692,8 @@ void Touch_Shutdown( void )
 		return;
 	Touch_RemoveAll_f();
 	Cmd_RemoveCommand( "touch_addbutton" );
+	Cmd_RemoveCommand( "numericalmenu" );
+	Cmd_RemoveCommand( "numericalmenu_exit" );
 	Cmd_RemoveCommand( "touch_removebutton" );
 	Cmd_RemoveCommand( "touch_enableedit" );
 	Cmd_RemoveCommand( "touch_disableedit" );

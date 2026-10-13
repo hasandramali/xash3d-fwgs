@@ -8,25 +8,6 @@ plugins {
 	alias(libs.plugins.android.application)
 }
 
-val prepareTouchNumbers by tasks.registering {
-	val source = rootProject.file("../numbers.cfg")
-	val destination = rootProject.file("../3rdparty/extras/xash-extras/touch_default")
-	inputs.file(source)
-	outputs.file(destination.resolve("numbers.cfg"))
-	doLast {
-		check(source.isFile && destination.isDirectory) {
-			"numbers.cfg or xash-extras is missing; clone the repository with all submodules before building"
-		}
-		source.copyTo(destination.resolve("numbers.cfg"), overwrite = true)
-	}
-}
-
-tasks.configureEach {
-	if (name == "preBuild" || (name.startsWith("merge") && name.endsWith("Assets"))) {
-		dependsOn(prepareTouchNumbers)
-	}
-}
-
 extensions.configure<ApplicationExtension> {
 	namespace = "su.xash.svencoop"
 	ndkVersion = "29.0.14206865"
