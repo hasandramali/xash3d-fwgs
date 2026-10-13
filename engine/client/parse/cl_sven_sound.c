@@ -25,6 +25,7 @@ static struct
 static int svenPendingCount;
 static sound_t svenSoundHandles[SVEN_SOUND_COUNT];
 static qboolean svenSoundsPrecached;
+static qboolean svenFreshTable;
 
 static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed );
 
@@ -105,6 +106,7 @@ void CL_SvenSoundCacheReset( void )
 	svenRequestSignon = -1;
 	svenPendingCount = 0;
 	svenSoundsPrecached = false;
+	svenFreshTable = false;
 	memset( &svenSoundTable, 0, sizeof( svenSoundTable ));
 }
 
@@ -141,6 +143,7 @@ static void CL_LoadSvenSoundCache( void )
 		svenRequestSignon = cls.signon;
 	}
 	if( svenSoundLoaded || host.realtime < svenNextLoad ) return;
+	if( !cls.demoplayback && !Host_IsLocalClient() && !svenFreshTable ) return;
 	svenNextLoad = host.realtime + 1.0;
 	buffer = FS_LoadFile( path, &size, false );
 	if( !buffer ) return;
@@ -201,7 +204,13 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 		}
 		return;
 	}
+	if( Q_strcmp( svenSoundMap, map ))
+	{
+		CL_SvenSoundCacheReset();
+		Q_strncpy( svenSoundMap, map, sizeof( svenSoundMap ));
+	}
 	svenSoundLoaded = false;
+	svenFreshTable = true;
 	svenSoundsPrecached = false;
 	svenNextLoad = 0;
 	CL_LoadSvenSoundCache();
@@ -209,8 +218,13 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 
 static void CL_SvenSoundCacheFlush( void )
 {
+	qboolean fresh = svenFreshTable;
+	char map[MAX_QPATH];
+	CL_SvenSoundMapName( map, sizeof( map ));
 	S_StopAllSounds( true );
 	CL_SvenSoundCacheReset();
+	Q_strncpy( svenSoundMap, map, sizeof( svenSoundMap ));
+	svenFreshTable = fresh;
 	CL_LoadSvenSoundCache();
 }
 
@@ -467,7 +481,9 @@ static void Test_SvenSoundPending( void )
 	TASSERT_EQi( svenPendingCount, 128 );
 	TASSERT_EQi( svenPending[0].event.index, 4 );
 	Q_strncpy( svenRequestedMap, "test", sizeof( svenRequestedMap ));
+	svenFreshTable = true;
 	CL_SvenSoundCacheReset();
+	TASSERT( !svenFreshTable );
 	TASSERT_EQi( svenPendingCount, 0 );
 	TASSERT_EQi( svenRequestedMap[0], 0 );
 }

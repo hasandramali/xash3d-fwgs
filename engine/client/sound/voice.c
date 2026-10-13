@@ -981,6 +981,9 @@ void Voice_AddIncomingData( int ent, const byte *data, uint size, uint frames )
 	int samples = 0;
 	int ofs = 0;
 
+	if( !voice.initialized && cl_sven_proto && cls.net_protocol == PROTO_GOLDSRC && voice_enable.value
+		&& ent > 0 && ent <= cl.maxclients && data && size >= 12 )
+		Voice_Init( "", 5, false );
 	if( !voice.initialized || !voice_enable.value )
 		return;
 

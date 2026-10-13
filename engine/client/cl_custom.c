@@ -136,7 +136,7 @@ qboolean CL_CheckFile( sizebuf_t *msg, resource_t *pResource )
 
 	host.downloadcount++;
 
-	if( cl.http_download )
+	if( cl.http_download && !( cl_sven_proto && !Q_strnicmp( filepath, "maps/soundcache/", 16 )))
 	{
 		HTTP_AddDownload( filepath, pResource->nDownloadSize, true, pResource );
 	}
