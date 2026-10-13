@@ -641,6 +641,16 @@ def configure(conf):
 		conf.add_subproject(i.name)
 
 def build(bld):
+	if bld.env.CLIENT:
+		source = bld.path.find_resource('numbers.cfg')
+		extras = bld.path.find_dir('3rdparty/extras/xash-extras/touch_default')
+		if not source or not extras:
+			bld.fatal('numbers.cfg or xash-extras is missing; clone the repository with all submodules before building')
+		target = extras.make_node('numbers.cfg')
+		data = source.read('rb')
+		if not target.exists() or target.read('rb') != data:
+			target.write(data, 'wb')
+
 	# enable progress bar mode if stdout is a terminal
 	if not bld.progress_bar and sys.stdout.isatty():
 		bld.progress_bar = 1

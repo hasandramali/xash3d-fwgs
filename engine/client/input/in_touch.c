@@ -167,7 +167,7 @@ static CVAR_DEFINE_AUTO( touch_highlight_b, "1.0", 0, "highlight b color" );
 static CVAR_DEFINE_AUTO( touch_highlight_a, "1.0", 0, "highlight alpha" );
 static CVAR_DEFINE_AUTO( touch_dpad_radius, "1.0", FCVAR_FILTERABLE, "dpad radius multiplier" );
 static CVAR_DEFINE_AUTO( touch_joy_radius, "1.0", FCVAR_FILTERABLE, "joy radius multiplier" );
-static CVAR_DEFINE_AUTO( touch_move_indicator, "0.0", FCVAR_FILTERABLE, "indicate move events (0 to disable)" );
+static CVAR_DEFINE_AUTO( touch_move_indicator, "1", FCVAR_FILTERABLE, "indicate move events (0 to disable)" );
 static CVAR_DEFINE_AUTO( touch_joy_texture, "touch_default/joy", FCVAR_FILTERABLE, "texture for move indicator");
 static CVAR_DEFINE_AUTO( touch_stick_texture, "gfx/touch/stick_thumb", FCVAR_FILTERABLE, "texture for analog stick thumb" );
 static CVAR_DEFINE_AUTO( touch_safearea, "1", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "keep touch controls inside the screen safe area, away from display cutouts" );
@@ -1022,6 +1022,7 @@ void Touch_AddClientButton( const char *name, const char *texture, const char *c
 
 static void Touch_LoadDefaults_f( void )
 {
+	touch.config_aspect_ratio = 0.45f;
 	for( int i = 0; i < g_DefaultButtonsLength; i++ )
 	{
 		touch_button_t *button;
@@ -1030,7 +1031,8 @@ static void Touch_LoadDefaults_f( void )
 			  x2 = g_DefaultButtons[i].x2,
 			  y2 = g_DefaultButtons[i].y2;
 
-		IN_TouchCheckCoords( &x1, &y1, &x2, &y2 );
+		if( g_DefaultButtons[i].round != round_none )
+			IN_TouchCheckCoords( &x1, &y1, &x2, &y2 );
 
 		if( g_DefaultButtons[i].aspect && g_DefaultButtons[i].round == round_aspect )
 		{
@@ -1040,7 +1042,8 @@ static void Touch_LoadDefaults_f( void )
 				y2 = y1 + (( x2 - x1 ) / Touch_ButtonAspectRatio( )) * g_DefaultButtons[i].aspect;
 		}
 
-		IN_TouchCheckCoords( &x1, &y1, &x2, &y2 );
+		if( g_DefaultButtons[i].round != round_none )
+			IN_TouchCheckCoords( &x1, &y1, &x2, &y2 );
 
 		button = Touch_AddButton( &touch.list_user, g_DefaultButtons[i].name, g_DefaultButtons[i].texture, g_DefaultButtons[i].command, x1, y1, x2, y2, g_DefaultButtons[i].color, true );
 		SetBits( button->flags, g_DefaultButtons[i].flags );
@@ -1262,27 +1265,47 @@ void Touch_Init( void )
 
 	// fill default buttons list
 	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "look", "", "_look", 0.500000, 0.000000, 1.000000, 1, color, 0, 0, 0 );
-	Touch_AddDefaultButton( "move", "", "_move", 0.000000, 0.000000, 0.500000, 1, color, 0, 0, 0 );
-	Touch_AddDefaultButton( "invnext", "touch_default/next_weap", "invnext", 0.000000, 0.530200, 0.120000, 0.757428, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "invprev", "touch_default/prev_weap", "invprev", 0.000000, 0.075743, 0.120000, 0.302971, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "use", "touch_default/use", "+use", 0.880000, 0.454457, 1.000000, 0.681685, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "jump", "touch_default/jump", "+jump", 0.880000, 0.227228, 1.000000, 0.454457, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "attack", "touch_default/shoot", "+attack", 0.760000, 0.530200, 0.880000, 0.757428, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "attack2", "touch_default/shoot_alt", "+attack2", 0.760000, 0.302971, 0.880000, 0.530200, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "loadquick", "touch_default/load", "loadquick", 0.760000, 0.000000, 0.840000, 0.142222, color, 2, 1, 16 );
-	Touch_AddDefaultButton( "savequick", "touch_default/save", "savequick", 0.840000, 0.000000, 0.920000, 0.142222, color, 2, 1, 16 );
-	Touch_AddDefaultButton( "messagemode", "touch_default/keyboard", "messagemode", 0.840000, 0.000000, 0.920000, 0.142222, color, 2, 1, 8 );
-	Touch_AddDefaultButton( "reload", "touch_default/reload", "+reload", 0.000000, 0.302971, 0.120000, 0.530200, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "flashlight", "touch_default/flash_light_filled", "impulse 100", 0.920000, 0.000000, 1.000000, 0.151486, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "scores", "touch_default/map", "+showscores", 0.760000, 0.000000, 0.840000, 0.142222, color, 2, 1, 8 );
-	Touch_AddDefaultButton( "show_numbers", "touch_default/show_weapons", "exec touch_default/numbers.cfg", 0.440000, 0.833171, 0.520000, 0.984656, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "duck", "touch_default/crouch", "+duck", 0.880000, 0.757428, 1.000000, 0.984656, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "tduck", "touch_default/tduck", ";+duck", 0.560000, 0.833171, 0.620000, 0.946785, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "edit", "touch_default/settings", "touch_enableedit", 0.420000, 0.000000, 0.500000, 0.151486, color, 2, 1, 32 );
-	Touch_AddDefaultButton( "menu", "touch_default/menu", "cancelselect", 0.000000, 0.833171, 0.080000, 0.984656, color, 2, 1, 0 );
-	Touch_AddDefaultButton( "spray", "touch_default/spray", "impulse 201", 0.680000, 0.000000, 0.760000, 0.142222, color, 2, 1, 8 );
-	Touch_AddDefaultButton( "voicechat", "touch_default/microphone", "+voicerecord", 0.780000, 0.817778, 0.860000, 0.960000, color, 2, 1, 8 );
+	Touch_AddDefaultButton( "look", "", "_look", 0.52, -0.0454545, 1, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "move", "", "_move", 0, -0, 0.5, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "attack", "touch_default/shoot", "+attack", 0.76, 0.545455, 0.88, 0.818182, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "duck", "touch_default/crouch", "+duck", 0.88, 0.727273, 1, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "edit", "touch_default/settings", "touch_enableedit", 0.48, 0, 0.56, 0.181818, color, 0, 0, 32 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "menu", "touch_default/menu", "cancelselect", 0.4, 0, 0.48, 0.181818, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "tduck", "touch_default/tduck", ";+duck", 0.82, 0.863636, 0.88, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "jump", "touch_default/jump", "+jump", 0.88, 0.545455, 1, 0.818182, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "messagemode", "touch_default/keyboard", "messagemode", 0.56, 0, 0.64, 0.181818, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "attack2", "touch_default/shoot_alt", "+attack2", 0.9, 0.318182, 1, 0.545455, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "use", "touch_default/use", "+use", 0.92, 0.136364, 1, 0.318182, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "reload", "touch_default/reload", "+reload", 0.84, 0.136364, 0.92, 0.318182, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "invnext", "touch_default/next_weap", "invnext", 0.9, 0, 0.98, 0.136364, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "invprev", "touch_default/prev_weap", "invprev", 0.82, 0, 0.9, 0.136364, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 51 );
+	Touch_AddDefaultButton( "altattack", "gfx/touch/alt_fire.png", "+alt1", 0.72, 0, 0.8, 0.181818, color, 0, 0, 128 );
+	MakeRGBA( color, 255, 255, 255, 67 );
+	Touch_AddDefaultButton( "cmdmenu", "touch_default/cmdmenu.png", "+commandmenu", 0.32, 0, 0.4, 0.181818, color, 0, 0, 128 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "medic", "touch_default/microphone", "medic", 0.34, 0.863636, 0.4, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 70 );
+	Touch_AddDefaultButton( "drop", "touch_default/edit_close.png", "drop", 0.4, 0.818182, 0.48, 1, color, 0, 0, 128 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "show_numbers", "touch_default/show_weapons", "exec touch_default/numbers.cfg", 0.48, 0.818182, 0.56, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "scores", "touch_default/map", "+showscores", 0.56, 0.818182, 0.64, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "flashlight", "touch_default/flash_light_filled", "impulse 100", 0.64, 0.863636, 0.7, 1, color, 0, 0, 0 );
 
 	Cmd_AddCommand( "touch_addbutton", Touch_AddButton_f, "add native touch button" );
 	Cmd_AddCommand( "touch_removebutton", IN_TouchRemoveButton_f, "remove native touch button" );
