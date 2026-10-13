@@ -72,7 +72,6 @@ void Test_RunWindowInsets( void );
 #define TEST_LIST_0 \
 	Test_RunLibCommon(); \
 	Test_RunCommon(); \
-	Test_RunWindowInsets(); \
 	Test_RunCmd(); \
 	Test_RunCvar(); \
 	Test_RunIPFilter(); \
@@ -85,6 +84,7 @@ void Test_RunWindowInsets( void );
 
 #define TEST_LIST_0_CLIENT \
 	Test_RunCon(); \
+	Test_RunWindowInsets(); \
 	Test_RunGamma(); \
 	Test_RunTouch();
 
