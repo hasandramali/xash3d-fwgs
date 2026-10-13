@@ -793,7 +793,6 @@ extern convar_t	gl_test;		// cvar to testify new effects
 extern convar_t	gl_msaa;
 extern convar_t	gl_stencilbits;
 extern convar_t	gl_overbright;
-extern convar_t	gl_overbright_studio;
 extern convar_t gl_fog;
 extern convar_t	gl_litwater_force;
 

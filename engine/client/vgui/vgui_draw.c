@@ -208,6 +208,11 @@ static void GAME_EXPORT VGUI_SetupDrawingText( int *pColor )
 	Vector4Set( vgui.color, pColor[0], pColor[1], pColor[2], 255 - pColor[3] );
 }
 
+static qboolean VGUI_UsesScreenCoordinates( void )
+{
+	return cls.state == ca_active && Cvar_VariableInteger( "cl_sven_camera_mouse" );
+}
+
 static void GAME_EXPORT VGUI_DrawQuad( const vpoint_t *ul, const vpoint_t *lr )
 {
 	if( !ul || !lr )
@@ -218,7 +223,8 @@ static void GAME_EXPORT VGUI_DrawQuad( const vpoint_t *ul, const vpoint_t *lr )
 	float w = lr->point[0] - ul->point[0];
 	float h = lr->point[1] - ul->point[1];
 
-	SPR_AdjustSize( &x, &y, &w, &h );
+	if( !VGUI_UsesScreenCoordinates() )
+		SPR_AdjustSize( &x, &y, &w, &h );
 
 	if( vgui.enable_texture )
 	{
@@ -247,7 +253,8 @@ static void GAME_EXPORT VGUI_SetPaintOffset( int x, int y )
 
 	Vector2Set( vgui.paint_offset, x, y );
 
-	SPR_AdjustSize( &fx, &fy, &fw, &fh );
+	if( !VGUI_UsesScreenCoordinates() )
+		SPR_AdjustSize( &fx, &fy, &fw, &fh );
 	ref.dllFuncs.R_Set2DOffset( fx, fy );
 }
 
@@ -268,8 +275,8 @@ static void GAME_EXPORT VGUI_GetMousePos( int *_x, int *_y )
 	int x, y;
 
 	Platform_GetMousePos( &x, &y );
-	*_x = x / xscale;
-	*_y = y / yscale;
+	*_x = VGUI_UsesScreenCoordinates() ? x : x / xscale;
+	*_y = VGUI_UsesScreenCoordinates() ? y : y / yscale;
 }
 
 static void GAME_EXPORT VGUI_CursorSelect( VGUI_DefaultCursor cursor )
@@ -629,7 +636,10 @@ void VGui_MouseMove( int x, int y )
 	{
 		float xscale = (float)refState.width / (float)clgame.scrInfo.iWidth;
 		float yscale = (float)refState.height / (float)clgame.scrInfo.iHeight;
-		vgui.dllFuncs.MouseMove( x / xscale, y / yscale );
+		if( VGUI_UsesScreenCoordinates() )
+			vgui.dllFuncs.MouseMove( x, y );
+		else
+			vgui.dllFuncs.MouseMove( x / xscale, y / yscale );
 	}
 }
 
