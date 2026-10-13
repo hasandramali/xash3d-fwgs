@@ -172,10 +172,15 @@ static CVAR_DEFINE_AUTO( touch_stick_texture, "gfx/touch/stick_thumb", FCVAR_FIL
 static CVAR_DEFINE_AUTO( touch_safearea, "1", FCVAR_ARCHIVE | FCVAR_FILTERABLE, "keep touch controls inside the screen safe area, away from display cutouts" );
 static CVAR_DEFINE( touch_emulate, "_touch_emulate", "0", FCVAR_PRIVILEGED, "emulate touch with mouse" );
 
+static qboolean Touch_StretchPixels( void );
+
 static void Touch_UpdateViewport( void )
 {
 	const float none[4] = { 0 };
-	const float *insets = touch_safearea.value ? host.window_insets : none;
+	// Stretch mode maps to raw render pixels, so safe-area insets must not
+	// shrink the viewport there; otherwise positions (raw) and sizes /
+	// hit-testing (view-based) disagree.
+	const float *insets = ( touch_safearea.value && !Touch_StretchPixels()) ? host.window_insets : none;
 
 	touch.view_x = refState.width * insets[0];
 	touch.view_y = refState.height * insets[1];
@@ -259,7 +264,34 @@ static inline float Touch_DrawAspectRatio( void )
 #undef TO_SCRN_Y
 #undef TO_SCRN_X
 #define TO_SCRN_X(x) (Touch_StretchPixels() ? (float)refState.width * (x) : touch.view_x + touch.view_width * (x))
-#define TO_SCRN_Y(x) (Touch_StretchPixels() ? (float)refState.height * (x) : touch.view_y + touch.view_width * (x) * Touch_AspectRatio())
+#define TO_SCRN_Y(x) (Touch_StretchPixels() ? (float)refState.height * (x) : touch.view_y + touch.view_width * (x) * Touch_ViewAspect())
+
+// Fitted draw ratio: the visible viewport's own aspect. Touch_AspectRatio()
+// carries the profile's design aspect (touch_aspectratio, learned at native
+// res), which goes stale when the render aspect changes (e.g. 640x480) and
+// then gathers buttons at the top. The view aspect always maps y=1 to
+// exactly the view bottom; it equals the old expression whenever the
+// profile aspect matches the render aspect (the normal native case).
+static inline float Touch_ViewAspect( void )
+{
+	if( touch.view_width > 0 )
+		return (float)touch.view_height / (float)touch.view_width;
+	if( refState.width > 0 )
+		return (float)refState.height / (float)refState.width;
+	return 9.0f / 16.0f;
+}
+
+// Sizes must live in the same space as positions. The view-based macros
+// above ignore stretch mode, which used to draw stretch-mode buttons with
+// positions from one space and sizes from another (and misaligned
+// hit-testing, which unmaps through SCRN_HEIGHT). Deriving sizes from the
+// final mapping keeps both modes consistent: identical to the old macros
+// when stretch is off, raw render pixels when it is on.
+#undef SCRN_WIDTH
+#undef SCRN_HEIGHT
+#define SCRN_WIDTH(x) (TO_SCRN_X(x) - TO_SCRN_X(0))
+#define SCRN_HEIGHT(x) (TO_SCRN_Y(x) - TO_SCRN_Y(0))
+
 static void Touch_ConfigAspectRatio_f( void )
 {
 	touch.config_aspect_ratio = Q_atof( Cmd_Argv( 1 ));
@@ -1095,7 +1127,13 @@ static void Touch_AddButton_f( void )
 static void Touch_EnableEdit_f( void )
 {
 	Touch_ResetSticks();
+	// Editor rescale must follow the WINDOW aspect, not the render aspect:
+	// the scene may render low-res on an unchanged window and the fitted
+	// draw mapping shows the same profile correctly at any render size.
+	// refState.scale_* holds render/window ratios: window = render / scale.
 	float current_ratio = (float)refState.height / refState.width;
+	if( refState.scale_x > 0.0f && refState.scale_y > 0.0f )
+		current_ratio = ( refState.height / refState.scale_y ) / ( refState.width / refState.scale_x );
 
 	if( touch.state == state_none )
 		touch.state = state_edit;
