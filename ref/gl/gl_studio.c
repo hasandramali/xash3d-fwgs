@@ -1329,7 +1329,7 @@ static void R_StudioLighting( float *lv, int bone, int flags, vec3_t normal )
 		return;
 	}
 
-	float illum = g_studio.ambientlight;
+	float illum = Q_max( g_studio.ambientlight, g_studio.shadelight * Q_max( 0.1f, r_lighting_ambient.value ));
 
 	if( FBitSet( flags, STUDIO_NF_FLATSHADE ))
 	{
@@ -1945,6 +1945,23 @@ R_StudioDrawPoints
 
 ===============
 */
+static void R_StudioTextureOverbright( qboolean enabled )
+{
+	if( enabled )
+	{
+		pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_ARB );
+		pglTexEnvi( GL_TEXTURE_ENV, GL_COMBINE_RGB_ARB, GL_MODULATE );
+		pglTexEnvi( GL_TEXTURE_ENV, GL_SOURCE0_RGB_ARB, GL_PREVIOUS_ARB );
+		pglTexEnvi( GL_TEXTURE_ENV, GL_SOURCE1_RGB_ARB, GL_TEXTURE );
+		pglTexEnvi( GL_TEXTURE_ENV, GL_RGB_SCALE_ARB, 2 );
+	}
+	else
+	{
+		pglTexEnvi( GL_TEXTURE_ENV, GL_RGB_SCALE_ARB, 1 );
+		pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
+	}
+}
+
 static void R_StudioDrawPoints( void )
 {
 	float		shellscale = 0.0f;
@@ -2108,8 +2125,12 @@ static void R_StudioDrawPoints( void )
 		}
 
 		R_StudioSetupSkin( m_pStudioHeader, pskinref[pmesh->skinref] );
+		qboolean overbright = gl_overbright_studio.value != 0.0f && g_studio.rendermode == kRenderNormal
+			&& !FBitSet( g_nFaceFlags, STUDIO_NF_MASKED | STUDIO_NF_ADDITIVE );
+		if( overbright ) R_StudioTextureOverbright( true );
 
 		R_StudioSubmitMesh( ptricmds, pstudionorms, s, t, shellscale, 0 );
+		if( overbright ) R_StudioTextureOverbright( false );
 
 		if( FBitSet( g_nFaceFlags, STUDIO_NF_MASKED ))
 		{
