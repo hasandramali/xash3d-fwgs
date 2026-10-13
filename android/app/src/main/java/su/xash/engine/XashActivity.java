@@ -15,6 +15,8 @@ import android.view.KeyEvent;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.DisplayCutout;
 import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
@@ -27,6 +29,7 @@ import java.util.List;
 
 public class XashActivity extends SDLActivity {
     private boolean mUseVolumeKeys;
+    private volatile float[] mWindowInsets = new float[4];
     private String mPackageName;
     private static final String TAG = "XashActivity";
     private static final int MIN_SURFACE_WIDTH = 320;
@@ -56,6 +59,17 @@ public class XashActivity extends SDLActivity {
         } else {
             getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         }
+
+        // mSurface is null if SDL failed to start and shows its error dialog
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && mSurface != null) {
+            mSurface.setOnApplyWindowInsetsListener((view, insets) -> {
+                updateWindowInsets(view, insets);
+                return insets;
+            });
+            mSurface.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) ->
+                updateWindowInsets(view, view.getRootWindowInsets()));
+            mSurface.requestApplyInsets();
+        }
     }
 
     @Override
@@ -76,6 +90,31 @@ public class XashActivity extends SDLActivity {
     public void onDestroy() {
         super.onDestroy();
         System.exit(0);
+    }
+
+    // JNI reads a snapshot; all View access stays on Android's UI thread.
+    private float[] getWindowInsets() {
+        return mWindowInsets;
+    }
+
+    private void updateWindowInsets(View surface, WindowInsets insets) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P)
+            return;
+
+        if (insets == null || surface.getWidth() <= 0 || surface.getHeight() <= 0)
+            return;
+
+        // Only the display cutout: system bars are hidden in immersive mode and reporting them while they're swiped in would shift the whole layout.
+        int left = 0, top = 0, right = 0, bottom = 0;
+        DisplayCutout cutout = insets.getDisplayCutout();
+        if (cutout != null) {
+            left = cutout.getSafeInsetLeft();
+            top = cutout.getSafeInsetTop();
+            right = cutout.getSafeInsetRight();
+            bottom = cutout.getSafeInsetBottom();
+        }
+        float width = surface.getWidth(), height = surface.getHeight();
+        mWindowInsets = new float[] { left / width, top / height, right / width, bottom / height };
     }
 
     @Override
