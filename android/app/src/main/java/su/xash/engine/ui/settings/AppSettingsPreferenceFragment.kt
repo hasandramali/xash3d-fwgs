@@ -3,6 +3,7 @@ package su.xash.engine.ui.settings
 import android.app.AlertDialog
 import android.os.Bundle
 import android.widget.EditText
+import androidx.navigation.fragment.findNavController
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import su.xash.engine.MainActivity
@@ -142,6 +143,11 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
         updateGamePathSummary()
         updateGlobalArgsSummary()
         updateRenderResolutionSummary()
+
+        findPreference<Preference>("crash_logs")?.setOnPreferenceClickListener {
+            findNavController().navigate(R.id.action_appSettingsFragment_to_crashLogsFragment)
+            true
+        }
     }
 
     override fun onPause() {

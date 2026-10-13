@@ -57,4 +57,7 @@
             app:defaultValue="false" />
     </PreferenceCategory>
 
+	<Preference
+		app:key="crash_logs"
+		app:title="@string/crash_logs" />
 </PreferenceScreen>

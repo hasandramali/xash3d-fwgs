@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
+import android.view.LayoutInflater
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
@@ -60,10 +62,13 @@ class MainActivity : AppCompatActivity() {
 
         val updater = AppUpdater(this)
         lifecycleScope.launch {
-            val info = updater.checkForUpdate()
+            // The updater model now reports a sealed UpdateCheck; anything
+            // but Available (up to date, disabled build, failure) is quiet.
+            val result = updater.checkForUpdate()
             prefs.edit().putLong(KEY_LAST_CHECK, now).apply()
-            if (info == null)
+            if (result !is AppUpdater.UpdateCheck.Available)
                 return@launch
+            val info = result.info
             if (prefs.getInt(KEY_DISMISSED_BUILDNUM, -1) >= info.buildNum)
                 return@launch
             val changelog = updater.fetchChangelog(BuildConfig.GIT_HASH, info.tagName)
