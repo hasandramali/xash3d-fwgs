@@ -20,10 +20,29 @@ GNU General Public License for more details.
 #include "input.h"
 #include "server.h" // !!svgame.hInstance
 #include "vid_common.h"
+#include "keydefs.h"
 
 static void 	UI_UpdateUserinfo( void );
 
 gameui_static_t	gameui;
+
+static qboolean ui_loading_console_pressed;
+static int ui_loading_mouse_x, ui_loading_mouse_y;
+
+static qboolean UI_LoadingConnection( void )
+{
+	return !cls.demoplayback && !cl.background && cls.state >= ca_connecting && cls.state < ca_active;
+}
+
+static void UI_LoadingConsoleBounds( int *x, int *y, int *width, int *height )
+{
+	int textWidth, textHeight;
+	Con_DrawStringLen( "Console", &textWidth, &textHeight );
+	*height = Q_max( textHeight + 16, gameui.globals->scrHeight / 12 );
+	*width = Q_max( textWidth + 24, *height * 3 );
+	*x = gameui.globals->scrWidth - *width - 16;
+	*y = 16;
+}
 
 static void UI_ToggleAllowConsole_f( void )
 {
@@ -35,7 +54,52 @@ static void UI_ToggleAllowConsole_f( void )
 
 void UI_UpdateMenu( float realtime )
 {
+	static qboolean loading;
+	static connstate_t previousState;
+	static qboolean downloading;
+	qboolean connecting = UI_LoadingConnection();
+
 	if( !gameui.hInstance ) return;
+
+	if( connecting )
+	{
+		qboolean restore = cls.key_dest != key_console && ( cls.key_dest != key_menu || !UI_IsVisible() );
+		if( !loading || previousState != cls.state || restore )
+		{
+			if( !loading || restore )
+			{
+				UI_ConnectionProgress_Disconnect();
+				UI_ConnectionProgress_Connect( cls.servername );
+			}
+			else if( cls.state >= ca_connected )
+				UI_ConnectionProgress_ParseServerInfo( cls.servername );
+			if( !loading || cls.key_dest != key_console )
+				Key_SetKeyDest( key_menu );
+		}
+		if( cls.key_dest != key_console )
+		{
+			qboolean currentDownload = HTTP_ShowDownloadProgress();
+			if( !currentDownload && cls.netchan.incomingbufs[FRAG_FILE_STREAM] && host.downloadfile[0] )
+			{
+				UI_ConnectionProgress_Download( host.downloadfile, cls.servername, NULL, 0, Q_max( 1, host.downloadcount ), "(server transfer; cannot skip)" );
+				currentDownload = true;
+			}
+			if( downloading && !currentDownload )
+				UI_ConnectionProgress_Precache();
+			downloading = currentDownload;
+		}
+	}
+	else if( loading )
+	{
+		UI_ConnectionProgress_Precache();
+		UI_ConnectionProgress_Disconnect();
+		if( cls.state == ca_active )
+			UI_SetActiveMenu( false );
+		downloading = false;
+		ui_loading_console_pressed = false;
+	}
+	loading = connecting;
+	previousState = cls.state;
 
 	// don't draw menu over console
 	if( cls.key_dest == key_console ) return;
@@ -61,18 +125,52 @@ void UI_UpdateMenu( float realtime )
 	gameui.globals->developer = host.allow_console;
 
 	gameui.dllFuncs.pfnRedraw( realtime );
+	if( connecting )
+	{
+		int x, y, width, height, textWidth, textHeight;
+		rgba_t color = { 255, 255, 255, 255 };
+		UI_LoadingConsoleBounds( &x, &y, &width, &height );
+		Con_DrawStringLen( "Console", &textWidth, &textHeight );
+		ref.dllFuncs.FillRGBA( kRenderTransTexture, x, y, width, height, 48, 48, 48, 230 );
+		Con_DrawString( x + ( width - textWidth ) / 2, y + ( height - textHeight ) / 2, "Console", color );
+	}
 	UI_UpdateUserinfo();
 }
 
 void UI_KeyEvent( int key, qboolean down )
 {
 	if( !gameui.hInstance ) return;
+	if( key == K_MOUSE1 )
+	{
+		int x, y, width, height;
+		UI_LoadingConsoleBounds( &x, &y, &width, &height );
+		qboolean inside = UI_LoadingConnection() && cls.key_dest == key_menu &&
+			ui_loading_mouse_x >= x && ui_loading_mouse_x < x + width &&
+			ui_loading_mouse_y >= y && ui_loading_mouse_y < y + height;
+		if( down && inside )
+		{
+			ui_loading_console_pressed = true;
+			return;
+		}
+		if( !down && ui_loading_console_pressed )
+		{
+			ui_loading_console_pressed = false;
+			if( inside )
+			{
+				UI_SetActiveMenu( false );
+				Key_SetKeyDest( key_console );
+			}
+			return;
+		}
+	}
 	gameui.dllFuncs.pfnKeyEvent( key, down );
 }
 
 void UI_MouseMove( int x, int y )
 {
 	if( !gameui.hInstance ) return;
+	ui_loading_mouse_x = x;
+	ui_loading_mouse_y = y;
 	gameui.dllFuncs.pfnMouseMove( x, y );
 }
 

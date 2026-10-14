@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.view.LayoutInflater
 import android.widget.TextView
 import androidx.core.net.toUri
+import androidx.preference.PreferenceManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.CoroutineScope
@@ -72,7 +73,7 @@ class Game(val ctx: Context, val basedir: File) {
 			}
 		}
 
-		commandLineArgs += pref.getString("arguments", "-console -log") ?: ""
+		commandLineArgs += pref.getString("arguments", "") ?: ""
 
 		if (externalGame && packageNames != null) {
 			var packageName: String? = null
@@ -128,7 +129,8 @@ class Game(val ctx: Context, val basedir: File) {
 			flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
 			putExtra("gamedir", defaultGameDir)
 			putExtra("argv", commandLineArgs)
-			putExtra("usevolume", pref.getBoolean("use_volume_buttons", false))
+			putExtra("usevolume", PreferenceManager.getDefaultSharedPreferences(ctx)
+				.getBoolean("use_volume_buttons", false))
 			putExtra("basedir", basedir.parent)
 			if (gameLibDir != null) putExtra("gamelibdir", gameLibDir)
 			if (packageName != null) putExtra("package", packageName)

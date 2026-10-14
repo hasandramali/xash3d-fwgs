@@ -83,14 +83,6 @@
 					android:layout_width="wrap_content"
 					android:layout_height="match_parent"
 					app:icon="@drawable/ic_baseline_play_arrow_24"
-					app:layout_constraintEnd_toStartOf="@+id/settingsButton" />
-
-				<com.google.android.material.button.MaterialButton
-					android:id="@+id/settingsButton"
-					style="@style/Widget.Material3.Button.IconButton"
-					android:layout_width="wrap_content"
-					android:layout_height="match_parent"
-					app:icon="@drawable/ic_baseline_settings_24"
 					app:layout_constraintEnd_toEndOf="parent" />
 			</androidx.constraintlayout.widget.ConstraintLayout>
 		</com.google.android.material.card.MaterialCardView>

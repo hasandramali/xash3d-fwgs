@@ -201,7 +201,7 @@ public class XashActivity extends SDLActivity {
 
     private String getGlobalArguments() {
         ensurePreferences();
-        String globalArgs = mPreferences.getString("global_arguments", "");
+        String globalArgs = mPreferences.getString("global_arguments", getString(R.string.default_global_arguments));
         if (globalArgs != null && !globalArgs.trim().isEmpty()) {
             return globalArgs.trim();
         }

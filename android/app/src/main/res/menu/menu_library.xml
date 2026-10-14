@@ -4,7 +4,12 @@
 		android:id="@+id/action_download"
 		android:icon="@drawable/ic_baseline_download_24"
 		android:title="@string/download_svencoop"
-		app:showAsAction="ifRoom" />
+		app:showAsAction="always" />
+	<item
+		android:id="@+id/action_about"
+		android:icon="@drawable/ic_outline_info_24"
+		android:title="@string/about_title"
+		app:showAsAction="always" />
 	<item
 		android:id="@+id/action_steam"
 		android:icon="@drawable/ic_baseline_steam_24"

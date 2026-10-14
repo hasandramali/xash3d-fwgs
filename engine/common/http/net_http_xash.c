@@ -182,6 +182,7 @@ static struct http_static_s
 	int active_count, progress_count;
 	float progress;
 	qboolean resolving;
+	char displayed_file[MAX_SYSPATH];
 } http;
 
 poolhandle_t http_mempool;
@@ -1681,6 +1682,7 @@ Clear all queue
 */
 static void HTTP_Clear_f( void )
 {
+	http.displayed_file[0] = '\0';
 	while( http.first_file )
 	{
 		httpfile_t *file = http.first_file;
@@ -1720,13 +1722,11 @@ HTTP_Cancel_f
 Stop current download, skip to next file
 ==============
 */
+static void HTTP_Skip_f( void );
+
 static void HTTP_Cancel_f( void )
 {
-	if( !http.first_file )
-		return;
-
-	http.first_file->server = NULL;
-	HTTP_FreeFile( http.first_file, true );
+	HTTP_Skip_f();
 }
 
 /*
@@ -1736,10 +1736,54 @@ HTTP_Skip_f
 Stop current download, skip to next server
 =============
 */
+qboolean HTTP_ShowDownloadProgress( void )
+{
+	httpfile_t *selected = NULL;
+	int pending = 0;
+
+	http.displayed_file[0] = '\0';
+	for( httpfile_t *file = http.first_file; file; file = file->next )
+	{
+		if( file->to_memory || !file->process || file->pfn_process == HTTP_FileFree )
+			continue;
+		pending++;
+		if( !selected || ( selected->socket == -1 && file->socket != -1 ))
+			selected = file;
+	}
+	if( !selected )
+		return false;
+
+	Q_strncpy( http.displayed_file, selected->path, sizeof( http.displayed_file ));
+#if !XASH_DEDICATED
+	scr_download.value = selected->size > 0 ? bound( 0, 100.0f * selected->downloaded / selected->size, 100 ) : 0;
+	qboolean required = Q_stristr( selected->path, "soundcache" ) || !Q_stricmp( COM_FileExtension( selected->path ), "bsp" );
+	UI_ConnectionProgress_Download( selected->path, selected->server ? selected->server->host : "", NULL,
+		0, pending, required ? "(required; cannot skip)" : "(Skip: skip this file)" );
+#endif
+	return true;
+}
+
 static void HTTP_Skip_f( void )
 {
-	if( http.first_file )
-		HTTP_FreeFile( http.first_file, true );
+	if( !http.displayed_file[0] )
+		return;
+
+	for( httpfile_t *file = http.first_file; file; file = file->next )
+	{
+		if( file->to_memory || !file->process || file->pfn_process == HTTP_FileFree || Q_strcmp( file->path, http.displayed_file ))
+			continue;
+		if( Q_stristr( file->path, "soundcache" ) || !Q_stricmp( COM_FileExtension( file->path ), "bsp" ))
+			return;
+		if( file->own_server && file->server )
+			Mem_Free( file->server );
+		file->server = NULL;
+		file->own_server = false;
+		file->resource = NULL;
+		Con_Printf( "Skipping optional download: %s\n", file->path );
+		HTTP_FreeFile( file, true );
+		http.displayed_file[0] = '\0';
+		return;
+	}
 }
 
 /*
@@ -1802,7 +1846,7 @@ void HTTP_Init( void )
 	// no engine HTTP traffic exists before signon downloads anyway.
 
 	Cmd_AddRestrictedCommand( "http_download", HTTP_Download_f, "add file to download queue" );
-	Cmd_AddRestrictedCommand( "http_skip", HTTP_Skip_f, "skip current download server" );
+	Cmd_AddRestrictedCommand( "http_skip", HTTP_Skip_f, "skip the displayed optional download (BSP and soundcache are required)" );
 	Cmd_AddRestrictedCommand( "http_cancel", HTTP_Cancel_f, "cancel current download" );
 	Cmd_AddRestrictedCommand( "http_clear", HTTP_Clear_f, "cancel all downloads" );
 	Cmd_AddRestrictedCommand( "http_list", HTTP_List_f, "list all queued downloads" );

@@ -3,11 +3,9 @@ package su.xash.svencoop.adapters
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.navigation.findNavController
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import su.xash.svencoop.R
 import su.xash.svencoop.databinding.CardGameBinding
 import su.xash.svencoop.model.Game
 import su.xash.svencoop.ui.library.LibraryViewModel
@@ -52,12 +50,6 @@ class GameAdapter(private val libraryViewModel: LibraryViewModel) :
 					gameCover.setImageBitmap(game.cover)
 				} else {
 					gameCover.visibility = View.GONE
-				}
-
-				settingsButton.setOnClickListener {
-					libraryViewModel.setSelectedGame(game)
-					it.findNavController()
-						.navigate(R.id.action_libraryFragment_to_gameSettingsFragment)
 				}
 
 				root.setOnClickListener { libraryViewModel.startEngine(it.context, game) }

@@ -30,6 +30,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val preferences = PreferenceManager.getDefaultSharedPreferences(this)
+        if (!preferences.contains("use_volume_buttons")) {
+            val gamePreferences = getSharedPreferences("svencoop", MODE_PRIVATE)
+            preferences.edit().putBoolean("use_volume_buttons",
+                gamePreferences.getBoolean("use_volume_buttons", false)).apply()
+        }
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 

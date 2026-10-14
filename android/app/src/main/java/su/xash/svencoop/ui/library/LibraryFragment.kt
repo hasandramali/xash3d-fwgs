@@ -2,6 +2,7 @@ package su.xash.svencoop.ui.library
 
 import android.Manifest
 import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -15,6 +16,7 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -369,12 +371,33 @@ class LibraryFragment : Fragment(), MenuProvider {
 			R.id.action_download -> {
 				startSvencoopDownload()
 			}
+			R.id.action_about -> {
+				showAboutDialog()
+			}
 			R.id.action_steam -> {
 				findNavController().navigate(R.id.action_libraryFragment_to_steamAuthFragment)
 			}
+			else -> return false
 		}
 
-		return false
+		return true
+	}
+
+	private fun showAboutDialog() {
+		val content = layoutInflater.inflate(R.layout.dialog_about, null)
+		content.findViewById<TextView>(R.id.aboutDiscord).setOnClickListener {
+			val url = getString(R.string.about_discord_url)
+			try {
+				startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+			} catch (_: ActivityNotFoundException) {
+				Toast.makeText(requireContext(), url, Toast.LENGTH_LONG).show()
+			}
+		}
+		MaterialAlertDialogBuilder(requireContext())
+			.setTitle(R.string.about_title)
+			.setView(content)
+			.setPositiveButton(android.R.string.ok, null)
+			.show()
 	}
 
 	override fun onResume() {

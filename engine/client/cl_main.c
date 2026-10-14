@@ -3837,6 +3837,16 @@ static qboolean CL_ShouldRescanFilesystem( void )
 qboolean CL_PrecacheResources( void )
 {
 	resource_t	*pRes;
+	int resourceCount = 0, processed = 0;
+	qboolean loading = cls.state != ca_active;
+
+	if( loading )
+	{
+		UI_ConnectionProgress_Precache();
+		for( pRes = cl.resourcesonhand.pNext; pRes && pRes != &cl.resourcesonhand; pRes = pRes->pNext )
+			resourceCount++;
+		scr_loading.value = 0;
+	}
 
 	// if we downloaded new WAD files or any other archives they must be added to searchpath
 	if( CL_ShouldRescanFilesystem( ))
@@ -3888,6 +3898,8 @@ qboolean CL_PrecacheResources( void )
 	// precache all the remaining resources where order is doesn't matter
 	for( pRes = cl.resourcesonhand.pNext; pRes && pRes != &cl.resourcesonhand; pRes = pRes->pNext )
 	{
+		if( loading )
+			scr_loading.value = 100.0f * ++processed / Q_max( 1, resourceCount );
 		if( FBitSet( pRes->ucFlags, RES_PRECACHED ))
 			continue;
 
@@ -3986,6 +3998,8 @@ qboolean CL_PrecacheResources( void )
 
 	if( cls.state != ca_active )
 		S_EndRegistration();
+	if( loading )
+		scr_loading.value = 100;
 
 	return true;
 }

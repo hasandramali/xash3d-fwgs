@@ -97,7 +97,7 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
     }
 
     private fun updateGlobalArgsSummary() {
-        val globalArgs = preferences.getString("global_arguments", "")
+        val globalArgs = preferences.getString("global_arguments", getString(R.string.default_global_arguments))
         if (globalArgs.isNullOrEmpty()) {
             globalArgsPreference.summary = "No global arguments set"
         } else {
@@ -115,7 +115,7 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
     }
 
     private fun showGlobalArgumentsDialog() {
-        val currentArgs = preferences.getString("global_arguments", "") ?: ""
+        val currentArgs = preferences.getString("global_arguments", getString(R.string.default_global_arguments)) ?: ""
         
         val editText = EditText(requireContext())
         editText.setText(currentArgs)
