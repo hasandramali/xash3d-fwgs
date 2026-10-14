@@ -31,8 +31,7 @@ static int ui_loading_mouse_x, ui_loading_mouse_y;
 
 static qboolean UI_LoadingConnection( void )
 {
-	return !cls.demoplayback && !cl.background && !SV_Initialized() &&
-		!COM_StringEmpty( cls.servername ) && Q_stricmp( cls.servername, "localhost" ) &&
+	return !cls.demoplayback && !Q_strncmp( cls.servername, "steam:", 6 ) &&
 		cls.state >= ca_connecting && cls.state < ca_active;
 }
 
@@ -65,6 +64,8 @@ void UI_UpdateMenu( float realtime )
 
 	if( connecting )
 	{
+		if( !loading )
+			Key_SetKeyDest( key_menu );
 		qboolean restore = cls.key_dest != key_console && ( cls.key_dest != key_menu || !UI_IsVisible() );
 		if( !loading || previousState != cls.state || restore )
 		{

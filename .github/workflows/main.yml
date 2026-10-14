@@ -96,6 +96,10 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Remove bundled touch presets
+      shell: bash
+      run: rm -rf -- 3rdparty/extras/xash-extras/touch_presets
+
     - name: Fix file permissions (Linux & macOS)
       if: matrix.targetos != 'win32'
       run: chmod -R 777 .
