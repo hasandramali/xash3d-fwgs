@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "xash3d_mathlib.h"
 #include "net_encode.h"
 #include "protocol.h"
+#include "hpak.h"
 #if !XASH_DEDICATED
 #include <bzlib.h>
 #endif // !XASH_DEDICATED
@@ -888,6 +889,9 @@ void Netchan_CreateFileFragmentsFromBuffer( netchan_t *chan, const char *filenam
 
 	int chunksize = chan->pfnBlockSize( chan->client, FRAGSIZE_FRAG );
 
+	if( chunksize <= Q_strlen( filename ) + 9 || chunksize > FRAGMENT_MAX_SIZE )
+		return;
+
 	if( chan->gs_netchan )
 	{
 #if !XASH_DEDICATED
@@ -926,9 +930,12 @@ void Netchan_CreateFileFragmentsFromBuffer( netchan_t *chan, const char *filenam
 
 	while( remaining > 0 )
 	{
-		int send = Q_min( remaining, chunksize );
+		int header = firstfragment ? Q_strlen( filename ) + 1 : 0;
+		if( firstfragment && chan->gs_netchan )
+			header += Q_strlen( compressor ) + 1 + sizeof( uint );
+		int send = Q_min( remaining, chunksize - header );
 
-		fragbuf_t *buf = Netchan_AllocFragbuf( send );
+		fragbuf_t *buf = Netchan_AllocFragbuf( send + header );
 		buf->bufferid = bufferid++;
 
 		// copy in data
@@ -945,9 +952,6 @@ void Netchan_CreateFileFragmentsFromBuffer( netchan_t *chan, const char *filenam
 				MSG_WriteString( &buf->frag_message, compressor );
 				MSG_WriteLong( &buf->frag_message, originalSize );
 			}
-
-			// send a bit less on first package
-			send -= MSG_GetNumBytesWritten( &buf->frag_message );
 
 			firstfragment = false;
 		}
@@ -1315,6 +1319,14 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 
 	Q_strncpy( chan->incomingfilename, filename, sizeof( chan->incomingfilename ));
 
+#if !XASH_DEDICATED
+	if( chan->sock == NS_CLIENT && filename[0] == '!' && !Cvar_VariableInteger( "cl_customspray" ))
+	{
+		Netchan_FlushIncoming( chan, FRAG_FILE_STREAM );
+		return false;
+	}
+#endif
+
 	if( filename[0] != '!' )
 	{
 		string write_path;
@@ -1333,6 +1345,13 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 		if( p == chan->incomingbufs[FRAG_FILE_STREAM] )
 			nsize -= MSG_GetNumBytesRead( msg );
 		p = p->next;
+	}
+
+	if( filename[0] == '!' && ( nsize > HPAK_ENTRY_MAX_SIZE ||
+		uncompressedSize > HPAK_ENTRY_MAX_SIZE ))
+	{
+		Netchan_FlushIncoming( chan, FRAG_FILE_STREAM );
+		return false;
 	}
 
 	byte *buffer = Mem_Calloc( net_mempool, nsize + 1 );

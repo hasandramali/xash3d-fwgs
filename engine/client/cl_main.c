@@ -35,6 +35,7 @@ CVAR_DEFINE_AUTO( mp_decals, "300", FCVAR_ARCHIVE, "decals limit in multiplayer"
 static CVAR_DEFINE_AUTO( dev_overview, "0", 0, "draw level in overview-mode" );
 static CVAR_DEFINE_AUTO( cl_resend, "6.0", 0, "time to resend connect" );
 CVAR_DEFINE( cl_allow_download, "cl_allowdownload", "1", FCVAR_ARCHIVE, "allow to downloading resources from the server" );
+CVAR_DEFINE_AUTO( cl_customspray, "1", FCVAR_ARCHIVE, "download, upload and display custom player sprays" );
 static CVAR_DEFINE( cl_allow_upload, "cl_allowupload", "1", FCVAR_ARCHIVE, "allow to uploading resources to the server" );
 CVAR_DEFINE_AUTO( cl_download_ingame, "1", FCVAR_ARCHIVE, "allow to downloading resources while client is active" );
 static CVAR_DEFINE_AUTO( cl_logofile, "lambda", FCVAR_ARCHIVE, "player logo name" );
@@ -233,6 +234,8 @@ static void CL_CreateResourceList( void )
 	ClearBits( cl_logocolor.flags, FCVAR_CHANGED );
 	ClearBits( cl_logoext.flags, FCVAR_CHANGED );
 #endif
+	if( !cl_customspray.value )
+		return;
 
 	// sanitize cvar value
 	if( Q_strcmp( cl_logoext.string, "bmp" ) && Q_strcmp( cl_logoext.string, "png" ))
@@ -282,7 +285,10 @@ static void CL_UpdateLogo( void )
 	CL_CreateResourceList();
 
 	if( cl.num_resources == 0 )
+	{
+		CL_SendResourceList( NULL, 0 );
 		return;
+	}
 
 	player_info_t	*player = &cl.players[cl.playernum];
 	COM_ClearCustomizationList( &player->customdata, true );
@@ -303,6 +309,28 @@ static void CL_UpdateLogo( void )
 
 static void CL_CheckLogoChanged( void )
 {
+	if( FBitSet( cl_customspray.flags, FCVAR_CHANGED ))
+	{
+		ClearBits( cl_customspray.flags, FCVAR_CHANGED );
+		if( !cl_customspray.value )
+		{
+			CL_ClearCustomSprayDecals();
+			for( int player = 0; player < MAX_CLIENTS; player++ )
+				COM_ClearCustomizationList( &cl.players[player].customdata, true );
+			for( resource_t *resource = cl.resourcesneeded.pNext, *next;
+				resource && resource != &cl.resourcesneeded; resource = next )
+			{
+				next = resource->pNext;
+				if( FBitSet( resource->ucFlags, RES_CUSTOM ))
+				{
+					ClearBits( resource->ucFlags, RES_WASMISSING );
+					CL_MoveToOnHandList( resource );
+				}
+			}
+		}
+		SetBits( cl_logoupdate.flags, FCVAR_CHANGED );
+	}
+
 	if( FBitSet( cl_logoupdate.flags, FCVAR_CHANGED ))
 	{
 		CL_UpdateLogo();
@@ -1249,16 +1277,7 @@ static void CL_BeginUpload_f( void )
 	if( COM_StringEmptyOrNULL( name ))
 		return;
 
-	if( !cl_allow_upload.value )
-		return;
-
-	// Sven's engine mishandles fragment-flagged client messages: it returns
-	// "badread" while reassembling the file-upload fragments and never flips
-	// the reliable-ack bit, deadlocking the reliable channel. Every later
-	// console stringcmd is then strangled in the client queue (kill/say/vote
-	// etc. never reach the server). Skip the customization upload for Sven;
-	// the missing decal/logo is cosmetic, and Sven does reconnect-tolerate it.
-	if( cl_sven_proto )
+	if( !cl_allow_upload.value || !cl_customspray.value )
 		return;
 
 	if( Q_strlen( name ) != 36 || Q_strnicmp( name, "!MD5", 4 ))
@@ -3556,6 +3575,8 @@ static void CL_RegisterCustomization( resource_t *resource )
 {
 	qboolean		bFound = false;
 	customization_t	*pList;
+	if( !cl_customspray.value || resource->playernum >= MAX_CLIENTS )
+		return;
 
 	for( pList = cl.players[resource->playernum].customdata.pNext; pList; pList = pList->pNext )
 	{
@@ -3648,10 +3669,21 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 			{
 				if( p->nDownloadSize == cls.netchan.tempbuffersize )
 				{
-					if( p->ucFlags & RES_CUSTOM )
+					if( cl_customspray.value && ( p->ucFlags & RES_CUSTOM ))
 					{
 						HPAK_AddLump( true, hpk_custom_file.string, p, cls.netchan.tempbuffer, NULL );
 						CL_RegisterCustomization( p );
+						for( resource_t *other = cl.resourcesneeded.pNext, *next;
+							other != &cl.resourcesneeded; other = next )
+						{
+							next = other->pNext;
+							if( other == p || !FBitSet( other->ucFlags, RES_CUSTOM ) ||
+								memcmp( other->rgucMD5_hash, p->rgucMD5_hash, 16 ))
+								continue;
+							CL_RegisterCustomization( other );
+							ClearBits( other->ucFlags, RES_WASMISSING );
+							CL_MoveToOnHandList( other );
+						}
 					}
 				}
 				else
@@ -3670,6 +3702,13 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 
 		// moving to 'onhandle' list even if file was missed
 		CL_MoveToOnHandList( p );
+	}
+
+	if( filename && filename[0] == '!' && cls.netchan.tempbuffer )
+	{
+		Mem_Free( cls.netchan.tempbuffer );
+		cls.netchan.tempbuffer = NULL;
+		cls.netchan.tempbuffersize = 0;
 	}
 
 	// Resolve canonical-path matches left behind by the legacy name lookup.
@@ -4082,6 +4121,7 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_resend );
 	Cvar_RegisterVariable( &cl_allow_upload );
 	Cvar_RegisterVariable( &cl_allow_download );
+	Cvar_RegisterVariable( &cl_customspray );
 	Cvar_RegisterVariable( &cl_goldsrc_debug );
 	Cvar_RegisterVariable( &cl_sven_soundcache );
 	Cvar_RegisterVariable( &cl_stall_timeout );

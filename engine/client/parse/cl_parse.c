@@ -22,6 +22,7 @@ GNU General Public License for more details.
 #include "input.h"
 #include "eiface.h"
 #include "sven_sound.h"
+#include "hpak.h"
 
 #if XASH_LOW_MEMORY != 2
 int CL_UPDATE_BACKUP = SINGLEPLAYER_BACKUP;
@@ -461,13 +462,31 @@ void CL_BatchResourceRequest( qboolean initialize )
 			CL_MoveToOnHandList( p );
 			break;
 		case t_decal:
+			if( !cl_customspray.value || !cl_allow_download.value )
+			{
+				CL_MoveToOnHandList( p );
+				break;
+			}
 			if( !HPAK_GetDataPointer( hpk_custom_file.string, p, NULL, NULL ))
 			{
 				done_downloading = false;
 				if( !FBitSet( p->ucFlags, RES_REQUESTED ))
 				{
+					qboolean requested = false;
+					for( resource_t *other = cl.resourcesneeded.pNext; other != &cl.resourcesneeded; other = other->pNext )
+					{
+						if( other != p && FBitSet( other->ucFlags, RES_CUSTOM ) &&
+							FBitSet( other->ucFlags, RES_REQUESTED ) &&
+							!memcmp( other->rgucMD5_hash, p->rgucMD5_hash, 16 ))
+						{
+							requested = true;
+							break;
+						}
+					}
+					if( requested )
+						break;
 					MSG_BeginClientCmd( &msg, clc_stringcmd );
-					MSG_WriteStringf( &msg, "dlfile !MD5%s", MD5_Print( p->rgucMD5_hash ));;
+					MSG_WriteStringf( &msg, "dlfile !MD5%s", MD5_Print( p->rgucMD5_hash ));
 					SetBits( p->ucFlags, RES_REQUESTED );
 					done_downloading = false;
 				}
@@ -606,7 +625,7 @@ static void CL_RemoveCustomization( int nPlayerNum, customization_t *pRemove )
 		{
 			if( pList->resource.type == t_decal )
 			{
-				if( cls.state == ca_active )
+				if( cls.state == ca_active && pList->nUserData1 > 0 )
 					ref.dllFuncs.R_DecalRemoveAll( pList->nUserData1 );
 				FS_FreeImage( pList->pInfo );
 			}
@@ -627,7 +646,7 @@ CL_ParseCustomization
 static void CL_ParseCustomization( sizebuf_t *msg )
 {
 	int i = MSG_ReadByte( msg );
-	if( i >= MAX_CLIENTS )
+	if( i < 0 || i >= MAX_CLIENTS )
 		Host_Error( "Bogus player index during customization parsing.\n" );
 
 	resource_t *pRes = Mem_Calloc( cls.mempool, sizeof( resource_t ));
@@ -642,6 +661,14 @@ static void CL_ParseCustomization( sizebuf_t *msg )
 	if( FBitSet( pRes->ucFlags, RES_CUSTOM ))
 		MSG_ReadBytes( msg, pRes->rgucMD5_hash, sizeof( pRes->rgucMD5_hash ), 16 );
 	pRes->playernum = i;
+
+	if( !cl_customspray.value || MSG_CheckOverflow( msg ) || pRes->type != t_decal ||
+		!FBitSet( pRes->ucFlags, RES_CUSTOM ) ||
+		pRes->nDownloadSize < HPAK_ENTRY_MIN_SIZE || pRes->nDownloadSize > HPAK_ENTRY_MAX_SIZE )
+	{
+		Mem_Free( pRes );
+		return;
+	}
 
 	if( !cl_allow_download.value )
 	{
@@ -660,7 +687,29 @@ static void CL_ParseCustomization( sizebuf_t *msg )
 	customization_t *pExistingCustomization = CL_PlayerHasCustomization( i, pRes->type );
 
 	if( pExistingCustomization )
+	{
+		if( !memcmp( pExistingCustomization->resource.rgucMD5_hash, pRes->rgucMD5_hash, 16 ))
+		{
+			Mem_Free( pRes );
+			return;
+		}
 		CL_RemoveCustomization( i, pExistingCustomization );
+	}
+
+	for( resource_t *pending = cl.resourcesneeded.pNext, *next;
+		pending != &cl.resourcesneeded; pending = next )
+	{
+		next = pending->pNext;
+		if( !FBitSet( pending->ucFlags, RES_CUSTOM ) || pending->playernum != i )
+			continue;
+		if( !memcmp( pending->rgucMD5_hash, pRes->rgucMD5_hash, 16 ))
+		{
+			Mem_Free( pRes );
+			return;
+		}
+		CL_RemoveFromResourceList( pending );
+		Mem_Free( pending );
+	}
 
 	qboolean bFound = false;
 	for( customization_t *pList = cl.players[pRes->playernum].customdata.pNext; pList; pList = pList->pNext )
@@ -708,6 +757,8 @@ CL_ParseResourceRequest
 */
 void CL_SendResourceList( const resource_t *list, int count )
 {
+	if( !cl_customspray.value )
+		count = 0;
 	MSG_BeginClientCmd( &cls.netchan.message, clc_resourcelist );
 	MSG_WriteShort( &cls.netchan.message, count );
 
@@ -732,6 +783,12 @@ static void CL_ParseResourceRequest( sizebuf_t *msg )
 	if( cl.servercount != arg )
 		return;
 
+	if( nStartIndex == 0 && ( !cl_customspray.value || cl.num_resources == 0 ))
+	{
+		CL_SendResourceList( NULL, 0 );
+		return;
+	}
+
 	if( nStartIndex < 0 || nStartIndex >= cl.num_resources )
 		return;
 
@@ -747,6 +804,8 @@ loading custom decal for self
 */
 static void CL_CreateCustomizationList( void )
 {
+	if( !cl_customspray.value )
+		return;
 	player_info_t *pPlayer = &cl.players[cl.playernum];
 	pPlayer->customdata.pNext = NULL;
 

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="steam_email_guard_warning">We strongly recommend using Steam Guard in the Steam mobile app instead of email codes.</string>
+    <string name="steam_connection_interrupted">The connection to Steam was interrupted or too slow. Check your connection and try again.</string>
     <string name="default_global_arguments" translatable="false">-console</string>
     <string name="about_title">about</string>
     <string name="about_text"><b>SvenClient Team:</b>\n<annotation url="https://gitlab.com/hasandramali">hasandramali</annotation> - Maintainer\n<annotation toggle="name">nightpirateslnp</annotation> - QA Lead&amp;designer\n<annotation url="https://github.com/iQuitt">iQuit</annotation> - Windows port &amp; engine analyst\n<annotation url="https://guns.lol/bariscodefx">bariscodefx</annotation> - SteamP2P advisor &amp; voice support\n\n<b>Special thanks to:</b>\n<annotation url="https://nenquen.github.io/">nenquen</annotation> - soundcache system rewrite\n<annotation url="https://github.com/berkchy">berkch</annotation> - for fixing SDL issues\nBruskk - for doing nothing</string>

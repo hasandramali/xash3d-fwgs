@@ -637,6 +637,8 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 	le_struct_swap( dwadinfo_swap, &whdr );
 	if( whdr.numlumps <= 0 || whdr.infotableofs <= 0 || whdr.infotableofs >= (int)filesize )
 		return false;
+	if( whdr.numlumps > ( filesize - whdr.infotableofs ) / sizeof( dlumpinfo_t ))
+		return false;
 
 	for( int i = 0; i < whdr.numlumps; ++i )
 	{
@@ -653,10 +655,11 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 			continue;
 
 		// get lump data and validate
-		const unsigned char *mipdata = (const unsigned char *)buffer + lump.filepos;
 		int mip_size = lump.disksize;
-		if( lump.filepos < 0 || lump.filepos + mip_size > (int)filesize )
+		if( lump.filepos < 0 || lump.filepos > filesize || mip_size < sizeof( mip ) ||
+			mip_size > filesize - lump.filepos )
 			continue;
+		const unsigned char *mipdata = (const unsigned char *)buffer + lump.filepos;
 
 		memcpy( &mip, mipdata, sizeof( mip ));
 		le_struct_swap( mip_swap, &mip );
@@ -667,7 +670,8 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 			continue;
 
 		uint32_t offset0 = mip.offsets[0];
-		if( offset0 == 0 || offset0 + width * height > (uint32_t)mip_size )
+		if( offset0 < sizeof( mip ) || offset0 > (uint32_t)mip_size ||
+			width * height > (uint32_t)mip_size - offset0 )
 			continue;
 
 		const unsigned char *pixels = mipdata + offset0;
@@ -675,7 +679,10 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 		uint32_t m1size = m0size / 4;
 		uint32_t m2size = m0size / 16;
 		uint32_t m3size = m0size / 64;
-		const unsigned char *palette = mipdata + 0x28 + m0size + m1size + m2size + m3size + 2;
+		uint32_t palette_offset = sizeof( mip ) + m0size + m1size + m2size + m3size + 2;
+		if( palette_offset > (uint32_t)mip_size || 256 * 3 > (uint32_t)mip_size - palette_offset )
+			continue;
+		const unsigned char *palette = mipdata + palette_offset;
 		const unsigned char *use_palette = palette;
 
 		// handle gradient palette

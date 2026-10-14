@@ -154,7 +154,7 @@ class SteamAuthFragment : Fragment() {
             statusText.text = getString(R.string.steam_username_hint) + " / " + getString(R.string.steam_password_hint)
             return
         }
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             showBusy(true)
             statusText.text = getString(R.string.steam_authenticating)
             val state = if (pendingEmailCode || pendingTwoFactor) {
@@ -186,6 +186,7 @@ class SteamAuthFragment : Fragment() {
                 pendingTwoFactor = false
                 codeLayout.hint = getString(R.string.steam_email_code_hint)
                 codeLayout.visibility = View.VISIBLE
+                codeLayout.helperText = getString(R.string.steam_email_guard_warning)
                 statusText.text = getString(R.string.steam_need_email_code)
             }
             is SteamAuthManager.LoginState.NeedTwoFactor -> {
@@ -212,6 +213,15 @@ class SteamAuthFragment : Fragment() {
                 statusText.text = getString(R.string.steam_error, state.message)
             }
         }
+        if ((state is SteamAuthManager.LoginState.Error || state is SteamAuthManager.LoginState.Failed)
+            && !auth.hasPendingAuth) {
+            pendingEmailCode = false
+            pendingTwoFactor = false
+            codeInput.text?.clear()
+            codeLayout.visibility = View.GONE
+            hideCredentialInputs(false)
+        }
+        if (!pendingEmailCode) codeLayout.helperText = null
     }
 
     /** Polls for the in-app approval with elapsed timer + cancel. */

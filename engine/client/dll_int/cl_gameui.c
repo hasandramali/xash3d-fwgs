@@ -31,7 +31,9 @@ static int ui_loading_mouse_x, ui_loading_mouse_y;
 
 static qboolean UI_LoadingConnection( void )
 {
-	return !cls.demoplayback && !cl.background && cls.state >= ca_connecting && cls.state < ca_active;
+	return !cls.demoplayback && !cl.background && !SV_Initialized() &&
+		!COM_StringEmpty( cls.servername ) && Q_stricmp( cls.servername, "localhost" ) &&
+		cls.state >= ca_connecting && cls.state < ca_active;
 }
 
 static void UI_LoadingConsoleBounds( int *x, int *y, int *width, int *height )
@@ -91,7 +93,8 @@ void UI_UpdateMenu( float realtime )
 	}
 	else if( loading )
 	{
-		UI_ConnectionProgress_Precache();
+		if( gameui.dllFuncs2.pfnConnectionProgress_Precache )
+			gameui.dllFuncs2.pfnConnectionProgress_Precache();
 		UI_ConnectionProgress_Disconnect();
 		if( cls.state == ca_active )
 			UI_SetActiveMenu( false );
@@ -114,7 +117,7 @@ void UI_UpdateMenu( float realtime )
 	}
 
 	// don't show menu while level is loaded
-	if( GameState->nextstate != STATE_RUNFRAME && !GameState->loadGame )
+	if( !connecting && GameState->nextstate != STATE_RUNFRAME && !GameState->loadGame )
 		return;
 
 	// menu time (not paused, not clamped)
@@ -157,6 +160,7 @@ void UI_KeyEvent( int key, qboolean down )
 			ui_loading_console_pressed = false;
 			if( inside )
 			{
+				host.allow_console = true;
 				UI_SetActiveMenu( false );
 				Key_SetKeyDest( key_console );
 			}
@@ -325,6 +329,7 @@ void UI_ConnectionProgress_Disconnect( void )
 
 void UI_ConnectionProgress_Download( const char *pszFileName, const char *pszServerName, const char *pszServerPath, int iCurrent, int iTotal, const char *comment )
 {
+	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
 	if( !gameui.dllFuncs2.pfnConnectionProgress_Download )
 		return;
 
@@ -343,6 +348,7 @@ void UI_ConnectionProgress_Download( const char *pszFileName, const char *pszSer
 
 void UI_ConnectionProgress_DownloadEnd( void )
 {
+	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
 	if( gameui.dllFuncs2.pfnConnectionProgress_DownloadEnd )
 	{
 		gameui.dllFuncs2.pfnConnectionProgress_DownloadEnd( );
@@ -351,6 +357,7 @@ void UI_ConnectionProgress_DownloadEnd( void )
 
 void UI_ConnectionProgress_Precache( void )
 {
+	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
 	if( gameui.dllFuncs2.pfnConnectionProgress_Precache )
 	{
 		gameui.dllFuncs2.pfnConnectionProgress_Precache( );
@@ -359,6 +366,7 @@ void UI_ConnectionProgress_Precache( void )
 
 void UI_ConnectionProgress_Connect( const char *server ) // NULL for local server
 {
+	if( !server || !UI_LoadingConnection() || cls.key_dest == key_console ) return;
 	if( gameui.dllFuncs2.pfnConnectionProgress_Connect )
 	{
 		gameui.dllFuncs2.pfnConnectionProgress_Connect( server );
@@ -367,6 +375,7 @@ void UI_ConnectionProgress_Connect( const char *server ) // NULL for local serve
 
 void UI_ConnectionProgress_ChangeLevel( void )
 {
+	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
 	if( gameui.dllFuncs2.pfnConnectionProgress_ChangeLevel )
 	{
 		gameui.dllFuncs2.pfnConnectionProgress_ChangeLevel( );
@@ -375,6 +384,7 @@ void UI_ConnectionProgress_ChangeLevel( void )
 
 void UI_ConnectionProgress_ParseServerInfo( const char *server )
 {
+	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
 	if( gameui.dllFuncs2.pfnConnectionProgress_ParseServerInfo )
 	{
 		gameui.dllFuncs2.pfnConnectionProgress_ParseServerInfo( server );

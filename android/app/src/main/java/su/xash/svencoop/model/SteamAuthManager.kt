@@ -7,6 +7,8 @@ import android.util.Log
 import su.xash.svencoop.R
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.io.IOException
+import android.os.SystemClock
 import java.io.OutputStream
 import java.math.BigInteger
 import java.net.InetAddress
@@ -29,6 +31,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -349,7 +352,6 @@ class SteamAuthManager(private val ctx: Context) {
             connectSocket()
             doHandshake()
             startReader()
-            connected = true
             Log.i(TAG, "connected to Steam CM")
         }
     }
@@ -370,7 +372,6 @@ class SteamAuthManager(private val ctx: Context) {
                     connectSocket()
                     doHandshake()
                     startReader()
-                    connected = true
                 }
                 prefs.edit().putString("account_name", username).apply()
 
@@ -405,7 +406,6 @@ class SteamAuthManager(private val ctx: Context) {
                         connectSocket()
                         doHandshake()
                         startReader()
-                        connected = true
                     }
                     sendLogon(
                         username = prefs.getString("account_name", "") ?: "",
@@ -432,8 +432,9 @@ class SteamAuthManager(private val ctx: Context) {
                 LoginState.Failed(result, "Login key rejected ($result)")
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "stored key login error: ${e.message}")
-            LoginState.Error(e.message ?: "stored key login error")
+            LoginState.Error(authErrorMessage(e))
         }
     }
 
@@ -461,7 +462,6 @@ class SteamAuthManager(private val ctx: Context) {
                         connectSocket()
                         doHandshake()
                         startReader()
-                        connected = true
                     }
                 }
                 prefs.edit().putString("account_name", username).apply()
@@ -498,9 +498,11 @@ class SteamAuthManager(private val ctx: Context) {
                     else e.message ?: "authentication failed"
                 )
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e(TAG, "loginModern error: ${e.message}")
+                connectLock.withLock { disconnect() }
                 authSession = null
-                LoginState.Error(e.message ?: "login error")
+                LoginState.Error(authErrorMessage(e))
             }
         }
     }
@@ -528,9 +530,11 @@ class SteamAuthManager(private val ctx: Context) {
                     }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e(TAG, "submitAuthCode error: ${e.message}")
+                connectLock.withLock { disconnect() }
                 authSession = null
-                LoginState.Error(e.message ?: "guard code error")
+                LoginState.Error(authErrorMessage(e))
             }
         }
     }
@@ -547,9 +551,11 @@ class SteamAuthManager(private val ctx: Context) {
             try {
                 finishAuthSession(session)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e(TAG, "awaitDeviceConfirmation error: ${e.message}")
+                connectLock.withLock { disconnect() }
                 authSession = null
-                LoginState.Error(e.message ?: "confirmation wait error")
+                LoginState.Error(authErrorMessage(e))
             }
         }
     }
@@ -561,6 +567,13 @@ class SteamAuthManager(private val ctx: Context) {
      */
     fun cancelPendingAuth() {
         authSession = null
+    }
+
+    val hasPendingAuth: Boolean get() = authSession != null
+
+    private fun authErrorMessage(error: Exception): String = when (error) {
+        is IOException -> ctx.getString(R.string.steam_connection_interrupted)
+        else -> error.message ?: ctx.getString(R.string.steam_connection_interrupted)
     }
 
     // -- auth-state listeners (UI refresh: toolbar icon tint etc.) ----------
@@ -601,7 +614,6 @@ class SteamAuthManager(private val ctx: Context) {
                         connectSocket()
                         doHandshake()
                         startReader()
-                        connected = true
                     }
                     sendLogon(
                         username = accountName,
@@ -627,8 +639,9 @@ class SteamAuthManager(private val ctx: Context) {
                 LoginState.Failed(result, "Refresh token rejected ($result)")
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "stored refresh token login error: ${e.message}")
-            LoginState.Error(e.message ?: "stored refresh token login error")
+            LoginState.Error(authErrorMessage(e))
         }
     }
 
@@ -1178,15 +1191,19 @@ class SteamAuthManager(private val ctx: Context) {
     // ------------------------------------------------------------------
 
     private suspend fun connectSocket() = suspendCancellableCoroutine<Unit> { cont ->
+        var connectingSocket: Socket? = null
+        cont.invokeOnCancellation { try { connectingSocket?.close() } catch (_: Exception) { } }
+        encrypted = false
+        currentSteamId = 0L
+        currentSessionId = 0
         try {
             for ((host, port) in CM_SERVERS) {
+                if (!cont.isActive) return@suspendCancellableCoroutine
                 try {
                     val sock = Socket()
-                    sock.connect(InetSocketAddress(host, port), 10000)
-                    // Steam CM connections are long-lived; remove read timeout to avoid
-                    // spurious disconnects on flaky mobile networks. The heartbeat (EMsg 1009)
-                    // sent every ~9s keeps the connection alive from both sides.
-                    sock.soTimeout = 0
+                    connectingSocket = sock
+                    sock.connect(InetSocketAddress(host, port), 20_000)
+                    sock.soTimeout = 30_000
                     socket = sock
                     input = sock.getInputStream()
                     output = sock.getOutputStream()
@@ -1194,10 +1211,11 @@ class SteamAuthManager(private val ctx: Context) {
                     cont.resume(Unit)
                     return@suspendCancellableCoroutine
                 } catch (e: Exception) {
+                    try { connectingSocket?.close() } catch (_: Exception) { }
                     Log.w(TAG, "connect failed $host:$port: ${e.message}")
                 }
             }
-            cont.resumeWithException(Exception("No Steam CM server reachable"))
+            cont.resumeWithException(IOException("No Steam CM server reachable"))
         } catch (e: Exception) {
             cont.resumeWithException(e)
         }
@@ -1260,6 +1278,7 @@ class SteamAuthManager(private val ctx: Context) {
 
     private fun startReader() {
         if (readerThread?.isAlive == true) return
+        socket?.soTimeout = 0
         expectDisconnect = false
         val currentReader = Thread {
             Log.i(TAG, "reader: thread started (name=${Thread.currentThread().name})")
@@ -1279,6 +1298,7 @@ class SteamAuthManager(private val ctx: Context) {
                 val isCurrentReader = readerThread === Thread.currentThread()
                 if (isCurrentReader) readerThread = null
                 if (isCurrentReader && !expectDisconnect) {
+                    val wasLoggedIn = loggedIn
                     closeP2P()
                     Log.e(TAG, "reader: UNEXPECTED STOP — marking disconnected (was connected=$connected loggedIn=$loggedIn)")
                     connected = false
@@ -1288,15 +1308,19 @@ class SteamAuthManager(private val ctx: Context) {
                     try { socket?.close() } catch (_: Exception) { }
                     gameConnectTokens.clear()
                     synchronized(ticketChangeLock) { ticketsByGame.clear() }
-                    logonFuture?.completeExceptionally(Exception("Connection lost"))
+                    val failure = IOException("Connection to Steam was lost")
+                    logonFuture?.completeExceptionally(failure)
+                    pendingJobs.values.forEach { it.completeExceptionally(failure) }
+                    pendingJobs.clear()
                     // Schedule automatic reconnection with stored credentials
-                    scheduleReconnect()
+                    if (wasLoggedIn) scheduleReconnect()
                 } else {
                     Log.i(TAG, "reader: stopped after replacement or expected disconnect")
                 }
             }
         }.apply { isDaemon = true; name = "sbrk-reader" }
         readerThread = currentReader
+        connected = true
         currentReader.start()
     }
 
@@ -1312,7 +1336,7 @@ class SteamAuthManager(private val ctx: Context) {
             while (attempt < maxAttempts && !Thread.interrupted() && !reloggedIn &&
                 generation == reconnectGeneration.get()) {
                 attempt++
-                val delayMs = baseDelayMs * (1 shl (attempt - 1)).coerceAtMost(60000) // max 60s
+                val delayMs = (baseDelayMs * (1L shl (attempt - 1))).coerceAtMost(60_000L)
                 Log.i(TAG, "Reconnect attempt $attempt/$maxAttempts in ${delayMs}ms...")
                 try {
                     Thread.sleep(delayMs)
@@ -1344,7 +1368,6 @@ class SteamAuthManager(private val ctx: Context) {
                             connectSocket()
                             doHandshake()
                             startReader()
-                            connected = true
                             Log.i(TAG, "Reconnected to Steam CM")
                         } catch (e: Exception) {
                             Log.w(TAG, "Reconnect attempt $attempt failed: ${e.message}")
@@ -1562,7 +1585,7 @@ class SteamAuthManager(private val ctx: Context) {
     // Logon
     // ------------------------------------------------------------------
 
-    private fun sendLogon(
+    private suspend fun sendLogon(
         username: String,
         password: String?,
         authCode: String?,
@@ -1584,14 +1607,21 @@ class SteamAuthManager(private val ctx: Context) {
         val header = buildProtoHeader(headerSteamId, 0)
         val future = CompletableFuture<Int>()
         logonFuture = future
-        sendProtobufMsg(5514, body, header)
-
         try {
-            return future.get(60, TimeUnit.SECONDS)
-        } catch (e: Exception) {
-            throw Exception("Timed out waiting for logon response: ${e.message}")
+            sendProtobufMsg(5514, body, header)
+            return kotlinx.coroutines.withTimeout(90_000L) {
+                suspendCancellableCoroutine { continuation ->
+                    continuation.invokeOnCancellation { future.cancel(false) }
+                    future.whenComplete { value, error ->
+                        if (error != null) continuation.resumeWithException(error)
+                        else continuation.resume(value)
+                    }
+                }
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            throw IOException("Steam logon response timed out", e)
         } finally {
-            logonFuture = null
+            if (logonFuture === future) logonFuture = null
         }
     }
 
@@ -1632,6 +1662,13 @@ class SteamAuthManager(private val ctx: Context) {
         body: ByteArray,
         allowedEresults: Set<Int> = setOf(ER_OK)
     ): ByteArray {
+        connectLock.withLock {
+            if (!connected) {
+                connectSocket()
+                doHandshake()
+                startReader()
+            }
+        }
         val jobId = nextJobId.getAndIncrement()
         val future = CompletableFuture<SteamMsg>()
         pendingJobs[jobId] = future
@@ -1801,9 +1838,11 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private suspend fun finishAuthSession(session: AuthSessionState): LoginState {
-        val deadline = System.currentTimeMillis() + AUTH_POLL_TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline) {
+        val deadline = SystemClock.elapsedRealtime() + AUTH_POLL_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (authSession !== session) throw CancellationException("Authentication cancelled")
             val result = pollAuthSessionStatus(session)
+            if (authSession !== session) throw CancellationException("Authentication cancelled")
             if (result != null) return completeAuth(result, session.steamId)
             delay(session.pollingIntervalMs)
         }
@@ -1820,22 +1859,31 @@ class SteamAuthManager(private val ctx: Context) {
             .putLong("steam_id", steamId)
             .apply()
         authSession = null
-        val logonResult = connectLock.withLock {
-            if (!connected) {
-                connectSocket()
-                doHandshake()
-                startReader()
-                connected = true
+        var logonResult = 0
+        for (attempt in 0..1) {
+            try {
+                logonResult = connectLock.withLock {
+                    if (!connected) {
+                        connectSocket()
+                        doHandshake()
+                        startReader()
+                    }
+                    sendLogon(
+                        username = username,
+                        password = null,
+                        authCode = null,
+                        twoFactorCode = null,
+                        loginKey = null,
+                        steamId = null,
+                        accessToken = result.refreshToken
+                    )
+                }
+                break
+            } catch (error: IOException) {
+                connectLock.withLock { disconnect() }
+                if (attempt == 1) throw error
+                delay(1500L)
             }
-            sendLogon(
-                username = username,
-                password = null,
-                authCode = null,
-                twoFactorCode = null,
-                loginKey = null,
-                steamId = null,
-                accessToken = result.refreshToken
-            )
         }
         return handleLogonResult(logonResult)
     }
@@ -2265,7 +2313,7 @@ class SteamAuthManager(private val ctx: Context) {
         Proto.packInt32(data.size).copyInto(final, 0)
         Proto.packInt32(TCP_MAGIC).copyInto(final, 4)
         data.copyInto(final, 8)
-        val stream = output ?: throw IllegalStateException("Steam disconnected")
+        val stream = output ?: throw IOException("Steam disconnected")
         synchronized(stream) {
             stream.write(final)
             stream.flush()
@@ -2329,6 +2377,9 @@ class SteamAuthManager(private val ctx: Context) {
         heartbeatJob = null
         connected = false
         loggedIn = false
+        encrypted = false
+        logonFuture?.completeExceptionally(IOException("Disconnected"))
+        logonFuture = null
         gameConnectTokens.clear()
         currentGamePlaying = null
         synchronized(ticketChangeLock) { ticketsByGame.clear() }
@@ -2383,8 +2434,9 @@ class SteamAuthManager(private val ctx: Context) {
         // Bound the wait so a dead/half-open CM socket cannot pin the broker client thread
         // forever; the engine retries the request anyway (see its ticket watchdog).
         return try {
-            kotlinx.coroutines.withTimeout(20_000L) {
+            kotlinx.coroutines.withTimeout(if (what.startsWith("Authentication.")) 60_000L else 20_000L) {
                 suspendCancellableCoroutine { cont ->
+                    cont.invokeOnCancellation { future.cancel(false) }
                     future.whenComplete { value, error ->
                         if (error != null) cont.resumeWithException(error)
                         else cont.resume(value)
@@ -2392,7 +2444,7 @@ class SteamAuthManager(private val ctx: Context) {
                 }
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            throw Exception("$what timed out")
+            throw IOException("$what timed out", e)
         }
     }
 

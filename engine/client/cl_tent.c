@@ -2906,13 +2906,41 @@ CL_PlayerDecal
 spray custom colored decal (clan logo etc)
 ===============
 */
+static int cl_spray_fallback;
+
+void CL_ClearCustomSprayDecals( void )
+{
+	if( cl_spray_fallback > 0 )
+		ref.dllFuncs.R_DecalRemoveAll( cl_spray_fallback );
+}
+
+static int CL_SprayFallbackTexture( void )
+{
+	if( !cl_spray_fallback )
+	{
+		Image_SetForceFlags( IL_LOAD_DECAL );
+		rgbdata_t *image = FS_LoadImage( "{lambda01", NULL, 0 );
+		Image_ClearForceFlags();
+		if( image )
+		{
+			cl_spray_fallback = GL_LoadTextureInternal( "#spray_lambda", image, TF_DECAL );
+			FS_FreeImage( image );
+		}
+		if( cl_spray_fallback <= 0 )
+			cl_spray_fallback = -1;
+	}
+	return cl_spray_fallback;
+}
+
 static void CL_PlayerDecal( int playernum, int customIndex, int entityIndex, float *pos )
 {
 	int		textureIndex = 0;
 	customization_t	*pCust = NULL;
 
-	if( playernum < MAX_CLIENTS )
-		pCust = cl.players[playernum].customdata.pNext;
+	if( !cl_customspray.value || playernum < 0 || playernum >= MAX_CLIENTS )
+		return;
+
+	pCust = cl.players[playernum].customdata.pNext;
 
 	if( pCust != NULL && pCust->pBuffer != NULL && pCust->pInfo != NULL )
 	{
@@ -2923,21 +2951,30 @@ static void CL_PlayerDecal( int playernum, int customIndex, int entityIndex, flo
 				char decalname[MAX_VA_STRING];
 				int width, height;
 
-				Q_snprintf( decalname, sizeof( decalname ), "player%dlogo%d", playernum, customIndex );
+				Q_snprintf( decalname, sizeof( decalname ), "player%dlogo", playernum );
 				textureIndex = ref.dllFuncs.GL_FindTexture( decalname );
 				if( textureIndex != 0 )
 					ref.dllFuncs.GL_FreeTexture( textureIndex );
 
 				pCust->nUserData1 = GL_LoadTextureInternal( decalname, pCust->pInfo, TF_DECAL );
+				if( pCust->nUserData1 <= 0 )
+				{
+					pCust->nUserData1 = -1;
+					textureIndex = CL_SprayFallbackTexture();
+					if( textureIndex > 0 )
+						CL_DecalShoot( textureIndex, entityIndex, 0, pos, FDECAL_CUSTOM );
+					return;
+				}
 
 				width = REF_GET_PARM( PARM_TEX_WIDTH, pCust->nUserData1 );
 				height = REF_GET_PARM( PARM_TEX_HEIGHT, pCust->nUserData1 );
 
-				if( width > cl_logomaxdim.value || height > cl_logomaxdim.value )
+				float maxdim = bound( 1.0f, cl_logomaxdim.value, 256.0f );
+				if( width > maxdim || height > maxdim )
 				{
-					double scale = cl_logomaxdim.value / Q_max( width, height );
-					width = round( width * scale );
-					height = round( height * scale );
+					double scale = maxdim / Q_max( width, height );
+					width = Q_max( 1, round( width * scale ));
+					height = Q_max( 1, round( height * scale ));
 					ref.dllFuncs.R_OverrideTextureSourceSize( pCust->nUserData1, width, height ); // default custom decal from HL1
 				}
 			}
@@ -2945,7 +2982,10 @@ static void CL_PlayerDecal( int playernum, int customIndex, int entityIndex, flo
 		}
 	}
 
-	CL_DecalShoot( textureIndex, entityIndex, 0, pos, FDECAL_CUSTOM );
+	if( textureIndex <= 0 )
+		textureIndex = CL_SprayFallbackTexture();
+	if( textureIndex > 0 )
+		CL_DecalShoot( textureIndex, entityIndex, 0, pos, FDECAL_CUSTOM );
 }
 
 /*
@@ -3077,6 +3117,7 @@ CL_ClearEffects
 */
 void CL_ClearEffects( void )
 {
+	cl_spray_fallback = 0;
 	CL_ClearEfrags ();
 	CL_ClearDlights ();
 	CL_ClearTempEnts ();
