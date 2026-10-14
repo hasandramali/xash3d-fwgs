@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.text.Annotation
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.TextPaint
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
 import android.view.LayoutInflater
@@ -404,6 +405,15 @@ class LibraryFragment : Fragment(), MenuProvider {
 						Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
 				}
 				val action = object : ClickableSpan() {
+					override fun updateDrawState(paint: TextPaint) {
+						if (annotation.key == "toggle") {
+							paint.color = aboutText.currentTextColor
+							paint.isUnderlineText = false
+						} else {
+							super.updateDrawState(paint)
+						}
+					}
+
 					override fun onClick(widget: View) {
 						if (annotation.key == "toggle") {
 							alternateName = !alternateName
@@ -420,9 +430,19 @@ class LibraryFragment : Fragment(), MenuProvider {
 		}
 		aboutText.movementMethod = LinkMovementMethod.getInstance()
 		updateCredits()
-		content.findViewById<TextView>(R.id.aboutDiscord).setOnClickListener {
-			openAboutLink(getString(R.string.about_discord_url))
+		val discordText = content.findViewById<TextView>(R.id.aboutDiscord)
+		val discordMessage = SpannableStringBuilder(getText(R.string.about_discord))
+		for (annotation in discordMessage.getSpans(0, discordMessage.length, Annotation::class.java)) {
+			if (annotation.key != "link" || annotation.value != "discord") continue
+			discordMessage.setSpan(object : ClickableSpan() {
+				override fun onClick(widget: View) {
+					openAboutLink(getString(R.string.about_discord_url))
+				}
+			}, discordMessage.getSpanStart(annotation), discordMessage.getSpanEnd(annotation),
+				Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
 		}
+		discordText.movementMethod = LinkMovementMethod.getInstance()
+		discordText.text = discordMessage
 		MaterialAlertDialogBuilder(requireContext())
 			.setTitle(R.string.about_title)
 			.setView(content)

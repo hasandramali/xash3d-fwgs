@@ -23,11 +23,8 @@
             android:minHeight="48dp"
             android:gravity="center_vertical"
             android:paddingEnd="16dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?attr/selectableItemBackground"
             android:textAppearance="?android:attr/textAppearanceMedium"
-            android:textColor="#448AFF"
+            android:textColorLink="#448AFF"
             android:text="@string/about_discord" />
     </LinearLayout>
 </ScrollView>
