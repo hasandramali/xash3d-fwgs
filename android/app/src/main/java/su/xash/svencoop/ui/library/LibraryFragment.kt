@@ -9,6 +9,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.text.Annotation
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.method.LinkMovementMethod
+import android.text.style.ClickableSpan
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuInflater
@@ -385,19 +390,52 @@ class LibraryFragment : Fragment(), MenuProvider {
 
 	private fun showAboutDialog() {
 		val content = layoutInflater.inflate(R.layout.dialog_about, null)
-		content.findViewById<TextView>(R.id.aboutDiscord).setOnClickListener {
-			val url = getString(R.string.about_discord_url)
-			try {
-				startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-			} catch (_: ActivityNotFoundException) {
-				Toast.makeText(requireContext(), url, Toast.LENGTH_LONG).show()
+		val aboutText = content.findViewById<TextView>(R.id.aboutText)
+		var alternateName = false
+		fun updateCredits() {
+			val credits = SpannableStringBuilder(getText(R.string.about_text))
+			val annotations = credits.getSpans(0, credits.length, Annotation::class.java)
+			for (annotation in annotations) {
+				if (annotation.key == "toggle" && alternateName) {
+					val start = credits.getSpanStart(annotation)
+					val replacement = getString(R.string.about_alternate_name)
+					credits.replace(start, credits.getSpanEnd(annotation), replacement)
+					credits.setSpan(annotation, start, start + replacement.length,
+						Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+				}
+				val action = object : ClickableSpan() {
+					override fun onClick(widget: View) {
+						if (annotation.key == "toggle") {
+							alternateName = !alternateName
+							updateCredits()
+						} else if (annotation.key == "url") {
+							openAboutLink(annotation.value)
+						}
+					}
+				}
+				credits.setSpan(action, credits.getSpanStart(annotation), credits.getSpanEnd(annotation),
+					Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
 			}
+			aboutText.text = credits
+		}
+		aboutText.movementMethod = LinkMovementMethod.getInstance()
+		updateCredits()
+		content.findViewById<TextView>(R.id.aboutDiscord).setOnClickListener {
+			openAboutLink(getString(R.string.about_discord_url))
 		}
 		MaterialAlertDialogBuilder(requireContext())
 			.setTitle(R.string.about_title)
 			.setView(content)
 			.setPositiveButton(android.R.string.ok, null)
 			.show()
+	}
+
+	private fun openAboutLink(url: String) {
+		try {
+			startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+		} catch (_: ActivityNotFoundException) {
+			Toast.makeText(requireContext(), url, Toast.LENGTH_LONG).show()
+		}
 	}
 
 	override fun onResume() {
