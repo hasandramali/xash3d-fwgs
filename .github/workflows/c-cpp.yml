@@ -1,5 +1,35 @@
 name: Build & Deploy Engine
-on: [push, pull_request]
+on:
+  push:
+    paths:
+      - '**.c'
+      - '**.cpp'
+      - '**.h'
+      - '**.hpp'
+      - '**.inc'
+      - '**.m'
+      - '**.mm'
+      - '3rdparty/**'
+      - '.gitmodules'
+      - 'wscript'
+      - 'scripts/**'
+      - 'android/**'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '**.c'
+      - '**.cpp'
+      - '**.h'
+      - '**.hpp'
+      - '**.inc'
+      - '**.m'
+      - '**.mm'
+      - '3rdparty/**'
+      - '.gitmodules'
+      - 'wscript'
+      - 'scripts/**'
+      - 'android/**'
+      - '.github/workflows/**'
 jobs:
 #  cleanup:
 #    runs-on: self-hosted
