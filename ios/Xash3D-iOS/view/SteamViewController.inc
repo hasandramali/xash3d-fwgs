@@ -71,7 +71,7 @@
     _install = [self button:@"Install game" action:@selector(installTapped)]; [stack addArrangedSubview:_install];
     _progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault]; [stack addArrangedSubview:_progress];
     _installStatus = [[UILabel alloc] init]; _installStatus.numberOfLines = 0; _installStatus.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-    _installStatus.text = @"Install Sven Co-op game data from Steam. Existing completed files are kept when cancelling."; [stack addArrangedSubview:_installStatus];
+    _installStatus.text = @"No Steam sign-in required. Completed files are kept if you cancel; incompatible binaries are removed after installation."; [stack addArrangedSubview:_installStatus];
     _cancelInstall = [self button:@"Cancel installation" action:@selector(cancelInstall)]; [stack addArrangedSubview:_cancelInstall];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:SvenSteamStateChanged object:nil];
     [self refresh];

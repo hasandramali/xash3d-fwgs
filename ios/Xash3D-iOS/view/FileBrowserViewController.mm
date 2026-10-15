@@ -9,6 +9,7 @@
 @property (nonatomic, strong) NSArray *files;
 @property (nonatomic, strong) NSFileManager *fm;
 @property (nonatomic, assign) BOOL forceLandscape;
+@property (nonatomic, strong) UIBarButtonItem *pasteButton;
 @end
 
 static NSString *_pasteboardPath = nil;
@@ -47,9 +48,8 @@ static NSString *kCellID = @"FileCell";
     // Launch button (right)
     UIBarButtonItem *launchBtn = [[UIBarButtonItem alloc] initWithTitle:@"Play" style:UIBarButtonItemStyleDone target:self action:@selector(launchTapped)];
     self.navigationItem.rightBarButtonItems = @[
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(settingsTapped)],
-        [[UIBarButtonItem alloc] initWithTitle:@"Steam" style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)],
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.down.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)]
+        launchBtn,
+        [[UIBarButtonItem alloc] initWithTitle:@"Steam" style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)]
     ];
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"global_arguments": @"-console"}];
     if (SteamService.shared.autoConnect) [SteamService.shared restoreSession];
@@ -57,10 +57,10 @@ static NSString *kCellID = @"FileCell";
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
     UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
     UIBarButtonItem *folderBtn = [[UIBarButtonItem alloc] initWithTitle:@"New Folder" style:UIBarButtonItemStylePlain target:self action:@selector(newFolderTapped)];
-    UIBarButtonItem *steamBtn = [[UIBarButtonItem alloc] initWithTitle:@"Steam" style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)];
     UIBarButtonItem *pasteBtn = [[UIBarButtonItem alloc] initWithTitle:@"Paste" style:UIBarButtonItemStylePlain target:self action:@selector(pasteTapped)];
+    self.pasteButton = pasteBtn;
     pasteBtn.enabled = (_pasteboardPath != nil);
-    self.toolbarItems = @[launchBtn, flex, steamBtn, flex, importBtn, flex, folderBtn, flex, pasteBtn];
+    self.toolbarItems = @[folderBtn, flex, importBtn, flex, pasteBtn];
     self.navigationController.toolbarHidden = NO;
 
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:kCellID];
@@ -86,28 +86,27 @@ static NSString *kCellID = @"FileCell";
         [self showError:[NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Finish or cancel game installation before playing."}]];
         return;
     }
-    [SteamService.shared startBroker];
-    [self doLaunchWithGameDir:@"svencoop" extraArgs:[[NSUserDefaults standardUserDefaults] stringForKey:@"global_arguments"] ?: @"-console"];
+    UIAlertController *launch = [UIAlertController alertControllerWithTitle:@"Command-line arguments" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    [launch addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.text = [[NSUserDefaults standardUserDefaults] stringForKey:@"global_arguments"] ?: @"-console";
+        field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        field.autocorrectionType = UITextAutocorrectionTypeNo;
+    }];
+    [launch addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [launch addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        if (self.dataDownloader.installing) return;
+        NSString *arguments = launch.textFields.firstObject.text ?: @"";
+        [[NSUserDefaults standardUserDefaults] setObject:arguments forKey:@"global_arguments"];
+        [SteamService.shared startBroker];
+        [self doLaunchWithGameDir:@"svencoop" extraArgs:arguments];
+    }]];
+    [self presentViewController:launch animated:YES completion:nil];
 }
 
 - (void)steamTapped
 {
     SteamViewController *steam = [[SteamViewController alloc] init]; steam.downloader = self.dataDownloader;
     [self.navigationController pushViewController:steam animated:YES];
-}
-
-- (void)settingsTapped
-{
-    UIAlertController *settings = [UIAlertController alertControllerWithTitle:@"Settings" message:@"Global command-line arguments" preferredStyle:UIAlertControllerStyleAlert];
-    [settings addTextFieldWithConfigurationHandler:^(UITextField *field){
-        field.text = [[NSUserDefaults standardUserDefaults] stringForKey:@"global_arguments"] ?: @"-console";
-        field.autocapitalizationType = UITextAutocapitalizationTypeNone; field.autocorrectionType = UITextAutocorrectionTypeNo;
-    }];
-    [settings addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [settings addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [[NSUserDefaults standardUserDefaults] setObject:settings.textFields.firstObject.text ?: @"" forKey:@"global_arguments"];
-    }]];
-    [self presentViewController:settings animated:YES completion:nil];
 }
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
@@ -428,16 +427,8 @@ static NSString *kCellID = @"FileCell";
 
 - (void)updatePasteButton
 {
-    if (self.toolbarItems.count >= 7) {
-        UIBarButtonItem *pasteBtn = self.toolbarItems[6];
-        pasteBtn.enabled = (_pasteboardPath != nil);
-        if (_isMoveOperation)
-            pasteBtn.title = @"Move Here";
-        else if (_pasteboardPath)
-            pasteBtn.title = @"Paste";
-        else
-            pasteBtn.title = @"Paste";
-    }
+    self.pasteButton.enabled = (_pasteboardPath != nil);
+    self.pasteButton.title = _pasteboardPath && _isMoveOperation ? @"Move Here" : @"Paste";
 }
 
 - (void)newFolderTapped

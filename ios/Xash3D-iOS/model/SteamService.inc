@@ -4,6 +4,7 @@
 #include <sstream>
 #include <cmath>
 #include "SteamP2P.hpp"
+#include "SteamContent.hpp"
 
 NSNotificationName const SvenSteamStateChanged = @"SvenSteamStateChanged";
 
@@ -195,6 +196,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
         throw std::runtime_error(SteamUTF8(error.localizedDescription ?: @"Could not connect to Steam"));
     if (generation != _generation) { [client disconnect]; throw std::runtime_error("Steam login cancelled"); }
     timeval timeout = {}; setsockopt(client->_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    client->_readDeadline = UINT64_MAX;
     _connected = true;
     { std::lock_guard<std::mutex> lock(_pendingMutex); _tokens.clear(); _friendAddresses.clear(); }
     Buffer hello; number(hello, 1, 65581);
@@ -227,7 +229,8 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     uint64_t job;
     { std::lock_guard<std::mutex> lock(_pendingMutex); job = _nextJob++; _pending[job] = pending; }
     if (!_connected) { std::lock_guard<std::mutex> lock(_pendingMutex); _pending.erase(job); throw std::runtime_error("Steam connection interrupted"); }
-    [_cm sendProtobufMsg:message body:body header:header(_steamID, _sessionID, job, method)];
+    try { [_cm sendProtobufMsg:message body:body header:header(_steamID, _sessionID, job, method)]; }
+    catch (...) { std::lock_guard<std::mutex> lock(_pendingMutex); _pending.erase(job); throw; }
     std::unique_lock<std::mutex> lock(_pendingMutex);
     bool finished = pending->changed.wait_for(lock, std::chrono::seconds(seconds), [&]{ return pending->done; });
     _pending.erase(job);
@@ -236,7 +239,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     return pending->reply;
 }
 - (Buffer)unified:(const std::string &)method body:(const Buffer &)body {
-    auto reply = [self request:9804 body:body method:method expected:147 timeout:60];
+    auto reply = [self request:(self.loggedIn ? 151 : 9804) body:body method:method expected:147 timeout:60];
     int result = int(value(reply.header, 13, 1));
     if (result == 5) throw std::runtime_error("Check your Steam username and password.");
     if (result == 56 || result == 88 || result == 89) throw std::runtime_error("Check your Steam Guard code and try again.");
@@ -294,7 +297,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     dispatch_source_set_timer(_heartbeat, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), std::max(3u, seconds) * NSEC_PER_SEC, NSEC_PER_SEC);
     dispatch_source_set_event_handler(_heartbeat, ^{
         if (generation != self->_generation || !self.loggedIn) return;
-        try { [self send:1009 body:Buffer{}]; [self advertise]; }
+        try { [self send:clientHeartbeat body:Buffer{}]; [self advertise]; }
         catch (...) {
             [self closeConnection];
             if (self.autoConnect) dispatch_async(self->_operations, ^{ if (generation == self->_generation) [self restoreSession]; });

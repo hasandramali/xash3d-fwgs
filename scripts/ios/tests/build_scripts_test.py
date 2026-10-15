@@ -7,6 +7,93 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_launcher_actions_and_anonymous_install(self):
+        repository = Path(__file__).resolve().parents[3]
+        browser = (repository / "ios/Xash3D-iOS/view/FileBrowserViewController.mm").read_text()
+        navigation = browser.split("self.navigationItem.rightBarButtonItems = @[", 1)[1].split("];", 1)[0]
+        self.assertIn("launchBtn", navigation)
+        self.assertEqual(navigation.count("@selector(steamTapped)"), 1)
+        self.assertNotIn("settingsTapped", browser)
+        self.assertNotIn("map_background", browser)
+        launcher = (repository / "ios/Xash3D-iOS/model/launchdialog.mm").read_text()
+        defaults = launcher.split('extern "C" void IOS_SetDefaultArgs()', 1)[1].split('\n}', 1)[0]
+        self.assertNotIn("map_background", defaults)
+        self.assertIn('"svenclient", "-console", "-game", "svencoop"', defaults)
+        self.assertNotIn("arrow.down.circle", navigation)
+        self.assertIn("self.toolbarItems = @[folderBtn, flex, importBtn, flex, pasteBtn];", browser)
+        self.assertIn("self.pasteButton.enabled = (_pasteboardPath != nil);", browser)
+        launch = browser.split("- (void)launchTapped", 1)[1].split("- (void)steamTapped", 1)[0]
+        self.assertIn('actionWithTitle:@"Cancel"', launch)
+        self.assertIn('actionWithTitle:@"Launch"', launch)
+        self.assertLess(launch.index('actionWithTitle:@"Launch"'), launch.index("doLaunchWithGameDir:"))
+        downloader = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
+        self.assertNotIn("requestLicense:", downloader)
+        self.assertIn("[client anonymousLoginWithError:&err]", downloader)
+        self.assertIn("if (!self.cancelled && !anyFailed) purgeForeignBinaries(targetDir);", downloader)
+
+    def test_steam_reads_honor_deadlines_and_cancellation(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
+        start = source.index("- (BOOL)readExact:(uint8_t *)d length:(size_t)l {")
+        end = source.index("- (BOOL)connectWithError:", start)
+        method = source[start:end].replace(
+            "- (BOOL)readExact:(uint8_t *)d length:(size_t)l", "bool readExact(uint8_t *d, size_t l)", 1
+        ).replace('@"', '"')
+        program = """
+#include "SteamContent.hpp"
+#include <atomic>
+#include <cassert>
+#include <cerrno>
+#include <poll.h>
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
+#define YES true
+#define NO false
+void logToFile(const char *, ...) {}
+struct CMReadTest {
+    std::atomic<int> _sock{-1};
+    std::atomic<bool> _closed{false};
+    uint64_t _readDeadline = 0;
+""" + method + """
+};
+int main() {
+    int descriptors[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors) == 0);
+    CMReadTest reader; reader._sock = descriptors[0];
+    uint8_t buffer[4];
+    auto started = svensteam::milliseconds();
+    reader._readDeadline = started + 80;
+    assert(!reader.readExact(buffer, 1));
+    assert(svensteam::milliseconds() - started < 1000);
+    reader._readDeadline = svensteam::milliseconds() + 2000;
+    std::thread sender([&] {
+        for (uint8_t value = 1; value <= 4; ++value) {
+            usleep(10000); assert(write(descriptors[1], &value, 1) == 1);
+        }
+    });
+    assert(reader.readExact(buffer, 4)); sender.join();
+    for (unsigned index = 0; index < 4; ++index) assert(buffer[index] == index + 1);
+    reader._readDeadline = UINT64_MAX;
+    started = svensteam::milliseconds();
+    std::thread cancellation([&] { usleep(20000); reader._closed = true; });
+    assert(!reader.readExact(buffer, 1)); cancellation.join();
+    assert(svensteam::milliseconds() - started < 1000);
+    reader._closed = false;
+    close(descriptors[1]);
+    assert(!reader.readExact(buffer, 1));
+    close(descriptors[0]);
+}
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "SteamReadTests.cpp"
+            executable = Path(temporary) / "steam-read-tests"
+            test_source.write_text(program)
+            subprocess.run([os.environ.get("CXX", "clang++"), "-std=c++17", "-Wall", "-Wextra",
+                            "-Werror", "-pthread", "-I", str(repository / "ios/Xash3D-iOS/model"),
+                            str(test_source), "-o", str(executable)], check=True)
+            subprocess.run([str(executable)], check=True, timeout=10)
+
     def test_steam_manifest_file_collection_syntax(self):
         repository = Path(__file__).resolve().parents[3]
         source = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
@@ -42,6 +129,8 @@ class SvenBuildScriptsTest(unittest.TestCase):
                            source.index("#pragma mark - Multi (emsg=1) message parsing")]
         login_start = source.index("- (BOOL)anonymousLoginWithError:(NSError **)error {")
         login = source[login_start:source.index("- (void)parseLogonResponseHeader:", login_start)]
+        content_start = source.index("- (BOOL)waitForMessage:(int)expected job:(uint64_t)job timeout:(int)seconds body:(bytes *)response error:(NSError **)error {")
+        content = source[content_start:source.index("\n@end", content_start)]
         methods = """
 @interface SteamCMClient (SyntaxDependencies)
 - (void)status:(NSString *)status;
@@ -58,7 +147,7 @@ class SvenBuildScriptsTest(unittest.TestCase):
             test_source.write_text(
                 '#include "SteamCMSyntaxPrelude.h"\n' + helpers +
                 source[interface_start:interface_end] + methods +
-                "\n@implementation SteamCMClient\n" + heartbeat + login + "\n@end\n")
+                "\n@implementation SteamCMClient\n" + heartbeat + login + content + "\n@end\n")
             subprocess.run([os.environ.get("CXX", "clang++"), "-fsyntax-only", "-std=c++17",
                             "-fblocks", "-fobjc-runtime=ios-13.0", "-fobjc-arc",
                             "-Wno-incomplete-implementation", "-Wno-objc-root-class",

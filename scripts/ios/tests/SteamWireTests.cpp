@@ -1,4 +1,5 @@
 #include "../../../ios/Xash3D-iOS/model/SteamP2P.hpp"
+#include "../../../ios/Xash3D-iOS/model/SteamContent.hpp"
 #include <cassert>
 #include <iostream>
 #include <random>
@@ -74,7 +75,37 @@ static void malformed() {
         try { stream.receive(data); } catch (const std::exception &) {}
     }
 }
+static void contentDownload() {
+    assert(clientHeartbeat == 703);
+    Buffer responseHeader; fixed(responseHeader, 11, 42);
+    assert(contentReplyMatches(147, responseHeader, 147, 42));
+    assert(!contentReplyMatches(147, responseHeader, 147, 43));
+    assert(!contentReplyMatches(703, responseHeader, 147, 42));
+    assert(!contentReplyMatches(147, {}, 147, 42));
+
+    Buffer key(32, 0xa5), response;
+    number(response, 1, 1); number(response, 2, 225841); data(response, 3, key);
+    assert(depotDecryptionKey(response, 225841) == key);
+    bool rejected = false;
+    try { depotDecryptionKey(response, 1); } catch (const std::exception &) { rejected = true; }
+    assert(rejected);
+    rejected = false;
+    Buffer denied; number(denied, 1, 5); number(denied, 2, 225841); data(denied, 3, key);
+    try { depotDecryptionKey(denied, 225841); } catch (const std::exception &) { rejected = true; }
+    assert(rejected);
+    rejected = false;
+    Buffer invalid; number(invalid, 1, 1); number(invalid, 2, 225841); data(invalid, 3, {1, 2});
+    try { depotDecryptionKey(invalid, 225841); } catch (const std::exception &) { rejected = true; }
+    assert(rejected);
+
+    Buffer cdn, entry; text(entry, 8, "cache.example.com"); text(entry, 9, "cdn.example.com"); data(cdn, 1, entry); data(cdn, 1, entry);
+    Buffer proxy; text(proxy, 8, "proxy.example.com"); number(proxy, 10, 1); data(cdn, 1, proxy);
+    Buffer unsafe; text(unsafe, 9, "example.com/path"); data(cdn, 1, unsafe);
+    assert(contentHosts(cdn) == std::vector<std::string>{"cdn.example.com"});
+    for (const auto &path : {"client.dll", "libserver.SO", "nested/lib.a", "setup.exe", "run.BAT"}) assert(foreignGameBinary(path));
+    for (const auto &path : {"models/a.mdl", "sound/a.wav", "sprites/dollar.spr", "dll-folder/map.bsp", "maps/a.txt"}) assert(!foreignGameBinary(path));
+}
 int main() {
-    protobuf(); masterlist(); broker(); stun(); streams(); malformed();
-    std::cout << "PASS: protobuf bounds, CM headers, masterlist, legacy STUN, stream handshake/retransmission, malformed input\n";
+    protobuf(); masterlist(); broker(); stun(); streams(); malformed(); contentDownload();
+    std::cout << "PASS: protobuf bounds, CM headers, masterlist, legacy STUN, stream handshake/retransmission, malformed input, content responses and binary filtering\n";
 }

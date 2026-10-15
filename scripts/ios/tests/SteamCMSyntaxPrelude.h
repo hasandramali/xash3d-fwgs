@@ -2,6 +2,7 @@
 #include <mutex>
 #include <vector>
 #include <unistd.h>
+#include "../../../ios/Xash3D-iOS/model/SteamContent.hpp"
 
 #if defined(__APPLE__)
 #import <Foundation/Foundation.h>
@@ -16,11 +17,13 @@ typedef unsigned long NSUInteger;
 + (instancetype)alloc;
 @end
 @interface NSString : NSObject
+@property(readonly) const char *UTF8String;
 @property(readonly) BOOL isAbsolutePath;
 @property(readonly) NSArray *pathComponents;
 @property(readonly) NSString *pathExtension;
 @property(readonly) NSString *lowercaseString;
 + (instancetype)stringWithFormat:(NSString *)format, ...;
++ (instancetype)stringWithUTF8String:(const char *)value;
 - (NSString *)stringByReplacingOccurrencesOfString:(NSString *)search withString:(NSString *)replacement;
 - (BOOL)hasPrefix:(NSString *)prefix;
 @end
@@ -43,12 +46,14 @@ typedef struct {
     unsigned long extra[5];
 } NSFastEnumerationState;
 @interface NSArray<ObjectType> : NSObject
+@property(readonly) NSUInteger count;
 + (instancetype)arrayWithObjects:(const id[])objects count:(NSUInteger)count;
 - (BOOL)containsObject:(id)object;
 - (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState *)state
                                 objects:(id __unsafe_unretained [])objects count:(NSUInteger)count;
 @end
 @interface NSMutableArray : NSArray
++ (instancetype)array;
 - (void)addObject:(id)object;
 @end
 @interface NSData : NSObject

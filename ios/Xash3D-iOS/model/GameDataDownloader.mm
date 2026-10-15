@@ -3,6 +3,7 @@
 #import <Security/Security.h>
 #import <CommonCrypto/CommonDigest.h>
 #include "SteamWire.hpp"
+#include "SteamContent.hpp"
 #include <atomic>
 #include <poll.h>
 #include <fcntl.h>
@@ -37,6 +38,7 @@ static const int PROTO_MASK = 0x80000000;
 static const int TCP_MAGIC = 0x31305456;
 static const uint64_t ANON_STEAM_ID = (10ULL << 52) | (1ULL << 56);
 static const int CM_PORT = 27017;
+static void logToFile(NSString *format, ...);
 
 // Per-depot working CDN host index cache
 static NSMutableDictionary *s_workingCdnHost;
@@ -66,6 +68,22 @@ static void cleanupTmpFiles(NSString *targetDir) {
             [fm removeItemAtPath:path error:nil];
         }
     }
+}
+
+static void purgeForeignBinaries(NSString *targetDir) {
+    NSFileManager *manager = NSFileManager.defaultManager;
+    NSDirectoryEnumerator *entries = [manager enumeratorAtPath:targetDir];
+    NSUInteger removed = 0;
+    for (NSString *relative in entries) {
+        NSString *path = [targetDir stringByAppendingPathComponent:relative];
+        NSDictionary *attributes = [manager attributesOfItemAtPath:path error:nil];
+        if (![attributes[NSFileType] isEqualToString:NSFileTypeRegular]) continue;
+        if (!svensteam::foreignGameBinary(relative.UTF8String ?: "")) continue;
+        NSError *error = nil;
+        if ([manager removeItemAtPath:path error:&error]) removed++;
+        else logToFile(@"[cleanup] Could not remove %@: %@", relative, error.localizedDescription);
+    }
+    logToFile(@"[cleanup] Removed %lu foreign binaries", (unsigned long)removed);
 }
 
 static NSArray *CM_SERVERS() {
@@ -442,21 +460,6 @@ static NSData *gzipDecompress(NSData *data) {
     return res;
 }
 
-#pragma mark - DNS resolution filter
-
-static NSArray *filterResolvableHosts(NSArray *hosts) {
-    NSMutableArray *res = [NSMutableArray array];
-    for (NSString *host in hosts) {
-        CFHostRef h = CFHostCreateWithName(NULL, (__bridge CFStringRef)host);
-        if (!h) continue;
-        Boolean ok = CFHostStartInfoResolution(h, kCFHostAddresses, NULL);
-        CFRelease(h);
-        if (ok) [res addObject:host];
-        else NSLog(@"[cdn] Skipping unresolvable host: %@", host);
-    }
-    return res;
-}
-
 #pragma mark - Steam CM Client
 
 @interface SteamCMClient : NSObject {
@@ -473,12 +476,13 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     int _heartbeatSeconds;
     BOOL _heartbeatRunning;
     int64_t _nextJobId;
+    uint64_t _readDeadline;
 }
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os;
 - (BOOL)connectWithError:(NSError **)error;
 - (BOOL)anonymousLoginWithError:(NSError **)error;
 - (BOOL)negotiateEncryptionWithError:(NSError **)error;
-- (BOOL)requestLicense:(int)appId error:(NSError **)error;
+- (BOOL)waitForMessage:(int)expected job:(uint64_t)job timeout:(int)seconds body:(bytes *)body error:(NSError **)error;
 - (NSArray *)requestCDNServerListWithError:(NSError **)error;
 - (NSData *)getDepotDecryptionKey:(int)appId depotId:(int)depotId error:(NSError **)error;
 - (uint64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error;
@@ -500,8 +504,25 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     return YES;
 }
 - (BOOL)readExact:(uint8_t *)d length:(size_t)l {
-    size_t o = 0; int againRetries = 0;
-    while (o < l) { ssize_t n = read(_sock, d+o, l-o); if (n > 0) { o += n; againRetries = 0; } else if (n == 0) return NO; else if (errno == EINTR) continue; else if (errno == EAGAIN) { if (++againRetries > 3) { logToFile(@"readExact: too many EAGAIN retries at %zu/%zu", o, l); return NO; } continue; } else { logToFile(@"readExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
+    size_t offset = 0;
+    uint64_t deadline = _readDeadline ? _readDeadline : svensteam::milliseconds() + 15000;
+    while (offset < l && !_closed) {
+        if (svensteam::milliseconds() >= deadline) {
+            logToFile(@"readExact: deadline reached at %zu/%zu", offset, l); return NO;
+        }
+        int descriptor = _sock;
+        if (descriptor < 0) return NO;
+        pollfd pending = {descriptor, POLLIN, 0};
+        int ready = poll(&pending, 1, 100);
+        if (ready < 0) { if (errno == EINTR) continue; return NO; }
+        if (!ready) continue;
+        if (_closed || descriptor != _sock) return NO;
+        ssize_t count = recv(descriptor, d + offset, l - offset, MSG_DONTWAIT);
+        if (count > 0) offset += size_t(count);
+        else if (count == 0) return NO;
+        else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) return NO;
+    }
+    if (offset != l) return NO;
     return YES;
 }
 
@@ -574,6 +595,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
 - (void)startHeartbeat:(int)intervalSeconds {
     [self stopHeartbeat];
+    intervalSeconds = std::max(3, std::min(60, intervalSeconds));
     _heartbeatSeconds = intervalSeconds;
     _heartbeatRunning = YES;
     __weak SteamCMClient *weakClient = self;
@@ -590,7 +612,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             auto h2 = packVarint((2<<3)|0); auto se = packVarint32(client->_currentSessionId);
             hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
             logToFile(@"Sending heartbeat (sessionId=%d steamId=%llu)", client->_currentSessionId, (unsigned long long)client->_currentSteamId);
-            try { [client sendProtobufMsg:1009 body:body header:hdr]; } catch (...) { break; }
+            try { [client sendProtobufMsg:svensteam::clientHeartbeat body:body header:hdr]; } catch (...) { break; }
         }
     }];
     _heartbeatThread.name = @"SteamCM-Heartbeat";
@@ -816,7 +838,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
                         if (fn == 1 && wt == 0) {
                             int lr = (int)SteamProto::readVarint(sp, spp, sl);
                             if (lr == 1) ok = YES;
-                        } else if (fn == 2 && wt == 0) {
+                        } else if (fn == 3 && wt == 0) {
                             _heartbeatSeconds = (int)SteamProto::readVarint(sp, spp, sl);
                             logToFile(@"  heartbeat_seconds=%d", _heartbeatSeconds);
                         } else {
@@ -840,7 +862,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
                     int lr = (int)SteamProto::readVarint(body.data(), sp, body.size());
                     logToFile(@"  Direct logon: eresult=%d sessionId=%d steamId=%llu", lr, _currentSessionId, (unsigned long long)_currentSteamId);
                     if (lr == 1) ok = YES;
-                } else if (fn == 2 && wt == 0) {
+                } else if (fn == 3 && wt == 0) {
                     _heartbeatSeconds = (int)SteamProto::readVarint(body.data(), sp, body.size());
                     logToFile(@"  heartbeat_seconds=%d", _heartbeatSeconds);
                 } else {
@@ -888,188 +910,73 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     }
 }
 
-- (BOOL)requestLicense:(int)appId error:(NSError **)error {
-    bytes b; auto f=packVarint((2<<3)|0); auto v=packVarint(appId);
-    b.insert(b.end(),f.begin(),f.end()); b.insert(b.end(),v.begin(),v.end());
-    bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
-    h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
-    h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
-    [self sendProtobufMsg:5572 body:b header:h];
-    for (int t=0;t<3;t++) {
-        int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
-        if (e == 1) {
-            NSArray *subs = [self parseMultiMessage:d];
-            for (NSDictionary *sub in subs) {
-                if ([sub[@"emsg"] intValue] == 5573) {
-                    NSData *sd = sub[@"body"];
-                    const uint8_t *sp = (const uint8_t *)sd.bytes; size_t sl = sd.length, spp = 0;
-                    SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl); SteamProto::readVarint(sp, spp, sl);
-                    int g=(int)SteamProto::readVarint(sp, spp, sl);
-                    if (g==appId) return YES;
+- (BOOL)waitForMessage:(int)expected job:(uint64_t)job timeout:(int)seconds body:(bytes *)response error:(NSError **)error {
+    using namespace svensteam;
+    _readDeadline = milliseconds() + uint64_t(seconds) * 1000;
+    try {
+        while (!_closed && milliseconds() < _readDeadline) {
+            @autoreleasepool {
+                int message = 0; BOOL proto = NO; bytes body, protoHeader;
+                if (![self readMessageWithEmsg:&message body:&body isProto:&proto header:&protoHeader error:nil])
+                    throw std::runtime_error(_closed ? "Installation cancelled" : "Steam content request timed out or the connection was lost. Please try again.");
+                NSArray *packets = message == 1 ? [self parseMultiMessage:body] :
+                    @[@{@"emsg":@(message), @"body":[NSData dataWithBytes:body.data() length:body.size()],
+                        @"header":[NSData dataWithBytes:protoHeader.data() length:protoHeader.size()]}];
+                for (NSDictionary *packet in packets) {
+                    int reply = [packet[@"emsg"] intValue];
+                    if (reply == 757) throw std::runtime_error("Steam closed the content download session. Please try again.");
+                    NSData *encodedHeader = packet[@"header"];
+                    Buffer decodedHeader((const uint8_t *)encodedHeader.bytes, (const uint8_t *)encodedHeader.bytes + encodedHeader.length);
+                    if (!contentReplyMatches(reply, decodedHeader, expected, job)) continue;
+                    int result = int(value(decodedHeader, 13, 1));
+                    if (result != 1) throw std::runtime_error("Steam content request failed (result " + std::to_string(result) + ").");
+                    NSData *encodedBody = packet[@"body"];
+                    response->assign((const uint8_t *)encodedBody.bytes, (const uint8_t *)encodedBody.bytes + encodedBody.length);
+                    _readDeadline = 0;
+                    return YES;
                 }
             }
-        } else if (e == 5573) {
-            size_t sp=0; SteamProto::readVarint(d.data(),sp,d.size());
-            SteamProto::readVarint(d.data(),sp,d.size()); SteamProto::readVarint(d.data(),sp,d.size());
-            int g=(int)SteamProto::readVarint(d.data(),sp,d.size()); if (g==appId) return YES;
-        } else if (e == 757) return NO;
+        }
+        throw std::runtime_error(_closed ? "Installation cancelled" : "Steam content request timed out. Please try again.");
+    } catch (const std::exception &failure) {
+        logToFile(@"[content] request %d job %llu failed: %s", expected, (unsigned long long)job, failure.what());
+        if (error) *error = [NSError errorWithDomain:@"SteamCM" code:1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithUTF8String:failure.what()]}];
+        [self disconnect];
+        return NO;
     }
-    return NO;
 }
 
 - (NSArray *)requestCDNServerListWithError:(NSError **)error {
-    bytes b; auto f1=packVarint((1<<3)|0); b.insert(b.end(),f1.begin(),f1.end()); auto v1=packVarint(1); b.insert(b.end(),v1.begin(),v1.end());
-    auto f2=packVarint((2<<3)|0); b.insert(b.end(),f2.begin(),f2.end()); auto v2=packVarint(5); b.insert(b.end(),v2.begin(),v2.end());
-    bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
-    h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
-    h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
-    auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
-    h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
-    std::string jn="ContentServerDirectory.GetServersForSteamPipe#1";
-    auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());
-    h.insert(h.end(),h12.begin(),h12.end()); h.insert(h.end(),jl.begin(),jl.end()); h.insert(h.end(),jn.begin(),jn.end());
-    [self sendProtobufMsg:151 body:b header:h];
-    NSMutableArray *sv = [NSMutableArray array];
-    for (int t=0;t<15;t++) {
-        int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
-        if (e == 147) { [self parseServerList:d into:sv]; if (sv.count) return filterResolvableHosts(sv); }
-        else if (e == 1) {
-            NSArray *subs = [self parseMultiMessage:d];
-            for (NSDictionary *sub in subs) {
-                if ([sub[@"emsg"] intValue] == 147) {
-                    NSData *sd = sub[@"body"];
-                    bytes sb((const uint8_t *)sd.bytes, (const uint8_t *)sd.bytes + sd.length);
-                    [self parseServerList:sb into:sv];
-                }
-            }
-            if (sv.count) return filterResolvableHosts(sv);
-        } else if (e == 757) break;
-    }
-    if (error) *error=[NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No CDN servers"}];
-    return nil;
-}
-
-- (void)parseServerList:(const bytes &)d into:(NSMutableArray *)sv {
-    size_t p=0;
-    while (p<d.size()) {
-        uint64_t tg=SteamProto::readVarint(d.data(),p,d.size()); int fn=(int)(tg>>3), wt=(int)(tg&7);
-        if (fn==1&&wt==2) {
-            uint64_t sl=SteamProto::readVarint(d.data(),p,d.size()); size_t e=p+(size_t)sl;
-            NSString *host=nil, *vhost=nil;
-            while (p<e) {
-                uint64_t ft=SteamProto::readVarint(d.data(),p,d.size()); int ffn=(int)(ft>>3), fwt=(int)(ft&7);
-                if (ffn==8&&fwt==2) { uint64_t hl=SteamProto::readVarint(d.data(),p,d.size());
-                    host=[[NSString alloc] initWithBytes:d.data()+p length:(NSUInteger)hl encoding:NSUTF8StringEncoding]; p+=hl; }
-                else if (ffn==9&&fwt==2) { uint64_t hl=SteamProto::readVarint(d.data(),p,d.size());
-                    vhost=[[NSString alloc] initWithBytes:d.data()+p length:(NSUInteger)hl encoding:NSUTF8StringEncoding]; p+=hl; }
-                else { if (fwt==0) SteamProto::readVarint(d.data(),p,d.size()); else if (fwt==1) p+=8; else if (fwt==2) { uint64_t l=SteamProto::readVarint(d.data(),p,d.size()); p+=l; } else if (fwt==5) p+=4; else p++; }
-            }
-            NSString *uh=vhost?:host; if (uh.length>0) [sv addObject:uh];
-        } else { if (wt==0) SteamProto::readVarint(d.data(),p,d.size()); else if (wt==1) p+=8; else if (wt==2) { uint64_t l=SteamProto::readVarint(d.data(),p,d.size()); p+=l; } else if (wt==5) p+=4; else p++; }
-    }
+    using namespace svensteam;
+    Buffer request, response; number(request, 2, 20);
+    uint64_t job = uint64_t(_nextJobId++);
+    [self sendProtobufMsg:151 body:request header:header(_currentSteamId, _currentSessionId, job, "ContentServerDirectory.GetServersForSteamPipe#1")];
+    if (![self waitForMessage:147 job:job timeout:30 body:&response error:error]) return nil;
+    NSMutableArray *servers = [NSMutableArray array];
+    for (const auto &host : contentHosts(response)) [servers addObject:[NSString stringWithUTF8String:host.c_str()]];
+    if (!servers.count && error) *error = [NSError errorWithDomain:@"SteamCM" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Steam returned no usable content servers. Please try again."}];
+    return servers;
 }
 
 - (NSData *)getDepotDecryptionKey:(int)appId depotId:(int)depotId error:(NSError **)error {
-    bytes b; auto f1=packVarint((1<<3)|0); auto v1=packVarint(depotId);
-    b.insert(b.end(),f1.begin(),f1.end()); b.insert(b.end(),v1.begin(),v1.end());
-    auto f2=packVarint((2<<3)|0); auto v2=packVarint(appId);
-    b.insert(b.end(),f2.begin(),f2.end()); b.insert(b.end(),v2.begin(),v2.end());
-    bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
-    h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
-    h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
-    [self sendProtobufMsg:5438 body:b header:h];
-    logToFile(@"[depotKey] Sent request for depot %d", depotId);
-    for (int t=0;t<15;t++) {
-        int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) { logToFile(@"[depotKey] readMessage failed try %d", t); continue; }
-        logToFile(@"[depotKey] Got emsg=%d body=%zu try %d", e, d.size(), t);
-        if (e==1) {
-            NSArray *subs = [self parseMultiMessage:d];
-            logToFile(@"[depotKey] Multi has %lu sub-messages", (unsigned long)subs.count);
-            for (NSDictionary *sub in subs) {
-                int subEmsg = [sub[@"emsg"] intValue];
-                logToFile(@"[depotKey] Sub-msg emsg=%d size=%lu", subEmsg, (unsigned long)[sub[@"body"] length]);
-                if (subEmsg == 5439) {
-                    NSData *sd = sub[@"body"];
-                    const uint8_t *sp=(const uint8_t *)sd.bytes; size_t sl=sd.length, spp=0;
-                    skipProtoField(sp, spp, sl);
-                    skipProtoField(sp, spp, sl);
-                    SteamProto::readVarint(sp, spp, sl);
-                    int kl=(int)SteamProto::readVarint(sp, spp, sl);
-                    logToFile(@"[depotKey] Parsed keyLength=%d remaining=%zu", kl, sl-spp);
-                    if (kl>0 && (size_t)kl<=sl-spp) {
-                        logToFile(@"[depotKey] Returning key of %d bytes", kl);
-                        return [NSData dataWithBytes:sp+spp length:kl];
-                    }
-                }
-            }
-        } else if (e==5439) {
-            size_t sp=0;
-            skipProtoField(d.data(), sp, d.size());
-            skipProtoField(d.data(), sp, d.size());
-            SteamProto::readVarint(d.data(), sp, d.size());
-            int kl=(int)SteamProto::readVarint(d.data(), sp, d.size());
-            logToFile(@"[depotKey] Direct 5439: keyLength=%d remaining=%zu", kl, d.size()-sp);
-            if (kl>0&&(size_t)kl<=d.size()-sp) {
-                logToFile(@"[depotKey] Returning key of %d bytes", kl);
-                return [NSData dataWithBytes:d.data()+sp length:kl];
-            }
-        } else if (e==757) { logToFile(@"[depotKey] Got logged off"); break; }
-    }
-    if (error) *error=[NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No depot key"}];
-    return nil;
+    using namespace svensteam;
+    Buffer request, response; number(request, 1, depotId); number(request, 2, appId);
+    uint64_t job = uint64_t(_nextJobId++);
+    [self sendProtobufMsg:5438 body:request header:header(_currentSteamId, _currentSessionId, job)];
+    if (![self waitForMessage:5439 job:job timeout:30 body:&response error:error]) return nil;
+    Buffer key = depotDecryptionKey(response, unsigned(depotId));
+    return [NSData dataWithBytes:key.data() length:key.size()];
 }
 
 - (uint64_t)requestManifestRequestCode:(int)depotId appId:(int)appId manifestId:(int64_t)manifestId error:(NSError **)error {
-    bytes b; auto f1=packVarint((1<<3)|0); auto v1=packVarint(appId);
-    b.insert(b.end(),f1.begin(),f1.end()); b.insert(b.end(),v1.begin(),v1.end());
-    auto f2=packVarint((2<<3)|0); auto v2=packVarint(depotId);
-    b.insert(b.end(),f2.begin(),f2.end()); b.insert(b.end(),v2.begin(),v2.end());
-    auto f3=packVarint((3<<3)|0); auto v3=packVarint64((uint64_t)manifestId);
-    b.insert(b.end(),f3.begin(),f3.end()); b.insert(b.end(),v3.begin(),v3.end());
-    bytes h; auto h1=packVarint((1<<3)|1); auto si=packFixed64(_currentSteamId);
-    h.insert(h.end(),h1.begin(),h1.end()); h.insert(h.end(),si.begin(),si.end());
-    auto h2=packVarint((2<<3)|0); auto se=packVarint32(_currentSessionId);
-    h.insert(h.end(),h2.begin(),h2.end()); h.insert(h.end(),se.begin(),se.end());
-    auto h10=packVarint((10<<3)|1); auto ji=packFixed64(_nextJobId++);
-    h.insert(h.end(),h10.begin(),h10.end()); h.insert(h.end(),ji.begin(),ji.end());
-    std::string jn="ContentServerDirectory.GetManifestRequestCode#1";
-    auto h12=packVarint((12<<3)|2); auto jl=packVarint((int64_t)jn.size());
-    h.insert(h.end(),h12.begin(),h12.end()); h.insert(h.end(),jl.begin(),jl.end()); h.insert(h.end(),jn.begin(),jn.end());
-    [self sendProtobufMsg:151 body:b header:h];
-    for (int t=0;t<15;t++) {
-        int e; bytes d; BOOL ip;
-        if (![self readMessageWithEmsg:&e body:&d isProto:&ip header:nil error:nil]) continue;
-        if (e==147) {
-            size_t sp=0;
-            while (sp < d.size()) {
-                uint64_t tag = SteamProto::readVarint(d.data(), sp, d.size());
-                int fn = (int)(tag>>3), wt = (int)(tag&7);
-                if (fn == 1 && wt == 0) return SteamProto::readVarint(d.data(), sp, d.size());
-                else { if (wt == 0) SteamProto::readVarint(d.data(), sp, d.size()); else if (wt == 1) sp += 8; else if (wt == 2) { uint64_t l = SteamProto::readVarint(d.data(), sp, d.size()); sp += (size_t)l; } else if (wt == 5) sp += 4; else sp++; }
-            }
-        } else if (e==1) {
-            NSArray *subs = [self parseMultiMessage:d];
-            for (NSDictionary *sub in subs) {
-                if ([sub[@"emsg"] intValue] == 147) {
-                    NSData *sd = sub[@"body"];
-                    const uint8_t *sp = (const uint8_t *)sd.bytes; size_t sl = sd.length, spp = 0;
-                    while (spp < sl) {
-                        uint64_t tag = SteamProto::readVarint(sp, spp, sl);
-                        int fn = (int)(tag>>3), wt = (int)(tag&7);
-                        if (fn == 1 && wt == 0) return SteamProto::readVarint(sp, spp, sl);
-                        else { if (wt == 0) SteamProto::readVarint(sp, spp, sl); else if (wt == 1) spp += 8; else if (wt == 2) { uint64_t l = SteamProto::readVarint(sp, spp, sl); spp += (size_t)l; } else if (wt == 5) spp += 4; else spp++; }
-                    }
-                }
-            }
-        } else if (e==757) break;
-    }
-    return 0;
+    using namespace svensteam;
+    Buffer request, response; number(request, 1, appId); number(request, 2, depotId); number(request, 3, uint64_t(manifestId));
+    uint64_t job = uint64_t(_nextJobId++);
+    [self sendProtobufMsg:151 body:request header:header(_currentSteamId, _currentSessionId, job, "ContentServerDirectory.GetManifestRequestCode#1")];
+    if (![self waitForMessage:147 job:job timeout:30 body:&response error:error]) return 0;
+    uint64_t code = value(response, 1);
+    if (!code && error) *error = [NSError errorWithDomain:@"SteamCM" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Steam did not authorize the content manifest. Please try again."}];
+    return code;
 }
 
 @end
@@ -1078,10 +985,14 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
 #pragma mark - Manifest download & parsing
 
-static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t rc, NSArray *hosts) {
+static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t rc, NSArray *hosts, BOOL(^cancelled)(void)) {
     int hc = (int)(hosts.count % INT_MAX);
+    if (!hc) return nil;
     int retryDelay = 500;
-    for (int hi = workingHostIndex(depotId, hosts);;hi++) {
+    int firstHost = workingHostIndex(depotId, hosts);
+    for (int attempt = 0; attempt < MIN(hc * 2, 8); attempt++) {
+        if (cancelled()) return nil;
+        int hi = firstHost + attempt;
         NSString *host = hosts[hi % hc];
         NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%llu",depotId,(long long)manifestId,(unsigned long long)rc]
                                : [NSString stringWithFormat:@"depot/%d/manifest/%lld/5",depotId,(long long)manifestId];
@@ -1089,18 +1000,22 @@ static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval=15;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res=nil;
         __block int statusCode = 0;
-        [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
             if (e) logToFile(@"[cdn-manifest] depot %d host %@ error: %@", depotId, host, e.localizedDescription);
             statusCode = (int)((NSHTTPURLResponse *)r).statusCode;
             if (statusCode == 200 && d.length>0) res = unzipFirstEntry(d);
             dispatch_semaphore_signal(sem);
-        }] resume];
-        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        }];
+        [task resume];
+        uint64_t deadline = svensteam::milliseconds() + 30000;
+        while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC))) {
+            if (cancelled() || svensteam::milliseconds() >= deadline) { [task cancel]; return nil; }
+        }
+        if (cancelled()) return nil;
         if (res) { logToFile(@"[cdn-manifest] depot %d host %@ OK (%d bytes)", depotId, host, (int)res.length); setWorkingHostIndex(depotId, hi % hc); return res; }
         logToFile(@"[cdn-manifest] depot %d host %@ FAILED HTTP %d (try %d)", depotId, host, statusCode, hi);
-        usleep(retryDelay);
+        for (int waited = 0; waited < retryDelay && !cancelled(); waited += 100) usleep(100000);
         retryDelay = MIN(retryDelay * 1.5, 5000);
-        if (hi > hc * 3) break;
     }
     logToFile(@"[cdn-manifest] depot %d ALL HOSTS EXHAUSTED", depotId);
     return nil;
@@ -1256,6 +1171,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 @interface GameDataDownloader ()
 @property (atomic, readwrite) BOOL installing;
 @property (atomic) BOOL cancelled;
+@property (atomic, strong) SteamCMClient *activeClient;
 @end
 
 @implementation GameDataDownloader {
@@ -1271,7 +1187,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
     return self;
 }
 
-- (void)cancel { self.cancelled = YES; }
+- (void)cancel { self.cancelled = YES; [self.activeClient disconnect]; }
 
 - (BOOL)hasGameData:(NSString *)gameDir {
     NSString *path = [_docsDir stringByAppendingPathComponent:gameDir];
@@ -1290,13 +1206,19 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         }
         self.installing = YES; self.cancelled = NO;
     }
-    void (^finish)(NSError *) = ^(NSError *error) { self.installing = NO; completion(error); };
+    void (^finish)(NSError *) = ^(NSError *error) {
+        [self.activeClient disconnect]; self.activeClient = nil;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            cleanupTmpFiles([_docsDir stringByAppendingPathComponent:gameDir]);
+            dispatch_async(dispatch_get_main_queue(), ^{ self.installing = NO; completion(error); });
+        });
+    };
 
     __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
     bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"Steam Download" expirationHandler:^{
         [[UIApplication sharedApplication] endBackgroundTask:bgTask];
         bgTask = UIBackgroundTaskInvalid;
-        self.cancelled = YES;
+        [self cancel];
     }];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         @autoreleasepool { try {
@@ -1314,6 +1236,8 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         cleanupTmpFiles(targetDir);
 
         SteamCMClient *client = [[SteamCMClient alloc] initWithOnStatus:^(NSString *m) { if (onProgress) onProgress(m, 0); }];
+        self.activeClient = client;
+        if (self.cancelled) { [client disconnect]; throw std::runtime_error("Installation cancelled"); }
 
         NSError *err = nil;
         if (onProgress) onProgress(@"Connecting to Steam...", 0);
@@ -1333,7 +1257,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             return;
         }
 
-        [client requestLicense:appId error:nil];
+        logToFile(@"[content] Anonymous depot access; skipping account-only free-license request");
 
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
         logToFile(@"Requesting CDN server list...");
@@ -1353,12 +1277,12 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             NSNumber *mid = HARDCODED_MANIFEST_IDS()[did];
             if (!mid || [mid unsignedLongLongValue] == 0) { logToFile(@"[setup] No manifest ID for depot %d", depotId); continue; }
             logToFile(@"[setup] Getting depot key for depot %d...", depotId);
-            NSData *dk = [client getDepotDecryptionKey:appId depotId:depotId error:nil];
-            if (!dk) { logToFile(@"[setup] Depot key FAILED for depot %d", depotId); continue; }
+            NSData *dk = [client getDepotDecryptionKey:appId depotId:depotId error:&err];
+            if (!dk) throw std::runtime_error(err.localizedDescription.UTF8String ?: "Could not obtain the depot key");
             logToFile(@"[setup] Got depot key: %lu bytes", (unsigned long)dk.length);
             logToFile(@"[setup] Requesting manifest request code for depot %d...", depotId);
-            uint64_t rc = [client requestManifestRequestCode:depotId appId:appId manifestId:(int64_t)[mid unsignedLongLongValue] error:nil];
-            if (rc == 0) { logToFile(@"[setup] Manifest request code is 0 for depot %d", depotId); continue; }
+            uint64_t rc = [client requestManifestRequestCode:depotId appId:appId manifestId:(int64_t)[mid unsignedLongLongValue] error:&err];
+            if (rc == 0) throw std::runtime_error(err.localizedDescription.UTF8String ?: "Could not obtain the manifest request code");
             logToFile(@"[setup] Got manifest request code: %llu for depot %d", (unsigned long long)rc, depotId);
             [depotSetups addObject:@{@"depotId":@(depotId), @"depotKey":dk, @"requestCode":@((unsigned long long)rc)}];
         }
@@ -1380,15 +1304,15 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             uint64_t rc = [ds[@"requestCode"] unsignedLongLongValue];
             if (onProgress) onProgress([NSString stringWithFormat:@"Downloading manifest for depot %d...", depotId], 0);
             logToFile(@"[manifest] Downloading manifest for depot %d manifestId=%lld rc=%llu", depotId, (long long)mid, (unsigned long long)rc);
-            NSData *manifestBytes = downloadManifestFromCDN(depotId, mid, rc, cdnHosts);
-            if (!manifestBytes) { logToFile(@"[manifest] FAILED: downloadManifestFromCDN returned nil"); continue; }
+            NSData *manifestBytes = downloadManifestFromCDN(depotId, mid, rc, cdnHosts, ^BOOL{ return self.cancelled; });
+            if (!manifestBytes) throw std::runtime_error(self.cancelled ? "Installation cancelled" : "Could not download the Steam content manifest. Please try again.");
             logToFile(@"[manifest] Got manifest: %lu bytes", (unsigned long)manifestBytes.length);
             NSArray *files = parseManifestFiles(manifestBytes, ds[@"depotKey"]);
             logToFile(@"[manifest] parseManifestFiles returned %lu files", (unsigned long)files.count);
             for (NSDictionary *f in files) {
                 NSString *path = [f[@"path"] stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
                 if (![path hasPrefix:@"svencoop/"] || path.isAbsolutePath || [path.pathComponents containsObject:@".."] ||
-                    [@[@"exe", @"dll"] containsObject:path.pathExtension.lowercaseString]) continue;
+                    svensteam::foreignGameBinary(path.UTF8String ?: "")) continue;
                 NSMutableDictionary *normalized = [f mutableCopy]; normalized[@"path"] = path;
                 [allFiles addObject:@{@"depotId":@(depotId), @"file":normalized, @"depotKey":ds[@"depotKey"]}];
             }
@@ -1433,6 +1357,8 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             });
         }
         dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
+
+        if (!self.cancelled && !anyFailed) purgeForeignBinaries(targetDir);
 
         dispatch_async(dispatch_get_main_queue(), ^{
             NSString *msg = self.cancelled ? @"Installation cancelled. Completed files are kept." : anyFailed ? [NSString stringWithFormat:@"%@ downloaded with some errors",displayName] : [NSString stringWithFormat:@"%@ downloaded successfully",displayName];
