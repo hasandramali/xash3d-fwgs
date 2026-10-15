@@ -4,13 +4,11 @@
 #import "SteamService.h"
 #include "SteamViewController.inc"
 #include "launcherdialog.h"
-@interface FileBrowserViewController () <UIDocumentPickerDelegate, UITextViewDelegate>
+@interface FileBrowserViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) NSArray *directories;
 @property (nonatomic, strong) NSArray *files;
 @property (nonatomic, strong) NSFileManager *fm;
 @property (nonatomic, assign) BOOL forceLandscape;
-@property (nonatomic) BOOL alternateName;
-@property (nonatomic) BOOL alternateSpray;
 @end
 
 static NSString *_pasteboardPath = nil;
@@ -51,8 +49,7 @@ static NSString *kCellID = @"FileCell";
     self.navigationItem.rightBarButtonItems = @[
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(settingsTapped)],
         [[UIBarButtonItem alloc] initWithTitle:@"Steam" style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)],
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.down.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)],
-        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(aboutTapped)]
+        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.down.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)]
     ];
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"global_arguments": @"-console"}];
     if (SteamService.shared.autoConnect) [SteamService.shared restoreSession];
@@ -111,53 +108,6 @@ static NSString *kCellID = @"FileCell";
         [[NSUserDefaults standardUserDefaults] setObject:settings.textFields.firstObject.text ?: @"" forKey:@"global_arguments"];
     }]];
     [self presentViewController:settings animated:YES completion:nil];
-}
-
-- (void)aboutTapped
-{
-    UIViewController *controller = [[UIViewController alloc] init]; controller.title = @"about";
-    controller.view.backgroundColor = UIColor.systemBackgroundColor;
-    UITextView *credits = [[UITextView alloc] init]; credits.editable = NO; credits.delegate = self;
-    credits.translatesAutoresizingMaskIntoConstraints = NO; credits.backgroundColor = UIColor.systemBackgroundColor;
-    credits.textContainerInset = UIEdgeInsetsMake(24, 16, 24, 16); [controller.view addSubview:credits];
-    [NSLayoutConstraint activateConstraints:@[
-        [credits.topAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.topAnchor],
-        [credits.bottomAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.bottomAnchor],
-        [credits.leadingAnchor constraintEqualToAnchor:controller.view.leadingAnchor],
-        [credits.trailingAnchor constraintEqualToAnchor:controller.view.trailingAnchor]
-    ]];
-    [self updateCredits:credits];
-    [self.navigationController pushViewController:controller animated:YES];
-}
-
-- (void)updateCredits:(UITextView *)view
-{
-    NSString *name = self.alternateName ? @"Klein Moretti" : @"nightpirateslnp";
-    NSString *spray = self.alternateSpray ? @"sparay anani s - custom sparay support" : @"sparay - custom spray support";
-    NSString *text = [NSString stringWithFormat:@"SvenClient Team:\nhasandramali - Maintainer\n%@ - QA Lead&designer\niQuit - Windows port & engine analyst\nbariscodefx - SteamP2P advisor & voice support\n\nSpecial thanks to:\nnenquen - soundcache system rewrite\nberkch - for fixing SDL issues\nBruskk - for doing nothing\n%@\n\nJoin our Discord for support!", name, spray];
-    NSMutableAttributedString *credits = [[NSMutableAttributedString alloc] initWithString:text attributes:@{
-        NSFontAttributeName: [UIFont preferredFontForTextStyle:UIFontTextStyleBody], NSForegroundColorAttributeName: UIColor.labelColor}];
-    NSDictionary *links = @{@"hasandramali":@"https://gitlab.com/hasandramali", @"iQuit":@"https://github.com/iQuitt",
-        @"bariscodefx":@"https://guns.lol/bariscodefx", @"nenquen":@"https://nenquen.github.io/", @"berkch":@"https://github.com/berkchy",
-        @"Discord":@"https://discord.gg/PZxBKGbjsD", name:@"svenclient-toggle://name", spray:@"svenclient-toggle://spray"};
-    view.linkTextAttributes = @{};
-    for (NSString *label in links) {
-        NSRange range = [text rangeOfString:label];
-        BOOL toggle = [links[label] hasPrefix:@"svenclient-toggle:"];
-        [credits addAttributes:@{NSLinkAttributeName:links[label], NSForegroundColorAttributeName:toggle ? UIColor.labelColor : UIColor.systemBlueColor,
-            NSUnderlineStyleAttributeName:toggle ? @0 : @(NSUnderlineStyleSingle)} range:range];
-    }
-    for (NSString *heading in @[@"SvenClient Team:", @"Special thanks to:"])
-        [credits addAttribute:NSFontAttributeName value:[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline] range:[text rangeOfString:heading]];
-    view.attributedText = credits;
-}
-
-- (BOOL)textView:(UITextView *)view shouldInteractWithURL:(NSURL *)url inRange:(NSRange)range interaction:(UITextItemInteraction)interaction
-{
-    if (![url.scheme isEqualToString:@"svenclient-toggle"]) return YES;
-    if ([url.host isEqualToString:@"name"]) self.alternateName = !self.alternateName;
-    else self.alternateSpray = !self.alternateSpray;
-    [self updateCredits:view]; return NO;
 }
 
 - (void)doLaunchWithGameDir:(NSString *)gameDir extraArgs:(NSString *)extraArgs
