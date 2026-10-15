@@ -1,44 +1,22 @@
 #!/bin/bash
-
-#cd into script directory
-SCRIPTDIR=${0%/*}
-cd "$SCRIPTDIR" || exit 1
-
-MODPATH=mod-build/$1
-if [ -z "$1" ]; then
-    MODPATH=mod-build/hlsdk
-    git clone --recursive https://github.com/hasandramali/hlsdk-portable -b svencoop "$MODPATH"
-else
-    git clone --recursive https://github.com/hasandramali/hlsdk-portable -b "$1" "$MODPATH"
+set -euo pipefail
+SCRIPTDIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(cd "$SCRIPTDIR/../.." && pwd)
+SOURCE_DIR="$SCRIPTDIR/mod-build/svencoop"
+LIBSDIR="$REPO_ROOT/build/ios/libs"
+if [ ! -d "$SOURCE_DIR/.git" ]; then
+    git clone --recursive --branch svencoop --single-branch https://github.com/hasandramali/hlsdk-portable "$SOURCE_DIR"
 fi
-
-mkdir -p ../../build/ios/libs || exit 1
-
-
-LIBSDIR=$(realpath ../../build/ios/libs)
-cd "$MODPATH" || exit 1
-
-#compiling hlsdk for ios release is broken, so just build for debug
-if [ ! -z $2 ]; then
-    cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT=0 -DCMAKE_INSTALL_PREFIX="$LIBSDIR" -DGAMEDIR="$2" -DCMAKE_BUILD_TYPE=Debug -B build -S .
-else
-    cmake -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT=0 -DCMAKE_INSTALL_PREFIX="$LIBSDIR" -DCMAKE_BUILD_TYPE=Debug -B build -S .
-fi
-cmake --build build --target install
-
-# Rename dylibs to include arch suffix (engine expects _arm64)
-find "$LIBSDIR" -name "*.dylib" -type f | while read f; do
-    dir=$(dirname "$f")
-    base=$(basename "$f" .dylib)
-    # Only rename if no arch suffix already
-    if [[ "$base" != *_arm64 ]] && [[ "$base" != *_x86* ]] && [[ "$base" != *_i386 ]]; then
-        mv "$f" "$dir/${base}_arm64.dylib"
-    fi
+cmake -S "$SOURCE_DIR" -B "$SOURCE_DIR/build-ios" \
+    -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos \
+    -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+    -DCMAKE_INSTALL_PREFIX="$LIBSDIR" -DCMAKE_BUILD_TYPE=Debug -DGAMEDIR=svencoop -DBUILD_SERVER=OFF -DBUILD_CLIENT=ON \
+    -DFREEVGUI_SRC_DIR="$REPO_ROOT/3rdparty/freevgui" -DXASH3D_ENGINE_RUNTIME_DIR="$REPO_ROOT" \
+    -DCMAKE_PROJECT_INCLUDE="$SCRIPTDIR/hlsdk_overrides.cmake"
+cmake --build "$SOURCE_DIR/build-ios" --target install --parallel
+find "$LIBSDIR/svencoop" -name '*.dylib' -type f | while IFS= read -r library; do
+    case "$library" in
+        *_arm64.dylib) ;;
+        *) mv "$library" "${library%.dylib}_arm64.dylib" ;;
+    esac
 done
-
-cd "$SCRIPTDIR"
-if [ -d "$MODPATH" ]; then
-    rm -rf "$MODPATH"
-fi
-
-exit 0

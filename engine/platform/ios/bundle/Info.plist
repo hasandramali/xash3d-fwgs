@@ -9,11 +9,11 @@
 	<key>CFBundleExecutable</key>
 	<string>xash</string>
 	<key>CFBundleIdentifier</key>
-	<string>su.xash.engine</string>
+	<string>su.xash.svenclient</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>xash3d-fwgs</string>
+	<string>svenclient</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -45,7 +45,7 @@
 	<key>LSSupportsGameMode</key>
 	<true/>
 	<key>MinimumOSVersion</key>
-	<string>12.0</string>
+	<string>13.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone permissions are required for voice chat</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
@@ -58,7 +58,7 @@
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
-	<string>Launch</string>
+	<string>LaunchScreenStoryboard</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
@@ -82,5 +82,7 @@
 	</array>
 	<key>UISupportsDocumentBrowser</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>SvenClient connects to game servers and Steam peers on your network.</string>
 </dict>
 </plist>

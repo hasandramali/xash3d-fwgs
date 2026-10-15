@@ -15,8 +15,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "1D6058900D05DD3D006BFB54"
-               BuildableName = "Xash3D.app"
-               BlueprintName = "Xash3D-iOS"
+               BuildableName = "SvenClient.app"
+               BlueprintName = "SvenClient"
                ReferencedContainer = "container:Xash3D-iOS.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -31,8 +31,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1D6058900D05DD3D006BFB54"
-            BuildableName = "Xash3D.app"
-            BlueprintName = "Xash3D-iOS"
+            BuildableName = "SvenClient.app"
+            BlueprintName = "SvenClient"
             ReferencedContainer = "container:Xash3D-iOS.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -54,8 +54,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1D6058900D05DD3D006BFB54"
-            BuildableName = "Xash3D.app"
-            BlueprintName = "Xash3D-iOS"
+            BuildableName = "SvenClient.app"
+            BlueprintName = "SvenClient"
             ReferencedContainer = "container:Xash3D-iOS.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -71,8 +71,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1D6058900D05DD3D006BFB54"
-            BuildableName = "Xash3D.app"
-            BlueprintName = "Xash3D-iOS"
+            BuildableName = "SvenClient.app"
+            BlueprintName = "SvenClient"
             ReferencedContainer = "container:Xash3D-iOS.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

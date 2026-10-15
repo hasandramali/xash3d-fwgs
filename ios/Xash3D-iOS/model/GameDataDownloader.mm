@@ -1,4 +1,12 @@
 #import "GameDataDownloader.h"
+#import "SteamService.h"
+#import <Security/Security.h>
+#import <CommonCrypto/CommonDigest.h>
+#include "SteamWire.hpp"
+#include <atomic>
+#include <poll.h>
+#include <fcntl.h>
+#include <ifaddrs.h>
 #import <os/log.h>
 #import <UIKit/UIKit.h>
 #import <UserNotifications/UserNotifications.h>
@@ -36,7 +44,8 @@ static NSMutableDictionary *s_workingCdnHost;
 static int workingHostIndex(int depotId, NSArray *hosts) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{ s_workingCdnHost = [NSMutableDictionary dictionary]; });
-    NSNumber *cached = s_workingCdnHost[@(depotId)];
+    NSNumber *cached;
+    @synchronized (s_workingCdnHost) { cached = s_workingCdnHost[@(depotId)]; }
     int hi = cached ? [cached intValue] : 0;
     int hc = (int)(hosts.count % INT_MAX);
     if (hi < 0 || hi >= hc) hi = 0;
@@ -44,7 +53,7 @@ static int workingHostIndex(int depotId, NSArray *hosts) {
 }
 
 static void setWorkingHostIndex(int depotId, int idx) {
-    s_workingCdnHost[@(depotId)] = @(idx);
+    @synchronized (s_workingCdnHost) { s_workingCdnHost[@(depotId)] = @(idx); }
 }
 
 static void cleanupTmpFiles(NSString *targetDir) {
@@ -65,18 +74,11 @@ static NSArray *CM_SERVERS() {
 }
 
 static NSDictionary *HARDCODED_MANIFEST_IDS() {
-    return @{@71: @9183617604528345869ULL, @11: @4720911300072406946ULL,
-             @21: @7841127166138118042ULL, @51: @789184054796507140ULL,
-             @81: @3601230779843470737ULL, @1:  @5928322771446233610ULL,
-             @4:  @8690279432129063737ULL, @1006:@6912453647411644579ULL};
+    return @{@225841: @7100405834093858048ULL};
 }
 
 static NSDictionary *GAMES() {
-    return @{@"valve":   @{@"appId":@90, @"depotIds":@[@71,@4,@1],  @"displayName":@"Half-Life"},
-             @"cstrike": @{@"appId":@90, @"depotIds":@[@11],        @"displayName":@"Counter-Strike"},
-             @"tfc":     @{@"appId":@90, @"depotIds":@[@21],        @"displayName":@"Team Fortress Classic"},
-             @"gearbox": @{@"appId":@90, @"depotIds":@[@51],        @"displayName":@"Opposing Force"},
-             @"czero":   @{@"appId":@90, @"depotIds":@[@81],        @"displayName":@"Condition Zero"}};
+    return @{@"svencoop": @{@"appId":@276060, @"depotIds":@[@225841], @"displayName":@"Sven Co-op"}};
 }
 
 static NSData *steamPublicKey() {
@@ -226,7 +228,7 @@ static bytes encryptAES(const uint8_t *sk, const bytes &pt) {
     uint8_t ecbIv[16];
     mbedtls_aes_context ae; mbedtls_aes_init(&ae); mbedtls_aes_setkey_enc(&ae, sk, 256);
     mbedtls_aes_crypt_ecb(&ae, MBEDTLS_AES_ENCRYPT, iv, ecbIv); mbedtls_aes_free(&ae);
-    size_t bc = (pt.size() + 15) / 16, pl = bc * 16;
+    size_t bc = pt.size() / 16 + 1, pl = bc * 16;
     bytes pad(pl, 0); memcpy(pad.data(), pt.data(), pt.size());
     uint8_t pv = (uint8_t)(pl - pt.size()); memset(pad.data() + pt.size(), pv, pl - pt.size());
     bytes ct(pl);
@@ -239,7 +241,7 @@ static bytes encryptAES(const uint8_t *sk, const bytes &pt) {
 }
 
 static bytes decryptAES(const uint8_t *sk, const uint8_t *d, size_t l) {
-    if (l < 16) throw std::runtime_error("too short");
+    if (l < 32 || l % 16) throw std::runtime_error("Invalid encrypted packet length");
     uint8_t iv[16];
     mbedtls_aes_context ae; mbedtls_aes_init(&ae); mbedtls_aes_setkey_dec(&ae, sk, 256);
     mbedtls_aes_crypt_ecb(&ae, MBEDTLS_AES_DECRYPT, d, iv); mbedtls_aes_free(&ae);
@@ -428,11 +430,12 @@ static NSData *gzipDecompress(NSData *data) {
     NSMutableData *res = [NSMutableData dataWithLength:data.length * 4];
     int ret;
     do {
+        if (strm.total_out > 16 * 1024 * 1024) { inflateEnd(&strm); return nil; }
         if (res.length < strm.total_out + 65536) res.length = strm.total_out + 65536;
         strm.next_out = (Bytef *)res.mutableBytes + strm.total_out;
         strm.avail_out = (uInt)(res.length - strm.total_out);
         ret = inflate(&strm, Z_FINISH);
-    } while (ret == Z_OK);
+    } while (ret == Z_OK || (ret == Z_BUF_ERROR && strm.avail_out == 0));
     inflateEnd(&strm);
     if (ret != Z_STREAM_END) return nil;
     res.length = strm.total_out;
@@ -457,7 +460,10 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 #pragma mark - Steam CM Client
 
 @interface SteamCMClient : NSObject {
-    int _sock;
+@public
+    std::mutex _writeMutex;
+    std::atomic<int> _sock;
+    std::atomic<bool> _closed;
     uint8_t _sessionKey[32];
     BOOL _encrypted;
     int _currentSessionId;
@@ -471,6 +477,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os;
 - (BOOL)connectWithError:(NSError **)error;
 - (BOOL)anonymousLoginWithError:(NSError **)error;
+- (BOOL)negotiateEncryptionWithError:(NSError **)error;
 - (BOOL)requestLicense:(int)appId error:(NSError **)error;
 - (NSArray *)requestCDNServerListWithError:(NSError **)error;
 - (NSData *)getDepotDecryptionKey:(int)appId depotId:(int)depotId error:(NSError **)error;
@@ -482,14 +489,14 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 @implementation SteamCMClient
 
 - (instancetype)initWithOnStatus:(void(^)(NSString *))os {
-    if (self = [super init]) { _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; _heartbeatSeconds = 9; _heartbeatRunning = NO; _nextJobId = 1; }
+    if (self = [super init]) { _closed = false; _sock = -1; _encrypted = NO; _currentSessionId = 0; _currentSteamId = ANON_STEAM_ID; _onStatus = os; _heartbeatSeconds = 9; _heartbeatRunning = NO; _nextJobId = 1; }
     return self;
 }
 - (void)dealloc { [self stopHeartbeat]; [self disconnect]; }
 - (void)status:(NSString *)s { if (_onStatus) _onStatus(s); }
 
 - (BOOL)writeExact:(const uint8_t *)d length:(size_t)l {
-    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n > 0) o += n; else if (n == 0) return NO; else if (errno == EAGAIN || errno == EINTR) continue; else { logToFile(@"writeExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
+    size_t o = 0; while (o < l) { ssize_t n = write(_sock, d+o, l-o); if (n > 0) o += n; else if (n == 0) return NO; else if (errno == EINTR) continue; else { logToFile(@"writeExact failed at %zu/%zu errno=%d", o, l, errno); return NO; } }
     return YES;
 }
 - (BOOL)readExact:(uint8_t *)d length:(size_t)l {
@@ -500,28 +507,56 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
 - (BOOL)connectWithError:(NSError **)error {
     for (NSString *host in CM_SERVERS()) {
-        struct sockaddr_in a; memset(&a,0,sizeof(a)); a.sin_family = AF_INET; a.sin_port = htons(CM_PORT);
-        if (inet_pton(AF_INET, host.UTF8String, &a.sin_addr) != 1) { logToFile(@"Cannot parse %@", host); continue; }
-        int s = socket(AF_INET, SOCK_STREAM, 0); if (s < 0) { logToFile(@"socket() failed for %@", host); continue; }
-        struct timeval tv; tv.tv_sec = 5; tv.tv_usec = 0;
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        logToFile(@"Trying CM server %@...", host);
-        if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) { _sock = s; logToFile(@"Connected to %@", host); [self status:[NSString stringWithFormat:@"Connected to %@", host]]; return YES; }
-        logToFile(@"Connect to %@ failed (errno=%d)", host, errno);
-        close(s);
+        if (_closed) break;
+        sockaddr_in address = {}; address.sin_family = AF_INET; address.sin_port = htons(CM_PORT);
+        if (inet_pton(AF_INET, host.UTF8String, &address.sin_addr) != 1) continue;
+        int descriptor = socket(AF_INET, SOCK_STREAM, 0); if (descriptor < 0) continue;
+        int noSignal = 1; setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, sizeof(noSignal));
+        int flags = fcntl(descriptor, F_GETFL, 0);
+        if (flags < 0 || fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)) { close(descriptor); continue; }
+        _sock = descriptor;
+        int result = connect(descriptor, (sockaddr *)&address, sizeof(address));
+        if (result < 0 && errno == EINPROGRESS) {
+            uint64_t deadline = svensteam::milliseconds() + 12000;
+            while (!_closed && svensteam::milliseconds() < deadline) {
+                pollfd pending = {descriptor, POLLOUT, 0};
+                int polled = poll(&pending, 1, 100);
+                if (polled < 0 && errno == EINTR) continue;
+                if (polled > 0) {
+                    int socketError = 0; socklen_t length = sizeof(socketError);
+                    result = getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &socketError, &length) == 0 && socketError == 0 ? 0 : -1;
+                    break;
+                }
+                if (polled < 0) break;
+            }
+        }
+        if (!_closed && result == 0 && _sock == descriptor) {
+            if (fcntl(descriptor, F_SETFL, flags) == 0) {
+                timeval timeout = {15, 0};
+                setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+                setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+                [self status:@"Connected to Steam"]; return YES;
+            }
+        }
+        int expected = descriptor;
+        if (_sock.compare_exchange_strong(expected, -1)) close(descriptor);
     }
-    if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No Steam CM server reachable"}];
+    if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:_closed ? @"Steam connection cancelled" : @"No Steam connection server is reachable. Check your connection and try again."}];
     return NO;
 }
 
-- (void)disconnect { [self stopHeartbeat]; if (_sock >= 0) { close(_sock); _sock = -1; logToFile(@"Disconnected"); } }
+- (void)disconnect {
+    _closed = true; [self stopHeartbeat];
+    int descriptor = _sock.exchange(-1);
+    if (descriptor >= 0) { shutdown(descriptor, SHUT_RDWR); close(descriptor); }
+}
 
 - (void)sendRaw:(const bytes &)d {
+    std::lock_guard<std::mutex> lock(_writeMutex);
     uint32_t len = (uint32_t)d.size(), magic = TCP_MAGIC;
     uint8_t h[8]; memcpy(h, &len, 4); memcpy(h+4, &magic, 4);
     logToFile(@"sendRaw: len=%u magic=0x%08x", len, magic);
-    [self writeExact:h length:8]; [self writeExact:d.data() length:d.size()];
+    if (![self writeExact:h length:8] || ![self writeExact:d.data() length:d.size()]) throw std::runtime_error("Steam connection lost while sending data");
 }
 
 - (void)sendProtobufMsg:(int)emsg body:(const bytes &)body header:(const bytes &)header {
@@ -555,7 +590,7 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
             auto h2 = packVarint((2<<3)|0); auto se = packVarint32(_currentSessionId);
             hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
             logToFile(@"Sending heartbeat (sessionId=%d steamId=%llu)", ss->_currentSessionId, (unsigned long long)ss->_currentSteamId);
-            [ss sendProtobufMsg:1009 body:body header:hdr];
+            try { [ss sendProtobufMsg:1009 body:body header:hdr]; } catch (...) { break; }
         }
     }];
     _heartbeatThread.name = @"SteamCM-Heartbeat";
@@ -573,37 +608,29 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 #pragma mark - Multi (emsg=1) message parsing
 
 - (NSArray<NSDictionary *> *)parseMultiMessage:(const bytes &)body {
-    size_t p = 0; uint64_t sizeUnzipped = 0; bytes msgBody;
-    while (p < body.size()) {
-        uint64_t tag = SteamProto::readVarint(body.data(), p, body.size());
-        int fn = (int)(tag>>3), wt = (int)(tag&7);
-        if (fn == 1 && wt == 0) sizeUnzipped = SteamProto::readVarint(body.data(), p, body.size());
-        else if (fn == 2 && wt == 2) { uint64_t l = SteamProto::readVarint(body.data(), p, body.size());
-            msgBody.assign(body.data()+p, body.data()+p+l); p += l; }
-        else { if (wt==0) SteamProto::readVarint(body.data(),p,body.size()); else if (wt==1) p+=8; else if (wt==2) { uint64_t l=SteamProto::readVarint(body.data(),p,body.size()); p+=l; } else if (wt==5) p+=4; else p++; }
+    using namespace svensteam;
+    uint64_t inflatedSize = value(body, 1);
+    if (inflatedSize > 16 * 1024 * 1024) throw std::runtime_error("Steam multi-message is too large");
+    Buffer contents = blob(body, 2);
+    if (inflatedSize) {
+        NSData *decoded = gzipDecompress([NSData dataWithBytes:contents.data() length:contents.size()]);
+        if (!decoded || decoded.length != inflatedSize) throw std::runtime_error("Invalid compressed Steam multi-message");
+        contents.assign((const uint8_t *)decoded.bytes, (const uint8_t *)decoded.bytes + decoded.length);
     }
-    NSData *subData = [NSData dataWithBytes:msgBody.data() length:msgBody.size()];
-    if (sizeUnzipped > 0) {
-        NSData *dec = gzipDecompress(subData);
-        if (dec) subData = dec;
+    NSMutableArray *messages = [NSMutableArray array];
+    for (size_t offset = 0; offset < contents.size();) {
+        size_t length = size_t(readInteger(contents, offset, 4)); offset += 4;
+        if (length < 8 || length > contents.size() - offset) throw std::runtime_error("Invalid Steam sub-message length");
+        uint32_t message = uint32_t(readInteger(contents, offset, 4));
+        if (!(message & 0x80000000)) { offset += length; continue; }
+        size_t headerLength = size_t(readInteger(contents, offset + 4, 4));
+        if (headerLength > length - 8) throw std::runtime_error("Invalid Steam sub-message header");
+        [messages addObject:@{@"emsg":@(message & 0x7fffffff),
+            @"header":[NSData dataWithBytes:contents.data() + offset + 8 length:headerLength],
+            @"body":[NSData dataWithBytes:contents.data() + offset + 8 + headerLength length:length - 8 - headerLength]}];
+        offset += length;
     }
-    NSMutableArray *msgs = [NSMutableArray array];
-    const uint8_t *dp = (const uint8_t *)subData.bytes;
-    size_t dl = subData.length, off = 0;
-    while (off + 4 <= dl) {
-        int subSize = readInt32LE(dp, off); off += 4;
-        if (subSize <= 0 || off + (size_t)subSize > dl) break;
-        int subEmsg = readInt32LE(dp, off) & 0x7FFFFFFF;
-        int hdrLen = readInt32LE(dp, off + 4);
-        size_t subOff = 8 + hdrLen;
-        if (subOff < (size_t)subSize) {
-            bytes subHeader(dp + off + 8, dp + off + 8 + hdrLen);
-            bytes subBody(dp + off + subOff, dp + off + subSize);
-            [msgs addObject:@{@"emsg":@(subEmsg), @"header":[NSData dataWithBytes:subHeader.data() length:subHeader.size()], @"body":[NSData dataWithBytes:subBody.data() length:subBody.size()]}];
-        }
-        off += subSize;
-    }
-    return msgs;
+    return messages;
 }
 
 - (BOOL)readMessageWithEmsg:(int*)oe body:(bytes*)ob isProto:(BOOL*)op header:(bytes*)oh error:(NSError**)err {
@@ -621,14 +648,14 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     if (payload.size() < 8) { logToFile(@"readMessage: payload too small %zu", payload.size()); if (err) *err = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Payload too small"}]; return NO; }
     int re = readInt32LE(payload.data(), 0); BOOL ip = (re & PROTO_MASK) != 0;
     size_t off = 4;
-    if (ip) { int hl = readInt32LE(payload.data(), (size_t)off); off += 4; logToFile(@"readMessage: proto emsg=%d headerLen=%d", re & 0x7FFFFFFF, hl); if (oh) oh->assign(payload.begin()+off, payload.begin()+off+hl); if (hl > 0) off += hl; } else { logToFile(@"readMessage: legacy emsg=%d", re & 0x7FFFFFFF); off += 16; }
+    if (ip) { int hl = readInt32LE(payload.data(), off); off += 4; if (hl < 0 || (size_t)hl > payload.size() - off) return NO; if (oh) oh->assign(payload.begin()+off, payload.begin()+off+hl); off += hl; } else { if (payload.size() < 20) return NO; off += 16; }
     if (oe) *oe = re & 0x7FFFFFFF; if (op) *op = ip;
     if (ob) ob->assign(payload.begin()+off, payload.end());
     logToFile(@"readMessage: body=%zu", ob ? ob->size() : 0);
     return YES;
 }
 
-- (BOOL)anonymousLoginWithError:(NSError **)error {
+- (BOOL)negotiateEncryptionWithError:(NSError **)error {
     arc4random_buf(_sessionKey, 32); _encrypted = NO;
     [self status:@"Waiting for encrypt request..."];
     logToFile(@"Waiting for ChannelEncryptRequest...");
@@ -724,6 +751,11 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     _encrypted = YES; [self status:@"Connecting Steam..."];
     logToFile(@"Encryption established, sending ClientHello...");
 
+    return YES;
+}
+
+- (BOOL)anonymousLoginWithError:(NSError **)error {
+    if (![self negotiateEncryptionWithError:error]) return NO;
     // Build proto header helper
     auto buildHeader = [&](uint64_t steamId, int sessionId) -> bytes {
         bytes h;
@@ -1040,6 +1072,8 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
 @end
 
+#include "SteamService.inc"
+
 #pragma mark - Manifest download & parsing
 
 static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t rc, NSArray *hosts) {
@@ -1071,63 +1105,56 @@ static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t
 }
 
 static NSArray *parseManifestFiles(NSData *data, NSData *depotKey) {
-    const uint8_t *b = (const uint8_t *)data.bytes; size_t l = data.length, p = 0;
-    NSData *payload = nil;
-    while (p+4 <= l) {
-        uint32_t magic = (uint32_t)readInt32LE(b, p); p += 4;
-        if (p+4 > l) break;
-        uint32_t plen = (uint32_t)readInt32LE(b, p); p += 4;
-        if (magic == 0x71F617D0) { if (p+plen <= l) payload = [NSData dataWithBytes:b+p length:plen]; p += plen; }
-        else if (magic == 0x1F4812BE || magic == 0x1B81B817) p += plen;
-        else if (magic == 0x32C415AB) break;
-        else break;
-    }
-    if (!payload) return @[];
-
-    const uint8_t *pb = (const uint8_t *)payload.bytes; size_t pl = payload.length, pp = 0;
-    NSMutableArray *files = [NSMutableArray array];
-    while (pp < pl) {
-        uint64_t tag = SteamProto::readVarint(pb, pp, pl);
-        int fn = (int)(tag>>3), wt = (int)(tag&7);
-        if (fn == 1 && wt == 2) {
-            uint64_t fl = SteamProto::readVarint(pb, pp, pl); size_t end = pp + (size_t)fl;
-            int64_t size = 0; int crc32 = 0; NSData *rawFn = nil;
+    using namespace svensteam;
+    try {
+        Buffer bytes((const uint8_t *)data.bytes, (const uint8_t *)data.bytes + data.length), payload;
+        bool encrypted = true;
+        for (size_t offset = 0; bytes.size() - offset >= 8;) {
+            uint32_t magic = uint32_t(readInteger(bytes, offset, 4)); offset += 4;
+            size_t length = size_t(readInteger(bytes, offset, 4)); offset += 4;
+            if (length > bytes.size() - offset) return @[];
+            Buffer section(bytes.begin() + offset, bytes.begin() + offset + length);
+            if (magic == 0x71f617d0) payload = section;
+            else if (magic == 0x1f4812be) encrypted = value(section, 4) != 0;
+            offset += length;
+        }
+        NSMutableArray *files = [NSMutableArray array];
+        for (const auto &entry : fields(payload)) {
+            if (entry.id != 1 || entry.wire != 2) continue;
+            auto rawName = blob(entry.bytes, 1); uint64_t size = value(entry.bytes, 2), flags = value(entry.bytes, 3);
+            if (size > 64ULL * 1024 * 1024 * 1024 || value(entry.bytes, 7) || !blob(entry.bytes, 7).empty()) continue;
+            NSString *path = encrypted ? decryptFilename(rawName.data(), rawName.size(), depotKey) : [[NSString alloc] initWithBytes:rawName.data() length:rawName.size() encoding:NSUTF8StringEncoding];
+            path = [path stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
+            if (!path.length) continue;
             NSMutableArray *chunks = [NSMutableArray array];
-            while (pp < end) {
-                uint64_t ft = SteamProto::readVarint(pb, pp, pl);
-                int ffn = (int)(ft>>3), fwt = (int)(ft&7);
-                if (ffn == 1 && fwt == 2) { uint64_t sl = SteamProto::readVarint(pb, pp, pl);
-                    rawFn = [NSData dataWithBytes:pb+pp length:(NSUInteger)sl]; pp += sl; }
-                else if (ffn == 2 && fwt == 0) size = (int64_t)SteamProto::readVarint(pb, pp, pl);
-                else if (ffn == 3 && fwt == 0) crc32 = (int)SteamProto::readVarint(pb, pp, pl);
-                else if (ffn == 6 && fwt == 2) {
-                    uint64_t cl = SteamProto::readVarint(pb, pp, pl); size_t ce = pp + (size_t)cl;
-                    NSData *sha1 = nil; int ck = 0; int64_t off = 0; int co = 0, cu = 0;
-                    while (pp < ce) {
-                        uint64_t ct = SteamProto::readVarint(pb, pp, pl);
-                        int cfn = (int)(ct>>3), cwt = (int)(ct&7);
-                        if (cfn == 1 && cwt == 2) { uint64_t sl = SteamProto::readVarint(pb, pp, pl);
-                            sha1 = [NSData dataWithBytes:pb+pp length:(NSUInteger)sl]; pp += sl; }
-                        else if (cfn == 2 && cwt == 5) { ck = readInt32LE(pb, pp); pp += 4; }
-                        else if (cfn == 3 && cwt == 0) off = (int64_t)SteamProto::readVarint(pb, pp, pl);
-                        else if (cfn == 4 && cwt == 0) cu = (int)SteamProto::readVarint(pb, pp, pl);
-                        else if (cfn == 5 && cwt == 0) co = (int)SteamProto::readVarint(pb, pp, pl);
-                        else { if (cwt==0) SteamProto::readVarint(pb,pp,pl); else if (cwt==1) pp+=8; else if (cwt==2) { uint64_t l2=SteamProto::readVarint(pb,pp,pl); pp+=l2; } else if (cwt==5) pp+=4; else pp++; }
-                    }
-                    if (sha1) [chunks addObject:@{@"sha1":sha1, @"checksum":@(ck), @"offset":@(off), @"compressedLength":@(co), @"uncompressedLength":@(cu)}];
-                } else { if (fwt==0) SteamProto::readVarint(pb,pp,pl); else if (fwt==1) pp+=8; else if (fwt==2) { uint64_t l2=SteamProto::readVarint(pb,pp,pl); pp+=l2; } else if (fwt==5) pp+=4; else pp++; }
+            for (const auto &chunkField : fields(entry.bytes)) {
+                if (chunkField.id != 6 || chunkField.wire != 2) continue;
+                auto hash = blob(chunkField.bytes, 1); uint64_t offset = value(chunkField.bytes, 3), length = value(chunkField.bytes, 4);
+                if (hash.size() != 20 || offset > size || length > size - offset) throw std::runtime_error("Invalid depot chunk bounds");
+                [chunks addObject:@{@"sha1":[NSData dataWithBytes:hash.data() length:hash.size()], @"checksum":@(uint32_t(value(chunkField.bytes, 2))),
+                    @"offset":@(offset), @"uncompressedLength":@(length), @"compressedLength":@(value(chunkField.bytes, 5))}];
             }
-            NSString *path = @"";
-            if (rawFn) path = [decryptFilename((const uint8_t *)rawFn.bytes, rawFn.length, depotKey) stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
-            if (path.length > 0) [files addObject:@{@"path":path, @"size":@(size), @"crc":@(crc32), @"chunks":chunks}];
-        } else { if (wt==0) SteamProto::readVarint(pb,pp,pl); else if (wt==1) pp+=8; else if (wt==2) { uint64_t l2=SteamProto::readVarint(pb,pp,pl); pp+=l2; } else if (wt==5) pp+=4; else pp++; }
-    }
-    return files;
+            auto hash = blob(entry.bytes, 5);
+            [files addObject:@{@"path":path, @"size":@(size), @"flags":@(flags), @"chunks":chunks,
+                @"sha1":[NSData dataWithBytes:hash.data() length:hash.size()]}];
+        }
+        return files;
+    } catch (const std::exception &error) { logToFile(@"Manifest rejected: %s", error.what()); return @[]; }
+}
+
+static NSData *SvenFileHash(NSString *path) {
+    FILE *file = fopen(path.fileSystemRepresentation, "rb"); if (!file) return nil;
+    CC_SHA1_CTX context; CC_SHA1_Init(&context); uint8_t block[65536]; size_t size;
+    while ((size = fread(block, 1, sizeof(block), file))) CC_SHA1_Update(&context, block, (CC_LONG)size);
+    BOOL failed = ferror(file); fclose(file); if (failed) return nil;
+    uint8_t hash[CC_SHA1_DIGEST_LENGTH]; CC_SHA1_Final(hash, &context);
+    return [NSData dataWithBytes:hash length:sizeof(hash)];
 }
 
 #pragma mark - Chunk download & file assembly
 
-static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData *depotKey, NSArray *hosts) {
+static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData *depotKey, NSArray *hosts, BOOL (^cancelled)(void)) {
+    if (!hosts.count || cancelled()) return nil;
     NSData *sha1 = chunk[@"sha1"];
     const uint8_t *sp = (const uint8_t *)sha1.bytes;
     NSMutableString *hex = [NSMutableString string];
@@ -1136,11 +1163,12 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
     int retryDelay = 500;
 
     for (int hi = workingHostIndex(depotId, hosts);; hi++) {
+        if (cancelled()) return nil;
         NSString *host = hosts[hi % hc];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/depot/%d/chunk/%@", host, depotId, hex]]];
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval = 15;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res = nil;
-        [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
             NSHTTPURLResponse *http = (NSHTTPURLResponse *)r;
             if (http.statusCode == 200 && d.length >= 16) {
                 NSData *dec = decryptChunk((const uint8_t *)depotKey.bytes, depotKey.length, (const uint8_t *)d.bytes, d.length);
@@ -1162,8 +1190,11 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
                 }
             }
             dispatch_semaphore_signal(sem);
-        }] resume];
-        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        }];
+        [task resume];
+        while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC))) {
+            if (cancelled()) { [task cancel]; return nil; }
+        }
         if (res) { setWorkingHostIndex(depotId, hi % hc); return res; }
         usleep(retryDelay);
         retryDelay = MIN(retryDelay * 1.5, 5000);
@@ -1172,44 +1203,58 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
     return nil;
 }
 
-static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSData *depotKey, NSArray *hosts) {
-    NSArray *chunks = file[@"chunks"];
-    if (chunks.count == 0) {
-        if ([outPath.lastPathComponent containsString:@"."])
-            [[NSFileManager defaultManager] createFileAtPath:outPath contents:[NSData data] attributes:nil];
-        else
-            [[NSFileManager defaultManager] createDirectoryAtPath:outPath withIntermediateDirectories:YES attributes:nil error:nil];
-        return YES;
-    }
-    NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *p = [outPath stringByDeletingLastPathComponent];
-    while (p && ![p isEqualToString:@"/"]) { BOOL isDir=NO;
-        if ([fm fileExistsAtPath:p isDirectory:&isDir] && !isDir) { [fm removeItemAtPath:p error:nil]; } p = [p stringByDeletingLastPathComponent]; }
-    [fm createDirectoryAtPath:[outPath stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *tmpPath = [[outPath stringByDeletingLastPathComponent] stringByAppendingPathComponent:[[outPath lastPathComponent] stringByAppendingString:@".tmp"]];
-    FILE *f = fopen([tmpPath UTF8String], "wb"); if (!f) return NO;
-    ftruncate(fileno(f), (off_t)[file[@"size"] longLongValue]);
-    __block BOOL ok = YES;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(8);
-    dispatch_group_t grp = dispatch_group_create();
-    for (NSDictionary *ch in chunks) {
-        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-        dispatch_group_enter(grp);
+static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSData *depotKey, NSArray *hosts, BOOL (^cancelled)(void)) {
+    if (cancelled()) return NO;
+    NSFileManager *manager = NSFileManager.defaultManager;
+    if ([file[@"flags"] unsignedIntValue] & 64) return [manager createDirectoryAtPath:outPath withIntermediateDirectories:YES attributes:nil error:nil];
+    NSData *hash = file[@"sha1"];
+    if (hash.length == 20 && [SvenFileHash(outPath) isEqualToData:hash]) return YES;
+    [manager createDirectoryAtPath:outPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *temporary = [outPath stringByAppendingString:@".tmp"];
+    int descriptor = open(temporary.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (descriptor < 0) return NO;
+    uint64_t fileSize = [file[@"size"] unsignedLongLongValue];
+    if (ftruncate(descriptor, (off_t)fileSize)) { close(descriptor); return NO; }
+    auto failed = std::make_shared<std::atomic<bool>>(false);
+    dispatch_semaphore_t workers = dispatch_semaphore_create(4); dispatch_group_t group = dispatch_group_create();
+    for (NSDictionary *chunk in file[@"chunks"]) {
+        if (cancelled() || *failed) { *failed = true; break; }
+        dispatch_semaphore_wait(workers, DISPATCH_TIME_FOREVER); dispatch_group_enter(group);
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            if (!ok) { dispatch_semaphore_signal(sem); dispatch_group_leave(grp); return; }
-            NSData *d = downloadChunkAndDecrypt(depotId, ch, depotKey, hosts);
-            if (d) { fseeko(f, (off_t)[ch[@"offset"] longLongValue], SEEK_SET); fwrite(d.bytes, 1, d.length, f); }
-            else ok = NO;
-            dispatch_semaphore_signal(sem); dispatch_group_leave(grp);
+            @autoreleasepool {
+                if (cancelled() || *failed) *failed = true;
+                else {
+                    NSData *data = downloadChunkAndDecrypt(depotId, chunk, depotKey, hosts, cancelled);
+                    uint64_t offset = [chunk[@"offset"] unsignedLongLongValue];
+                    if (!data || data.length != [chunk[@"uncompressedLength"] unsignedLongLongValue] || offset > fileSize || data.length > fileSize - offset) *failed = true;
+                    else {
+                        size_t written = 0;
+                        while (written < data.length && !cancelled()) {
+                            ssize_t count = pwrite(descriptor, (const uint8_t *)data.bytes + written, data.length - written, (off_t)(offset + written));
+                            if (count < 0 && errno == EINTR) continue;
+                            if (count <= 0) { *failed = true; break; } written += size_t(count);
+                        }
+                        if (cancelled()) *failed = true;
+                    }
+                }
+                dispatch_semaphore_signal(workers); dispatch_group_leave(group);
+            }
         });
     }
-    dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
-    fclose(f);
-    if (ok) { [fm removeItemAtPath:outPath error:nil]; [fm moveItemAtPath:tmpPath toPath:outPath error:nil]; return YES; }
-    else { [fm removeItemAtPath:tmpPath error:nil]; return NO; }
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER); close(descriptor);
+    if (!*failed && hash.length == 20 && ![SvenFileHash(temporary) isEqualToData:hash]) *failed = true;
+    if (!*failed && !cancelled()) {
+        if (rename(temporary.fileSystemRepresentation, outPath.fileSystemRepresentation) == 0) return YES;
+    }
+    [manager removeItemAtPath:temporary error:nil]; return NO;
 }
 
 #pragma mark - GameDataDownloader
+
+@interface GameDataDownloader ()
+@property (atomic, readwrite) BOOL installing;
+@property (atomic) BOOL cancelled;
+@end
 
 @implementation GameDataDownloader {
     NSString *_docsDir;
@@ -1224,6 +1269,8 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
     return self;
 }
 
+- (void)cancel { self.cancelled = YES; }
+
 - (BOOL)hasGameData:(NSString *)gameDir {
     NSString *path = [_docsDir stringByAppendingPathComponent:gameDir];
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -1234,16 +1281,27 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 }
 
 - (void)downloadGame:(NSString *)gameDir onProgress:(void(^)(NSString*,float))onProgress completion:(void(^)(NSError*))completion {
+    @synchronized (self) {
+        if (self.installing) {
+            completion([NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:@"A game installation is already running"}]);
+            return;
+        }
+        self.installing = YES; self.cancelled = NO;
+    }
+    void (^finish)(NSError *) = ^(NSError *error) { self.installing = NO; completion(error); };
+
     __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
     bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"Steam Download" expirationHandler:^{
         [[UIApplication sharedApplication] endBackgroundTask:bgTask];
         bgTask = UIBackgroundTaskInvalid;
+        self.cancelled = YES;
     }];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @autoreleasepool { try {
         NSDictionary *info = GAMES()[gameDir];
         if (!info) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Unknown game: %@",gameDir]}]);
+                finish([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Unknown game: %@",gameDir]}]);
                 if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
@@ -1260,7 +1318,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         logToFile(@"Connecting to Steam CM...");
         if (![client connectWithError:&err]) {
             logToFile(@"Connect failed: %@", err.localizedDescription);
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
+            dispatch_async(dispatch_get_main_queue(), ^{ finish(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
 
@@ -1269,17 +1327,20 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         if (![client anonymousLoginWithError:&err]) {
             logToFile(@"Login failed: %@", err.localizedDescription);
             [client disconnect];
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
+            dispatch_async(dispatch_get_main_queue(), ^{ finish(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
+
+        [client requestLicense:appId error:nil];
 
         if (onProgress) onProgress(@"Getting CDN servers...", 0);
         logToFile(@"Requesting CDN server list...");
         NSArray *cdnHosts = [client requestCDNServerListWithError:&err];
-        if (!cdnHosts) {
+        if (!cdnHosts.count) {
+            if (!err) err = [NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:@"No Steam content server is reachable."}];
             logToFile(@"CDN servers failed: %@", err.localizedDescription);
             [client disconnect];
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
+            dispatch_async(dispatch_get_main_queue(), ^{ finish(err); if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; } });
             return;
         }
         logToFile(@"Got %lu CDN hosts", (unsigned long)cdnHosts.count);
@@ -1304,7 +1365,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
         if (depotSetups.count == 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Could not set up any depots"}]);
+                finish([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Could not set up any depots"}]);
                 if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
@@ -1323,15 +1384,20 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             NSArray *files = parseManifestFiles(manifestBytes, ds[@"depotKey"]);
             logToFile(@"[manifest] parseManifestFiles returned %lu files", (unsigned long)files.count);
             for (NSDictionary *f in files) {
+                NSString *path = [f[@"path"] stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
+                if (![path hasPrefix:@"svencoop/"] || path.isAbsolutePath || [path.pathComponents containsObject:@".."] ||
+                    [@[@"exe", @"dll"] containsObject:path.pathExtension.lowercaseString]) continue;
+                NSMutableDictionary *normalized = [f mutableCopy]; normalized[@"path"] = path;
+                f = normalized;
                 [allFiles addObject:@{@"depotId":@(depotId), @"file":f, @"depotKey":ds[@"depotKey"]}];
             }
-            totalFiles += files.count;
+            totalFiles = allFiles.count;
         }
 
         if (allFiles.count == 0) {
             logToFile(@"[download] No files found in manifest(s)");
             dispatch_async(dispatch_get_main_queue(), ^{
-                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No files found"}]);
+                finish([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"No files found"}]);
                 if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
             }); return;
         }
@@ -1340,10 +1406,11 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
         __block int64_t completed = 0;
         __block BOOL anyFailed = NO;
-        dispatch_semaphore_t sem = dispatch_semaphore_create(10);
+        dispatch_semaphore_t sem = dispatch_semaphore_create(3);
         dispatch_group_t grp = dispatch_group_create();
 
         for (NSDictionary *entry in allFiles) {
+            if (self.cancelled) { anyFailed = YES; break; }
             dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
             dispatch_group_enter(grp);
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -1354,7 +1421,8 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
                 if ([relPath hasPrefix:[NSString stringWithFormat:@"%@/", gameDir]])
                     relPath = [relPath substringFromIndex:gameDir.length + 1];
                 NSString *outPath = [targetDir stringByAppendingPathComponent:relPath];
-                if (!assembleFile(depotId, mf, outPath, depotKey, cdnHosts)) anyFailed = YES;
+                BOOL success = assembleFile(depotId, mf, outPath, depotKey, cdnHosts, ^BOOL{ return self.cancelled; });
+                @synchronized (self) { if (!success) anyFailed = YES; }
                 @synchronized (self) { completed++;
                     if (onProgress) dispatch_async(dispatch_get_main_queue(), ^{
                         onProgress([NSString stringWithFormat:@"Downloading %@... (%lld/%lld)",displayName,completed,totalFiles], (float)completed/(float)totalFiles);
@@ -1366,18 +1434,18 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *msg = anyFailed ? [NSString stringWithFormat:@"%@ downloaded with some errors",displayName] : [NSString stringWithFormat:@"%@ downloaded successfully",displayName];
-            if (anyFailed)
-                completion([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:msg}]);
+            NSString *msg = self.cancelled ? @"Installation cancelled. Completed files are kept." : anyFailed ? [NSString stringWithFormat:@"%@ downloaded with some errors",displayName] : [NSString stringWithFormat:@"%@ downloaded successfully",displayName];
+            if (anyFailed || self.cancelled)
+                finish([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:msg}]);
             else
-                completion(nil);
+                finish(nil);
             // Local notification on completion
             logToFile(@"[notif] sending: %@", msg);
             UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
             [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
                 if (settings.authorizationStatus == UNAuthorizationStatusAuthorized || settings.authorizationStatus == UNAuthorizationStatusProvisional) {
                     UNMutableNotificationContent *nc = [[UNMutableNotificationContent alloc] init];
-                    nc.title = @"Xash3D Download Complete";
+                    nc.title = @"SvenClient Download Complete";
                     nc.body = msg;
                     nc.sound = [UNNotificationSound defaultSound];
                     UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:@"XashDownloadDone" content:nc trigger:nil];
@@ -1388,6 +1456,13 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
             }];
             if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; logToFile(@"[bg] ended background task"); }
         });
+        } catch (const std::exception &failure) {
+            NSString *message = [NSString stringWithUTF8String:failure.what()] ?: @"Installation failed";
+            dispatch_async(dispatch_get_main_queue(), ^{
+                finish([NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:message}]);
+                if (bgTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:bgTask]; bgTask = UIBackgroundTaskInvalid; }
+            });
+        } }
     });
 }
 

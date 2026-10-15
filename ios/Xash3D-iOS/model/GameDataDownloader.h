@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 
 @interface GameDataDownloader : NSObject
+@property (atomic, readonly) BOOL installing;
+- (void)cancel;
 
 - (instancetype)initWithDocumentsDir:(NSString *)docsDir;
 

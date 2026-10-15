@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Xash3D</string>
+	<string>SvenClient</string>
 	<key>CFBundleDocumentTypes</key>
 	<array/>
 	<key>CFBundleExecutable</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Xash3D</string>
+	<string>SvenClient</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -25,7 +25,7 @@
 	<key>CFBundleVersion</key>
 	<string>1.0</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Xash3D requires bluetooth permission for built-in SDL2 library.</string>
+	<string>SvenClient uses Bluetooth for game controller support.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -57,5 +57,7 @@
 	</array>
 	<key>UISupportsDocumentBrowser</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>SvenClient connects to game servers and Steam peers on your network.</string>
 </dict>
 </plist>

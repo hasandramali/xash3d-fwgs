@@ -44,9 +44,9 @@ extern "C" const char *IOS_GetDocsDir()
     static const char *dir = nil;
     if( dir ) return dir;
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *documentsDirctory = [paths objectAtIndex:0];
+    NSString *documentsDirctory = [[paths objectAtIndex:0] stringByAppendingPathComponent:@"svenclient"];
     [[NSFileManager defaultManager] createDirectoryAtPath:documentsDirctory withIntermediateDirectories:YES attributes:nil error:nil];
-    dir = [documentsDirctory fileSystemRepresentation];
+    dir = strdup([documentsDirctory fileSystemRepresentation]);
     return dir;
 }
 
@@ -122,8 +122,7 @@ extern "C" BOOL IOS_IsResourcesReady()
 {
     NSString *doc = [NSString stringWithUTF8String:IOS_GetDocsDir()];
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    return ([fileManager fileExistsAtPath:[doc stringByAppendingPathComponent:@"valve"]] ||
-            [fileManager fileExistsAtPath:[doc stringByAppendingPathComponent:@"cstrike"]]);
+    return [fileManager fileExistsAtPath:[doc stringByAppendingPathComponent:@"svencoop"]];
 }
 
 // UINavigationController subclass that locks to portrait for the launcher
@@ -175,9 +174,9 @@ void IOS_PrepareView()
 
 extern "C" void IOS_SetDefaultArgs()
 {
-    static const char *args[64] = { "xash", "-dev", "1", "-game", "valve" };
+    static const char *args[64] = { "svenclient", "-console", "-game", "svencoop" };
     g_pszArgv = args;
-    g_iArgc = 5;
+    g_iArgc = 4;
 }
 
 extern "C" void IOS_LaunchDialog( void )

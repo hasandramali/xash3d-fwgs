@@ -67,20 +67,20 @@ jobs:
             targetarch: multiarch
 
           # Windows builds
-          - os: windows-latest
-            targetos: win32
-            targetarch: amd64
-          - os: windows-2022
-            targetos: win32
-            targetarch: i386
+#          - os: windows-latest
+#            targetos: win32
+#            targetarch: amd64
+#          - os: windows-2022
+#            targetos: win32
+#            targetarch: i386
 
           # Apple builds
 #          - os: macos-14
 #            targetos: apple
 #            targetarch: arm64
-#          - os: macos-latest
-#            targetos: ios
-#            targetarch: arm64
+          - os: macos-latest
+            targetos: ios
+            targetarch: arm64
 #          - os: macos-15-intel
 #            targetos: apple
 #            targetarch: amd64
@@ -99,6 +99,10 @@ jobs:
     - name: Remove bundled touch presets
       shell: bash
       run: rm -rf -- 3rdparty/extras/xash-extras/touch_presets
+
+    - name: Remove bundled logos
+      shell: bash
+      run: rm -rf -- 3rdparty/extras/xash-extras/logos
 
     - name: Fix file permissions (Linux & macOS)
       if: matrix.targetos != 'win32'
