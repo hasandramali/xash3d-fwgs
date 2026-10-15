@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "launcherdialog.h"
+#include "IOSPaths.hpp"
 #include "FileBrowserViewController.h"
 
 char *g_szLibrarySuffix = NULL;
@@ -44,8 +45,11 @@ extern "C" const char *IOS_GetDocsDir()
     static const char *dir = nil;
     if( dir ) return dir;
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *documentsDirctory = [[paths objectAtIndex:0] stringByAppendingPathComponent:@"svenclient"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:documentsDirctory withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *documentsDirctory = [paths objectAtIndex:0];
+    std::string migration;
+    if (!svenios::migrateLegacyRoot(documentsDirctory.fileSystemRepresentation, migration))
+        NSLog(@"SvenClient data migration failed: %s", migration.c_str());
+    else if (!migration.empty()) NSLog(@"SvenClient data migration: %s", migration.c_str());
     dir = strdup([documentsDirctory fileSystemRepresentation]);
     return dir;
 }

@@ -4,7 +4,7 @@ REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BUILDDIR="$REPO_ROOT/build"
 APP="$BUILDDIR/ios/svenclient.app"
 [ -d "$BUILDDIR/SDL2.framework" ] || { echo "Place SDL2.framework in build/ before packaging."; exit 1; }
-[ -d "$BUILDDIR/ios/libs/svencoop" ] || { echo "Build the Sven Co-op client library before packaging."; exit 1; }
+[ -f "$BUILDDIR/ios/libs/svencoop/cl_dlls/client_ios_arm64.dylib" ] || { echo "Build client_ios_arm64.dylib before packaging."; exit 1; }
 rm -rf "$APP"
 mkdir -p "$APP"
 cp -R "$BUILDDIR/ios/libs/svencoop" "$APP/"

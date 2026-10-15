@@ -1,5 +1,8 @@
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     function(svenclient_ios_link)
+        if(TARGET client)
+            set_target_properties(client PROPERTIES OUTPUT_NAME "client_ios_arm64" PREFIX "")
+        endif()
         if(TARGET client AND CMAKE_C_COMPILER_ID MATCHES "Clang")
             set_property(SOURCE "${CMAKE_SOURCE_DIR}/pm_shared/pm_math.c"
                 TARGET_DIRECTORY client APPEND PROPERTY COMPILE_OPTIONS "-fgnu89-inline")

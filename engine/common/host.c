@@ -696,6 +696,11 @@ void GAME_EXPORT Host_Error( const char *error, ... )
 
 	if( host.framecount < 3 )
 	{
+		if( host.status == HOST_INIT )
+		{
+			Sys_Error( "%sInit: %s", __func__, hosterror1 );
+			return;
+		}
 		Con_Printf( S_ERROR "%sInit: %s", __func__, hosterror1 );
 		Host_AbortCurrentFrame();
 		return;

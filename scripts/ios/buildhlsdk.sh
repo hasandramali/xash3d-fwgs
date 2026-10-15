@@ -14,9 +14,6 @@ cmake -S "$SOURCE_DIR" -B "$SOURCE_DIR/build-ios" \
     -DFREEVGUI_SRC_DIR="$REPO_ROOT/3rdparty/freevgui" -DXASH3D_ENGINE_RUNTIME_DIR="$REPO_ROOT" \
     -DCMAKE_PROJECT_INCLUDE="$SCRIPTDIR/hlsdk_overrides.cmake"
 cmake --build "$SOURCE_DIR/build-ios" --target install --parallel
-find "$LIBSDIR/svencoop" -name '*.dylib' -type f | while IFS= read -r library; do
-    case "$library" in
-        *_arm64.dylib) ;;
-        *) mv "$library" "${library%.dylib}_arm64.dylib" ;;
-    esac
-done
+CLIENT_LIBRARY="$LIBSDIR/svencoop/cl_dlls/client_ios_arm64.dylib"
+[ -f "$CLIENT_LIBRARY" ] || { echo "Missing iOS client library: $CLIENT_LIBRARY"; exit 1; }
+rm -f "$LIBSDIR/svencoop/cl_dlls/client_arm64.dylib"

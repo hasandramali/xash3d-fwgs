@@ -7,6 +7,43 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_initialization_error_does_not_jump_to_a_frame(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "engine/common/host.c").read_text()
+        start = source.index("\tif( host.framecount < 3 )", source.index("void GAME_EXPORT Host_Error("))
+        end = source.index("\n\tif( host.framecount == host.errorframe )", start)
+        program = """
+#include <assert.h>
+#define S_ERROR ""
+enum { HOST_INIT, HOST_FRAME };
+static struct { int framecount, status; } host;
+static char hosterror1[] = "Missing client library";
+static int fatal, aborted;
+void Sys_Error(const char *format, ...) { (void)format; fatal++; }
+void Con_Printf(const char *format, ...) { (void)format; }
+void Host_AbortCurrentFrame(void) { aborted++; }
+void check_error(void) {
+""" + source[start:end] + """
+}
+int main(void) {
+    host.status = HOST_INIT;
+    check_error();
+    assert(fatal == 1 && aborted == 0);
+    fatal = 0;
+    host.status = HOST_FRAME;
+    check_error();
+    assert(fatal == 0 && aborted == 1);
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "host-error-test.c"
+            executable = Path(temporary) / "host-error-test"
+            test_source.write_text(program)
+            subprocess.run([os.environ.get("CC", "clang"), "-std=c11", "-Wall", "-Wextra", "-Werror",
+                            str(test_source), "-o", str(executable)], check=True)
+            subprocess.run([str(executable)], check=True)
+
     def test_launcher_actions_and_anonymous_install(self):
         repository = Path(__file__).resolve().parents[3]
         browser = (repository / "ios/Xash3D-iOS/view/FileBrowserViewController.mm").read_text()
@@ -16,6 +53,8 @@ class SvenBuildScriptsTest(unittest.TestCase):
         self.assertNotIn("settingsTapped", browser)
         self.assertNotIn("map_background", browser)
         launcher = (repository / "ios/Xash3D-iOS/model/launchdialog.mm").read_text()
+        self.assertNotIn('stringByAppendingPathComponent:@"svenclient"', launcher)
+        self.assertIn("svenios::migrateLegacyRoot", launcher)
         defaults = launcher.split('extern "C" void IOS_SetDefaultArgs()', 1)[1].split('\n}', 1)[0]
         self.assertNotIn("map_background", defaults)
         self.assertIn('"svenclient", "-console", "-game", "svencoop"', defaults)
@@ -291,7 +330,7 @@ assert(len == previous);
                 "add_library(vgui STATIC vgui.cpp)\nadd_library(client SHARED client.cpp)\n"
                 "target_link_libraries(client PRIVATE -Wl,--whole-archive vgui -Wl,--no-whole-archive)\n"
                 'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/link-properties.txt" '
-                'CONTENT "$<TARGET_PROPERTY:client,LINK_LIBRARIES>\\n$<TARGET_PROPERTY:client,LINK_OPTIONS>")\n'
+                'CONTENT "$<TARGET_PROPERTY:client,LINK_LIBRARIES>\\n$<TARGET_PROPERTY:client,LINK_OPTIONS>\\n$<TARGET_FILE_NAME:client>")\n'
             )
             subprocess.run(["cmake", "-S", str(root), "-B", str(root / "build")],
                            check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -300,6 +339,8 @@ assert(len == previous);
             self.assertNotIn("--no-whole-archive", properties)
             self.assertIn("LINKER:-force_load,", properties)
             self.assertIn("vgui", properties)
+            self.assertIn("client_ios_arm64", properties)
+            self.assertNotIn("libclient_ios_arm64", properties)
 
     def test_apple_hlsdk_c_inline_linkage(self):
         repository = Path(__file__).resolve().parents[3]
@@ -365,7 +406,10 @@ elif '--build' in sys.argv:
                 command.write_text(mock)
                 command.chmod(0o755)
             log = root / "commands.log"
-            library = root / "build/ios/libs/svencoop/cl_dlls/client.dylib"
+            library = root / "build/ios/libs/svencoop/cl_dlls/client_ios_arm64.dylib"
+            library.parent.mkdir(parents=True)
+            stale_library = library.with_name("client_arm64.dylib")
+            stale_library.write_bytes(b"obsolete")
             environment = dict(os.environ, PATH=str(executables) + os.pathsep + os.environ["PATH"],
                                SVEN_TEST_LOG=str(log), SVEN_TEST_LIBRARY=str(library))
             subprocess.run(["bash", str(scripts / "buildallmods.sh")], env=environment, check=True)
@@ -377,11 +421,12 @@ elif '--build' in sys.argv:
             self.assertIn("-DCMAKE_PROJECT_INCLUDE=", commands)
             self.assertNotIn("cs16", commands)
             self.assertNotIn("opfor", commands)
-            self.assertTrue(library.with_name("client_arm64.dylib").is_file())
+            self.assertTrue(library.is_file())
+            self.assertFalse(stale_library.exists())
             products = root / "products"
             environment.update(BUILT_PRODUCTS_DIR=str(products), EXECUTABLE_FOLDER_PATH="SvenClient.app")
             subprocess.run(["bash", str(scripts / "prepare_game_libs.sh")], env=environment, check=True)
-            self.assertTrue((products / "SvenClient.app/svencoop/cl_dlls/client_arm64.dylib").is_file())
+            self.assertTrue((products / "SvenClient.app/svencoop/cl_dlls/client_ios_arm64.dylib").is_file())
             self.assertEqual(commands, log.read_text())
 
 
