@@ -1078,15 +1078,19 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
     for (NSUInteger i = 0; i < sha1.length; i++) [hex appendFormat:@"%02x", sp[i]];
     int hc = (int)(hosts.count % INT_MAX);
     int retryDelay = 500;
-
-    for (int hi = workingHostIndex(depotId, hosts);; hi++) {
+    int firstHost = workingHostIndex(depotId, hosts);
+    for (int attempt = 0; attempt < MIN(hc * 2, 8); attempt++) {
         if (cancelled()) return nil;
+        int hi = firstHost + attempt;
         NSString *host = hosts[hi % hc];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/depot/%d/chunk/%@", host, depotId, hex]]];
         [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval = 15;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res = nil;
+        __block NSString *failure = @"Invalid encrypted or compressed chunk";
         NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
             NSHTTPURLResponse *http = (NSHTTPURLResponse *)r;
+            if (e) failure = e.localizedDescription;
+            else if (http.statusCode != 200) failure = [NSString stringWithFormat:@"HTTP %ld", (long)http.statusCode];
             if (http.statusCode == 200 && d.length >= 16) {
                 NSData *dec = decryptChunk((const uint8_t *)depotKey.bytes, depotKey.length, (const uint8_t *)d.bytes, d.length);
                 if (dec) {
@@ -1102,20 +1106,23 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
                     }
                     if (res) {
                         int adler = adler32_steam((const uint8_t *)res.bytes, res.length);
-                        if (adler != [chunk[@"checksum"] intValue]) res = nil;
+                        if (adler != [chunk[@"checksum"] intValue]) { res = nil; failure = @"Chunk checksum mismatch"; }
                     }
                 }
             }
             dispatch_semaphore_signal(sem);
         }];
         [task resume];
+        uint64_t deadline = svensteam::milliseconds() + 30000;
+        BOOL timedOut = NO;
         while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC))) {
             if (cancelled()) { [task cancel]; return nil; }
+            if (svensteam::milliseconds() >= deadline) { [task cancel]; timedOut = YES; break; }
         }
-        if (res) { setWorkingHostIndex(depotId, hi % hc); return res; }
-        usleep(retryDelay);
+        if (!timedOut && res) { setWorkingHostIndex(depotId, hi % hc); return res; }
+        logToFile(@"[chunk] depot=%d hash=%@ host=%@ attempt=%d failed: %@", depotId, hex, host, attempt + 1, timedOut ? @"Request timed out" : failure);
+        for (int waited = 0; waited < retryDelay && !cancelled(); waited += 100) usleep(100000);
         retryDelay = MIN(retryDelay * 1.5, 5000);
-        if (hi > hc * 3) break;
     }
     return nil;
 }
@@ -1129,9 +1136,9 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
     [manager createDirectoryAtPath:outPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *temporary = [outPath stringByAppendingString:@".tmp"];
     int descriptor = open(temporary.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (descriptor < 0) return NO;
+    if (descriptor < 0) { logToFile(@"[file] Cannot create %@: %s", outPath, strerror(errno)); return NO; }
     uint64_t fileSize = [file[@"size"] unsignedLongLongValue];
-    if (ftruncate(descriptor, (off_t)fileSize)) { close(descriptor); return NO; }
+    if (ftruncate(descriptor, (off_t)fileSize)) { logToFile(@"[file] Cannot allocate %@ (%llu bytes): %s", outPath, (unsigned long long)fileSize, strerror(errno)); close(descriptor); return NO; }
     auto failed = std::make_shared<std::atomic<bool>>(false);
     dispatch_semaphore_t workers = dispatch_semaphore_create(4); dispatch_group_t group = dispatch_group_create();
     for (NSDictionary *chunk in file[@"chunks"]) {
@@ -1159,11 +1166,24 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         });
     }
     dispatch_group_wait(group, DISPATCH_TIME_FOREVER); close(descriptor);
-    if (!*failed && hash.length == 20 && ![SvenFileHash(temporary) isEqualToData:hash]) *failed = true;
+    if (!*failed && hash.length == 20 && ![SvenFileHash(temporary) isEqualToData:hash]) {
+        logToFile(@"[file] SHA-1 mismatch: %@", outPath); *failed = true;
+    }
     if (!*failed && !cancelled()) {
         if (rename(temporary.fileSystemRepresentation, outPath.fileSystemRepresentation) == 0) return YES;
+        logToFile(@"[file] Cannot install %@: %s", outPath, strerror(errno));
     }
     [manager removeItemAtPath:temporary error:nil]; return NO;
+}
+
+static BOOL assembleFileWithRetry(int depotId, NSDictionary *file, NSString *outPath, NSData *depotKey, NSArray *hosts, BOOL (^cancelled)(void)) {
+    for (int attempt = 1; attempt <= 3 && !cancelled(); attempt++) {
+        if (assembleFile(depotId, file, outPath, depotKey, hosts, cancelled)) return YES;
+        if (cancelled()) return NO;
+        logToFile(@"[file] Attempt %d/3 failed: %@", attempt, outPath);
+        if (attempt < 3) for (int waited = 0; waited < attempt * 10 && !cancelled(); waited++) usleep(100000);
+    }
+    return NO;
 }
 
 #pragma mark - GameDataDownloader
@@ -1331,6 +1351,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
 
         __block int64_t completed = 0;
         __block BOOL anyFailed = NO;
+        NSMutableArray<NSString *> *failedFiles = [NSMutableArray array];
         dispatch_semaphore_t sem = dispatch_semaphore_create(3);
         dispatch_group_t grp = dispatch_group_create();
 
@@ -1346,8 +1367,8 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
                 if ([relPath hasPrefix:[NSString stringWithFormat:@"%@/", gameDir]])
                     relPath = [relPath substringFromIndex:gameDir.length + 1];
                 NSString *outPath = [targetDir stringByAppendingPathComponent:relPath];
-                BOOL success = assembleFile(depotId, mf, outPath, depotKey, cdnHosts, ^BOOL{ return self.cancelled; });
-                @synchronized (self) { if (!success) anyFailed = YES; }
+                BOOL success = assembleFileWithRetry(depotId, mf, outPath, depotKey, cdnHosts, ^BOOL{ return self.cancelled; });
+                @synchronized (self) { if (!success) { anyFailed = YES; [failedFiles addObject:relPath]; } }
                 @synchronized (self) { completed++;
                     if (onProgress) dispatch_async(dispatch_get_main_queue(), ^{
                         onProgress([NSString stringWithFormat:@"Downloading %@... (%lld/%lld)",displayName,completed,totalFiles], (float)completed/(float)totalFiles);
@@ -1358,10 +1379,11 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
         }
         dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
 
-        if (!self.cancelled && !anyFailed) purgeForeignBinaries(targetDir);
+        if (!self.cancelled) purgeForeignBinaries(targetDir);
+        if (!self.cancelled && failedFiles.count) logToFile(@"[download] %lu files failed; first: %@", (unsigned long)failedFiles.count, failedFiles.firstObject);
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *msg = self.cancelled ? @"Installation cancelled. Completed files are kept." : anyFailed ? [NSString stringWithFormat:@"%@ downloaded with some errors",displayName] : [NSString stringWithFormat:@"%@ downloaded successfully",displayName];
+            NSString *msg = self.cancelled ? @"Installation cancelled. Completed files are kept." : anyFailed ? [NSString stringWithFormat:@"%lu files could not be installed (first: %@). Tap Install game to retry; verified files will be kept.", (unsigned long)failedFiles.count, failedFiles.firstObject ?: @"unknown"] : [NSString stringWithFormat:@"%@ downloaded successfully",displayName];
             if (anyFailed || self.cancelled)
                 finish([NSError errorWithDomain:@"GameDataDownloader" code:-1 userInfo:@{NSLocalizedDescriptionKey:msg}]);
             else

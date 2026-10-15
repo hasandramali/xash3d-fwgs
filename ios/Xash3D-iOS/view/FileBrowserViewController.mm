@@ -97,8 +97,13 @@ static NSString *kCellID = @"FileCell";
         if (self.dataDownloader.installing) return;
         NSString *arguments = launch.textFields.firstObject.text ?: @"";
         [[NSUserDefaults standardUserDefaults] setObject:arguments forKey:@"global_arguments"];
-        [SteamService.shared startBroker];
-        [self doLaunchWithGameDir:@"svencoop" extraArgs:arguments];
+        UIBarButtonItem *play = self.navigationItem.rightBarButtonItems.firstObject;
+        play.enabled = NO; play.title = @"Connecting…";
+        [SteamService.shared prepareForLaunch:^(NSError *error){
+            play.enabled = YES; play.title = @"Play";
+            if (error) { [self showError:error]; return; }
+            [self doLaunchWithGameDir:@"svencoop" extraArgs:arguments];
+        }];
     }]];
     [self presentViewController:launch animated:YES completion:nil];
 }

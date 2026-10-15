@@ -18,5 +18,6 @@ FOUNDATION_EXPORT NSNotificationName const SvenSteamStateChanged;
 - (void)cancelLogin;
 - (void)logout;
 - (void)startBroker;
+- (void)prepareForLaunch:(void (^)(NSError *error))completion;
 - (void)stopBroker;
 @end

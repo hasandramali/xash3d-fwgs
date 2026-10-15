@@ -131,7 +131,9 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     std::map<uint64_t, std::string> _friendAddresses;
     std::condition_variable _friendChanged, _tokensChanged;
     uint64_t _nextJob, _steamID, _authClientID, _authSteamID, _ticketSequence;
-    int _sessionID, _brokerSocket, _guardType;
+    int _sessionID, _guardType;
+    std::atomic<int> _brokerSocket;
+    std::atomic<uint64_t> _brokerGeneration;
     Buffer _authRequest, _boundToken;
     std::string _boundAddress;
     uint64_t _boundServerID;
@@ -154,7 +156,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
 - (instancetype)init {
     if ((self = [super init])) {
         _operations = dispatch_queue_create("su.xash.svenclient.steam", DISPATCH_QUEUE_SERIAL);
-        _generation = 1; _connected = false; _nextJob = 1; _brokerSocket = -1;
+        _generation = 1; _connected = false; _nextJob = 1; _brokerSocket = -1; _brokerGeneration = 0;
         _status = @"Sign in to Steam"; _guardKind = @""; _accountName = SteamCredentials()[@"account"] ?: @"";
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"steam_auto_connect": @YES}];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(becameActive) name:UIApplicationDidBecomeActiveNotification object:nil];
@@ -163,7 +165,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
 }
 - (BOOL)autoConnect { return [[NSUserDefaults standardUserDefaults] boolForKey:@"steam_auto_connect"]; }
 - (BOOL)hasSavedSession { return [SteamCredentials()[@"refresh"] length] > 0; }
-- (void)becameActive { if (self.autoConnect) [self restoreSession]; }
+- (void)becameActive { if (self.autoConnect) { if (self.loggedIn) [self startBroker]; else [self restoreSession]; } }
 - (void)setAutoConnect:(BOOL)value { [[NSUserDefaults standardUserDefaults] setBool:value forKey:@"steam_auto_connect"]; }
 - (void)notify {
     dispatch_async(dispatch_get_main_queue(), ^{ [[NSNotificationCenter defaultCenter] postNotificationName:SvenSteamStateChanged object:self]; });
@@ -391,7 +393,8 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     });
 }
 - (void)restoreSession {
-    if (self.busy || self.loggedIn) return;
+    if (self.loggedIn) { [self startBroker]; return; }
+    if (self.busy) return;
     NSDictionary *credentials = SteamCredentials(); if (![credentials[@"refresh"] length]) return;
     [self cancelLogin]; uint64_t generation = _generation; self.busy = YES; self.status = @"Reconnecting to Steam…"; [self notify];
     dispatch_async(_operations, ^{
@@ -456,28 +459,69 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     [self brokerWrite:socket payload:Buffer(text.begin(), text.end())];
 }
 - (void)startBroker {
-    if (self.brokerRunning || !self.loggedIn) return;
-    int listener = socket(AF_INET, SOCK_STREAM, 0); if (listener < 0) return;
-    int reuse = 1; setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-    sockaddr_in address = {}; address.sin_family = AF_INET; address.sin_port = htons(27420); address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(listener, (sockaddr *)&address, sizeof(address)) || listen(listener, 4)) { close(listener); self.status = @"Steam connected; could not start game broker"; [self notify]; return; }
-    _brokerSocket = listener; self.brokerRunning = YES; [self notify];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        while (self.brokerRunning && self->_brokerSocket == listener) {
-            int client = accept(listener, NULL, NULL); if (client < 0) break;
-            int noSignal = 1; setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, sizeof(noSignal));
-            { std::lock_guard<std::mutex> lock(self->_brokerMutex); self->_brokerClients.insert(client); }
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ [self handleBroker:client]; });
-        }
+    @synchronized (self) {
+        if (self.brokerRunning || !self.loggedIn) return;
+        int listener = socket(AF_INET, SOCK_STREAM, 0); if (listener < 0) return;
+        int reuse = 1; setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        sockaddr_in address = {}; address.sin_family = AF_INET; address.sin_port = htons(27420); address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (bind(listener, (sockaddr *)&address, sizeof(address)) || listen(listener, 4)) { close(listener); self.status = @"Steam connected; could not start game broker"; [self notify]; return; }
+        _brokerSocket = listener; self.brokerRunning = YES; [self notify];
+        uint64_t generation = ++_brokerGeneration;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            while (self.brokerRunning && self->_brokerSocket == listener && self->_brokerGeneration == generation) {
+                int client = accept(listener, NULL, NULL);
+                if (client < 0) { if (errno == EINTR) continue; break; }
+                if (self->_brokerGeneration != generation) { close(client); break; }
+                int noSignal = 1; setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, sizeof(noSignal));
+                { std::lock_guard<std::mutex> lock(self->_brokerMutex); self->_brokerClients.insert(client); }
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ [self handleBroker:client]; });
+            }
+            @synchronized (self) {
+                if (self->_brokerGeneration == generation) {
+                    [self stopBroker];
+                    uint64_t restartGeneration = self->_brokerGeneration;
+                    if (self.loggedIn) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                        if (self->_brokerGeneration == restartGeneration && self.loggedIn && !self.brokerRunning) [self startBroker];
+                    });
+                }
+            }
+        });
+    }
+}
+- (void)prepareForLaunch:(void (^)(NSError *))completion {
+    if (!self.loggedIn && self.guardKind.length) {
+        completion([NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Finish Steam Guard verification before launching."}]); return;
+    }
+    if (!self.loggedIn && !self.busy && self.autoConnect && self.hasSavedSession) [self restoreSession];
+    if (!self.loggedIn && !self.busy) { completion(nil); return; }
+    [self waitForLaunch:milliseconds() + 120000 generation:_generation completion:completion];
+}
+- (void)waitForLaunch:(uint64_t)deadline generation:(uint64_t)generation completion:(void (^)(NSError *))completion {
+    if (generation == _generation && self.loggedIn) {
+        [self startBroker];
+        NSError *error = self.brokerRunning ? nil : [NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Could not start the Steam game connection. Please reconnect to Steam."}];
+        completion(error); return;
+    }
+    if (generation != _generation || !self.busy || self.guardKind.length || milliseconds() >= deadline) {
+        NSString *message = self.guardKind.length ? @"Finish Steam Guard verification before launching." : self.status;
+        if (milliseconds() >= deadline) message = @"Steam connection timed out. Please reconnect before launching.";
+        completion([NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:message ?: @"Steam connection was cancelled."}]); return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+        [self waitForLaunch:deadline generation:generation completion:completion];
     });
 }
 - (void)stopBroker {
-    self.brokerRunning = NO;
-    if (_brokerSocket >= 0) { shutdown(_brokerSocket, SHUT_RDWR); close(_brokerSocket); _brokerSocket = -1; }
-    [self closeP2P:-1 request:0];
-    std::lock_guard<std::mutex> lock(_brokerMutex);
-    for (int client : _brokerClients) shutdown(client, SHUT_RDWR);
-    [self notify];
+    @synchronized (self) {
+        self.brokerRunning = NO;
+        ++_brokerGeneration;
+        int listener = _brokerSocket.exchange(-1);
+        if (listener >= 0) { shutdown(listener, SHUT_RDWR); close(listener); }
+        [self closeP2P:-1 request:0];
+        std::lock_guard<std::mutex> lock(_brokerMutex);
+        for (int client : _brokerClients) shutdown(client, SHUT_RDWR);
+        [self notify];
+    }
 }
 - (void)handleBroker:(int)socket {
     @autoreleasepool {

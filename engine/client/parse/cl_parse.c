@@ -29,6 +29,7 @@ int CL_UPDATE_BACKUP = SINGLEPLAYER_BACKUP;
 #endif
 
 qboolean cl_sven_proto = false;
+static qboolean cl_captured_bad_usermsg;
 
 /*
 ===============
@@ -868,6 +869,7 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 	cls.timestart = Platform_DoubleTime();
 	cls.demowaiting = false;	// server is changed
 	cl_sven_proto = false;
+	cl_captured_bad_usermsg = false;
 	CL_SvenSoundCacheReset();
 
 	// wipe the client_t struct
@@ -2600,6 +2602,13 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				// during a stuck signon) would otherwise flood console/log.
 				// Parsing behavior is unchanged (consume to end of datagram).
 				static int unregWarnCount = 0;
+
+				if( !cl_captured_bad_usermsg && cls.signon < SIGNONS && host_developer.value >= DEV_EXTENDED )
+				{
+					cl_captured_bad_usermsg = true;
+					CL_DumpBadMessage( msg, svc_num, MSG_GetNumBytesRead( msg ) - 3 );
+					CL_WriteMessageHistory();
+				}
 
 				if(( unregWarnCount++ % 256 ) == 0 )
 					Con_Printf( S_WARN "%s: unregistered msg %d has no size prefix: skipping to end of message\n", __func__, svc_num );

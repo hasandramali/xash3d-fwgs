@@ -7,6 +7,53 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_content_file_retries_are_bounded_and_cancellable(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
+        start = source.index("static BOOL assembleFileWithRetry(")
+        end = source.index("#pragma mark - GameDataDownloader", start)
+        retry = source[start:end].replace("BOOL (^cancelled)(void)", "BOOL (*cancelled)(void)").replace('@"', '"')
+        program = """
+#include <cassert>
+#define YES true
+#define NO false
+using BOOL = bool;
+struct NSDictionary {};
+struct NSString {};
+struct NSData {};
+struct NSArray {};
+static int attempts, succeedAfter, delays;
+static bool cancelled, cancelDuringDelay;
+void logToFile(const char *, ...) {}
+int usleep(unsigned) { delays++; if (cancelDuringDelay) cancelled = true; return 0; }
+bool isCancelled() { return cancelled; }
+bool assembleFile(int, NSDictionary *, NSString *, NSData *, NSArray *, bool (*)(void)) {
+    attempts++; return attempts >= succeedAfter;
+}
+""" + retry + """
+int main() {
+    succeedAfter = 2;
+    assert(assembleFileWithRetry(1, nullptr, nullptr, nullptr, nullptr, isCancelled));
+    assert(attempts == 2 && delays > 0);
+    attempts = delays = 0; succeedAfter = 99;
+    assert(!assembleFileWithRetry(1, nullptr, nullptr, nullptr, nullptr, isCancelled));
+    assert(attempts == 3);
+    attempts = 0; cancelled = true;
+    assert(!assembleFileWithRetry(1, nullptr, nullptr, nullptr, nullptr, isCancelled));
+    assert(attempts == 0);
+    cancelled = false; cancelDuringDelay = true;
+    assert(!assembleFileWithRetry(1, nullptr, nullptr, nullptr, nullptr, isCancelled));
+    assert(attempts == 1);
+}
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "content-retry-test.cpp"
+            executable = Path(temporary) / "content-retry-test"
+            test_source.write_text(program)
+            subprocess.run([os.environ.get("CXX", "clang++"), "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                            str(test_source), "-o", str(executable)], check=True)
+            subprocess.run([str(executable)], check=True)
+
     def test_initialization_error_does_not_jump_to_a_frame(self):
         repository = Path(__file__).resolve().parents[3]
         source = (repository / "engine/common/host.c").read_text()
@@ -68,7 +115,9 @@ int main(void) {
         downloader = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
         self.assertNotIn("requestLicense:", downloader)
         self.assertIn("[client anonymousLoginWithError:&err]", downloader)
-        self.assertIn("if (!self.cancelled && !anyFailed) purgeForeignBinaries(targetDir);", downloader)
+        self.assertIn("if (!self.cancelled) purgeForeignBinaries(targetDir);", downloader)
+        self.assertIn("assembleFileWithRetry(depotId, mf", downloader)
+        self.assertIn("prepareForLaunch:", launch)
 
     def test_steam_reads_honor_deadlines_and_cancellation(self):
         repository = Path(__file__).resolve().parents[3]
