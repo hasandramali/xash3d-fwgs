@@ -576,21 +576,21 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
     [self stopHeartbeat];
     _heartbeatSeconds = intervalSeconds;
     _heartbeatRunning = YES;
-    __weak typeof(self) ws = self;
+    __weak SteamCMClient *weakClient = self;
     _heartbeatThread = [[NSThread alloc] initWithBlock:^{
         while (![NSThread currentThread].isCancelled) {
-            [NSThread sleepForTimeInterval:_heartbeatSeconds];
+            [NSThread sleepForTimeInterval:intervalSeconds];
             if ([NSThread currentThread].isCancelled) break;
-            __strong typeof(ws) ss = ws;
-            if (!ss) break;
+            SteamCMClient *client = weakClient;
+            if (!client) break;
             bytes body; auto f = packVarint((1<<3)|0); auto v = packVarint(1);
             body.insert(body.end(),f.begin(),f.end()); body.insert(body.end(),v.begin(),v.end());
-            bytes hdr; auto h1 = packVarint((1<<3)|1); auto si = packFixed64(_currentSteamId);
+            bytes hdr; auto h1 = packVarint((1<<3)|1); auto si = packFixed64(client->_currentSteamId);
             hdr.insert(hdr.end(),h1.begin(),h1.end()); hdr.insert(hdr.end(),si.begin(),si.end());
-            auto h2 = packVarint((2<<3)|0); auto se = packVarint32(_currentSessionId);
+            auto h2 = packVarint((2<<3)|0); auto se = packVarint32(client->_currentSessionId);
             hdr.insert(hdr.end(),h2.begin(),h2.end()); hdr.insert(hdr.end(),se.begin(),se.end());
-            logToFile(@"Sending heartbeat (sessionId=%d steamId=%llu)", ss->_currentSessionId, (unsigned long long)ss->_currentSteamId);
-            try { [ss sendProtobufMsg:1009 body:body header:hdr]; } catch (...) { break; }
+            logToFile(@"Sending heartbeat (sessionId=%d steamId=%llu)", client->_currentSessionId, (unsigned long long)client->_currentSteamId);
+            try { [client sendProtobufMsg:1009 body:body header:hdr]; } catch (...) { break; }
         }
     }];
     _heartbeatThread.name = @"SteamCM-Heartbeat";
@@ -791,7 +791,9 @@ static NSArray *filterResolvableHosts(NSArray *hosts) {
 
     BOOL ok = NO;
     for (int t = 0; t < 10 && !ok; t++) {
-        bytes hdr;
+        int emsg = 0;
+        BOOL isProto = NO;
+        bytes body, hdr;
         if (![self readMessageWithEmsg:&emsg body:&body isProto:&isProto header:&hdr error:nil]) {
             logToFile(@"Login response read failed (try %d)", t);
             usleep(100000); continue;

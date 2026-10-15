@@ -7,6 +7,40 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_steam_cm_login_and_heartbeat_syntax(self):
+        repository = Path(__file__).resolve().parents[3]
+        source_path = repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm"
+        source = source_path.read_text()
+        helpers = source[source.index("typedef std::vector<uint8_t> bytes;"):
+                         source.index("static int32_t adler32_steam(")]
+        interface_start = source.index("@interface SteamCMClient")
+        interface_end = source.index("@end", interface_start) + len("@end")
+        heartbeat = source[source.index("- (void)startHeartbeat:(int)intervalSeconds {"):
+                           source.index("#pragma mark - Multi (emsg=1) message parsing")]
+        login_start = source.index("- (BOOL)anonymousLoginWithError:(NSError **)error {")
+        login = source[login_start:source.index("- (void)parseLogonResponseHeader:", login_start)]
+        methods = """
+@interface SteamCMClient (SyntaxDependencies)
+- (void)status:(NSString *)status;
+- (void)startHeartbeat:(int)seconds;
+- (void)stopHeartbeat;
+- (void)sendProtobufMsg:(int)emsg body:(const bytes &)body header:(const bytes &)header;
+- (BOOL)readMessageWithEmsg:(int *)emsg body:(bytes *)body isProto:(BOOL *)isProto
+                    header:(bytes *)header error:(NSError **)error;
+- (NSArray *)parseMultiMessage:(const bytes &)body;
+@end
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "SteamCMClientSyntax.mm"
+            test_source.write_text(
+                '#include "SteamCMSyntaxPrelude.h"\n' + helpers +
+                source[interface_start:interface_end] + methods +
+                "\n@implementation SteamCMClient\n" + heartbeat + login + "\n@end\n")
+            subprocess.run([os.environ.get("CXX", "clang++"), "-fsyntax-only", "-std=c++17",
+                            "-fblocks", "-fobjc-runtime=ios-13.0", "-fobjc-arc",
+                            "-Wno-incomplete-implementation", "-Wno-objc-root-class",
+                            "-I", str(Path(__file__).resolve().parent), str(test_source)], check=True)
+
     def test_crash_register_layouts(self):
         repository = Path(__file__).resolve().parents[3]
         source = (repository / "engine/platform/posix/crash_posix.c").read_text()
