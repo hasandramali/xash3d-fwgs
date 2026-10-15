@@ -43,33 +43,11 @@ CL_HasResourceFile
 */
 qboolean CL_HasResourceFile( const resource_t *pResource, const char *filepath )
 {
-	char cachepath[MAX_SYSPATH];
-
 	// Native Sven events execute DLL callbacks; no script bytes are read.
 	// Keep the server's name/index registration, but don't download a file
 	// when its handler is already installed. Unknown scripts still download.
 	if( cl_sven_proto && pResource->type == t_eventscript && CL_HasEventHook( filepath ))
 		return true;
-
-	// only the download cache is ours to verify and refetch, whatever the game itself provides is none of the server's business
-	COM_DownloadCachePath( cachepath, sizeof( cachepath ), filepath, false );
-
-	FS_AllowDirectPaths( true );
-	fs_offset_t size = FS_FileSize( cachepath, false );
-	FS_AllowDirectPaths( false );
-
-	// FIXME: proof of concept, we only catch files shorter than the server's copy, i.e. leftovers of an interrupted download.
-	// A complete file of a different size still passes. GoldSrc never compares sizes at all.
-	//
-	// comparing against a wrapped nDownloadSize (it's sent as a signed 24-bit value, see SV_SendResource) is harmless here, as wrapping only ever makes it smaller
-	if( size >= 0 && size < pResource->nDownloadSize )
-	{
-		Con_Printf( S_WARN "%s is %ld bytes but server reports %d, downloading it again\n", cachepath, (long)size, pResource->nDownloadSize );
-
-		FS_AllowDirectPaths( true );
-		FS_Delete( cachepath );
-		FS_AllowDirectPaths( false );
-	}
 
 	return FS_FileExists( filepath, false );
 }

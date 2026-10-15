@@ -409,6 +409,7 @@ static int HTTP_FileCreateSocket( httpfile_t *file )
 		return 0;
 	}
 
+	http.active_count++;
 	if( !NET_MakeSocketNonBlocking( file->socket ))
 	{
 		Con_Printf( S_ERROR "%s: failed to make socket non-blocking, error %s\n", __func__, NET_ErrorString());
@@ -419,7 +420,6 @@ static int HTTP_FileCreateSocket( httpfile_t *file )
 	if( !file->buf )
 		file->buf = Mem_Calloc( http_mempool, MAX_HTTP_BUFFER_SIZE + 1 );
 
-	http.active_count++;
 	file->pfn_process = HTTP_FileConnect;
 	return 1;
 }
@@ -1359,11 +1359,9 @@ void HTTP_Run( void )
 		}
 	}
 
-	// update progress
-	if( !Host_IsDedicated() && http.progress_count != 0 )
-		Cvar_SetValue( "scr_download", http.progress/http.progress_count * 100 );
-
 	HTTP_AutoClean();
+	if( !Host_IsDedicated() )
+		HTTP_ShowDownloadProgress();
 }
 
 /*
@@ -1687,6 +1685,7 @@ Clear all queue
 */
 static void HTTP_Clear_f( void )
 {
+	HTTP_CancelDownloads();
 	http.displayed_file[0] = '\0';
 	while( http.first_file )
 	{
@@ -1701,7 +1700,10 @@ static void HTTP_Clear_f( void )
 			HTTP_TlsFree( file->tls );
 
 		if( file->socket != -1 )
+		{
 			closesocket( file->socket );
+			http.active_count--;
+		}
 
 		if( file->buf )
 			Mem_Free( file->buf );
@@ -1744,14 +1746,12 @@ Stop current download, skip to next server
 qboolean HTTP_ShowDownloadProgress( void )
 {
 	httpfile_t *selected = NULL;
-	int pending = 0;
 
 	http.displayed_file[0] = '\0';
 	for( httpfile_t *file = http.first_file; file; file = file->next )
 	{
 		if( file->to_memory || !file->process || file->pfn_process == HTTP_FileFree )
 			continue;
-		pending++;
 		if( !selected || ( selected->socket == -1 && file->socket != -1 ))
 			selected = file;
 	}
@@ -1761,9 +1761,7 @@ qboolean HTTP_ShowDownloadProgress( void )
 	Q_strncpy( http.displayed_file, selected->path, sizeof( http.displayed_file ));
 #if !XASH_DEDICATED
 	scr_download.value = selected->size > 0 ? bound( 0, 100.0f * selected->downloaded / selected->size, 100 ) : 0;
-	qboolean required = Q_stristr( selected->path, "soundcache" ) || !Q_stricmp( COM_FileExtension( selected->path ), "bsp" );
-	UI_ConnectionProgress_Download( selected->path, selected->server ? selected->server->host : "", NULL,
-		0, pending, required ? "(required; cannot skip)" : "(Skip: skip this file)" );
+	Q_strncpy( host.downloadfile, selected->path, sizeof( host.downloadfile ));
 #endif
 	return true;
 }
@@ -1874,7 +1872,11 @@ void HTTP_CancelDownloads( void )
 	http.resolving = false;
 	http.download_sequence++;
 	if( !Host_IsDedicated() )
+	{
 		Cvar_SetValue( "scr_download", -1 );
+		host.downloadcount = 0;
+		host.downloadfile[0] = '\0';
+	}
 }
 
 void HTTP_ResetProcessState( void )

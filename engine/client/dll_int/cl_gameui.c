@@ -26,26 +26,6 @@ static void 	UI_UpdateUserinfo( void );
 
 gameui_static_t	gameui;
 
-static qboolean ui_loading_console_pressed;
-static int ui_loading_mouse_x, ui_loading_mouse_y;
-
-static qboolean UI_LoadingConnection( void )
-{
-	return !cls.demoplayback && !SV_Active() && !COM_StringEmpty( cls.servername ) &&
-		Q_stricmp( cls.servername, "localhost" ) &&
-		cls.state >= ca_connecting && cls.state < ca_active;
-}
-
-static void UI_LoadingConsoleBounds( int *x, int *y, int *width, int *height )
-{
-	int textWidth, textHeight;
-	Con_DrawStringLen( "Console", &textWidth, &textHeight );
-	*height = Q_max( textHeight + 16, gameui.globals->scrHeight / 12 );
-	*width = Q_max( textWidth + 24, *height * 3 );
-	*x = gameui.globals->scrWidth - *width - 16;
-	*y = 16;
-}
-
 static void UI_ToggleAllowConsole_f( void )
 {
 	host.allow_console = host.allow_console_init = true;
@@ -56,55 +36,7 @@ static void UI_ToggleAllowConsole_f( void )
 
 void UI_UpdateMenu( float realtime )
 {
-	static qboolean loading;
-	static connstate_t previousState;
-	static qboolean downloading;
-	qboolean connecting = UI_LoadingConnection();
-
 	if( !gameui.hInstance ) return;
-
-	if( connecting )
-	{
-		if( !loading )
-			Key_SetKeyDest( key_menu );
-		qboolean restore = cls.key_dest != key_console && ( cls.key_dest != key_menu || !UI_IsVisible() );
-		if( !loading || previousState != cls.state || restore )
-		{
-			if( !loading || restore )
-			{
-				UI_ConnectionProgress_Disconnect();
-				UI_ConnectionProgress_Connect( cls.servername );
-			}
-			else if( cls.state >= ca_connected )
-				UI_ConnectionProgress_ParseServerInfo( cls.servername );
-			if( !loading || cls.key_dest != key_console )
-				Key_SetKeyDest( key_menu );
-		}
-		if( cls.key_dest != key_console )
-		{
-			qboolean currentDownload = HTTP_ShowDownloadProgress();
-			if( !currentDownload && cls.netchan.incomingbufs[FRAG_FILE_STREAM] && host.downloadfile[0] )
-			{
-				UI_ConnectionProgress_Download( host.downloadfile, cls.servername, NULL, 0, Q_max( 1, host.downloadcount ), "(server transfer; cannot skip)" );
-				currentDownload = true;
-			}
-			if( downloading && !currentDownload )
-				UI_ConnectionProgress_Precache();
-			downloading = currentDownload;
-		}
-	}
-	else if( loading )
-	{
-		if( gameui.dllFuncs2.pfnConnectionProgress_Precache )
-			gameui.dllFuncs2.pfnConnectionProgress_Precache();
-		UI_ConnectionProgress_Disconnect();
-		if( cls.state == ca_active )
-			UI_SetActiveMenu( false );
-		downloading = false;
-		ui_loading_console_pressed = false;
-	}
-	loading = connecting;
-	previousState = cls.state;
 
 	// don't draw menu over console
 	if( cls.key_dest == key_console ) return;
@@ -119,7 +51,7 @@ void UI_UpdateMenu( float realtime )
 	}
 
 	// don't show menu while level is loaded
-	if( !connecting && GameState->nextstate != STATE_RUNFRAME && !GameState->loadGame )
+	if( GameState->nextstate != STATE_RUNFRAME && !GameState->loadGame )
 		return;
 
 	// menu time (not paused, not clamped)
@@ -130,53 +62,18 @@ void UI_UpdateMenu( float realtime )
 	gameui.globals->developer = host.allow_console;
 
 	gameui.dllFuncs.pfnRedraw( realtime );
-	if( connecting )
-	{
-		int x, y, width, height, textWidth, textHeight;
-		rgba_t color = { 255, 255, 255, 255 };
-		UI_LoadingConsoleBounds( &x, &y, &width, &height );
-		Con_DrawStringLen( "Console", &textWidth, &textHeight );
-		ref.dllFuncs.FillRGBA( kRenderTransTexture, x, y, width, height, 48, 48, 48, 230 );
-		Con_DrawString( x + ( width - textWidth ) / 2, y + ( height - textHeight ) / 2, "Console", color );
-	}
 	UI_UpdateUserinfo();
 }
 
 void UI_KeyEvent( int key, qboolean down )
 {
 	if( !gameui.hInstance ) return;
-	if( key == K_MOUSE1 )
-	{
-		int x, y, width, height;
-		UI_LoadingConsoleBounds( &x, &y, &width, &height );
-		qboolean inside = UI_LoadingConnection() && cls.key_dest == key_menu &&
-			ui_loading_mouse_x >= x && ui_loading_mouse_x < x + width &&
-			ui_loading_mouse_y >= y && ui_loading_mouse_y < y + height;
-		if( down && inside )
-		{
-			ui_loading_console_pressed = true;
-			return;
-		}
-		if( !down && ui_loading_console_pressed )
-		{
-			ui_loading_console_pressed = false;
-			if( inside )
-			{
-				host.allow_console = true;
-				UI_SetActiveMenu( false );
-				Key_SetKeyDest( key_console );
-			}
-			return;
-		}
-	}
 	gameui.dllFuncs.pfnKeyEvent( key, down );
 }
 
 void UI_MouseMove( int x, int y )
 {
 	if( !gameui.hInstance ) return;
-	ui_loading_mouse_x = x;
-	ui_loading_mouse_y = y;
 	gameui.dllFuncs.pfnMouseMove( x, y );
 }
 
@@ -331,66 +228,26 @@ void UI_ConnectionProgress_Disconnect( void )
 
 void UI_ConnectionProgress_Download( const char *pszFileName, const char *pszServerName, const char *pszServerPath, int iCurrent, int iTotal, const char *comment )
 {
-	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
-	if( !gameui.dllFuncs2.pfnConnectionProgress_Download )
-		return;
-
-	if( pszServerPath )
-	{
-		char serverpath[MAX_SYSPATH];
-
-		Q_snprintf( serverpath, sizeof( serverpath ), "%s%s", pszServerName, pszServerPath );
-		gameui.dllFuncs2.pfnConnectionProgress_Download( pszFileName, serverpath, iCurrent, iTotal, comment );
-	}
-	else
-	{
-		gameui.dllFuncs2.pfnConnectionProgress_Download( pszFileName, pszServerName, iCurrent, iTotal, comment );
-	}
 }
 
 void UI_ConnectionProgress_DownloadEnd( void )
 {
-	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
-	if( gameui.dllFuncs2.pfnConnectionProgress_DownloadEnd )
-	{
-		gameui.dllFuncs2.pfnConnectionProgress_DownloadEnd( );
-	}
 }
 
 void UI_ConnectionProgress_Precache( void )
 {
-	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
-	if( gameui.dllFuncs2.pfnConnectionProgress_Precache )
-	{
-		gameui.dllFuncs2.pfnConnectionProgress_Precache( );
-	}
 }
 
 void UI_ConnectionProgress_Connect( const char *server ) // NULL for local server
 {
-	if( !server || !UI_LoadingConnection() || cls.key_dest == key_console ) return;
-	if( gameui.dllFuncs2.pfnConnectionProgress_Connect )
-	{
-		gameui.dllFuncs2.pfnConnectionProgress_Connect( server );
-	}
 }
 
 void UI_ConnectionProgress_ChangeLevel( void )
 {
-	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
-	if( gameui.dllFuncs2.pfnConnectionProgress_ChangeLevel )
-	{
-		gameui.dllFuncs2.pfnConnectionProgress_ChangeLevel( );
-	}
 }
 
 void UI_ConnectionProgress_ParseServerInfo( const char *server )
 {
-	if( !UI_LoadingConnection() || cls.key_dest == key_console ) return;
-	if( gameui.dllFuncs2.pfnConnectionProgress_ParseServerInfo )
-	{
-		gameui.dllFuncs2.pfnConnectionProgress_ParseServerInfo( server );
-	}
 }
 
 static void GAME_EXPORT UI_DrawLogo( const char *filename, float x, float y, float width, float height )

@@ -1802,7 +1802,7 @@ static void CL_Connect_f( void )
 	CL_Disconnect();
 
 	UI_SetActiveMenu( false );
-	Key_SetKeyDest( key_menu );
+	Key_SetKeyDest( key_console );
 
 	cls.state = ca_connecting;
 	cls.net_protocol = proto;
