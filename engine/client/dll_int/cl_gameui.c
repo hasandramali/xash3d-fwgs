@@ -31,7 +31,8 @@ static int ui_loading_mouse_x, ui_loading_mouse_y;
 
 static qboolean UI_LoadingConnection( void )
 {
-	return !cls.demoplayback && !Q_strncmp( cls.servername, "steam:", 6 ) &&
+	return !cls.demoplayback && !SV_Active() && !COM_StringEmpty( cls.servername ) &&
+		Q_stricmp( cls.servername, "localhost" ) &&
 		cls.state >= ca_connecting && cls.state < ca_active;
 }
 

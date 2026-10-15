@@ -24,7 +24,7 @@ CVAR_DEFINE_AUTO( gl_stencilbits, "8", FCVAR_GLCONFIG|FCVAR_READ_ONLY, "pixelfor
 CVAR_DEFINE_AUTO( gl_overbright, "1", FCVAR_GLCONFIG, "overbrights" );
 CVAR_DEFINE_AUTO( gl_fog, "1", FCVAR_GLCONFIG, "allow for rendering fog using built-in OpenGL fog implementation" );
 CVAR_DEFINE_AUTO( gl_litwater_force, "0", FCVAR_GLCONFIG, "force enable lightmapped water, even if support not declared in the map" );
-CVAR_DEFINE_AUTO( r_lighting_ambient, "0.4", FCVAR_GLCONFIG, "additional studio model ambient light (0: map lighting, 1 or higher: fullbright)" );
+CVAR_DEFINE_AUTO( r_lighting_ambient, "0.36", FCVAR_GLCONFIG, "additional studio model ambient light (0: map lighting, 1 or higher: fullbright)" );
 CVAR_DEFINE_AUTO( r_detailtextures, "1", FCVAR_GLCONFIG, "enable detail textures support" );
 CVAR_DEFINE_AUTO( r_novis, "0", 0, "ignore vis information (perfomance test)" );
 CVAR_DEFINE_AUTO( r_nocull, "0", 0, "ignore frustrum culling (perfomance test)" );

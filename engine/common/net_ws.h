@@ -100,6 +100,7 @@ void HTTP_AddDownload( const char *path, int size, qboolean process, resource_t 
 // stream, so without this a healthy-but-slow FastDL batch looks stalled).
 size_t HTTP_GetDownloadedBytes( void );
 void HTTP_ClearCustomServers( void );
+void HTTP_CancelDownloads( void );
 void HTTP_Shutdown( void );
 void HTTP_ResetProcessState( void );
 void HTTP_Init( void );

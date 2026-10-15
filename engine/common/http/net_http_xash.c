@@ -183,6 +183,7 @@ static struct http_static_s
 	float progress;
 	qboolean resolving;
 	char displayed_file[MAX_SYSPATH];
+	unsigned int download_sequence;
 } http;
 
 poolhandle_t http_mempool;
@@ -775,8 +776,11 @@ HTTP_ClearCustomServers
 */
 void HTTP_ClearCustomServers( void )
 {
-	if( http.first_file )
-		return; // may be referenced
+	for( httpfile_t *file = http.first_file; file; file = file->next )
+	{
+		if( file->server && !file->own_server )
+			return;
+	}
 
 	while( http.first_server )
 	{
@@ -800,6 +804,7 @@ static void HTTP_AutoClean( void )
 	char buf[1024];
 	httpfile_t **prev = &http.first_file;
 	sizebuf_t msg;
+	unsigned int download_sequence = http.download_sequence;
 
 	MSG_Init( &msg, "DlFile", buf, sizeof( buf ));
 
@@ -841,7 +846,7 @@ static void HTTP_AutoClean( void )
 	}
 
 #if !XASH_DEDICATED
-	if( MSG_GetNumBytesWritten( &msg ) > 0 )
+	if( MSG_GetNumBytesWritten( &msg ) > 0 && download_sequence == http.download_sequence )
 	{
 		// it's expected to be on fragments channel
 		Netchan_CreateFragments( &cls.netchan, &msg );
@@ -1818,15 +1823,63 @@ static void HTTP_List_f( void )
 
 /*
 ================
-HTTP_ResetProcessState
+HTTP_CancelDownloads
 
-When connected to new server, all old files should not increase counter
+Stop file transfers without cancelling independent in-memory requests.
 ================
 */
-void HTTP_ResetProcessState( void )
+void HTTP_CancelDownloads( void )
 {
 	for( httpfile_t *file = http.first_file; file; file = file->next )
+	{
+		char incomplete[MAX_SYSPATH + 64];
+		if( file->to_memory )
+			continue;
 		file->process = false;
+		file->resource = NULL;
+		if( file->file )
+			FS_Close( file->file );
+		file->file = NULL;
+		if( file->tls )
+			HTTP_TlsFree( file->tls );
+		file->tls = NULL;
+		if( file->socket != -1 )
+		{
+			closesocket( file->socket );
+			http.active_count--;
+		}
+		file->socket = -1;
+		if( file->buf )
+			Mem_Free( file->buf );
+		file->buf = NULL;
+		if( file->own_server && file->server )
+			Mem_Free( file->server );
+		file->server = NULL;
+		file->own_server = false;
+		if( file->pfn_process != HTTP_FileFree )
+		{
+			COM_DownloadCachePath( incomplete, sizeof( incomplete ), file->path, true );
+			FS_AllowDirectPaths( true );
+			FS_Delete( incomplete );
+			FS_AllowDirectPaths( false );
+		}
+		file->success = false;
+		file->downloaded = 0;
+		file->blocktime = 0;
+		file->pfn_process = HTTP_FileFree;
+	}
+	http.displayed_file[0] = '\0';
+	http.progress = 0;
+	http.progress_count = 0;
+	http.resolving = false;
+	http.download_sequence++;
+	if( !Host_IsDedicated() )
+		Cvar_SetValue( "scr_download", -1 );
+}
+
+void HTTP_ResetProcessState( void )
+{
+	HTTP_CancelDownloads();
 }
 
 /*

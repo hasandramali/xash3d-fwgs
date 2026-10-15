@@ -1801,9 +1801,8 @@ static void CL_Connect_f( void )
 	Con_Printf( "server %s\n", server );
 	CL_Disconnect();
 
-	// TESTTEST: a see console during connection
 	UI_SetActiveMenu( false );
-	Key_SetKeyDest( key_console );
+	Key_SetKeyDest( key_menu );
 
 	cls.state = ca_connecting;
 	cls.net_protocol = proto;
@@ -1890,6 +1889,10 @@ CL_ClearState
 */
 void CL_ClearState( void )
 {
+	HTTP_CancelDownloads();
+	memset( &cls.dl, 0, sizeof( cls.dl ));
+	host.downloadcount = 0;
+	host.downloadfile[0] = '\0';
 	CL_ClearResourceLists();
 
 	for( int i = 0; i < MAX_CLIENTS; i++ )
@@ -2085,7 +2088,11 @@ This is also called on Host_Error, so it shouldn't cause any errors
 void CL_Disconnect( void )
 {
 	if( cls.state == ca_disconnected )
+	{
+		HTTP_CancelDownloads();
+		HTTP_ClearCustomServers();
 		return;
+	}
 
 	cls.connect_time = 0;
 	cls.changedemo = false;
