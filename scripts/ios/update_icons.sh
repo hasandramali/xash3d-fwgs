@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-SOURCE="${1:-$REPO_ROOT/ic_launcher.jpg}"
+SOURCE="${1:-$REPO_ROOT/ic_launcher.png}"
 CATALOG="$REPO_ROOT/ios/Resources/Assets.xcassets"
 python3 - "$CATALOG/AppIcon.appiconset/Contents.json" <<'PY' | while read -r size filename; do
 import json, sys

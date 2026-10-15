@@ -30,14 +30,14 @@ get_ffmpeg_archive()
 	echo "ffmpeg-n$FFMPEG_VERSION-latest-$A$B-$FLAVOR-$FFMPEG_VERSION"
 }
 
-if [ -n "$TRAVIS_BUILD_DIR" ]; then
+if [ -n "${TRAVIS_BUILD_DIR:-}" ]; then
 	BUILDDIR=$TRAVIS_BUILD_DIR
-elif [ -n "$GITHUB_WORKSPACE" ]; then
+elif [ -n "${GITHUB_WORKSPACE:-}" ]; then
 	BUILDDIR=$GITHUB_WORKSPACE
 fi
 
-if [ -n "$TRAVIS_CPU_ARCH" ]; then
+if [ -n "${TRAVIS_CPU_ARCH:-}" ]; then
 	ARCH=$TRAVIS_CPU_ARCH
-elif [ -n "$GH_CPU_ARCH" ]; then
+elif [ -n "${GH_CPU_ARCH:-}" ]; then
 	ARCH=$GH_CPU_ARCH
 fi

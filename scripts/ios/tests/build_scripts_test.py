@@ -7,6 +7,27 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_shared_ci_environment_with_nounset(self):
+        repository = Path(__file__).resolve().parents[3]
+        environment = dict(os.environ)
+        for name in ("TRAVIS_BUILD_DIR", "TRAVIS_CPU_ARCH", "GITHUB_WORKSPACE", "GH_CPU_ARCH", "BUILDDIR", "ARCH"):
+            environment.pop(name, None)
+        cases = (
+            ({"GITHUB_WORKSPACE": "/github/workspace", "GH_CPU_ARCH": "arm64"}, "/github/workspace:arm64"),
+            ({"TRAVIS_BUILD_DIR": "/travis/workspace", "TRAVIS_CPU_ARCH": "amd64",
+              "GITHUB_WORKSPACE": "/github/workspace", "GH_CPU_ARCH": "arm64"}, "/travis/workspace:amd64"),
+            ({}, ":"),
+        )
+        for variables, expected in cases:
+            with self.subTest(variables=variables):
+                result = subprocess.run(
+                    ["bash", "-euo", "pipefail", "-c",
+                     '. scripts/lib.sh; printf "%s:%s" "${BUILDDIR:-}" "${ARCH:-}"'],
+                    cwd=repository, env=dict(environment, **variables), check=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+                self.assertEqual(result.stdout, expected)
+
     def test_apple_static_vgui_link_options(self):
         repository = Path(__file__).resolve().parents[3]
         with tempfile.TemporaryDirectory() as temporary:
