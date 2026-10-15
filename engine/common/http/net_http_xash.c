@@ -1111,10 +1111,9 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 					{
 					case 404:
 						Con_Printf( S_ERROR "%s: file not found\n", curfile->path );
-						// definitive: not on fastdl. Remember it so later
-						// batches (and watchdog reconnects) don't re-request
-						// a file that exists nowhere instead of joining.
-						COM_NoteMissingRemoteFile( curfile->path );
+						break;
+					case 403:
+						Con_Printf( S_WARN "FastDL denied access to %s (HTTP 403); trying the next download source\n", curfile->path );
 						break;
 					default:
 						Con_Printf( S_ERROR "%s: bad response: %s\n", curfile->path, curfile->buf );
@@ -1388,6 +1387,22 @@ void HTTP_AddDownload( const char *path, int size, qboolean process, resource_t 
 	if( !http.first_server )
 	{
 		Con_Printf( S_ERROR "no servers to download %s\n", path );
+		return;
+	}
+
+	for( httpfile_t *pending = http.first_file; pending; pending = pending->next )
+	{
+		if( pending->to_memory || Q_strcmp( pending->path, path ))
+			continue;
+		if( pending->pfn_process == HTTP_FileFree && !pending->process )
+			continue;
+		if( process )
+		{
+			pending->process = true;
+			if( res && !pending->resource )
+				pending->resource = res;
+		}
+		Con_Reportf( "HTTP: reusing queued download %s\n", path );
 		return;
 	}
 

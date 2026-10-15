@@ -392,14 +392,19 @@ class LibraryFragment : Fragment(), MenuProvider {
 	private fun showAboutDialog() {
 		val content = layoutInflater.inflate(R.layout.dialog_about, null)
 		val aboutText = content.findViewById<TextView>(R.id.aboutText)
-		var alternateName = false
+		val activeToggles = mutableSetOf<String>()
+		val toggleStrings = mapOf(
+			"name" to R.string.about_alternate_name,
+			"spray" to R.string.about_alternate_spray
+		)
 		fun updateCredits() {
 			val credits = SpannableStringBuilder(getText(R.string.about_text))
 			val annotations = credits.getSpans(0, credits.length, Annotation::class.java)
 			for (annotation in annotations) {
-				if (annotation.key == "toggle" && alternateName) {
+				val replacementId = toggleStrings[annotation.value]
+				if (annotation.key == "toggle" && annotation.value in activeToggles && replacementId != null) {
 					val start = credits.getSpanStart(annotation)
-					val replacement = getString(R.string.about_alternate_name)
+					val replacement = getString(replacementId)
 					credits.replace(start, credits.getSpanEnd(annotation), replacement)
 					credits.setSpan(annotation, start, start + replacement.length,
 						Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -416,7 +421,9 @@ class LibraryFragment : Fragment(), MenuProvider {
 
 					override fun onClick(widget: View) {
 						if (annotation.key == "toggle") {
-							alternateName = !alternateName
+							if (!activeToggles.add(annotation.value)) {
+								activeToggles.remove(annotation.value)
+							}
 							updateCredits()
 						} else if (annotation.key == "url") {
 							openAboutLink(annotation.value)
