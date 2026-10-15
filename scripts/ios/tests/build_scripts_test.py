@@ -7,6 +7,108 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_crash_register_layouts(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "engine/platform/posix/crash_posix.c").read_text()
+        registers = source.split("static void Sys_DumpRegisters(", 1)[1].split(
+            "\n#endif // XASH_ANDROID || XASH_LINUX || XASH_APPLE", 1)[0]
+        registers = "static void Sys_DumpRegisters(" + registers
+        fault_start = source.index("\t\t\tucontext_t *uc =", source.index("static void Sys_Crash("))
+        fault_end = source.index("\n\t\t\tSys_DumpFaultingModules(", fault_start)
+        fault_registers = source[fault_start:fault_end]
+        cases = (
+            ("apple-arm64", 1, "__aarch64__", """
+typedef struct {
+    uint64_t __x[29], opaque_fp, opaque_lr, opaque_sp, opaque_pc;
+    unsigned int __cpsr;
+} arm_thread_state64_t;
+typedef struct { arm_thread_state64_t __ss; } machine_context;
+typedef struct { machine_context *uc_mcontext; } ucontext_t;
+#define arm_thread_state64_get_fp(state) ((state).opaque_fp)
+#define arm_thread_state64_get_lr(state) ((state).opaque_lr)
+#define arm_thread_state64_get_sp(state) ((state).opaque_sp)
+#define arm_thread_state64_get_pc(state) ((state).opaque_pc)
+""", """
+machine_context machine = {0};
+ucontext_t context = { &machine };
+machine.__ss.opaque_pc = 0x111;
+machine.__ss.opaque_lr = 0x222;
+machine.__ss.opaque_sp = 0x333;
+machine.__ss.__x[28] = 0x444;
+""", "pc    =0000000000000111", "0x222"),
+            ("apple-x86_64", 1, "__x86_64__", """
+typedef struct { uint64_t __rip, __rsp, __rbp; } thread_state;
+typedef struct { thread_state __ss; } machine_context;
+typedef struct { machine_context *uc_mcontext; } ucontext_t;
+""", """
+machine_context machine = {0};
+ucontext_t context = { &machine };
+machine.__ss.__rip = 0x111;
+machine.__ss.__rsp = 0x333;
+""", "rip=0000000000000111", "0"),
+            ("linux-arm64", 0, "__aarch64__", """
+typedef struct { uint64_t regs[31], sp, pc, pstate; } machine_context;
+typedef struct { machine_context uc_mcontext; } ucontext_t;
+""", """
+ucontext_t context = {0};
+context.uc_mcontext.pc = 0x111;
+context.uc_mcontext.regs[30] = 0x222;
+context.uc_mcontext.sp = 0x333;
+""", "pc    =0000000000000111", "0x222"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, apple, architecture, declarations, setup, expected, link_register in cases:
+                with self.subTest(platform=name):
+                    program = """
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+#undef __aarch64__
+#undef __arm__
+#undef __x86_64__
+static int Sys_CrashAppend(char *message, int len, size_t max_len, int logfd, const char *format, ...)
+{
+    (void)logfd;
+    va_list arguments;
+    va_start(arguments, format);
+    int written = vsnprintf(message + len, max_len - len, format, arguments);
+    va_end(arguments);
+    return len + written;
+}
+"""
+                    program += f"\n#define XASH_APPLE {apple}\n#define {architecture} 1\n"
+                    program += declarations + registers
+                    program += "\nstatic void check_fault_registers(void *context) {\n" + fault_registers
+                    program += f"\nassert(pc == 0x111 && lr == {link_register} && sp == 0x333);\n}}\n"
+                    program += "int main(void) {\n" + setup
+                    program += """
+char message[4096] = {0};
+int len = 0;
+Sys_DumpRegisters(NULL, message, &len, sizeof(message), -1);
+assert(len == 0);
+Sys_DumpRegisters(&context, message, &len, sizeof(message), -1);
+assert(len > 0);
+check_fault_registers(&context);
+"""
+                    program += f'assert(strstr(message, "{expected}") != NULL);\n'
+                    if apple:
+                        program += """
+context.uc_mcontext = NULL;
+int previous = len;
+Sys_DumpRegisters(&context, message, &len, sizeof(message), -1);
+assert(len == previous);
+"""
+                    program += "return 0;\n}\n"
+                    test_source = root / f"{name}.c"
+                    executable = root / name
+                    test_source.write_text(program)
+                    subprocess.run([os.environ.get("CC", "clang"), "-std=gnu11", "-Wall", "-Wextra",
+                                    "-Werror", str(test_source), "-o", str(executable)], check=True)
+                    subprocess.run([str(executable)], check=True)
+
     def test_shared_ci_environment_with_nounset(self):
         repository = Path(__file__).resolve().parents[3]
         environment = dict(os.environ)

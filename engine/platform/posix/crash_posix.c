@@ -18,7 +18,14 @@ GNU General Public License for more details.
 #if XASH_FREEBSD || XASH_NETBSD || XASH_OPENBSD || XASH_ANDROID || XASH_LINUX || XASH_APPLE
 #include <signal.h>
 #include <sys/mman.h>
+#if XASH_APPLE
+#include <sys/ucontext.h>
+#if defined( __aarch64__ )
+#include <mach/arm/thread_status.h>
+#endif
+#else
 #include <ucontext.h>
+#endif
 #include <stdarg.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -134,10 +141,39 @@ static void Sys_DumpRegisters( void *context, char *message, int *lenp, size_t m
 
 	if( !uc )
 		return;
+#if XASH_APPLE
+	if( !uc->uc_mcontext )
+		return;
+#endif
 
 	len = Sys_CrashAppend( message, len, max_len, logfd, "Registers:\n" );
 
+#if XASH_APPLE
 #if defined( __aarch64__ )
+	{
+		const arm_thread_state64_t *state = &uc->uc_mcontext->__ss;
+		for( int reg = 0; reg < 28; reg += 4 )
+			len = Sys_CrashAppend( message, len, max_len, logfd, "  x%d=%016llx  x%d=%016llx  x%d=%016llx  x%d=%016llx\n",
+				reg, (unsigned long long)state->__x[reg],
+				reg + 1, (unsigned long long)state->__x[reg + 1],
+				reg + 2, (unsigned long long)state->__x[reg + 2],
+				reg + 3, (unsigned long long)state->__x[reg + 3] );
+		len = Sys_CrashAppend( message, len, max_len, logfd, "  x28=%016llx  x29=%016llx  x30(lr)=%016llx\n",
+			(unsigned long long)state->__x[28],
+			(unsigned long long)arm_thread_state64_get_fp( *state ),
+			(unsigned long long)arm_thread_state64_get_lr( *state ) );
+		len = Sys_CrashAppend( message, len, max_len, logfd, "  sp   =%016llx  pc    =%016llx  cpsr=%08x\n",
+			(unsigned long long)arm_thread_state64_get_sp( *state ),
+			(unsigned long long)arm_thread_state64_get_pc( *state ),
+			(unsigned int)state->__cpsr );
+	}
+#elif defined( __x86_64__ )
+	len = Sys_CrashAppend( message, len, max_len, logfd, "  rip=%016llx rsp=%016llx rbp=%016llx\n",
+		(unsigned long long)uc->uc_mcontext->__ss.__rip,
+		(unsigned long long)uc->uc_mcontext->__ss.__rsp,
+		(unsigned long long)uc->uc_mcontext->__ss.__rbp );
+#endif
+#elif defined( __aarch64__ )
 	{
 		const char *regnames[31] = {
 			"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9",
@@ -362,7 +398,19 @@ static void Sys_Crash( int signal, siginfo_t *si, void *context )
 			uintptr_t pc = 0, lr = 0, sp = 0;
 			if( uc )
 			{
+#if XASH_APPLE
+				if( uc->uc_mcontext )
+				{
 #if defined( __aarch64__ )
+					pc = (uintptr_t)arm_thread_state64_get_pc( uc->uc_mcontext->__ss );
+					lr = (uintptr_t)arm_thread_state64_get_lr( uc->uc_mcontext->__ss );
+					sp = (uintptr_t)arm_thread_state64_get_sp( uc->uc_mcontext->__ss );
+#elif defined( __x86_64__ )
+					pc = (uintptr_t)uc->uc_mcontext->__ss.__rip;
+					sp = (uintptr_t)uc->uc_mcontext->__ss.__rsp;
+#endif
+				}
+#elif defined( __aarch64__ )
 				pc = (uintptr_t)uc->uc_mcontext.pc;
 				lr = (uintptr_t)uc->uc_mcontext.regs[30];
 				sp = (uintptr_t)uc->uc_mcontext.sp;
