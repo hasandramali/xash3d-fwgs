@@ -212,6 +212,44 @@ assert(len == previous);
             self.assertIn("LINKER:-force_load,", properties)
             self.assertIn("vgui", properties)
 
+    def test_apple_hlsdk_c_inline_linkage(self):
+        repository = Path(__file__).resolve().parents[3]
+        overrides = repository / "scripts/ios/hlsdk_overrides.cmake"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "cl_dll").mkdir()
+            (root / "pm_shared").mkdir()
+            (root / "pm_shared/pm_math.c").write_text(
+                "inline void sincos_ps(float value, float *sine, float *cosine) "
+                "{ *sine = value; *cosine = value + 1; }\n"
+                "float angle_matrix_test(void) { float sine, cosine; "
+                "sincos_ps(1, &sine, &cosine); return sine + cosine; }\n"
+            )
+            (root / "client.cpp").write_text(
+                'extern "C" float angle_matrix_test(void);\n'
+                "int main() { return angle_matrix_test() == 3 ? 0 : 1; }\n"
+            )
+            (root / "cl_dll/CMakeLists.txt").write_text(
+                "add_library(client STATIC ../pm_shared/pm_math.c)\n"
+                "target_compile_options(client PRIVATE -O0 -std=c11)\n"
+            )
+            (root / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.19)\n"
+                "project(SvenInlineTest LANGUAGES C CXX)\n"
+                "set(CMAKE_SYSTEM_NAME iOS)\n"
+                f'include("{overrides}")\n'
+                "add_subdirectory(cl_dll)\n"
+                "add_executable(inline_test client.cpp)\n"
+                "target_link_libraries(inline_test PRIVATE client)\n"
+            )
+            build = root / "build"
+            subprocess.run(["cmake", "-S", str(root), "-B", str(build),
+                            "-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++"],
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            subprocess.run(["cmake", "--build", str(build)],
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            subprocess.run([str(build / "inline_test")], check=True)
+
     def test_only_sven_client_is_built_and_packaged(self):
         repository = Path(__file__).resolve().parents[3]
         with tempfile.TemporaryDirectory() as temporary:
