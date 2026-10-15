@@ -1390,8 +1390,7 @@ static BOOL assembleFile(int depotId, NSDictionary *file, NSString *outPath, NSD
                 if (![path hasPrefix:@"svencoop/"] || path.isAbsolutePath || [path.pathComponents containsObject:@".."] ||
                     [@[@"exe", @"dll"] containsObject:path.pathExtension.lowercaseString]) continue;
                 NSMutableDictionary *normalized = [f mutableCopy]; normalized[@"path"] = path;
-                f = normalized;
-                [allFiles addObject:@{@"depotId":@(depotId), @"file":f, @"depotKey":ds[@"depotKey"]}];
+                [allFiles addObject:@{@"depotId":@(depotId), @"file":normalized, @"depotKey":ds[@"depotKey"]}];
             }
             totalFiles = allFiles.count;
         }

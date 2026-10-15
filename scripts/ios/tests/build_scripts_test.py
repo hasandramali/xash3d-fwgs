@@ -7,6 +7,29 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_steam_manifest_file_collection_syntax(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
+        loop_start = source.index("            for (NSDictionary *f in files) {")
+        loop_end = source.index("            totalFiles = allFiles.count;", loop_start)
+        program = (
+            '#include "SteamCMSyntaxPrelude.h"\n'
+            "void collectManifestFiles(NSArray *files, NSMutableArray *allFiles, int depotId, NSDictionary *ds) {\n" +
+            source[loop_start:loop_end] + "\n}\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "SteamManifestSyntax.mm"
+            test_source.write_text(program)
+            command = [os.environ.get("CXX", "clang++"), "-fsyntax-only", "-std=c++17",
+                       "-fblocks", "-fobjc-runtime=ios-13.0", "-fobjc-arc",
+                       "-Wno-objc-root-class", "-I", str(Path(__file__).resolve().parent), str(test_source)]
+            subprocess.run(command, check=True)
+            test_source.write_text(program.replace(
+                '[allFiles addObject:', 'f = normalized;\n[allFiles addObject:', 1))
+            invalid = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("fast enumeration variables cannot be modified", invalid.stderr)
+
     def test_steam_cm_login_and_heartbeat_syntax(self):
         repository = Path(__file__).resolve().parents[3]
         source_path = repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm"
