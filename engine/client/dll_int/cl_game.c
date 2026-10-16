@@ -2213,7 +2213,9 @@ static const struct { const char *name; int number; int size; } svenUsrMsgs[] =
 	{ "PrtlUpdt", 129, -1 }, { "ASScriptName", 130, -1 }, { "PrintKB", 131, -1 },
 	{ "InvAdd", 132, -1 }, { "InvRemove", 133, 5 },
 	{ "ViewMode", 134, 1 }, { "ClassicMode", 137, 1 }, { "WeaponSpr", 138, -1 },
+	{ "ToggleElem", 139, 2 }, { "CustSpr", 140, -1 },
 	{ "NumDisplay", 141, -1 }, { "UpdateNum", 142, 5 },
+	{ "TimeDisplay", 143, -1 }, { "UpdateTime", 144, 9 },
 	{ "ClServerInfo", 147, -1 }, { "VoiceMask", 148, 8 },
 };
 

@@ -3880,6 +3880,21 @@ static qboolean CL_ShouldRescanFilesystem( void )
 	return retval;
 }
 
+static model_t *CL_PrecacheResourceModel( resource_t *resource )
+{
+	if( FBitSet( resource->ucFlags, RES_WASMISSING ) && FS_FileExists( resource->szFileName, false ))
+		ClearBits( resource->ucFlags, RES_WASMISSING );
+
+	if( !FBitSet( resource->ucFlags, RES_WASMISSING ))
+		return Mod_ForName( resource->szFileName, false, true );
+
+	const char *fallback = !Q_stricmp( COM_FileExtension( resource->szFileName ), "spr" ) ? "models/error.spr" : "models/error.mdl";
+	if( !Q_stricmp( COM_FileExtension( resource->szFileName ), "spr" ) && !FS_FileExists( fallback, false ))
+		fallback = "sprites/error.spr";
+	Con_Printf( S_ERROR "Missing model %s; using %s\n", resource->szFileName, fallback );
+	return Mod_ForName( fallback, false, true );
+}
+
 qboolean CL_PrecacheResources( void )
 {
 	resource_t	*pRes;
@@ -3988,13 +4003,7 @@ qboolean CL_PrecacheResources( void )
 				{
 					if( pRes->nIndex != -1 )
 					{
-						if( FBitSet( pRes->ucFlags, RES_WASMISSING ))
-						{
-							Con_Printf( S_ERROR "Missing model %s; using models/error.mdl\n", pRes->szFileName );
-							cl.models[pRes->nIndex] = Mod_ForName( "models/error.mdl", false, true );
-						}
-						else
-							cl.models[pRes->nIndex] = Mod_ForName( pRes->szFileName, false, true );
+						cl.models[pRes->nIndex] = CL_PrecacheResourceModel( pRes );
 
 						if( cl.models[pRes->nIndex] == NULL )
 						{

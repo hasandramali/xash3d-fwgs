@@ -3,6 +3,7 @@
 #import "GameDataDownloader.h"
 #import "SteamService.h"
 #include "SteamViewController.inc"
+#include "LaunchOptionsViewController.inc"
 #include "launcherdialog.h"
 @interface FileBrowserViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) NSArray *directories;
@@ -47,11 +48,14 @@ static NSString *kCellID = @"FileCell";
 
     // Launch button (right)
     UIBarButtonItem *launchBtn = [[UIBarButtonItem alloc] initWithTitle:@"Play" style:UIBarButtonItemStyleDone target:self action:@selector(launchTapped)];
+    UIBarButtonItem *launchSpacing = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFixedSpace target:nil action:nil];
+    launchSpacing.width = 20;
     self.navigationItem.rightBarButtonItems = @[
         launchBtn,
+        launchSpacing,
         [[UIBarButtonItem alloc] initWithTitle:@"Steam" style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)]
     ];
-    [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"global_arguments": @"-console"}];
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"global_arguments": @"-console", @"immersive_mode_svencoop": @NO}];
     if (SteamService.shared.autoConnect) [SteamService.shared restoreSession];
 
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
@@ -86,17 +90,15 @@ static NSString *kCellID = @"FileCell";
         [self showError:[NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Finish or cancel game installation before playing."}]];
         return;
     }
-    UIAlertController *launch = [UIAlertController alertControllerWithTitle:@"Command-line arguments" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [launch addTextFieldWithConfigurationHandler:^(UITextField *field){
-        field.text = [[NSUserDefaults standardUserDefaults] stringForKey:@"global_arguments"] ?: @"-console";
-        field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        field.autocorrectionType = UITextAutocorrectionTypeNo;
-    }];
-    [launch addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [launch addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+    LaunchOptionsViewController *launch = [[LaunchOptionsViewController alloc] init];
+    launch.arguments = [[NSUserDefaults standardUserDefaults] stringForKey:@"global_arguments"] ?: @"-console";
+    launch.immersive = [[NSUserDefaults standardUserDefaults] boolForKey:@"immersive_mode_svencoop"];
+    launch.modalPresentationStyle = UIModalPresentationFormSheet;
+    if (@available(iOS 15.0, *)) launch.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+    launch.onLaunch = ^(NSString *arguments, BOOL immersive){
         if (self.dataDownloader.installing) return;
-        NSString *arguments = launch.textFields.firstObject.text ?: @"";
         [[NSUserDefaults standardUserDefaults] setObject:arguments forKey:@"global_arguments"];
+        [[NSUserDefaults standardUserDefaults] setBool:immersive forKey:@"immersive_mode_svencoop"];
         UIBarButtonItem *play = self.navigationItem.rightBarButtonItems.firstObject;
         play.enabled = NO; play.title = @"Connecting…";
         [SteamService.shared prepareForLaunch:^(NSError *error){
@@ -104,7 +106,7 @@ static NSString *kCellID = @"FileCell";
             if (error) { [self showError:error]; return; }
             [self doLaunchWithGameDir:@"svencoop" extraArgs:arguments];
         }];
-    }]];
+    };
     [self presentViewController:launch animated:YES completion:nil];
 }
 
@@ -141,6 +143,11 @@ static NSString *kCellID = @"FileCell";
             [argArray removeObjectAtIndex:index]; if (index < argArray.count) [argArray removeObjectAtIndex:index];
         } else index++;
     }
+    for (NSUInteger index = 1; index < argArray.count;) {
+        if ([argArray[index] isEqualToString:@"-noimmersive"]) [argArray removeObjectAtIndex:index];
+        else index++;
+    }
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"immersive_mode_svencoop"]) [argArray addObject:@"-noimmersive"];
     [argArray addObjectsFromArray:@[@"-game", @"svencoop"]];
     if (argArray.count > 63) {
         [self showError:[NSError errorWithDomain:@"SvenClient" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Too many command-line arguments."}]]; return;

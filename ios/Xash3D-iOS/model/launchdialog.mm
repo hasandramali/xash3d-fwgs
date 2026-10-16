@@ -178,9 +178,9 @@ void IOS_PrepareView()
 
 extern "C" void IOS_SetDefaultArgs()
 {
-    static const char *args[64] = { "svenclient", "-console", "-game", "svencoop" };
+    static const char *args[64] = { "svenclient", "-console", "-game", "svencoop", "-noimmersive" };
     g_pszArgv = args;
-    g_iArgc = 4;
+    g_iArgc = 5;
 }
 
 extern "C" void IOS_LaunchDialog( void )

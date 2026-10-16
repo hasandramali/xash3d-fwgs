@@ -98,6 +98,7 @@
     [_broker setTitle:steam.brokerRunning ? @"Stop game connection" : @"Start game connection" forState:UIControlStateNormal];
     if (steam.busy) [_activity startAnimating]; else [_activity stopAnimating];
     if (steam.loggedIn) { _password.text = @""; _code.text = @""; }
+    [_install setTitle:[self.downloader hasGameData:@"svencoop"] ? @"Reinstall game" : @"Install game" forState:UIControlStateNormal];
     _install.enabled = !self.downloader.installing; _cancelInstall.hidden = !self.downloader.installing;
     _progress.hidden = !self.downloader.installing;
 }

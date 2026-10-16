@@ -7,6 +7,63 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_downloaded_model_overrides_stale_missing_flag(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "engine/client/cl_main.c").read_text()
+        start = source.index("static model_t *CL_PrecacheResourceModel(")
+        end = source.index("qboolean CL_PrecacheResources(", start)
+        program = """
+#include <assert.h>
+#include <string.h>
+#include <strings.h>
+#include <stdbool.h>
+#define S_ERROR ""
+#define RES_WASMISSING 1
+#define FBitSet(value, bits) ((value) & (bits))
+#define ClearBits(value, bits) ((value) &= ~(bits))
+#define Q_stricmp strcasecmp
+typedef struct { int marker; } model_t;
+typedef struct { unsigned ucFlags; char szFileName[128]; } resource_t;
+static model_t original, fallback;
+static bool available;
+static bool customSpriteFallback = true;
+static const char *loaded;
+const char *COM_FileExtension(const char *path) { const char *dot = strrchr(path, '.'); return dot ? dot + 1 : ""; }
+bool FS_FileExists(const char *path, bool gameOnly) { (void)gameOnly; return !strcmp(path, "models/error.spr") ? customSpriteFallback : available; }
+void Con_Printf(const char *format, ...) { (void)format; }
+model_t *Mod_ForName(const char *path, bool crash, bool crc) {
+    (void)crash; (void)crc; loaded = path;
+    if (!strncmp(path, "models/error.", 13) || !strcmp(path, "sprites/error.spr")) return &fallback;
+    return available ? &original : 0;
+}
+""" + source[start:end] + """
+int main(void) {
+    resource_t resource = { RES_WASMISSING, "models/Evilmansion/furniture/arc_fern.mdl" };
+    available = true;
+    assert(CL_PrecacheResourceModel(&resource) == &original);
+    assert(!(resource.ucFlags & RES_WASMISSING));
+    assert(!strcmp(loaded, resource.szFileName));
+    available = false; resource.ucFlags = RES_WASMISSING;
+    assert(CL_PrecacheResourceModel(&resource) == &fallback);
+    assert(!strcmp(loaded, "models/error.mdl"));
+    strcpy(resource.szFileName, "sprites/dynamic_mapvote/theyhunger.SPR");
+    assert(CL_PrecacheResourceModel(&resource) == &fallback);
+    assert(!strcmp(loaded, "models/error.spr"));
+    customSpriteFallback = false;
+    assert(CL_PrecacheResourceModel(&resource) == &fallback);
+    assert(!strcmp(loaded, "sprites/error.spr"));
+    resource.ucFlags = 0;
+    assert(CL_PrecacheResourceModel(&resource) == 0);
+}
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "model-fallback-test.c"
+            executable = Path(temporary) / "model-fallback-test"
+            test_source.write_text(program)
+            subprocess.run([os.environ.get("CC", "clang"), "-std=c11", "-Wall", "-Wextra", "-Werror",
+                            str(test_source), "-o", str(executable)], check=True)
+            subprocess.run([str(executable)], check=True)
+
     def test_content_file_retries_are_bounded_and_cancellable(self):
         repository = Path(__file__).resolve().parents[3]
         source = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
@@ -96,6 +153,8 @@ int main(void) {
         browser = (repository / "ios/Xash3D-iOS/view/FileBrowserViewController.mm").read_text()
         navigation = browser.split("self.navigationItem.rightBarButtonItems = @[", 1)[1].split("];", 1)[0]
         self.assertIn("launchBtn", navigation)
+        self.assertIn("launchSpacing", navigation)
+        self.assertIn("launchSpacing.width = 20;", browser)
         self.assertEqual(navigation.count("@selector(steamTapped)"), 1)
         self.assertNotIn("settingsTapped", browser)
         self.assertNotIn("map_background", browser)
@@ -109,9 +168,17 @@ int main(void) {
         self.assertIn("self.toolbarItems = @[folderBtn, flex, importBtn, flex, pasteBtn];", browser)
         self.assertIn("self.pasteButton.enabled = (_pasteboardPath != nil);", browser)
         launch = browser.split("- (void)launchTapped", 1)[1].split("- (void)steamTapped", 1)[0]
-        self.assertIn('actionWithTitle:@"Cancel"', launch)
-        self.assertIn('actionWithTitle:@"Launch"', launch)
-        self.assertLess(launch.index('actionWithTitle:@"Launch"'), launch.index("doLaunchWithGameDir:"))
+        options = (repository / "ios/Xash3D-iOS/view/LaunchOptionsViewController.inc").read_text()
+        self.assertIn('setTitle:@"Cancel"', options)
+        self.assertIn('setTitle:@"Launch"', options)
+        self.assertIn('@"Immersive mode"', options)
+        self.assertIn("UISwitch", options)
+        self.assertIn("dismissViewControllerAnimated:YES completion:", options)
+        self.assertLess(launch.index("launch.onLaunch ="), launch.index("doLaunchWithGameDir:"))
+        self.assertIn('@"immersive_mode_svencoop": @NO', browser)
+        self.assertIn('[argArray addObject:@"-noimmersive"]', browser)
+        steam = (repository / "ios/Xash3D-iOS/view/SteamViewController.inc").read_text()
+        self.assertIn('hasGameData:@"svencoop"] ? @"Reinstall game" : @"Install game"', steam)
         downloader = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
         self.assertNotIn("requestLicense:", downloader)
         self.assertIn("[client anonymousLoginWithError:&err]", downloader)
