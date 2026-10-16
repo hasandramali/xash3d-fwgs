@@ -73,7 +73,7 @@
     _install = [self button:installTitle action:@selector(installTapped)]; [stack addArrangedSubview:_install];
     _progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault]; [stack addArrangedSubview:_progress];
     _installStatus = [[UILabel alloc] init]; _installStatus.numberOfLines = 0; _installStatus.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-    _installStatus.text = @"No Steam sign-in required. Completed files are kept if you cancel; incompatible binaries are removed after installation."; [stack addArrangedSubview:_installStatus];
+    _installStatus.text = @"Steam account is not needed for downloading data."; [stack addArrangedSubview:_installStatus];
     _cancelInstall = [self button:@"Cancel installation" action:@selector(cancelInstall)]; [stack addArrangedSubview:_cancelInstall];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:SvenSteamStateChanged object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:UIApplicationDidBecomeActiveNotification object:nil];

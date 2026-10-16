@@ -179,10 +179,13 @@ static qboolean Touch_StretchPixels( void );
 static void Touch_UpdateViewport( void )
 {
 	const float none[4] = { 0 };
+	const float *insets = none;
+#if !XASH_IOS
 	// Stretch mode maps to raw render pixels (May-2026 fitted behavior),
 	// so safe-area insets must not shrink the viewport there; otherwise
 	// positions (raw) and sizes/hit-testing (view-based) disagree.
-	const float *insets = ( touch_safearea.value && !Touch_StretchPixels()) ? host.window_insets : none;
+	insets = ( touch_safearea.value && !Touch_StretchPixels()) ? host.window_insets : none;
+#endif
 
 	touch.view_x = refState.width * insets[0];
 	touch.view_y = refState.height * insets[1];
@@ -1274,6 +1277,7 @@ static void Touch_EnableEdit_f( void )
 	// convert coordinates to actual aspect ratio after it was updated
 	if( touch.config_aspect_ratio != touch.actual_aspect_ratio )
 	{
+#if !XASH_IOS
 		for( touch_button_t *button = touch.list_user.first; button; button = button->next )
 		{
 			button->y1 /= touch.actual_aspect_ratio / touch.config_aspect_ratio;
@@ -1286,6 +1290,7 @@ static void Touch_EnableEdit_f( void )
 				button->y2 -= button->y2 - 1.0f;
 			}
 		}
+#endif
 		touch.config_aspect_ratio = touch.actual_aspect_ratio;
 	}
 }

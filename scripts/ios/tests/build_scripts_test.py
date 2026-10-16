@@ -10,6 +10,95 @@ import zlib
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_ios_touch_viewport_and_editor_preserve_coordinates(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "engine/client/input/in_touch.c").read_text()
+
+        def function(signature):
+            start = source.index(signature)
+            opening = source.index("{", start)
+            depth = 1
+            end = opening + 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            return source[start:end]
+
+        harness = r'''
+#include <assert.h>
+#include <math.h>
+#include <stddef.h>
+#define Q_max(first, second) ((first) > (second) ? (first) : (second))
+enum { state_none, state_edit, state_edit_move, true = 1 };
+typedef struct touch_button_s {
+    float x1, y1, x2, y2;
+    struct touch_button_s *next;
+} touch_button_t;
+static struct { float value; } touch_safearea = {1};
+static struct { float window_insets[4]; } host = {{0.05f, 0.02f, 0.05f, 0.06f}};
+static struct { int width, height; float scale_x, scale_y; } refState = {1000, 750, 1, 1};
+static struct {
+    float view_x, view_y, view_width, view_height;
+    float actual_aspect_ratio, config_aspect_ratio;
+    int state, resize_finger, move_finger, look_finger, wheel_finger, configchanged;
+    void *move_button;
+    struct { touch_button_t *first; } list_user;
+} touch;
+static int stretch;
+static int Touch_StretchPixels(void) { return stretch; }
+static void Touch_ResetSticks(void) {}
+'''
+        harness += function("static void Touch_UpdateViewport( void )") + "\n"
+        harness += function("static void Touch_EnableEdit_f( void )") + "\n"
+        harness += r'''
+int main(void) {
+    Touch_UpdateViewport();
+#if XASH_IOS
+    assert(touch.view_x == 0 && touch.view_y == 0);
+    assert(touch.view_width == 1000 && touch.view_height == 750);
+#else
+    assert(touch.view_x == 50 && touch.view_y == 15);
+    assert(fabsf(touch.view_width - 900) < 0.001f);
+    assert(fabsf(touch.view_height - 690) < 0.001f);
+#endif
+    stretch = 1;
+    Touch_UpdateViewport();
+    assert(touch.view_x == 0 && touch.view_y == 0);
+    assert(touch.view_width == 1000 && touch.view_height == 750);
+    touch_button_t button = {0.6f, 0.6f, 0.8f, 0.9f, NULL};
+    touch.list_user.first = &button;
+    touch.actual_aspect_ratio = touch.config_aspect_ratio = 0.5f;
+    Touch_EnableEdit_f();
+    assert(touch.state == state_edit);
+    assert(touch.resize_finger == -1 && touch.move_finger == -1);
+    assert(touch.look_finger == -1 && touch.wheel_finger == -1);
+    assert(button.x1 == 0.6f && button.x2 == 0.8f);
+#if XASH_IOS
+    assert(button.y1 == 0.6f && button.y2 == 0.9f);
+    for (int repeat = 0; repeat < 4; ++repeat) {
+        refState.width = repeat % 2 ? 1000 : 1500;
+        touch.state = state_none;
+        Touch_EnableEdit_f();
+        Touch_UpdateViewport();
+        assert(button.y1 == 0.6f && button.y2 == 0.9f);
+        assert(touch.view_width == refState.width && touch.view_height == refState.height);
+    }
+#else
+    assert(fabsf(button.y1 - 0.4f) < 0.001f);
+    assert(fabsf(button.y2 - 0.6f) < 0.001f);
+#endif
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "touch-viewport.c"
+            test_source.write_text(harness)
+            for ios in (0, 1):
+                executable = Path(temporary) / ("touch-viewport-" + str(ios))
+                subprocess.run([os.environ.get("CC", "clang"), "-std=c11", "-DXASH_IOS=" + str(ios),
+                                str(test_source), "-lm", "-o", str(executable)], check=True)
+                subprocess.run([str(executable)], check=True)
+
     def test_captured_sven_delta_descriptions_and_clientdata(self):
         repository = Path(__file__).resolve().parents[3]
         fixture = json.loads((Path(__file__).parent / "fixtures/sven_delta_packets.json").read_text())
