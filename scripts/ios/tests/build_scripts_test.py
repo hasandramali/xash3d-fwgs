@@ -1,12 +1,39 @@
+import base64
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+import zlib
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_captured_sven_delta_descriptions_and_clientdata(self):
+        repository = Path(__file__).resolve().parents[3]
+        fixture = json.loads((Path(__file__).parent / "fixtures/sven_delta_packets.json").read_text())
+        includes = ["engine", "engine/common", "engine/client", "engine/client/vgui", "engine/server",
+                    "engine/platform", "public", "common", "filesystem", "pm_shared", "3rdparty/library_suffix/include"]
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "sven-delta-test"
+            descriptions = Path(temporary) / "descriptions.bin"
+            descriptions.write_bytes(zlib.decompress(base64.b64decode(fixture["descriptions_zlib_base64"])))
+            dead_strip = "-Wl,-dead_strip" if os.uname().sysname == "Darwin" else "-Wl,--gc-sections"
+            command = [os.environ.get("CC", "clang"), "-std=gnu11", "-DENGINE_DLL", "-DHAVE_STRCASECMP",
+                       "-DHAVE_STRNCASECMP", "-ffunction-sections", "-fdata-sections", "-Wno-pointer-sign",
+                       "-Wno-initializer-overrides"]
+            command += ["-I" + str(repository / include) for include in includes]
+            command += [str(Path(__file__).parent / "SvenDeltaTests.c"),
+                        str(repository / "engine/common/net_buffer.c"), str(repository / "public/crtlib.c"),
+                        str(repository / "public/xash3d_mathlib.c"), dead_strip, "-lm", "-o", str(executable)]
+            subprocess.run(command, check=True)
+            for capture in fixture["cases"]:
+                packet = Path(temporary) / (capture["name"] + ".bin")
+                packet.write_bytes(bytes.fromhex(capture["hex"]))
+                subprocess.run([str(executable), str(descriptions), str(packet),
+                                str(capture["health"]), str(capture["bits"])], check=True)
+
     def test_installed_directory_and_visible_immersive_option(self):
         repository = Path(__file__).resolve().parents[3]
         downloader = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()

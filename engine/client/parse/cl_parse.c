@@ -2650,9 +2650,11 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	if( iSize == -1 )
 		iSize = MSG_ReadWord( msg );
 
-	if( iSize >= MAX_USERMSG_LENGTH )
+	if( MSG_CheckOverflow( msg ) || iSize < 0 || iSize >= MAX_USERMSG_LENGTH
+		|| iSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
 	{
-		Con_Reportf( "%s: user message %s size limit hit (%d > %d)!\n", __func__, clgame.msg[i].name, iSize, MAX_USERMSG_LENGTH );
+		Host_Error( "%s: invalid user message %s size %d (remaining %d, limit %d)\n", __func__,
+			clgame.msg[i].name, iSize, MSG_GetNumBitsLeft( msg ) >> 3, MAX_USERMSG_LENGTH );
 		return;
 	}
 

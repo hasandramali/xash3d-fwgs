@@ -37,9 +37,6 @@ GNU General Public License for more details.
 #define DT_SIGNED		BIT( 8 )	// sign modificator
 #define DT_SIGNED_GS	BIT( 31 ) // GoldSrc-specific sign modificator
 
-// The GoldSrc/Sven wire does not carry per-field type flags, so they are
-// spelled out explicitly per field below (derived from the member C types;
-// keep them in sync when touching the structs).
 // When adding a field, pick the matching DT_* combo for its C type:
 // float/double -> DT_FLOAT|DT_SIGNED, int -> DT_INTEGER|DT_SIGNED,
 // unsigned int -> DT_INTEGER, short -> DT_SHORT|DT_SIGNED,
@@ -386,49 +383,49 @@ static const delta_info_t dt_goldsrc_meta =
 	.pFields = (delta_t[ARRAYSIZE( meta_fields )])
 	{
 		{
-			"fieldType", offsetof( goldsrc_delta_t, fieldType ), sizeof( ((goldsrc_delta_t *)0)->fieldType ), DT_INTEGER|DT_SIGNED,
+			"fieldType", offsetof( goldsrc_delta_t, fieldType ), sizeof( ((goldsrc_delta_t *)0)->fieldType ),
 			.flags = DT_INTEGER,
 			.multiplier = 1.0f,
 			.post_multiplier = 1.0f,
 			.bits = 32,
 		},
 		{
-			"fieldName", offsetof( goldsrc_delta_t, fieldName ), sizeof( ((goldsrc_delta_t *)0)->fieldName ), DT_STRING,
+			"fieldName", offsetof( goldsrc_delta_t, fieldName ), sizeof( ((goldsrc_delta_t *)0)->fieldName ),
 			.flags = DT_STRING,
 			.multiplier = 1.0f,
 			.post_multiplier = 1.0f,
 			.bits = 1,
 		},
 		{
-			"fieldOffset", offsetof( goldsrc_delta_t, fieldOffset ), sizeof( ((goldsrc_delta_t *)0)->fieldOffset ), DT_INTEGER|DT_SIGNED,
+			"fieldOffset", offsetof( goldsrc_delta_t, fieldOffset ), sizeof( ((goldsrc_delta_t *)0)->fieldOffset ),
 			.flags = DT_INTEGER,
 			.multiplier = 1.0f,
 			.post_multiplier = 1.0f,
 			.bits = 16,
 		},
 		{
-			"fieldSize", offsetof( goldsrc_delta_t, fieldSize ), sizeof( ((goldsrc_delta_t *)0)->fieldSize ), DT_SHORT|DT_SIGNED,
+			"fieldSize", offsetof( goldsrc_delta_t, fieldSize ), sizeof( ((goldsrc_delta_t *)0)->fieldSize ),
 			.flags = DT_INTEGER,
 			.multiplier = 1.0f,
 			.post_multiplier = 1.0f,
 			.bits = 8,
 		},
 		{
-			"significant_bits", offsetof( goldsrc_delta_t, significant_bits ), sizeof( ((goldsrc_delta_t *)0)->significant_bits ), DT_INTEGER|DT_SIGNED,
+			"significant_bits", offsetof( goldsrc_delta_t, significant_bits ), sizeof( ((goldsrc_delta_t *)0)->significant_bits ),
 			.flags = DT_INTEGER,
 			.multiplier = 1.0f,
 			.post_multiplier = 1.0f,
 			.bits = 8,
 		},
 		{
-			"premultiply", offsetof( goldsrc_delta_t, premultiply ), sizeof( ((goldsrc_delta_t *)0)->premultiply ), DT_FLOAT|DT_SIGNED,
+			"premultiply", offsetof( goldsrc_delta_t, premultiply ), sizeof( ((goldsrc_delta_t *)0)->premultiply ),
 			.flags = DT_FLOAT,
 			.multiplier = 4000.0f,
 			.post_multiplier = 1.0f,
 			.bits = 32,
 		},
 		{
-			"postmultiply", offsetof( goldsrc_delta_t, postmultiply ), sizeof( ((goldsrc_delta_t *)0)->postmultiply ), DT_FLOAT|DT_SIGNED,
+			"postmultiply", offsetof( goldsrc_delta_t, postmultiply ), sizeof( ((goldsrc_delta_t *)0)->postmultiply ),
 			.flags = DT_FLOAT,
 			.multiplier = 4000.0f,
 			.post_multiplier = 1.0f,
@@ -1555,6 +1552,14 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 
 	for( i = 0; i < c; i++ )
 		bits[i] = MSG_ReadByte( msg );
+	for( i = dt->numFields; i < c * 8; i++ )
+	{
+		if( bits[i >> 3] & BIT( i & 7 ))
+		{
+			Host_Error( "%s: unknown field %d in %s mask\n", __func__, i, dt->pName );
+			return;
+		}
+	}
 
 	// field-level bit ledger: reconstruct exactly which fields the client
 	// consumed and where each field landed in the bitstream. Together with
@@ -2207,233 +2212,55 @@ qboolean MSG_ReadDeltaEntity( sizebuf_t *msg, const entity_state_t *from, entity
 	return true;
 }
 
-static void Delta_GSDumpPayload( const char *label, const sizebuf_t *msg, int startBit )
-{
-	static const char hexd[] = "0123456789abcdef";
-	int start = startBit >> 3;
-	int end = msg->nDataBits >> 3;
-	int len = end - start;
-
-	if( len > 256 ) len = 256;
-	if( len <= 0 ) return;
-
-	for( int i = 0; i < len; i += 16 )
-	{
-		char hex[64];
-		int n = Q_min( 16, len - i );
-		for( int j = 0; j < n; j++ )
-		{
-			byte b = msg->pData[start + i + j];
-			hex[j * 3] = hexd[b >> 4];
-			hex[j * 3 + 1] = hexd[b & 15];
-			hex[j * 3 + 2] = ' ';
-		}
-		hex[n * 3] = 0;
-		Con_Printf( "%s %04x: %s\n", label, start + i, hex );
-	}
-}
-
-/*
-===================================
-GoldSrc/Sven Co-op delta description
-
-The Sven engine sends ALL table descriptions in ONE svc_deltatable message.
-Each table is:
-
-	name\0
-	u16   count   (number of slots; real field records == count / 2,
-	               each field is a (data-blob, name+descriptor) pair)
-	then  count/2 records, each:
-	       [data blob]      opaque junk, skipped by token scan
-	       [name\0]         field name
-	       [descriptor]     variable length (see below)
-	                         - u16  offset, ONLY present if nonzero
-	                         - u8   marker byte (0x01 in captures)
-	                         - u8   significant_bits
-	                         - u32  premultiply   (fixed point, 4000 == 1.0)
-	                         - u32  postmultiply  (fixed point, 4000 == 1.0)
-
-The descriptor is what the server's DELTA_WriteDelta emits for the field
-description against a zeroed record (g_MetaDelta): meta fields whose value
-is zero (e.g. fieldOffset == 0) are omitted on the wire, which is why the
-offset u16 disappears for the first struct member. There is NO flags byte:
-type flags are taken from the local struct layout (explicit DT_* per field).
-
-After the last table comes a usermsg id->name registration array plus
-other Sven payload, which is simply consumed up to the end of the message.
-===================================
-*/
-static qboolean Delta_ReadGSToken( sizebuf_t *msg, char *buf, size_t maxlen )
-{
-	// skip non-printable data until a NUL-terminated printable run of
-	// at least 3 chars is found; consumes the trailing NUL as well
-	while( MSG_GetNumBitsLeft( msg ) >= 8 )
-	{
-		int c = MSG_ReadByte( msg );
-
-		if( c < 32 || c > 126 )
-			continue; // junk byte
-
-		size_t len = 0;
-		while( c >= 32 && c <= 126 )
-		{
-			if( len < maxlen - 1 )
-				buf[len] = (char)c;
-			len++;
-
-			if( MSG_GetNumBitsLeft( msg ) < 8 )
-			{
-				buf[0] = 0;
-				return false;
-			}
-			c = MSG_ReadByte( msg );
-		}
-
-		if( len >= 3 && c == 0 )
-		{
-			if( len > maxlen - 1 )
-				len = maxlen - 1;
-			buf[len] = 0;
-			return true;
-		}
-		// not a usable token, keep scanning
-	}
-
-	buf[0] = 0;
-	return false;
-}
-
 void Delta_ParseTableField_GS( sizebuf_t *msg )
 {
-	char name[32], pending[32] = "";
-	delta_info_t *dt;
-	int dbg = Cvar_VariableInteger( "cl_goldsrc_debug" );
-
-	// delta encoders it's already initialized on this machine (local game)
-	// re-initialize and load delta.lst before applying server overrides
-	if( delta_init )
-		Delta_Init();
-
-	MSG_StartBitWriting( msg );
-
-	while( MSG_GetNumBitsLeft( msg ) >= 8 )
+	char name[32];
+	Q_strncpy( name, MSG_ReadString( msg ), sizeof( name ));
+	delta_info_t *dt = Delta_FindStruct( name );
+	int count = MSG_ReadWord( msg );
+	if( MSG_CheckOverflow( msg ) || !dt || count < 1 || count > dt->maxFields )
 	{
-		const char *s = name;
-		int savedBit = msg->iCurBit;
-
-		if( pending[0] )
-		{
-			// next table name was already read while parsing the previous one
-			Q_strncpy( name, pending, sizeof( name ));
-			pending[0] = 0;
-		}
-		else if( !Delta_ReadGSToken( msg, name, sizeof( name )))
-		{
-			break;
-		}
-
-		dt = Delta_FindStruct( s );
-		if( !dt )
-		{
-			// not a known delta struct: rewind past the consumed token
-			// so the main parse loop can read it as the next svc command
-			MSG_SeekToBit( msg, savedBit, SEEK_SET );
-			if( dbg >= 1 )
-				Con_DPrintf( "GS-DELTA: tail '%s' bitpos=%d bitsleft=%d\n", s, msg->iCurBit, MSG_GetNumBitsLeft( msg ));
-			break;
-		}
-
-		int num_fields = MSG_ReadShort( msg );
-		int pairs = Q_min( num_fields / 2, 512 ); // blob+name pairs
-
-		if( dbg >= 2 )
-			Con_DPrintf( "GS-DELTA: table='%s' num_fields=%d pairs=%d maxFields=%d bitpos=%d\n",
-				s, num_fields, pairs, dt->maxFields, msg->iCurBit );
-
-		for( int i = 0; i < pairs; i++ )
-		{
-			int bitBefore = msg->iCurBit;
-
-			if( !Delta_ReadGSToken( msg, name, sizeof( name )))
-				break;
-
-			if( Delta_FindStruct( name ))
-			{
-				// field list done, next table name is already consumed
-				Q_strncpy( pending, name, sizeof( pending ));
-				break;
-			}
-
-			const delta_field_t *pInfo = Delta_FindFieldInfo( dt->pInfo, name, dt->maxFields );
-
-			int fOffset = 0;
-			int fBits = 1;
-			uint fPre = 0, fPost = 0;
-
-			// the server omits the u16 offset when the field offset is zero
-			if( !pInfo || pInfo->offset != 0 )
-			{
-				fOffset = MSG_ReadShort( msg );
-			}
-			MSG_ReadByte( msg ); // constant marker byte
-			fBits = MSG_ReadByte( msg );
-			fPre = MSG_ReadUBitLong( msg, 32 );
-			fPost = MSG_ReadUBitLong( msg, 32 );
-
-			if( dbg >= 2 )
-				Con_DPrintf( "  [%d] bit=%d name='%s' offset=%d sigbits=%d pre=%u post=%u\n",
-					i, bitBefore, name, fOffset, fBits, fPre, fPost );
-
-			if( !pInfo )
-			{
-				// Sven-specific field this engine doesn't know; consume in wire but skip
-				if( dbg >= 2 )
-					Con_DPrintf( S_WARN "%s: %s->%s: unknown wire field, skipped\n", __func__, dt->pName, name );
-				continue;
-			}
-
-			if( pInfo->offset != fOffset )
-			{
-				Con_DPrintf( S_WARN "%s: %s->%s: offset mismatch wire=%d local=%d\n", __func__, dt->pName, name, fOffset, pInfo->offset );
-			}
-
-			// premultiply/postmultiply are fixed point with 4000 == 1.0
-			float mul = ( fPre != 0 ) ? (float)fPre / 4000.0f : 1.0f;
-			float post_mul = ( fPost != 0 ) ? (float)fPost / 4000.0f : 1.0f;
-
-			int existingFlags = pInfo->flags;
-			for( int k = 0; k < dt->numFields; k++ )
-			{
-				if( !Q_strcmp( dt->pFields[k].name, name ))
-				{
-					existingFlags = dt->pFields[k].flags;
-					break;
-				}
-			}
-
-			Delta_AddField( dt, name, existingFlags, fBits, mul, post_mul );
-		}
-
-		dt->bInitialized = true;
+		Host_Error( "%s: invalid delta table %s (%d fields)\n", __func__, name, count );
+		return;
 	}
 
-	// after applying the server overrides, dump the resulting layout so a
-	// wire/local field-count mismatch (Sven's 17 vs delta.lst's 34) can be
-	// caught in the same log that shows the rest of the parse.
-	if( dbg >= 5 )
-		Delta_DebugDumpAllTables( "after-deltatable" );
+	if( delta_init )
+		Delta_Shutdown();
+	if( dt->pFields )
+		Z_Free( dt->pFields );
+	dt->pFields = NULL;
+	dt->numFields = 0;
+	dt->bInitialized = false;
 
-	if( dbg >= 3 )
-		Delta_GSDumpPayload( "GS-DELTA-TAIL", msg, msg->iCurBit );
-
-	// Do NOT consume remaining bytes here: after the delta tables the
-	// network message may contain additional svc commands (movevars,
-	// cdtrack, setview, etc.) that the main parse loop must handle.
-
-	if( dbg >= 2 )
-		Con_DPrintf( "GS-DELTA: done bitpos=%d bitsleft=%d\n", msg->iCurBit, MSG_GetNumBitsLeft( msg ));
-
+	MSG_StartBitWriting( msg );
+	for( int index = 0; index < count; index++ )
+	{
+		goldsrc_delta_t empty = { 0 }, description = { 0 };
+		Delta_ParseGSFields( msg, &dt_goldsrc_meta, &empty, &description, 0 );
+		uint type = (uint)description.fieldType & 0xff;
+		if( MSG_CheckOverflow( msg ) || !type || ( type & ( type - 1 ))
+			|| ((uint)description.fieldType & ~( 0xffu | (uint)DT_SIGNED_GS ))
+			|| description.significant_bits < 1 || description.significant_bits > 32
+			|| !isfinite( description.premultiply ) || description.premultiply <= 0
+			|| !isfinite( description.postmultiply ) || description.postmultiply <= 0 )
+		{
+			Host_Error( "%s: invalid field %d in %s\n", __func__, index, name );
+			return;
+		}
+		int flags = type;
+		if( (uint)description.fieldType & (uint)DT_SIGNED_GS )
+			flags |= DT_SIGNED;
+		if( !Delta_AddField( dt, description.fieldName, flags, description.significant_bits,
+			description.premultiply, description.postmultiply ) || dt->numFields != index + 1 )
+		{
+			Host_Error( "%s: unsupported or duplicate field %s->%s\n", __func__, name, description.fieldName );
+			return;
+		}
+	}
 	MSG_EndBitWriting( msg );
+	dt->bInitialized = true;
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 5 )
+		Delta_DebugDumpTable( msg, dt - dt_info, "after-deltatable" );
 }
 
 /*
