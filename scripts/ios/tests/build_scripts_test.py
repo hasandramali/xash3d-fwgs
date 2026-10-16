@@ -20,7 +20,7 @@ class SvenBuildScriptsTest(unittest.TestCase):
             descriptions = Path(temporary) / "descriptions.bin"
             descriptions.write_bytes(zlib.decompress(base64.b64decode(fixture["descriptions_zlib_base64"])))
             dead_strip = "-Wl,-dead_strip" if os.uname().sysname == "Darwin" else "-Wl,--gc-sections"
-            command = [os.environ.get("CC", "clang"), "-std=gnu11", "-DENGINE_DLL", "-DHAVE_STRCASECMP",
+            command = [os.environ.get("CC", "clang"), "-std=gnu11", "-DENGINE_DLL", "-DXASH_DEDICATED=1", "-DHAVE_STRCASECMP",
                        "-DHAVE_STRNCASECMP", "-ffunction-sections", "-fdata-sections", "-Wno-pointer-sign",
                        "-Wno-initializer-overrides"]
             command += ["-I" + str(repository / include) for include in includes]
