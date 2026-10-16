@@ -631,7 +631,7 @@ void Netchan_AddBufferToList( fragbuf_t **pplist, fragbuf_t *pbuf )
 	if( !pplist )
 		return;
 
-	if( !*pplist )
+	if( !*pplist || FRAG_GETID( pbuf->bufferid ) < FRAG_GETID( (*pplist)->bufferid ))
 	{
 		pbuf->next = *pplist;
 		*pplist = pbuf;
@@ -843,26 +843,19 @@ Netchan_CheckForCompletion
 */
 static void Netchan_CheckForCompletion( netchan_t *chan, int stream, int intotalbuffers )
 {
-	int	size = 0;
 	int	c = 0;
+	chan->incomingready[stream] = false;
 
 	fragbuf_t *p = chan->incomingbufs[stream];
 	if( !p ) return;
 
 	while( p )
 	{
-		size += MSG_GetNumBytesWritten( &p->frag_message );
 		c++;
 
 		int id = FRAG_GETID( p->bufferid );
-		if( id != c )
-		{
-			if( chan->sock == NS_CLIENT )
-			{
-				Con_DPrintf( S_ERROR "Lost/dropped fragment would cause stall, retrying connection\n" );
-				Cbuf_AddText( "reconnect\n" );
-			}
-		}
+		if( id != c || FRAG_GETCOUNT( p->bufferid ) != intotalbuffers )
+			return;
 		p = p->next;
 	}
 

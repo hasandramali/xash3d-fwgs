@@ -93,8 +93,11 @@ static NSString *kCellID = @"FileCell";
     LaunchOptionsViewController *launch = [[LaunchOptionsViewController alloc] init];
     launch.arguments = [[NSUserDefaults standardUserDefaults] stringForKey:@"global_arguments"] ?: @"-console";
     launch.immersive = [[NSUserDefaults standardUserDefaults] boolForKey:@"immersive_mode_svencoop"];
-    launch.modalPresentationStyle = UIModalPresentationFormSheet;
-    if (@available(iOS 15.0, *)) launch.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+    launch.modalPresentationStyle = UIModalPresentationPageSheet;
+    if (@available(iOS 15.0, *)) {
+        launch.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.largeDetent];
+        launch.sheetPresentationController.prefersGrabberVisible = YES;
+    }
     launch.onLaunch = ^(NSString *arguments, BOOL immersive){
         if (self.dataDownloader.installing) return;
         [[NSUserDefaults standardUserDefaults] setObject:arguments forKey:@"global_arguments"];

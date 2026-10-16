@@ -7,6 +7,124 @@ import unittest
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_installed_directory_and_visible_immersive_option(self):
+        repository = Path(__file__).resolve().parents[3]
+        downloader = (repository / "ios/Xash3D-iOS/model/GameDataDownloader.mm").read_text()
+        installed = downloader.split("- (BOOL)hasGameData:", 1)[1].split("- (void)downloadGame:", 1)[0]
+        self.assertIn("fileExistsAtPath:path isDirectory:&isDir] && isDir", installed)
+        self.assertNotIn("contentsOfDirectoryAtPath", installed)
+        steam = (repository / "ios/Xash3D-iOS/view/SteamViewController.inc").read_text()
+        self.assertIn('button:installTitle action:@selector(installTapped)', steam)
+        self.assertIn("UIApplicationDidBecomeActiveNotification", steam)
+        browser = (repository / "ios/Xash3D-iOS/view/FileBrowserViewController.mm").read_text()
+        launch = browser.split("- (void)launchTapped", 1)[1].split("- (void)steamTapped", 1)[0]
+        self.assertIn("launch.modalPresentationStyle = UIModalPresentationPageSheet", launch)
+        self.assertIn("UISheetPresentationControllerDetent.largeDetent", launch)
+        self.assertNotIn("mediumDetent", launch)
+        options = (repository / "ios/Xash3D-iOS/view/LaunchOptionsViewController.inc").read_text()
+        self.assertLess(options.index("addArrangedSubview:_argumentsField"), options.index("addArrangedSubview:immersiveRow"))
+        self.assertIn("immersiveRow.heightAnchor constraintGreaterThanOrEqualToConstant:44", options)
+        self.assertIn("CGSizeMake(420, 360)", options)
+        self.assertIn("_immersiveSwitch.accessibilityLabel", options)
+        self.assertIn("stack.widthAnchor constraintEqualToAnchor:_scroll.frameLayoutGuide.widthAnchor constant:-48", options)
+
+    def test_fragment_batches_are_drained_before_the_next_packet(self):
+        repository = Path(__file__).resolve().parents[3]
+        client = (repository / "engine/client/cl_main.c").read_text()
+        network = (repository / "engine/common/net_chan.c").read_text()
+
+        def function(source, signature):
+            start = source.index(signature)
+            opening = source.index("{", start)
+            depth, end = 1, opening + 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            return source[start:end]
+
+        reader = function(client, "static void CL_ReadNetMessage( void )")
+        rejected = reader.index("if( !Netchan_Process(")
+        self.assertIn("CL_ProcessIncomingFragments( parsefn );", reader[rejected:reader.index("continue;", rejected)])
+        self.assertIn("CL_ParseNetMessage( &net_message, parsefn );\n\t\tCL_ProcessIncomingFragments( parsefn );", reader)
+        program = r"""
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <string.h>
+#define FRAG_GETID(value) (((value) >> 16) & 65535)
+#define FRAG_GETCOUNT(value) ((value) & 65535)
+#define FRAG_NORMAL_STREAM 0
+#define ca_connected 3
+typedef bool qboolean;
+typedef struct fragbuf_s { int bufferid; struct fragbuf_s *next; char value; } fragbuf_t;
+typedef struct { bool incomingready[2]; fragbuf_t *incomingbufs[2]; char incomingfilename[32]; } netchan_t;
+typedef struct { char *data; size_t size; } sizebuf_t;
+struct { int state; netchan_t netchan; } cls;
+char net_message_buffer[128];
+sizebuf_t net_message;
+static unsigned batches, fileCopies;
+bool Netchan_IncomingReady(netchan_t *channel) { return channel->incomingready[0] || channel->incomingready[1]; }
+bool Netchan_CopyNormalFragments(netchan_t *channel,sizebuf_t *message,size_t *size) {
+ (void)message;
+ if(!channel->incomingready[0]) return false;
+ *size=0;
+ for(fragbuf_t *fragment=channel->incomingbufs[0];fragment;fragment=fragment->next)
+  net_message_buffer[(*size)++]=fragment->value;
+ channel->incomingbufs[0]=NULL; channel->incomingready[0]=false;
+ return true;
+}
+void MSG_Init(sizebuf_t *message,const char *name,char *data,size_t size) {
+ (void)name; message->data=data; message->size=size;
+}
+void CL_ParseNetMessage(sizebuf_t *message,void (*parse)(sizebuf_t *)) { parse(message); }
+bool Netchan_CopyFileFragments(netchan_t *channel,sizebuf_t *message) {
+ (void)channel; (void)message; ++fileCopies; return false;
+}
+void CL_ProcessFile(bool success,const char *name) { (void)success; (void)name; assert(false); }
+"""
+        program += function(network, "void Netchan_AddBufferToList( fragbuf_t **pplist, fragbuf_t *pbuf )\n{")
+        program += function(network, "static void Netchan_CheckForCompletion(")
+        program += function(client, "static void CL_ProcessIncomingFragments(")
+        program += r"""
+void parse(sizebuf_t *message) {
+ if(batches==0) assert(message->size==1 && message->data[0]=='P');
+ else assert(message->size==4 && !memcmp(message->data,"BZ2!",4));
+ ++batches;
+}
+int main(void) {
+ cls.state=ca_connected;
+ fragbuf_t prefix={(1<<16)|1,NULL,'P'};
+ Netchan_AddBufferToList(&cls.netchan.incomingbufs[0],&prefix);
+ Netchan_CheckForCompletion(&cls.netchan,0,1);
+ CL_ProcessIncomingFragments(parse);
+ assert(batches==1 && !cls.netchan.incomingbufs[0]);
+ fragbuf_t fragments[4]={ {(1<<16)|4,NULL,'B'}, {(2<<16)|4,NULL,'Z'},
+                         {(3<<16)|4,NULL,'2'}, {(4<<16)|4,NULL,'!'} };
+ const int order[]={1,3,0,2};
+ for(unsigned index=0;index<4;++index) {
+  Netchan_AddBufferToList(&cls.netchan.incomingbufs[0],&fragments[order[index]]);
+  Netchan_CheckForCompletion(&cls.netchan,0,4);
+  assert(cls.netchan.incomingready[0]==(index==3));
+  CL_ProcessIncomingFragments(parse);
+  assert(batches==(index==3?2:1));
+ }
+ fragbuf_t mismatched[2]={ {(1<<16)|2,NULL,'a'}, {(2<<16)|3,NULL,'b'} };
+ Netchan_AddBufferToList(&cls.netchan.incomingbufs[0],&mismatched[0]);
+ Netchan_AddBufferToList(&cls.netchan.incomingbufs[0],&mismatched[1]);
+ Netchan_CheckForCompletion(&cls.netchan,0,2);
+ assert(!cls.netchan.incomingready[0]);
+ cls.state=0; cls.netchan.incomingready[1]=true;
+ unsigned before=fileCopies; CL_ProcessIncomingFragments(parse); assert(fileCopies==before);
+}
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "fragments.c"
+            executable = Path(temporary) / "fragments-test"
+            source.write_text(program)
+            subprocess.run([os.environ.get("CC", "clang"), "-std=c11", "-Wall", "-Wextra", "-Werror",
+                            str(source), "-o", str(executable)], check=True)
+            subprocess.run([str(executable)], check=True)
+
     def test_downloaded_model_overrides_stale_missing_flag(self):
         repository = Path(__file__).resolve().parents[3]
         source = (repository / "engine/client/cl_main.c").read_text()

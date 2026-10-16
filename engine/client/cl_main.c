@@ -3365,9 +3365,23 @@ static void CL_ParseNetMessage( sizebuf_t *msg, void (*parsefn)( sizebuf_t * ))
 
 /*
 =================
-CL_ReadNetMessage
+CL_ProcessIncomingFragments
 =================
 */
+static void CL_ProcessIncomingFragments( void (*parsefn)( sizebuf_t * ))
+{
+	size_t size;
+	if( cls.state < ca_connected || !Netchan_IncomingReady( &cls.netchan ))
+		return;
+	if( Netchan_CopyNormalFragments( &cls.netchan, &net_message, &size ))
+	{
+		MSG_Init( &net_message, "ServerData", net_message_buffer, size );
+		CL_ParseNetMessage( &net_message, parsefn );
+	}
+	if( cls.state >= ca_connected && Netchan_CopyFileFragments( &cls.netchan, &net_message ))
+		CL_ProcessFile( true, cls.netchan.incomingfilename );
+}
+
 static void CL_ReadNetMessage( void )
 {
 	size_t	curSize;
@@ -3426,7 +3440,10 @@ static void CL_ReadNetMessage( void )
 			}
 
 			if( !Netchan_Process( &cls.netchan, &net_message ))
+			{
+				CL_ProcessIncomingFragments( parsefn );
 				continue;
+			}
 
 			// STEAM/SIGNON DEBUG: log inbound server packet size so we can tell
 			// whether the server is actually sending signon data or just ACKs.
@@ -3466,27 +3483,13 @@ static void CL_ReadNetMessage( void )
 		}
 
 		CL_ParseNetMessage( &net_message, parsefn );
+		CL_ProcessIncomingFragments( parsefn );
 	}
+
+	CL_ProcessIncomingFragments( parsefn );
 
 	// build list of all solid entities per next frame (exclude clients)
 	CL_SetSolidEntities();
-
-	// check for fragmentation/reassembly related packets.
-	if( cls.state != ca_disconnected && Netchan_IncomingReady( &cls.netchan ))
-	{
-		// process the incoming buffer(s)
-		if( Netchan_CopyNormalFragments( &cls.netchan, &net_message, &curSize ))
-		{
-			MSG_Init( &net_message, "ServerData", net_message_buffer, curSize );
-			CL_ParseNetMessage( &net_message, parsefn );
-		}
-
-		if( Netchan_CopyFileFragments( &cls.netchan, &net_message ))
-		{
-			// remove from resource request stuff.
-			CL_ProcessFile( true, cls.netchan.incomingfilename );
-		}
-	}
 
 	Netchan_UpdateProgress( &cls.netchan );
 

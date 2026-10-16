@@ -1213,9 +1213,7 @@ static BOOL assembleFileWithRetry(int depotId, NSDictionary *file, NSString *out
     NSString *path = [_docsDir stringByAppendingPathComponent:gameDir];
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL isDir = NO;
-    if (![fm fileExistsAtPath:path isDirectory:&isDir]) return NO;
-    if (!isDir) return NO;
-    return [fm contentsOfDirectoryAtPath:path error:nil].count > 0;
+    return [fm fileExistsAtPath:path isDirectory:&isDir] && isDir;
 }
 
 - (void)downloadGame:(NSString *)gameDir onProgress:(void(^)(NSString*,float))onProgress completion:(void(^)(NSError*))completion {

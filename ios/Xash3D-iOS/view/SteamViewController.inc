@@ -40,8 +40,9 @@
         [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:24],
         [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-24],
-        [stack.leadingAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.leadingAnchor constant:24],
-        [stack.trailingAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.trailingAnchor constant:-24]
+        [stack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor constant:24],
+        [stack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor constant:-24],
+        [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-48]
     ]];
     _statusLabel = [[UILabel alloc] init]; _statusLabel.numberOfLines = 0;
     _statusLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2]; [stack addArrangedSubview:_statusLabel];
@@ -68,12 +69,14 @@
     UILabel *privacy = [[UILabel alloc] init]; privacy.numberOfLines = 0; privacy.textColor = UIColor.secondaryLabelColor;
     privacy.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     privacy.text = @"Your password is sent encrypted to Steam and is never saved. Your saved session stays in this device’s Keychain."; [stack addArrangedSubview:privacy];
-    _install = [self button:@"Install game" action:@selector(installTapped)]; [stack addArrangedSubview:_install];
+    NSString *installTitle = [self.downloader hasGameData:@"svencoop"] ? @"Reinstall game" : @"Install game";
+    _install = [self button:installTitle action:@selector(installTapped)]; [stack addArrangedSubview:_install];
     _progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault]; [stack addArrangedSubview:_progress];
     _installStatus = [[UILabel alloc] init]; _installStatus.numberOfLines = 0; _installStatus.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     _installStatus.text = @"No Steam sign-in required. Completed files are kept if you cancel; incompatible binaries are removed after installation."; [stack addArrangedSubview:_installStatus];
     _cancelInstall = [self button:@"Cancel installation" action:@selector(cancelInstall)]; [stack addArrangedSubview:_cancelInstall];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:SvenSteamStateChanged object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:UIApplicationDidBecomeActiveNotification object:nil];
     [self refresh];
 }
 - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }

@@ -24,6 +24,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.CRC32
 import java.util.zip.GZIPInputStream
 import javax.crypto.Cipher
@@ -223,6 +224,8 @@ class SteamAuthManager(private val ctx: Context) {
     private var logonFuture: CompletableFuture<Int>? = null
     @Volatile private var expectDisconnect = false
     private val reconnectGeneration = AtomicLong(0L)
+    private val sessionRestoreRunning = AtomicBoolean(false)
+    private var lastGameRecoveryAttempt = -30_000L
 
     // ticket state
     @Volatile private var currentGameDir: String? = null
@@ -242,8 +245,10 @@ class SteamAuthManager(private val ctx: Context) {
     private val ticketChangeLock = Any()
 
     // broker
-    private var brokerServer: ServerSocket? = null
-    private var brokerThread: Thread? = null
+    @Volatile private var brokerServer: ServerSocket? = null
+    @Volatile private var brokerThread: Thread? = null
+    @Volatile private var brokerWanted = false
+    private val brokerClients = java.util.Collections.newSetFromMap(ConcurrentHashMap<Socket, Boolean>())
     private data class P2PBinding(val owner: Socket, val request: Long, val peer: Long, val session: SteamP2PSession)
     @Volatile private var p2pBinding: P2PBinding? = null
     private val p2pLock = Any()
@@ -595,7 +600,7 @@ class SteamAuthManager(private val ctx: Context) {
         }
     }
 
-    fun isBrokerRunning(): Boolean = brokerServer != null
+    fun isBrokerRunning(): Boolean = brokerServer?.let { it.isBound && !it.isClosed } == true
 
     /**
      * Re-login using a stored refresh token (persistent session from [loginModern]).
@@ -710,18 +715,42 @@ class SteamAuthManager(private val ctx: Context) {
             return
         }
         if (!hasStoredKey) return
+        if (!sessionRestoreRunning.compareAndSet(false, true)) return
+        val generation = reconnectGeneration.get()
         Thread {
-            kotlinx.coroutines.runBlocking {
-                val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
-                Log.i(TAG, "ensureSessionAsync: restore result=$state")
-                if (state is LoginState.Success) {
-                    Log.i(TAG, "ensureSessionAsync: restore OK, starting broker")
-                    startBroker()
-                } else {
-                    Log.e(TAG, "ensureSessionAsync: restore FAILED, broker NOT started")
+            try {
+                kotlinx.coroutines.runBlocking {
+                    if (generation != reconnectGeneration.get()) return@runBlocking
+                    val state = if (hasStoredRefreshToken) loginWithStoredRefreshToken() else loginWithStoredKey()
+                    Log.i(TAG, "ensureSessionAsync: restore result=$state")
+                    if (state is LoginState.Success && generation == reconnectGeneration.get()) {
+                        Log.i(TAG, "ensureSessionAsync: restore OK, starting broker")
+                        synchronized(this@SteamAuthManager) {
+                            if (generation == reconnectGeneration.get() && loggedIn) startBroker()
+                        }
+                    } else {
+                        Log.e(TAG, "ensureSessionAsync: restore FAILED, broker NOT started")
+                    }
                 }
+            } finally {
+                sessionRestoreRunning.set(false)
             }
         }.apply { isDaemon = true; start() }
+    }
+
+    @Synchronized
+    fun recoverGameSessionAsync() {
+        if (!brokerWanted) return
+        if (isLoggedIn) {
+            startBroker()
+            return
+        }
+        synchronized(this) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastGameRecoveryAttempt < 30_000L) return
+            lastGameRecoveryAttempt = now
+        }
+        ensureSessionAsync()
     }
 
     /**
@@ -840,48 +869,77 @@ class SteamAuthManager(private val ctx: Context) {
     // Broker server (SBRK protocol for cl_steam.c)
     // ------------------------------------------------------------------
 
+    @Synchronized
     fun startBroker() {
-        if (brokerServer != null) return
+        brokerWanted = true
+        if (brokerThread?.isAlive == true) return
         Log.i(TAG, "startBroker: creating ServerSocket on 127.0.0.1:$BROKER_PORT")
-        brokerThread = Thread {
+        val worker = Thread {
             try {
-                val server = ServerSocket(BROKER_PORT, 4, InetAddress.getByName("127.0.0.1"))
-                brokerServer = server
-                notifyAuthStateChanged()
-                Log.i(TAG, "SteamBroker listening on 127.0.0.1:$BROKER_PORT (thread=${Thread.currentThread().name})")
-                while (!server.isClosed) {
+                while (brokerWanted && brokerThread === Thread.currentThread() && !Thread.currentThread().isInterrupted) {
+                    var server: ServerSocket? = null
                     try {
-                        Log.d(TAG, "broker: waiting for accept()")
-                        val client = server.accept()
-                        Log.i(TAG, "broker: ACCEPTED client from ${client.inetAddress.hostAddress}:${client.port}")
-                        // The engine (cl_steam.c) keeps this connection open for the whole session and
-                        // only sends frames when it needs a ticket or a gamedir change. A short
-                        // SO_TIMEOUT would tear the connection down while the player is idle in-game
-                        // ("connection closed by broker"), forcing a pointless reconnect every ~30s.
-                        // Use no timeout: the handler only exits on EOF (engine closed its socket) or
-                        // on an explicit sb_terminate frame.
-                        client.soTimeout = 0
-                        Thread { handleBrokerClient(client) }.apply { isDaemon = true; start() }
+                        val listener = ServerSocket()
+                        server = listener
+                        listener.reuseAddress = true
+                        listener.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), BROKER_PORT), 4)
+                        synchronized(this@SteamAuthManager) {
+                            if (!brokerWanted || brokerThread !== Thread.currentThread()) return@Thread
+                            brokerServer = listener
+                        }
+                        notifyAuthStateChanged()
+                        Log.i(TAG, "SteamBroker listening on 127.0.0.1:$BROKER_PORT")
+                        while (!listener.isClosed && brokerWanted && brokerThread === Thread.currentThread()) {
+                            val client = listener.accept()
+                            val accepted = synchronized(this@SteamAuthManager) {
+                                if (!brokerWanted || brokerServer !== listener) {
+                                    client.close()
+                                    false
+                                } else {
+                                    brokerClients.add(client)
+                                    true
+                                }
+                            }
+                            if (!accepted) break
+                            client.soTimeout = 0
+                            Thread { handleBrokerClient(client) }.apply { isDaemon = true; start() }
+                        }
                     } catch (e: Exception) {
-                        if (server.isClosed) break
-                        Log.w(TAG, "broker accept error: ${e.message}", e)
+                        if (brokerWanted && brokerThread === Thread.currentThread())
+                            Log.w(TAG, "broker listener stopped: ${e.message}", e)
+                    } finally {
+                        try { server?.close() } catch (_: Exception) { }
+                        synchronized(this@SteamAuthManager) {
+                            if (brokerServer === server) brokerServer = null
+                        }
+                        notifyAuthStateChanged()
                     }
+                    if (brokerWanted && brokerThread === Thread.currentThread()) Thread.sleep(1000)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "broker thread FAILED: ${e.message}", e)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } finally {
+                synchronized(this@SteamAuthManager) {
+                    if (brokerThread === Thread.currentThread()) brokerThread = null
+                }
                 notifyAuthStateChanged()
             }
-            Log.i(TAG, "broker: accept loop exited (isClosed=${brokerServer?.isClosed})")
-        }.apply { isDaemon = true; name = "sbrk-broker"; start() }
+        }.apply { isDaemon = true; name = "sbrk-broker" }
+        brokerThread = worker
+        worker.start()
     }
 
+    @Synchronized
     fun stopBroker() {
+        brokerWanted = false
         closeP2P()
         Log.i(TAG, "stopBroker: closing broker")
         try { brokerServer?.close() } catch (e: Exception) { Log.w(TAG, "stopBroker close: ${e.message}", e) }
         brokerServer = null
         brokerThread?.interrupt()
         brokerThread = null
+        brokerClients.forEach { try { it.close() } catch (_: Exception) { } }
+        brokerClients.clear()
         notifyAuthStateChanged()
     }
 
@@ -996,6 +1054,7 @@ class SteamAuthManager(private val ctx: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "$tag: broker client error: ${e.message}", e)
         } finally {
+            brokerClients.remove(client)
             closeP2P(client)
         }
         Log.i(TAG, "$tag: handler exiting")
@@ -1349,6 +1408,10 @@ class SteamAuthManager(private val ctx: Context) {
                     if (generation != reconnectGeneration.get()) return@runBlocking
                     connectLock.withLock {
                         if (generation != reconnectGeneration.get()) return@withLock
+                        if (loggedIn) {
+                            reloggedIn = true
+                            return@withLock
+                        }
                         try {
                             // Close old socket if any
                             try { socket?.close() } catch (_: Exception) { }
@@ -1387,8 +1450,8 @@ class SteamAuthManager(private val ctx: Context) {
                     if (state is LoginState.Success) {
                         Log.i(TAG, "Re-login successful after reconnect")
                         reloggedIn = true
-                        if (brokerServer != null) {
-                            startBroker()
+                        synchronized(this@SteamAuthManager) {
+                            if (brokerWanted && generation == reconnectGeneration.get()) startBroker()
                         }
                     } else {
                         Log.w(TAG, "Re-login failed after reconnect: $state")

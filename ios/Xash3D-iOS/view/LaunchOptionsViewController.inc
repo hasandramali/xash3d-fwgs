@@ -12,7 +12,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.preferredContentSize = CGSizeMake(360, 240);
+    self.preferredContentSize = CGSizeMake(420, 360);
     _scroll = [[UIScrollView alloc] init];
     _scroll.translatesAutoresizingMaskIntoConstraints = NO;
     _scroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
@@ -32,10 +32,15 @@
     [stack addArrangedSubview:_argumentsField];
     UIStackView *immersiveRow = [[UIStackView alloc] init];
     immersiveRow.axis = UILayoutConstraintAxisHorizontal; immersiveRow.spacing = 16;
+    immersiveRow.alignment = UIStackViewAlignmentCenter;
     UILabel *immersiveLabel = [[UILabel alloc] init];
     immersiveLabel.text = @"Immersive mode";
+    immersiveLabel.numberOfLines = 0;
     immersiveLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     _immersiveSwitch = [[UISwitch alloc] init]; _immersiveSwitch.on = self.immersive;
+    _immersiveSwitch.accessibilityLabel = @"Immersive mode";
+    [_immersiveSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_immersiveSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
     [immersiveRow addArrangedSubview:immersiveLabel]; [immersiveRow addArrangedSubview:_immersiveSwitch];
     [stack addArrangedSubview:immersiveRow];
     UIStackView *buttons = [[UIStackView alloc] init];
@@ -55,9 +60,11 @@
         [_scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [stack.topAnchor constraintEqualToAnchor:_scroll.contentLayoutGuide.topAnchor constant:24],
         [stack.bottomAnchor constraintEqualToAnchor:_scroll.contentLayoutGuide.bottomAnchor constant:-24],
-        [stack.leadingAnchor constraintEqualToAnchor:_scroll.frameLayoutGuide.leadingAnchor constant:24],
-        [stack.trailingAnchor constraintEqualToAnchor:_scroll.frameLayoutGuide.trailingAnchor constant:-24],
-        [_argumentsField.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [stack.leadingAnchor constraintEqualToAnchor:_scroll.contentLayoutGuide.leadingAnchor constant:24],
+        [stack.trailingAnchor constraintEqualToAnchor:_scroll.contentLayoutGuide.trailingAnchor constant:-24],
+        [stack.widthAnchor constraintEqualToAnchor:_scroll.frameLayoutGuide.widthAnchor constant:-48],
+        [_argumentsField.heightAnchor constraintGreaterThanOrEqualToConstant:48],
+        [immersiveRow.heightAnchor constraintGreaterThanOrEqualToConstant:44],
         [buttons.heightAnchor constraintGreaterThanOrEqualToConstant:44]
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardChanged:) name:UIKeyboardWillChangeFrameNotification object:nil];

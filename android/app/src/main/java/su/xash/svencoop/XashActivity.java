@@ -43,6 +43,14 @@ public class XashActivity extends SDLActivity {
     private int mAppliedSurfaceWidth = -1;
     private int mAppliedSurfaceHeight = -1;
     private boolean mAppliedSurfaceStretch = false;
+    private final Handler mSteamRecoveryHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mSteamRecovery = new Runnable() {
+        @Override
+        public void run() {
+            su.xash.svencoop.model.SteamAuthManager.get(XashActivity.this).recoverGameSessionAsync();
+            mSteamRecoveryHandler.postDelayed(this, 5000);
+        }
+    };
 
     @Override
     protected SDLSurface createSDLSurface(Context context) {
@@ -90,6 +98,14 @@ public class XashActivity extends SDLActivity {
     protected void onResume() {
         super.onResume();
         applyFixedSurfaceSize();
+        mSteamRecoveryHandler.removeCallbacks(mSteamRecovery);
+        mSteamRecoveryHandler.post(mSteamRecovery);
+    }
+
+    @Override
+    protected void onPause() {
+        mSteamRecoveryHandler.removeCallbacks(mSteamRecovery);
+        super.onPause();
     }
 
     @Override
