@@ -10,6 +10,48 @@ import zlib
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_gamma_validation_restores_bounds_with_maximum_ten(self):
+        repository = Path(__file__).resolve().parents[3]
+        source = (repository / "engine/client/gamma.c").read_text()
+        validation = source.split("static void V_ValidateGammaCvars( void )", 1)[1]
+        validation = "static void V_ValidateGammaCvars( void )" + validation.split("void V_CheckGamma( void )", 1)[0]
+        harness = r'''
+#include <assert.h>
+#include <math.h>
+#include <stdlib.h>
+typedef struct { float value; } cvar_t;
+static cvar_t v_gamma, v_texgamma = {0}, v_lightgamma = {20}, v_brightness = {100};
+static int updates;
+static void Cvar_DirectSet(cvar_t *variable, const char *text) {
+    variable->value = strtof(text, NULL);
+    updates++;
+}
+'''
+        harness += validation
+        harness += r'''
+int main(void) {
+    const float inputs[] = {-INFINITY, -1, 0, 1.7f, 1.8f, 3, 9.9f, 10, 10.1f, 100, INFINITY};
+    const float expected[] = {1.8f, 1.8f, 1.8f, 1.8f, 1.8f, 3, 9.9f, 10, 10, 10, 10};
+    for (unsigned index = 0; index < sizeof(inputs) / sizeof(inputs[0]); index++) {
+        v_gamma.value = inputs[index];
+        V_ValidateGammaCvars();
+        assert(v_gamma.value == expected[index]);
+        updates = 0;
+        V_ValidateGammaCvars();
+        assert(updates == 0);
+        assert(v_texgamma.value == 0 && v_lightgamma.value == 20 && v_brightness.value == 100);
+    }
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            test_source = Path(temporary) / "gamma-bounds.c"
+            executable = Path(temporary) / "gamma-bounds"
+            test_source.write_text(harness)
+            subprocess.run([os.environ.get("CC", "clang"), "-std=c11", str(test_source),
+                            "-o", str(executable)], check=True)
+            subprocess.run([str(executable)], check=True)
+
     def test_ios_touch_viewport_and_editor_preserve_coordinates(self):
         repository = Path(__file__).resolve().parents[3]
         source = (repository / "engine/client/input/in_touch.c").read_text()
