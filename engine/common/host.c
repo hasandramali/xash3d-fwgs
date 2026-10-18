@@ -1356,12 +1356,16 @@ Host_Shutdown
 */
 void Host_ShutdownWithReason( const char *reason )
 {
+	string reasoncopy = "";
 	qboolean error = host.status == HOST_ERR_FATAL;
 
 	if( host.shutdown_issued )
 		return;
 
 	host.shutdown_issued = true;
+
+	if( reason != NULL )
+		Q_strncpy( reasoncopy, reason, sizeof( reasoncopy ));
 
 	if( reason != NULL )
 		Con_Printf( S_NOTE "Issuing host shutdown due to reason \"%s\"\n", reason );
@@ -1396,5 +1400,5 @@ void Host_ShutdownWithReason( const char *reason )
 
 	// restore filter
 	Sys_RestoreCrashHandler();
-	Sys_CloseLog( reason );
+	Sys_CloseLog( reason != NULL ? reasoncopy : NULL );
 }
