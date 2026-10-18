@@ -219,6 +219,15 @@ def build(bld):
 			includes.append(ios_launcher.make_node('controller').abspath())
 
 		root = bld.path.parent
+		miniz_node = root.find_node('3rdparty/miniz')
+		if miniz_node:
+			includes.append(miniz_node.abspath())
+			if bld.env.HAVE_SYSTEM_ZLIB:
+				source.append(miniz_node.find_node('miniz.c'))
+			else:
+				miniz = bld.get_tgen_by_name('zlib')
+				for flag in ('defines', 'export_defines'):
+					setattr(miniz, flag, [define for define in Utils.to_list(getattr(miniz, flag)) if define != 'MINIZ_NO_ARCHIVE_APIS'])
 		lzma_node = root.find_node('3rdparty/lzma')
 		if lzma_node:
 			source += lzma_node.ant_glob('*.c')
