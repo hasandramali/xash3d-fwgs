@@ -10,6 +10,27 @@ import zlib
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_embedded_bootmap_lumps_are_aligned_before_typed_access(self):
+        repository = Path(__file__).resolve().parents[3]
+        includes = ["engine", "engine/common", "engine/client", "engine/client/vgui", "engine/server",
+                    "engine/platform", "public", "common", "filesystem", "pm_shared", "3rdparty/library_suffix/include"]
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "bsp-alignment-test"
+            dead_strip = "-Wl,-dead_strip" if os.uname().sysname == "Darwin" else "-Wl,--gc-sections"
+            command = [os.environ.get("CC", "clang"), "-std=gnu11", "-DENGINE_DLL", "-DXASH_DEDICATED=1",
+                       "-DHAVE_STRCASECMP", "-DHAVE_STRNCASECMP", "-ffunction-sections", "-fdata-sections",
+                       "-Wno-pointer-sign", "-fsanitize=alignment", "-fno-sanitize-recover=alignment"]
+            command += ["-I" + str(repository / include) for include in includes]
+            command += [str(Path(__file__).parent / "BspAlignmentTests.c"),
+                        str(repository / "engine/common/bootmap_blob.c"), str(repository / "public/crtlib.c"),
+                        str(repository / "public/xash3d_mathlib.c"), dead_strip, "-lm", "-o", str(executable)]
+            subprocess.run(command, check=True)
+            broken = subprocess.run([str(executable), "--unaligned"], stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True)
+            self.assertNotEqual(broken.returncode, 0)
+            self.assertIn("misaligned address", broken.stderr)
+            subprocess.run([str(executable)], check=True)
+
     def test_gamma_validation_restores_bounds_with_maximum_ten(self):
         repository = Path(__file__).resolve().parents[3]
         source = (repository / "engine/client/gamma.c").read_text()

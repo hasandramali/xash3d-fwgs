@@ -41,8 +41,17 @@ typedef struct leaflist_s
 	int      topnode; // for overflows where each leaf can't be stored individually
 } leaflist_t;
 
+typedef struct bsp_lump_copy_s
+{
+	struct bsp_lump_copy_s *next;
+	byte data[];
+} bsp_lump_copy_t;
+
 typedef struct
 {
+	poolhandle_t mempool;
+	bsp_lump_copy_t *lump_copies;
+
 	// generic lumps
 	dmodel_t   *submodels;
 	size_t     numsubmodels;
@@ -754,6 +763,29 @@ Mod_LoadLump
 generic loader
 =================
 */
+static byte *Mod_AlignLumpData( dbspmodel_t *bmod, byte *data, size_t size )
+{
+	if( !((uintptr_t)data & ( sizeof( uint32_t ) - 1 )))
+		return data;
+
+	bsp_lump_copy_t *copy = Mem_Malloc( bmod->mempool, sizeof( *copy ) + size );
+	memcpy( copy->data, data, size );
+	copy->next = bmod->lump_copies;
+	bmod->lump_copies = copy;
+	return copy->data;
+}
+
+static void Mod_FreeBmodelLumps( dbspmodel_t *bmod )
+{
+	while( bmod->lump_copies )
+	{
+		bsp_lump_copy_t *copy = bmod->lump_copies;
+		bmod->lump_copies = copy->next;
+		Mem_Free( copy );
+	}
+	Mem_Free( bmod );
+}
+
 static void Mod_LoadLump( const void *in, const mlumpinfo_t *info, mlumpstat_t *stat, int flags, loadlump_source_t source, const void *bspx_data, dbspmodel_t *bmod )
 {
 	int     version = ((const dheader_t *)in)->version;
@@ -924,6 +956,8 @@ static void Mod_LoadLump( const void *in, const mlumpinfo_t *info, mlumpstat_t *
 		return;
 
 	byte *data = (byte *)in + l.fileofs;
+	if( real_entrysize > sizeof( byte ) || info->dataofs == offsetof( dbspmodel_t, textures ))
+		data = Mod_AlignLumpData( bmod, data, l.filelen );
 
 	// all checks are passed, store pointers
 	*(byte **)((byte *)bmod + info->dataofs) = data;
@@ -4226,6 +4260,7 @@ static qboolean Mod_LoadBmodelLumps( model_t *mod, byte *mod_base, size_t buffer
 	}
 
 	dbspmodel_t *bmod = Mem_Calloc( mod->mempool, sizeof( *bmod ));
+	bmod->mempool = mod->mempool;
 	bmod->version = header->version;	// share up global
 	if( isworld )
 	{
@@ -4257,7 +4292,7 @@ static qboolean Mod_LoadBmodelLumps( model_t *mod, byte *mod_base, size_t buffer
 		if( loadstat.numerrors )
 		{
 			Con_DPrintf( "%s: %i error(s), %i warning(s)\n", __func__, loadstat.numerrors, loadstat.numwarnings );
-			Mem_Free( bmod );
+			Mod_FreeBmodelLumps( bmod );
 			return false; // there were errors, we can't load this map
 		}
 
@@ -4322,7 +4357,7 @@ static qboolean Mod_LoadBmodelLumps( model_t *mod, byte *mod_base, size_t buffer
 		Con_Reportf( "Wad files required to run the map: \"%s\"\n", wadvalue );
 	}
 
-	Mem_Free( bmod );
+	Mod_FreeBmodelLumps( bmod );
 	return true;
 }
 
