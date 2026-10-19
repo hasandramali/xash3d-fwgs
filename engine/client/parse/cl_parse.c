@@ -918,11 +918,17 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 		Q_strncpy( clgame.mapname, s, sizeof( clgame.mapname ));
 		COM_StripExtension( clgame.mapname );
 
-		s = MSG_ReadString( msg );
-		if( !COM_StringEmpty( s ))
-			Con_Printf( "Server map cycle: %s\n", s ); // VALVEWHY?
-		if( cl_sven_proto )
-			CL_DispatchUserMessage( "ServerMapList", Q_strlen( s ) + 1, (void *)s );
+		size_t mapcycleCapacity = Q_max( MSG_GetNumBytesLeft( msg ), 0 ) + 1;
+		char *mapcycle = Mem_Malloc( cls.mempool, mapcycleCapacity );
+		size_t mapcycleLength = MSG_ReadStringBuffer( msg, mapcycle, mapcycleCapacity );
+		if( !MSG_CheckOverflow( msg ))
+		{
+			if( mapcycleLength )
+				Con_Printf( "Server map cycle: %s\n", mapcycle );
+			if( cl_sven_proto )
+				CL_DispatchUserMessage( "ServerMapList", mapcycleLength + 1, mapcycle );
+		}
+		Mem_Free( mapcycle );
 
 		if( MSG_ReadByte( msg ))
 			Con_Printf( "Uh, server says it's VAC2 secured.\n" );

@@ -796,14 +796,18 @@ qboolean MSG_ReadBytes( sizebuf_t *sb, void *out, size_t maxBytes, int bytes )
 	return MSG_ReadBits( sb, out, maxBytes, bytes << 3 );
 }
 
-static char *MSG_ReadStringExt( sizebuf_t *sb, qboolean bLine )
+static size_t MSG_ReadStringExt( sizebuf_t *sb, char *string, size_t size, qboolean bLine )
 {
-	static char	string[4096];
-	int		l = 0;
+	size_t length = 0;
 
-	do
+	for( ;; )
 	{
-		// use MSG_ReadByte so -1 is out of bounds
+		if( MSG_Overflow( sb, 8 ))
+		{
+			sb->iCurBit = sb->nDataBits;
+			break;
+		}
+
 		int c = MSG_ReadByte( sb );
 
 		if( c == 0 ) break;
@@ -814,22 +818,32 @@ static char *MSG_ReadStringExt( sizebuf_t *sb, qboolean bLine )
 		// NOTE: but game strings leave unchanged. see pfnWriteString for details
 		if( c == '%' ) c = '.';
 
-		string[l] = c;
-		l++;
-	} while( l < sizeof( string ) - 1 );
-	string[l] = 0; // terminator
+		if( size && length < size - 1 )
+			string[length++] = c;
+	}
+	if( size )
+		string[length] = 0;
 
-	return string;
+	return length;
+}
+
+size_t MSG_ReadStringBuffer( sizebuf_t *sb, char *string, size_t size )
+{
+	return MSG_ReadStringExt( sb, string, size, false );
 }
 
 char *MSG_ReadString( sizebuf_t *sb )
 {
-	return MSG_ReadStringExt( sb, false );
+	static char string[4096];
+	MSG_ReadStringBuffer( sb, string, sizeof( string ));
+	return string;
 }
 
 char *MSG_ReadStringLine( sizebuf_t *sb )
 {
-	return MSG_ReadStringExt( sb, true );
+	static char string[4096];
+	MSG_ReadStringExt( sb, string, sizeof( string ), true );
+	return string;
 }
 
 void MSG_ExciseBits( sizebuf_t *sb, int startbit, int bitstoremove )
