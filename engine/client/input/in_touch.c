@@ -178,10 +178,18 @@ static qboolean Touch_StretchPixels( void );
 static void Touch_UpdateViewport( void )
 {
 	const float none[4] = { 0 };
+#if XASH_IOS
+	// The iOS app already resizes the SDL view to the safe area
+	// (IOS_ConstrainGameViewToSafeArea), so refState is already inside the
+	// cutout. Applying host.window_insets again double-shrinks the touch
+	// layout and shifts buttons up. Keep the historic full-view mapping.
+	const float *insets = none;
+#else
 	// Stretch mode maps to raw render pixels, so safe-area insets must not
 	// shrink the viewport there; otherwise positions (raw) and sizes /
 	// hit-testing (view-based) disagree.
 	const float *insets = ( touch_safearea.value && !Touch_StretchPixels()) ? host.window_insets : none;
+#endif
 
 	touch.view_x = refState.width * insets[0];
 	touch.view_y = refState.height * insets[1];

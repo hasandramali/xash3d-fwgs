@@ -100,7 +100,35 @@ dll_user_t *FS_FindLibrary( const char *dllname, qboolean directpath )
 
 	// fs can't find library
 	if( !g_fsapi.FindLibrary( dllname, directpath, &dllInfo ))
-		return NULL;
+	{
+#if XASH_IOS
+		// library_suffix names iOS libraries as <name>_ios_<arch>, but some
+		// third-party game libraries (cs16-client and its vendored submodules)
+		// still ship the legacy Apple-style <name>_<arch> names. Retry with
+		// the platform token stripped so already-packaged bundles keep working.
+		const char *ios_token = Q_strstr( dllname, "_ios_" );
+
+		if( ios_token )
+		{
+			char alt[1024];
+			size_t prefix_len = (size_t)( ios_token - dllname );
+
+			if( prefix_len + 1 < sizeof( alt ))
+			{
+				memcpy( alt, dllname, prefix_len );
+				Q_strncpy( alt + prefix_len, ios_token + 5, sizeof( alt ) - prefix_len );
+
+				if( !g_fsapi.FindLibrary( alt, directpath, &dllInfo ))
+					return NULL;
+
+				Con_Reportf( "%s: using legacy Apple-style library name %s\n", __func__, alt );
+			}
+			else return NULL;
+		}
+		else
+#endif
+			return NULL;
+	}
 
 	// NOTE: for libraries we not fail even if search is NULL
 	// let the OS find library himself
