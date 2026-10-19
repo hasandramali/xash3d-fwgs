@@ -761,6 +761,7 @@ typedef struct
 {
 	qboolean valid;
 	qboolean owned_hint;
+	qboolean removed_hint;
 	qboolean real_name;
 	char name[64];
 	char sprdir[64]; // CustWeapon sprite subdirectory (e.g. "hunger/weapons").
@@ -797,6 +798,8 @@ typedef struct
 	float pending_time;
 	int drop_pending;
 	float drop_pending_time;
+	int alt_pending;
+	float alt_pending_time;
 	float expire_time;
 } cl_weaponlistfix_t;
 

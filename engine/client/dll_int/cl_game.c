@@ -484,12 +484,29 @@ static void CL_WeaponListFix_ForgetWeapon( int id )
 	if( !weapon )
 		return;
 	weapon->owned_hint = false;
+	weapon->removed_hint = true;
 	if( cl_weaponlistfix_state.active_weapon == id )
 		cl_weaponlistfix_state.active_weapon = -1;
 	if( cl_weaponlistfix_state.selected_weapon == id )
 		cl_weaponlistfix_state.selected_weapon = -1;
 	if( cl_weaponlistfix_state.select_pending == id )
 		cl_weaponlistfix_state.select_pending = 0;
+}
+
+static void CL_WeaponListFix_ConfirmAlternateAction( int id )
+{
+	int pending = cl_weaponlistfix_state.alt_pending;
+	float elapsed = cl.time - cl_weaponlistfix_state.alt_pending_time;
+	if( !pending )
+		return;
+	if( id < 0 || cl_weaponlistfix_state.weapondata_valid || elapsed < 0
+		|| elapsed > CL_WEAPONLISTFIX_PENDING_TIMEOUT )
+		cl_weaponlistfix_state.alt_pending = 0;
+	else if( id != pending )
+	{
+		CL_WeaponListFix_ForgetWeapon( pending );
+		cl_weaponlistfix_state.alt_pending = 0;
+	}
 }
 
 static void CL_WeaponListFix_PruneExhaustedWeapons( void )
@@ -551,7 +568,10 @@ void CL_WeaponListFix_UpdateWeaponData( const weapon_data_t *weapons, int count 
 		}
 		weapon->owned_hint = owned;
 		if( owned )
+		{
+			weapon->removed_hint = false;
 			weapon->clip = weapons[id].m_iClip;
+		}
 		else
 			CL_WeaponListFix_ForgetWeapon( id );
 	}
@@ -802,6 +822,7 @@ static void CL_WeaponListFix_ShowMenu( const cl_weaponlistfix_weapon_t *weapon )
 
 static void CL_WeaponListFix_SelectWeapon( cl_weaponlistfix_weapon_t *weapon )
 {
+	cl_weaponlistfix_state.alt_pending = 0;
 	if( !weapon || COM_StringEmpty( weapon->name ))
 		return;
 
@@ -868,6 +889,24 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	if( cls.state < ca_connected )
 		return false;
 
+	if( !Q_stricmp( cmd_name, "+alt1" ))
+	{
+		weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.active_weapon );
+		cl_weaponlistfix_state.alt_pending = 0;
+		if( cls.state == ca_active && !cl_weaponlistfix_state.weapondata_valid
+			&& weapon && weapon->real_name && weapon->owned_hint
+			&& weapon->ammo1 < 0 && weapon->ammo2 < 0 && weapon->clip <= 0 )
+		{
+			cl_weaponlistfix_state.alt_pending = weapon->id;
+			cl_weaponlistfix_state.alt_pending_time = cl.time;
+		}
+		return false;
+	}
+	if( !Q_strncmp( cmd_name, "weapon_", 7 ) || !Q_strncmp( cmd_name, "slot", 4 )
+		|| !Q_stricmp( cmd_name, "invnext" ) || !Q_stricmp( cmd_name, "invprev" )
+		|| !Q_stricmp( cmd_name, "lastinv" ) || !Q_stricmp( cmd_name, "drop" ))
+		cl_weaponlistfix_state.alt_pending = 0;
+
 	// slot1..slot9 are swallowed ONLY in the aggressive cl_weaponlistfix 2 mode.
 	// In mode 1 the keys stay on the vanilla path so server-side menus
 	// (Sven vote/buy selections) keep working; only the cycling keys
@@ -900,6 +939,7 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 			if( drop && drop->owned_hint )
 			{
 				drop->owned_hint = false;
+				drop->removed_hint = true;
 				cl_weaponlistfix_state.drop_pending = id;
 				cl_weaponlistfix_state.drop_pending_time = cl.time;
 				cl_weaponlistfix_state.active_weapon = -1;
@@ -1107,6 +1147,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		if( id < 1 )
 		{
+			CL_WeaponListFix_ConfirmAlternateAction( id );
 			cl_weaponlistfix_state.active_weapon = -1;
 			CL_WeaponListFix_PruneExhaustedWeapons();
 			return;
@@ -1157,7 +1198,8 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 			}
 		}
 
-		weapon->owned_hint = true;
+		if( state & 1 ) weapon->removed_hint = false;
+		weapon->owned_hint = !weapon->removed_hint;
 		weapon->clip = clip;
 		weapon->ammo = ammo;
 
@@ -1168,6 +1210,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 			if( suppress_drop )
 			{
 				weapon->owned_hint = false;
+				weapon->removed_hint = true;
 				cl_weaponlistfix_state.active_weapon = -1;
 			}
 			else
@@ -1180,6 +1223,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 			}
 		}
 
+		if( state & 1 ) CL_WeaponListFix_ConfirmAlternateAction( id );
 		CL_WeaponListFix_PruneExhaustedWeapons();
 		return;
 	}
@@ -1210,7 +1254,10 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 
 		if( weapon )
 		{
+			weapon->removed_hint = false;
 			weapon->owned_hint = true;
+			if( cl_weaponlistfix_state.alt_pending == id )
+				cl_weaponlistfix_state.alt_pending = 0;
 			CL_WeaponListFix_NotePickupRow( id );
 		}
 		return;
@@ -1284,7 +1331,11 @@ void CL_WeaponListFix_OnResetHUD( void )
 		return;
 
 	for( i = 0; i < CL_WEAPONLISTFIX_MAX_WEAPONS; i++ )
+	{
 		cl_weaponlistfix_state.weapons[i].owned_hint = false;
+		cl_weaponlistfix_state.weapons[i].removed_hint = false;
+	}
+	cl_weaponlistfix_state.alt_pending = 0;
 	memset( cl_weaponlistfix_state.ammo_valid, 0, sizeof( cl_weaponlistfix_state.ammo_valid ));
 	cl_weaponlistfix_state.active_weapon = -1;
 	cl_weaponlistfix_state.drop_pending = 0;
