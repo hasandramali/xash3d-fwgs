@@ -87,7 +87,7 @@ CVAR_DEFINE_AUTO( hud_utf8, "0", FCVAR_ARCHIVE, "Use utf-8 encoding for hud text
 CVAR_DEFINE_AUTO( ui_renderworld, "1", FCVAR_PROTECTED, "render world when UI is visible" );
 static CVAR_DEFINE_AUTO( cl_maxframetime, "0", 0, "set deadline timer for client rendering to catch freezes" );
 CVAR_DEFINE_AUTO( cl_fixmodelinterpolationartifacts, "1", 0, "try to fix up models interpolation on a moving platforms (monsters on trains for example)" );
-CVAR_DEFINE_AUTO( cl_weaponlistfix, "2", FCVAR_ARCHIVE, "0: off, 1: Sven-compatible weapon inventory (invnext/invprev switch, slot keys stay on the vanilla/menu path for vote/buy menus), 2: slot1..slot9 also switch weapons via the engine inventory" );
+CVAR_DEFINE_AUTO( cl_weaponlistfix, "2", FCVAR_READ_ONLY, "0: off, 1: Sven-compatible weapon inventory (invnext/invprev switch, slot keys stay on the vanilla/menu path for vote/buy menus), 2: slot1..slot9 also switch weapons via the engine inventory" );
 CVAR_DEFINE_AUTO( wl_pickup_rows, "", 0, "last weapon pickup rows for the client HUD notifier (id:row pairs, engine-written, never archived)" );
 
 //
