@@ -86,30 +86,28 @@ const char *COM_OffsetNameForFunction( void *function )
 #if XASH_IOS
 /*
 =================
-IOS_FindLibraryVariant
+IOS_BuildCounterpartName
 
 library_suffix names iOS libraries as <name>_ios_<arch>.<ext>, but some
 third-party game libraries (cs16-client and its vendored submodules) still
 ship the legacy Apple-style <name>_<arch>.<ext>, and a few callers request
-the Apple-style name directly. Try the counterpart spelling so already
-packaged bundles are found no matter which naming was used to build them.
+the Apple-style name directly. Given one spelling, build the other in `out`.
+Returns false if the name can't be converted.
 =================
 */
-static qboolean IOS_FindLibraryVariant( const char *dllname, qboolean directpath, fs_dllinfo_t *dllInfo )
+static qboolean IOS_BuildCounterpartName( const char *dllname, char *out, size_t size )
 {
-	char alt[1024];
 	const char *ios_token = Q_strstr( dllname, "_ios_" );
-	const size_t len = Q_strlen( dllname );
 
-	if( len >= sizeof( alt ))
+	if( Q_strlen( dllname ) >= size )
 		return false;
 
 	if( ios_token )
 	{
 		// <name>_ios_<arch> -> <name>_<arch>
 		const size_t prefix_len = (size_t)( ios_token - dllname );
-		memcpy( alt, dllname, prefix_len );
-		Q_strncpy( alt + prefix_len, ios_token + 4, sizeof( alt ) - prefix_len );
+		memcpy( out, dllname, prefix_len );
+		Q_strncpy( out + prefix_len, ios_token + 4, size - prefix_len );
 	}
 	else
 	{
@@ -122,10 +120,27 @@ static qboolean IOS_FindLibraryVariant( const char *dllname, qboolean directpath
 			return false;
 
 		prefix_len = (size_t)( unders - dllname ) + 1;
-		memcpy( alt, dllname, prefix_len );
-		Q_strncpy( alt + prefix_len, "ios_", sizeof( alt ) - prefix_len );
-		Q_strncpy( alt + prefix_len + 4, dllname + prefix_len, sizeof( alt ) - prefix_len - 4 );
+		memcpy( out, dllname, prefix_len );
+		Q_strncpy( out + prefix_len, "ios_", size - prefix_len );
+		Q_strncpy( out + prefix_len + 4, dllname + prefix_len, size - prefix_len - 4 );
 	}
+
+	return true;
+}
+
+/*
+=================
+IOS_FindLibraryVariant
+
+Retry a failed library lookup with the counterpart iOS naming convention.
+=================
+*/
+static qboolean IOS_FindLibraryVariant( const char *dllname, qboolean directpath, fs_dllinfo_t *dllInfo )
+{
+	char alt[1024];
+
+	if( !IOS_BuildCounterpartName( dllname, alt, sizeof( alt )))
+		return false;
 
 	if( !g_fsapi.FindLibrary( alt, directpath, dllInfo ))
 		return false;
@@ -149,9 +164,28 @@ dll_user_t *FS_FindLibrary( const char *dllname, qboolean directpath )
 	}
 
 	fs_dllinfo_t dllInfo;
+	qboolean found = false;
+
+#if XASH_IOS
+	// Prefer a spelling that exists in the CURRENT game directory. Library
+	// search walks the whole game hierarchy, so a mod shipping <name>_<arch>
+	// (e.g. cstrike) would otherwise be shadowed by the base game's
+	// <name>_ios_<arch> before the counterpart fallback below can run.
+	if( g_fsapi.FileExists && !g_fsapi.FileExists( dllname, true ))
+	{
+		char alt[1024];
+
+		if( IOS_BuildCounterpartName( dllname, alt, sizeof( alt )) && g_fsapi.FileExists( alt, true ))
+		{
+			found = g_fsapi.FindLibrary( alt, directpath, &dllInfo );
+			if( found )
+				Con_Reportf( "%s: using game-local counterpart iOS library name %s\n", __func__, alt );
+		}
+	}
+#endif
 
 	// fs can't find library
-	if( !g_fsapi.FindLibrary( dllname, directpath, &dllInfo ))
+	if( !found && !g_fsapi.FindLibrary( dllname, directpath, &dllInfo ))
 	{
 #if XASH_IOS
 		if( !IOS_FindLibraryVariant( dllname, directpath, &dllInfo ))
