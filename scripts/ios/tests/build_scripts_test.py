@@ -10,6 +10,23 @@ import zlib
 
 
 class SvenBuildScriptsTest(unittest.TestCase):
+    def test_weapon_ownership_tracks_server_removals_and_exhaustible_ammo(self):
+        repository = Path(__file__).resolve().parents[3]
+        includes = ["engine", "engine/common", "engine/client", "engine/client/vgui", "engine/server",
+                    "engine/platform", "public", "common", "filesystem", "pm_shared", "3rdparty/library_suffix/include"]
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "weapon-ownership-test"
+            dead_strip = "-Wl,-dead_strip" if os.uname().sysname == "Darwin" else "-Wl,--gc-sections"
+            command = [os.environ.get("CC", "clang"), "-std=gnu11", "-DENGINE_DLL",
+                       "-DHAVE_STRCASECMP", "-DHAVE_STRNCASECMP", "-ffunction-sections", "-fdata-sections",
+                       "-Wno-pointer-sign", "-fsanitize=undefined", "-fno-sanitize-recover=undefined"]
+            command += ["-I" + str(repository / include) for include in includes]
+            command += [str(Path(__file__).parent / "WeaponOwnershipTests.c"),
+                        str(repository / "public/crtlib.c"), str(repository / "public/xash3d_mathlib.c"),
+                        dead_strip, "-lm", "-o", str(executable)]
+            subprocess.run(command, check=True)
+            subprocess.run([str(executable)], check=True)
+
     def test_long_network_strings_preserve_message_boundaries(self):
         repository = Path(__file__).resolve().parents[3]
         includes = ["engine", "engine/common", "engine/client", "engine/client/vgui", "engine/server",

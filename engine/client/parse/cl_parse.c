@@ -1095,7 +1095,7 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	int		i, j, command_ack;
 	clientdata_t	*from_cd, *to_cd;
 	weapon_data_t	*from_wd, *to_wd;
-	weapon_data_t	nullwd[64];
+	weapon_data_t	nullwd[CL_WEAPONLISTFIX_MAX_WEAPONS];
 	clientdata_t	nullcd;
 	frame_t		*frame;
 	int		idx;
@@ -1257,13 +1257,14 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 
 	if( proto == PROTO_GOLDSRC )
 	{
+		memcpy( to_wd, from_wd, sizeof( frame->weapondata ));
 		for( i = 0; ; i++ )
 		{
 			if( !MSG_ReadOneBit( msg )) break;
 
 			idx = MSG_ReadUBitLong( msg, 8 );
 
-			if( idx < MAX_LOCAL_WEAPONS )
+			if( idx < ( cl_sven_proto ? CL_WEAPONLISTFIX_MAX_WEAPONS : MAX_LOCAL_WEAPONS ))
 				Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &from_wd[idx], &to_wd[idx], cl.mtime[0] );
 			else Delta_ReadGSFields( msg, DT_WEAPONDATA_T, &nullwd[0], &nullwd[0], cl.mtime[0] );
 		}
@@ -1283,7 +1284,10 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	}
 
 	if( cl_sven_proto && !MSG_CheckOverflow( msg ))
+	{
 		frame->clientdata_sequence = cls.netchan.incoming_sequence;
+		CL_WeaponListFix_UpdateWeaponData( to_wd, CL_WEAPONLISTFIX_MAX_WEAPONS );
+	}
 
 	// make a local copy of physinfo
 	Q_strncpy( cls.physinfo, frame->clientdata.physinfo, sizeof( cls.physinfo ));

@@ -117,6 +117,8 @@ static qboolean CL_WeaponListFix_FixedRow( const char *name, int *row, int *pos 
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
 #define CL_WEAPONLISTFIX_PENDING_TIMEOUT 3.0f
 #define CL_WEAPONLISTFIX_DROP_TIMEOUT 1.0f
+#define CL_WEAPONLISTFIX_SELECTONEMPTY BIT( 2 )
+#define CL_WEAPONLISTFIX_EXHAUSTIBLE BIT( 4 )
 #define CL_WEAPONLISTFIX_HIDEHUD_WEAPONS BIT( 0 )
 #define CL_WEAPONLISTFIX_HIDEHUD_ALL BIT( 2 )
 
@@ -474,6 +476,85 @@ static void CL_WeaponListFix_AddUnknownWeapon( int id )
 
 	// sort weapons by slot and pos for better navigation
 	qsort( cl_weaponlistfix_state.order, cl_weaponlistfix_state.count, sizeof( int ), CL_WeaponListFix_CompareWeapons );
+}
+
+static void CL_WeaponListFix_ForgetWeapon( int id )
+{
+	cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
+	if( !weapon )
+		return;
+	weapon->owned_hint = false;
+	if( cl_weaponlistfix_state.active_weapon == id )
+		cl_weaponlistfix_state.active_weapon = -1;
+	if( cl_weaponlistfix_state.selected_weapon == id )
+		cl_weaponlistfix_state.selected_weapon = -1;
+	if( cl_weaponlistfix_state.select_pending == id )
+		cl_weaponlistfix_state.select_pending = 0;
+}
+
+static void CL_WeaponListFix_PruneExhaustedWeapons( void )
+{
+	if( cl_weaponlistfix_state.weapondata_valid )
+		return;
+	for( int id = 1; id < CL_WEAPONLISTFIX_MAX_WEAPONS; id++ )
+	{
+		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
+		if( !weapon || !weapon->owned_hint || !( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
+			|| ( weapon->flags & CL_WEAPONLISTFIX_SELECTONEMPTY )
+			|| cl_weaponlistfix_state.active_weapon == id || weapon->clip > 0 )
+			continue;
+		if( weapon->ammo1 < 0 || weapon->ammo1 >= ARRAYSIZE( cl_weaponlistfix_state.ammo_counts )
+			|| !cl_weaponlistfix_state.ammo_valid[weapon->ammo1]
+			|| cl_weaponlistfix_state.ammo_counts[weapon->ammo1] != 0 )
+			continue;
+		if( weapon->ammo2 >= 0 && ( weapon->ammo2 >= ARRAYSIZE( cl_weaponlistfix_state.ammo_counts )
+			|| !cl_weaponlistfix_state.ammo_valid[weapon->ammo2]
+			|| cl_weaponlistfix_state.ammo_counts[weapon->ammo2] != 0 ))
+			continue;
+		CL_WeaponListFix_ForgetWeapon( id );
+	}
+}
+
+void CL_WeaponListFix_UpdateWeaponData( const weapon_data_t *weapons, int count )
+{
+	if( !weapons || count != CL_WEAPONLISTFIX_MAX_WEAPONS )
+		return;
+
+	for( int id = 1; id < count; id++ )
+	{
+		if( weapons[id].m_iId == id )
+		{
+			cl_weaponlistfix_state.weapondata_valid = true;
+			break;
+		}
+	}
+	if( !cl_weaponlistfix_state.weapondata_valid )
+		return;
+
+	for( int id = 1; id < count; id++ )
+	{
+		qboolean owned = weapons[id].m_iId == id;
+		if( owned )
+			CL_WeaponListFix_AddUnknownWeapon( id );
+		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
+		if( !weapon )
+			continue;
+
+		if( cl_weaponlistfix_state.drop_pending == id )
+		{
+			if( !owned )
+				cl_weaponlistfix_state.drop_pending = 0;
+			else if( cl.time - cl_weaponlistfix_state.drop_pending_time <= CL_WEAPONLISTFIX_DROP_TIMEOUT )
+				owned = false;
+			else
+				cl_weaponlistfix_state.drop_pending = 0;
+		}
+		weapon->owned_hint = owned;
+		if( owned )
+			weapon->clip = weapons[id].m_iClip;
+		else
+			CL_WeaponListFix_ForgetWeapon( id );
+	}
 }
 
 // a "real" class name is anything but the automatic weapon_<id> fallback.
@@ -919,6 +1000,18 @@ static int CL_WeaponListFix_CompareWeapons( const void *a, const void *b )
 
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf )
 {
+	if( !Q_stricmp( pszName, "AmmoX" ))
+	{
+		cl_weaponlistfix_msg_t msg;
+		if( !pbuf || iSize != 5 )
+			return;
+		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
+		int ammo = CL_WeaponListFix_ReadByte( &msg );
+		cl_weaponlistfix_state.ammo_counts[ammo] = CL_WeaponListFix_ReadLong( &msg );
+		cl_weaponlistfix_state.ammo_valid[ammo] = true;
+		CL_WeaponListFix_PruneExhaustedWeapons();
+		return;
+	}
 	if( !Q_stricmp( pszName, "ShowMenu" ))
 	{
 		cl_weaponlistfix_msg_t msg;
@@ -997,6 +1090,8 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		int clip;
 		int ammo;
 		cl_weaponlistfix_weapon_t *weapon;
+		if( !pbuf || iSize != 11 )
+			return;
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
 		state = CL_WeaponListFix_ReadByte( &msg );
@@ -1013,6 +1108,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		if( id < 1 )
 		{
 			cl_weaponlistfix_state.active_weapon = -1;
+			CL_WeaponListFix_PruneExhaustedWeapons();
 			return;
 		}
 
@@ -1084,6 +1180,7 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 			}
 		}
 
+		CL_WeaponListFix_PruneExhaustedWeapons();
 		return;
 	}
 
@@ -1188,6 +1285,7 @@ void CL_WeaponListFix_OnResetHUD( void )
 
 	for( i = 0; i < CL_WEAPONLISTFIX_MAX_WEAPONS; i++ )
 		cl_weaponlistfix_state.weapons[i].owned_hint = false;
+	memset( cl_weaponlistfix_state.ammo_valid, 0, sizeof( cl_weaponlistfix_state.ammo_valid ));
 	cl_weaponlistfix_state.active_weapon = -1;
 	cl_weaponlistfix_state.drop_pending = 0;
 	cl_weaponlistfix_state.drop_pending_time = 0;

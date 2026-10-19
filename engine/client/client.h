@@ -51,6 +51,8 @@ typedef struct netbandwithgraph_s
 	word		voicebytes;
 } netbandwidthgraph_t;
 
+#define CL_WEAPONLISTFIX_MAX_WEAPONS 256
+
 typedef struct frame_s
 {
 	// received from server
@@ -64,7 +66,7 @@ typedef struct frame_s
 
 	clientdata_t	clientdata;	// local client private data
 	entity_state_t	playerstate[MAX_CLIENTS];
-	weapon_data_t	weapondata[MAX_LOCAL_WEAPONS];
+	weapon_data_t	weapondata[CL_WEAPONLISTFIX_MAX_WEAPONS];
 	netbandwidthgraph_t graphdata;
 	byte		flags[MAX_VISIBLE_PACKET_VIS_BYTES];
 	int		num_entities;
@@ -755,8 +757,6 @@ extern convar_t cl_screenfade;
 extern convar_t cl_weaponlistfix;
 extern convar_t wl_pickup_rows;
 
-#define CL_WEAPONLISTFIX_MAX_WEAPONS 256
-
 typedef struct
 {
 	qboolean valid;
@@ -790,6 +790,9 @@ typedef struct
 	int display_slot;
 	int hidehud_bits;
 	int menu_valid_slots;
+	qboolean weapondata_valid;
+	int ammo_counts[256];
+	qboolean ammo_valid[256];
 	char pending_name[64];
 	float pending_time;
 	int drop_pending;
@@ -819,6 +822,7 @@ void CL_WavePlayLen_f( void );
 qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name );
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf );
 void CL_WeaponListFix_OnResetHUD( void );
+void CL_WeaponListFix_UpdateWeaponData( const weapon_data_t *weapons, int count );
 void CL_WeaponListFix_Draw( void );
 void CL_WeaponListFix_Reset( void );
 void CL_WeaponListFix_AppendMove( usercmd_t *cmd );
