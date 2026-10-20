@@ -161,4 +161,8 @@
     <string name="steam_broker_starting">Starting steam…</string>
     <string name="steam_broker_stopping">Stopping steam…</string>
     <string name="steam_broker_running">Ticket steam running on port %1$d</string>
+    <string name="steam_library_title">Sven Co-op library access</string>
+    <string name="steam_library_question">Sven Co-op must be in your Steam library to play online. Would you like to add it to your library for free now?</string>
+    <string name="steam_library_no">NO</string>
+    <string name="steam_library_yes">YES</string>
 </resources>

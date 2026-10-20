@@ -4,6 +4,9 @@ FOUNDATION_EXPORT NSNotificationName const SvenSteamStateChanged;
 
 @interface SteamService : NSObject
 @property (atomic, readonly) BOOL loggedIn;
+@property (atomic, readonly) NSUInteger svenLibrarySession;
+@property (atomic, readonly) BOOL svenLibraryPromptPending;
+@property (atomic, copy, readonly) NSString *svenLibraryError;
 @property (atomic, readonly) BOOL busy;
 @property (atomic, readonly) BOOL brokerRunning;
 @property (atomic, readonly) BOOL hasSavedSession;
@@ -15,6 +18,7 @@ FOUNDATION_EXPORT NSNotificationName const SvenSteamStateChanged;
 - (void)login:(NSString *)username password:(NSString *)password;
 - (void)submitCode:(NSString *)code;
 - (void)restoreSession;
+- (void)answerSvenLibraryPrompt:(BOOL)add session:(NSUInteger)session;
 - (void)cancelLogin;
 - (void)logout;
 - (void)startBroker;

@@ -1,5 +1,54 @@
 #import "SteamService.h"
 
+static __weak UIAlertController *svenLibraryAlert;
+static NSUInteger svenLibraryAlertSession;
+static NSUInteger svenLibraryErrorSession = NSNotFound;
+static BOOL svenLibraryPromptRetry;
+
+static void SvenPresentLibraryPrompt(UIViewController *controller) {
+    SteamService *steam = SteamService.shared;
+    NSUInteger session = steam.svenLibrarySession;
+    if (svenLibraryAlert && (!steam.loggedIn || svenLibraryAlertSession != session)) {
+        [svenLibraryAlert dismissViewControllerAnimated:NO completion:nil]; svenLibraryAlert = nil;
+    }
+    if (!steam.loggedIn || (!steam.svenLibraryPromptPending &&
+        (!steam.svenLibraryError.length || svenLibraryErrorSession == session))) return;
+    UIViewController *presenter = controller.navigationController.visibleViewController ?: controller;
+    if (!presenter.viewIfLoaded.window || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
+    if (svenLibraryAlert) return;
+    while (presenter.presentedViewController && ![presenter.presentedViewController isKindOfClass:UIAlertController.class])
+        presenter = presenter.presentedViewController;
+    if (presenter.presentedViewController || presenter.isBeingPresented || presenter.isBeingDismissed) {
+        if (!svenLibraryPromptRetry) {
+            svenLibraryPromptRetry = YES;
+            __weak UIViewController *weakController = controller;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+                svenLibraryPromptRetry = NO;
+                UIViewController *strongController = weakController;
+                if (strongController) SvenPresentLibraryPrompt(strongController);
+            });
+        }
+        return;
+    }
+    BOOL consent = steam.svenLibraryPromptPending;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Sven Co-op library access"
+        message:consent ? @"Sven Co-op must be in your Steam library to play online. Would you like to add it to your library for free now?" : steam.svenLibraryError
+        preferredStyle:UIAlertControllerStyleAlert];
+    if (consent) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"NO" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){
+            [SteamService.shared answerSvenLibraryPrompt:NO session:session];
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"YES" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+            [SteamService.shared answerSvenLibraryPrompt:YES session:session];
+        }]];
+    } else {
+        svenLibraryErrorSession = session;
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    }
+    svenLibraryAlert = alert; svenLibraryAlertSession = session;
+    [presenter presentViewController:alert animated:YES completion:nil];
+}
+
 @interface SteamViewController : UIViewController
 @property (nonatomic, strong) GameDataDownloader *downloader;
 @end
@@ -83,6 +132,9 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated]; self.navigationController.toolbarHidden = YES; [self refresh];
 }
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated]; SvenPresentLibraryPrompt(self);
+}
 - (void)refresh {
     SteamService *steam = SteamService.shared;
     _statusLabel.text = steam.loggedIn ? [NSString stringWithFormat:@"%@\n%@", steam.accountName, steam.status] : steam.status;
@@ -104,6 +156,7 @@
     [_install setTitle:[self.downloader hasGameData:@"svencoop"] ? @"Reinstall game" : @"Install game" forState:UIControlStateNormal];
     _install.enabled = !self.downloader.installing; _cancelInstall.hidden = !self.downloader.installing;
     _progress.hidden = !self.downloader.installing;
+    SvenPresentLibraryPrompt(self);
 }
 - (void)signIn {
     [self.view endEditing:YES];

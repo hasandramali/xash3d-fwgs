@@ -1,10 +1,12 @@
 #include <memory>
+#include <thread>
 #include <set>
 #include <netinet/in.h>
 #include <sstream>
 #include <cmath>
 #include "SteamP2P.hpp"
 #include "SteamContent.hpp"
+#include "SteamLibrary.hpp"
 
 NSNotificationName const SvenSteamStateChanged = @"SvenSteamStateChanged";
 
@@ -103,6 +105,8 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
 
 @interface SteamService ()
 @property (atomic, readwrite) BOOL loggedIn;
+@property (atomic, readwrite) BOOL svenLibraryPromptPending;
+@property (atomic, copy, readwrite) NSString *svenLibraryError;
 @property (atomic, readwrite) BOOL busy;
 @property (atomic, readwrite) BOOL brokerRunning;
 @property (atomic, copy, readwrite) NSString *accountName;
@@ -117,6 +121,9 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
 - (void)advertise;
 - (void)handleBroker:(int)socket;
 - (void)becameActive;
+- (BOOL)librarySessionActive:(NSUInteger)session;
+- (BOOL)ownsSvenForSession:(NSUInteger)session;
+- (void)checkSvenLibrary:(NSUInteger)session;
 @end
 
 @implementation SteamService {
@@ -124,6 +131,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     dispatch_queue_t _operations;
     dispatch_source_t _heartbeat;
     std::atomic<uint64_t> _generation;
+    std::atomic<NSUInteger> _librarySession;
     std::atomic<bool> _connected;
     std::mutex _pendingMutex, _brokerMutex, _ticketMutex;
     std::map<uint64_t, std::shared_ptr<SteamPending>> _pending;
@@ -156,7 +164,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
 - (instancetype)init {
     if ((self = [super init])) {
         _operations = dispatch_queue_create("su.xash.svenclient.steam", DISPATCH_QUEUE_SERIAL);
-        _generation = 1; _connected = false; _nextJob = 1; _brokerSocket = -1; _brokerGeneration = 0;
+        _generation = 1; _librarySession = 0; _connected = false; _nextJob = 1; _brokerSocket = -1; _brokerGeneration = 0;
         _status = @"Sign in to Steam"; _guardKind = @""; _accountName = SteamCredentials()[@"account"] ?: @"";
         [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"steam_auto_connect": @YES}];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(becameActive) name:UIApplicationDidBecomeActiveNotification object:nil];
@@ -175,6 +183,7 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
 }
 - (void)closeConnection {
     _connected = false; self.loggedIn = NO;
+    ++_librarySession; self.svenLibraryPromptPending = NO; self.svenLibraryError = nil;
     [self closeP2P:-1 request:0];
     if (_heartbeat) { dispatch_source_cancel(_heartbeat); _heartbeat = nil; }
     [_cm disconnect];
@@ -317,10 +326,58 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     auto response = [self request:5514 body:body method:"" expected:751 timeout:90];
     if (generation != _generation) throw std::runtime_error("Steam login cancelled");
     if (value(response.body, 1) != 1) throw std::runtime_error("Steam rejected the saved session. Please sign in again.");
+    NSUInteger session = ++_librarySession;
+    self.svenLibraryPromptPending = NO; self.svenLibraryError = nil;
     self.loggedIn = YES; self.busy = NO; self.guardKind = @""; self.accountName = credentials[@"account"] ?: @"";
     self.status = @"Connected to Steam";
     Buffer online; number(online, 1, 1); [self send:716 body:online];
     [self beginHeartbeat:unsigned(value(response.body, 3, 9))]; [self startBroker]; [self notify];
+    dispatch_async(_operations, ^{ [self checkSvenLibrary:session]; });
+}
+- (NSUInteger)svenLibrarySession { return _librarySession.load(); }
+- (BOOL)librarySessionActive:(NSUInteger)session {
+    return self.loggedIn && _connected && session == _librarySession;
+}
+- (BOOL)ownsSvenForSession:(NSUInteger)session {
+    if (![self librarySessionActive:session]) throw std::runtime_error("Steam session changed");
+    auto reply = [self request:151 body:svenOwnedGamesQuery(_steamID) method:"Player.GetOwnedGames#1" expected:147 timeout:30];
+    if (![self librarySessionActive:session]) throw std::runtime_error("Steam session changed");
+    if (reply.message != 147 || value(reply.header, 13, 2) != 1)
+        throw std::runtime_error("Steam library check failed. Please reconnect and try again.");
+    return ownsSven(reply.body);
+}
+- (void)checkSvenLibrary:(NSUInteger)session {
+    @autoreleasepool { try {
+        BOOL owned = [self ownsSvenForSession:session];
+        if (![self librarySessionActive:session]) return;
+        self.svenLibraryPromptPending = !owned; [self notify];
+    } catch (const std::exception &error) {
+        if ([self librarySessionActive:session]) NSLog(@"Steam library check failed: %s", error.what());
+    } }
+}
+- (void)answerSvenLibraryPrompt:(BOOL)add session:(NSUInteger)session {
+    if (![self librarySessionActive:session] || !self.svenLibraryPromptPending) return;
+    self.svenLibraryPromptPending = NO;
+    if (!add) return;
+    dispatch_async(_operations, ^{
+        @autoreleasepool { try {
+            if (![self librarySessionActive:session]) return;
+            auto reply = [self request:5572 body:svenFreeLicenseQuery() method:"" expected:5573 timeout:30];
+            if (![self librarySessionActive:session]) return;
+            if (reply.message != 5573 || value(reply.body, 1, 2) != 1)
+                throw std::runtime_error("Could not add Sven Co-op. Please reconnect and try again.");
+            BOOL owned = NO;
+            for (int attempt = 0; attempt < 3 && !owned; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                owned = [self ownsSvenForSession:session];
+            }
+            if (!owned) throw std::runtime_error("Steam has not confirmed the Sven Co-op license yet. Please reconnect and try again.");
+            [self notify];
+        } catch (const std::exception &error) {
+            if (![self librarySessionActive:session]) return;
+            self.svenLibraryError = [NSString stringWithUTF8String:error.what()]; [self notify];
+        } }
+    });
 }
 - (void)login:(NSString *)username password:(NSString *)password {
     [self cancelLogin]; uint64_t generation = _generation;

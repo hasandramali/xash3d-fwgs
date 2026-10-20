@@ -56,6 +56,8 @@ static NSString *kCellID = @"FileCell";
         [[UIBarButtonItem alloc] initWithTitle:@"Steam" style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)]
     ];
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"global_arguments": @"-console", @"immersive_mode_svencoop": @NO}];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(steamLibraryChanged) name:SvenSteamStateChanged object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(steamLibraryChanged) name:UIApplicationDidBecomeActiveNotification object:nil];
     if (SteamService.shared.autoConnect) [SteamService.shared restoreSession];
 
     UIBarButtonItem *importBtn = [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importTapped)];
@@ -75,6 +77,14 @@ static NSString *kCellID = @"FileCell";
 {
     [self.navigationController popViewControllerAnimated:YES];
 }
+
+- (void)steamLibraryChanged { SvenPresentLibraryPrompt(self); }
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated]; SvenPresentLibraryPrompt(self);
+}
+
+- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 
 - (void)viewWillAppear:(BOOL)animated
 {
