@@ -3624,7 +3624,13 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 	byte		rgucMD5_hash[16];
 	resource_t	*p;
 
-	if( !COM_StringEmptyOrNULL( filename ) && successfully_received )
+	qboolean cached_soundcache = !successfully_received && CL_SvenSoundCacheDownloaded( filename );
+	if( cached_soundcache )
+	{
+		Con_DPrintf( "Ignoring late transfer failure for loaded soundcache '%s'\n", filename );
+		successfully_received = true;
+	}
+	if( !COM_StringEmptyOrNULL( filename ) && successfully_received && !cached_soundcache )
 	{
 		if( filename[0] != '!' )
 			Con_Printf( "processing %s\n", filename );
@@ -3637,7 +3643,7 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 		COM_NoteMissingRemoteFile( filename );
 	}
 
-	if( successfully_received && filename && filename[0] != '!' )
+	if( successfully_received && filename && filename[0] != '!' && !cached_soundcache )
 		CL_SvenSoundCacheOnDownload( filename );
 
 	for( p = cl.resourcesneeded.pNext; p != &cl.resourcesneeded; p = p->pNext )

@@ -427,7 +427,8 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 				}
 			else
 			{
-				Con_DPrintf( "%s: eindex %d late spawn without spawnbaseline, decoding vanilla-style\n", __func__, newnum );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 2 )
+					Con_DPrintf( "%s: eindex %d late spawn without spawnbaseline, decoding vanilla-style\n", __func__, newnum );
 				nobaseline = true;
 			}
 		}

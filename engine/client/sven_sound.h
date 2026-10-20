@@ -43,6 +43,8 @@ void CL_SvenSoundCacheReset( void );
 void CL_SvenSoundCacheInvalidate( void );
 void CL_SvenSoundFrame( void );
 void CL_SvenSoundCacheOnDownload( const char *filename );
+qboolean CL_SvenSoundCacheRequest( sizebuf_t *message, const char *filename );
+qboolean CL_SvenSoundCacheDownloaded( const char *filename );
 void CL_ParseSvenStartSound( const char *name, int size, void *buffer );
 const char *CL_SvenSoundName( int index );
 qboolean CL_SvenSoundActive( void );

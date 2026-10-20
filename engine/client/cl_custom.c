@@ -16,6 +16,7 @@ GNU General Public License for more details.
 #include "common.h"
 #include "client.h"
 #include "net_encode.h"
+#include "sven_sound.h"
 
 /*
 =====================
@@ -112,6 +113,12 @@ qboolean CL_CheckFile( sizebuf_t *msg, resource_t *pResource )
 		return true;
 	}
 
+	if( CL_SvenSoundCacheRequest( msg, filepath ))
+	{
+		if( !FBitSet( pResource->ucFlags, RES_REQUESTED )) host.downloadcount++;
+		SetBits( pResource->ucFlags, RES_REQUESTED );
+		return false;
+	}
 	host.downloadcount++;
 
 	if( cl.http_download && !( cl_sven_proto && !Q_strnicmp( filepath, "maps/soundcache/", 16 )))

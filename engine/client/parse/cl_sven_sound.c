@@ -115,6 +115,38 @@ void CL_SvenSoundCacheInvalidate( void )
 	svenSoundsPrecached = false;
 }
 
+qboolean CL_SvenSoundCacheRequest( sizebuf_t *message, const char *filename )
+{
+	char map[MAX_QPATH], path[MAX_QPATH + 32];
+	if( !cl_sven_proto || !clgame.mapname[0] || !filename ) return false;
+	CL_SvenSoundMapName( map, sizeof( map ));
+	Q_snprintf( path, sizeof( path ), "maps/soundcache/%s.txt", map );
+	if( Q_stricmp( path, filename )) return false;
+	if( Q_strcmp( svenSoundMap, map ))
+	{
+		CL_SvenSoundCacheReset();
+		Q_strncpy( svenSoundMap, map, sizeof( svenSoundMap ));
+	}
+	if( !Q_strcmp( svenRequestedMap, map )
+		&& ( svenSoundLoaded || svenRequestSignon >= SIGNONS || cls.signon != SIGNONS ))
+		return true;
+	MSG_BeginClientCmd( message, clc_stringcmd );
+	MSG_WriteStringf( message, "dlfile \"%s\"", path );
+	Q_strncpy( svenRequestedMap, map, sizeof( svenRequestedMap ));
+	svenRequestSignon = cls.signon;
+	return true;
+}
+
+qboolean CL_SvenSoundCacheDownloaded( const char *filename )
+{
+	char map[MAX_QPATH], path[MAX_QPATH + 32];
+	if( !cl_sven_proto || !svenFreshTable || !svenSoundLoaded || !filename ) return false;
+	CL_SvenSoundMapName( map, sizeof( map ));
+	if( Q_strcmp( map, svenSoundMap )) return false;
+	Q_snprintf( path, sizeof( path ), "maps/soundcache/%s.txt", map );
+	return !Q_stricmp( path, filename );
+}
+
 static void CL_LoadSvenSoundCache( void )
 {
 	char map[MAX_QPATH], path[MAX_QPATH + 32];
@@ -129,18 +161,17 @@ static void CL_LoadSvenSoundCache( void )
 		Q_strncpy( svenSoundMap, map, sizeof( svenSoundMap ));
 	}
 	Q_snprintf( path, sizeof( path ), "maps/soundcache/%s.txt", map );
-	if( cls.state >= ca_connected && !cls.demoplayback
-		&& ( Q_strcmp( svenRequestedMap, map ) || ( svenRequestSignon < SIGNONS && cls.signon == SIGNONS )))
+	if( cls.state >= ca_connected && !cls.demoplayback )
 	{
 		byte data[256];
 		sizebuf_t message;
 		MSG_Init( &message, "SvenSoundCache", data, sizeof( data ));
-		MSG_BeginClientCmd( &message, clc_stringcmd );
-		MSG_WriteStringf( &message, "dlfile \"%s\"", path );
-		Netchan_CreateFragments( &cls.netchan, &message );
-		Netchan_FragSend( &cls.netchan );
-		Q_strncpy( svenRequestedMap, map, sizeof( svenRequestedMap ));
-		svenRequestSignon = cls.signon;
+		CL_SvenSoundCacheRequest( &message, path );
+		if( MSG_GetNumBytesWritten( &message ))
+		{
+			Netchan_CreateFragments( &cls.netchan, &message );
+			Netchan_FragSend( &cls.netchan );
+		}
 	}
 	if( svenSoundLoaded || host.realtime < svenNextLoad ) return;
 	if( !cls.demoplayback && !Host_IsLocalClient() && !svenFreshTable ) return;
@@ -211,6 +242,8 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 	}
 	svenSoundLoaded = false;
 	svenFreshTable = true;
+	Q_strncpy( svenRequestedMap, map, sizeof( svenRequestedMap ));
+	svenRequestSignon = cls.signon;
 	svenSoundsPrecached = false;
 	svenNextLoad = 0;
 	CL_LoadSvenSoundCache();

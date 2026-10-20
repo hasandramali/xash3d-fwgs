@@ -184,6 +184,12 @@ static struct http_static_s
 	qboolean resolving;
 	char displayed_file[MAX_SYSPATH];
 	unsigned int download_sequence;
+	struct
+	{
+		char host[256];
+		int port;
+		double expires;
+	} tls_failures[8];
 } http;
 
 poolhandle_t http_mempool;
@@ -283,6 +289,8 @@ static void HTTP_FreeFile( httpfile_t *file, qboolean error )
 				file->own_server = false;
 			}
 			file->server = next;
+			file->url_in_server = false;
+			file->redirects_followed = 0;
 
 			file->pfn_process = HTTP_FileQueue; // Reset download state, HTTP_Run() will open file again
 			return;
@@ -340,12 +348,54 @@ static int HTTP_FileQueue( httpfile_t *file )
 
 	file->pfn_process = HTTP_FileResolveNS;
 	file->blocktime = file->downloaded = file->lastchecksize = file->checktime = 0;
+	file->size = file->reported_size;
+	file->got_response = false;
+	file->compressed = false;
+	file->chunked = false;
+	file->chunksize = 0;
 	file->chunkhead_len = 0; // drop any stale partial header (fresh socket below)
 	return 1;
 }
 
+static qboolean HTTP_TLSFailedRecently( const httpserver_t *server )
+{
+	if( !server || !server->secure ) return false;
+	for( int index = 0; index < ARRAYSIZE( http.tls_failures ); index++ )
+	{
+		if( http.tls_failures[index].expires > host.realtime
+			&& http.tls_failures[index].port == server->port
+			&& !Q_stricmp( http.tls_failures[index].host, server->host ))
+			return true;
+	}
+	return false;
+}
+
+static void HTTP_RememberTLSFailure( const httpserver_t *server )
+{
+	int slot = 0;
+	for( int index = 0; index < ARRAYSIZE( http.tls_failures ); index++ )
+	{
+		if( http.tls_failures[index].port == server->port
+			&& !Q_stricmp( http.tls_failures[index].host, server->host ))
+		{
+			slot = index;
+			break;
+		}
+		if( http.tls_failures[index].expires < http.tls_failures[slot].expires ) slot = index;
+	}
+	Q_strncpy( http.tls_failures[slot].host, server->host, sizeof( http.tls_failures[slot].host ));
+	http.tls_failures[slot].port = server->port;
+	http.tls_failures[slot].expires = host.realtime + 30.0;
+}
+
 static int HTTP_FileResolveNS( httpfile_t *file )
 {
+	if( !file->to_memory && HTTP_TLSFailedRecently( file->server ))
+	{
+		Con_DPrintf( "HTTP: recent TLS failure for %s:%d, trying next download source\n", file->server->host, file->server->port );
+		HTTP_FreeFile( file, true );
+		return 0;
+	}
 	if( file->server->resolved )
 	{
 		file->addr = file->server->addr;
@@ -558,6 +608,11 @@ static int HTTP_FileConnect( httpfile_t *file )
 
 static int HTTP_FileTlsHandshake( httpfile_t *file )
 {
+	if( !file->to_memory && HTTP_TLSFailedRecently( file->server ))
+	{
+		HTTP_FreeFile( file, true );
+		return 0;
+	}
 	int ret = HTTP_TlsHandshake( file->tls );
 
 	if( ret == HTTP_TLS_OK )
@@ -574,6 +629,7 @@ static int HTTP_FileTlsHandshake( httpfile_t *file )
 		return 0;
 	}
 
+	if( !file->to_memory ) HTTP_RememberTLSFailure( file->server );
 	HTTP_FreeFile( file, true );
 	return 0;
 }
@@ -778,7 +834,7 @@ void HTTP_ClearCustomServers( void )
 {
 	for( httpfile_t *file = http.first_file; file; file = file->next )
 	{
-		if( file->server && !file->own_server )
+		if( file->server && ( !file->own_server || file->server->next ))
 			return;
 	}
 
@@ -842,6 +898,7 @@ static void HTTP_AutoClean( void )
 				Con_Printf( "successfully downloaded %s!\n", cur->path );
 		}
 
+		if( cur->own_server && cur->server ) Mem_Free( cur->server );
 		Mem_Free( cur );
 	}
 
@@ -1617,6 +1674,7 @@ static qboolean HTTP_FileRedirect( httpfile_t *file, const char *location )
 		file->socket = -1;
 	}
 
+	newserver->next = file->server->next;
 	if( file->own_server && file->server )
 		Mem_Free( file->server );
 	file->server = newserver;
@@ -1843,6 +1901,7 @@ Stop file transfers without cancelling independent in-memory requests.
 */
 void HTTP_CancelDownloads( void )
 {
+	memset( http.tls_failures, 0, sizeof( http.tls_failures ));
 	for( httpfile_t *file = http.first_file; file; file = file->next )
 	{
 		char incomplete[MAX_SYSPATH + 64];

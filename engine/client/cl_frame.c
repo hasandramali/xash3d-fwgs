@@ -777,7 +777,7 @@ qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe )
 		return false;
 	}
 
-	if( subtracted >= CL_UPDATE_MASK )
+	if( subtracted >= ( cl_sven_proto ? CL_UPDATE_BACKUP : CL_UPDATE_MASK ))
 	{
 		// we can't use this, it is too old
 		Con_NPrintf( 2, "^3Warning:^1 delta frame is too old^7\n" );
