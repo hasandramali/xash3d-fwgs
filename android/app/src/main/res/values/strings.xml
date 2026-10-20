@@ -162,5 +162,5 @@
     <string name="steam_broker_stopping">Stopping steam…</string>
     <string name="steam_broker_running">Ticket steam running on port %1$d</string>
     <string name="steam_library_title">Sven Co-op library access</string>
-    <string name="steam_library_notice">Sven Co-op must be in your Steam library to play online. Please open Steam & add Sven Co-op to your library for free, then restart SvenClient.</string>
+    <string name="steam_library_notice">Sven Co-op must be in your Steam library to play online. Please open Steam &amp; add Sven Co-op to your library for free, then restart SvenClient.</string>
 </resources>
