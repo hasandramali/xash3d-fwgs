@@ -29,7 +29,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var navController: NavController
     private var steamLibraryDialog: AlertDialog? = null
     private var steamLibraryDialogSession = -1L
-    private var steamLibraryErrorSession = -1L
     private val steamLibraryListener: () -> Unit = { runOnUiThread { refreshSteamLibraryPrompt() } }
 
     override fun onStart() {
@@ -65,18 +64,11 @@ class MainActivity : AppCompatActivity() {
         if (auth.svenLibraryPromptPending) {
             steamLibraryDialog = MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.steam_library_title)
-                .setMessage(R.string.steam_library_question)
+                .setMessage(R.string.steam_library_notice)
                 .setCancelable(false)
-                .setNegativeButton(R.string.steam_library_no) { _, _ -> auth.answerSvenLibraryPrompt(session, false) }
-                .setPositiveButton(R.string.steam_library_yes) { _, _ -> auth.answerSvenLibraryPrompt(session, true) }
+                .setPositiveButton(android.R.string.ok) { _, _ -> auth.acknowledgeSvenLibraryNotice(session) }
                 .show()
-        } else if (auth.svenLibraryError != null && steamLibraryErrorSession != session) {
-            steamLibraryErrorSession = session
-            steamLibraryDialog = MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.steam_library_title)
-                .setMessage(auth.svenLibraryError)
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
+
         }
     }
 

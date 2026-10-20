@@ -13,10 +13,6 @@ inline Buffer svenOwnedGamesQuery(uint64_t steamID) {
     return request;
 }
 
-inline Buffer svenFreeLicenseQuery() {
-    Buffer request; number(request, 2, 225840); return request;
-}
-
 inline bool ownsSven(const Buffer &response) {
     bool owned = false;
     for (const auto &field : fields(response)) {

@@ -29,10 +29,6 @@ internal object SteamLibraryProtocol {
         }.toByteArray()
     }
 
-    fun freeLicenseQuery(): ByteArray = ByteArrayOutputStream().apply {
-        field(this, 2, APP_ID.toLong())
-    }.toByteArray()
-
     private class Reader(private val data: ByteArray) {
         private var position = 0
         val remaining get() = data.size - position

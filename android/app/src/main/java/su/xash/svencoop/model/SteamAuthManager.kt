@@ -218,22 +218,19 @@ class SteamAuthManager(private val ctx: Context) {
             if (changed) {
                 val session = librarySession.incrementAndGet()
                 svenLibraryPromptPending = false
-                svenLibraryError = null
                 svenLibraryStatus = if (value) SvenLibraryStatus.CHECKING else SvenLibraryStatus.UNKNOWN
                 notifyAuthStateChanged()
                 if (value) libraryScope.launch { checkSvenLibrary(session) }
             }
         }
 
-    enum class SvenLibraryStatus { UNKNOWN, CHECKING, OWNED, MISSING, ADDING, ERROR }
+    enum class SvenLibraryStatus { UNKNOWN, CHECKING, OWNED, MISSING, ERROR }
     private val librarySession = AtomicLong(0L)
     private val libraryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val svenLibrarySession: Long get() = librarySession.get()
     @Volatile var svenLibraryStatus = SvenLibraryStatus.UNKNOWN
         private set
     @Volatile var svenLibraryPromptPending = false
-        private set
-    @Volatile var svenLibraryError: String? = null
         private set
 
     // job correlation
@@ -624,7 +621,7 @@ class SteamAuthManager(private val ctx: Context) {
     private fun librarySessionActive(session: Long) =
         loggedIn && connected && librarySession.get() == session
 
-    private suspend fun libraryRequest(session: Long, message: Int, body: ByteArray, method: String? = null): SteamMsg {
+    private suspend fun libraryRequest(session: Long, body: ByteArray): SteamMsg {
         check(librarySessionActive(session)) { "Steam session changed" }
         val jobId = nextJobId.getAndIncrement()
         val future = CompletableFuture<SteamMsg>()
@@ -634,13 +631,13 @@ class SteamAuthManager(private val ctx: Context) {
                 check(librarySessionActive(session)) { "Steam session changed" }
                 val header = ByteArrayOutputStream()
                 header.write(buildProtoHeader(currentSteamId, currentSessionId, jobId))
-                if (method != null) writeStringField(header, 12, method)
-                sendProtobufMsg(message, body, header.toByteArray())
+                writeStringField(header, 12, "Player.GetOwnedGames#1")
+                sendProtobufMsg(151, body, header.toByteArray())
             }
-            val reply = awaitJob(future, method ?: "RequestFreeLicense")
+            val reply = awaitJob(future, "Player.GetOwnedGames#1")
             check(librarySessionActive(session)) { "Steam session changed" }
-            check(reply.emsg == if (method == null) 5573 else 147) { "Unexpected Steam library response" }
-            val result = if (method == null) readEresult(reply.body) else readHeaderEresult(reply.header)
+            check(reply.emsg == 147) { "Unexpected Steam library response" }
+            val result = readHeaderEresult(reply.header)
             check(result == ER_OK) { "Steam library request failed (result $result). Please try again later." }
             return reply
         } finally {
@@ -649,8 +646,7 @@ class SteamAuthManager(private val ctx: Context) {
     }
 
     private suspend fun ownsSven(session: Long): Boolean {
-        val reply = libraryRequest(session, 151,
-            SteamLibraryProtocol.ownedGamesQuery(currentSteamId), "Player.GetOwnedGames#1")
+        val reply = libraryRequest(session, SteamLibraryProtocol.ownedGamesQuery(currentSteamId))
         return SteamLibraryProtocol.ownsSven(reply.body)
     }
 
@@ -669,34 +665,9 @@ class SteamAuthManager(private val ctx: Context) {
         }
     }
 
-    fun answerSvenLibraryPrompt(session: Long, add: Boolean) {
-        if (!librarySessionActive(session) || !svenLibraryPromptPending) return
+    fun acknowledgeSvenLibraryNotice(session: Long) {
+        if (!librarySessionActive(session)) return
         svenLibraryPromptPending = false
-        if (!add) return
-        svenLibraryStatus = SvenLibraryStatus.ADDING
-        notifyAuthStateChanged()
-        libraryScope.launch {
-            try {
-                libraryRequest(session, 5572, SteamLibraryProtocol.freeLicenseQuery())
-                var owned = false
-                repeat(3) {
-                    if (!owned) {
-                        delay(1000)
-                        owned = ownsSven(session)
-                    }
-                }
-                check(owned) { "Steam has not confirmed the Sven Co-op license yet. Please reconnect and try again." }
-                if (!librarySessionActive(session)) return@launch
-                svenLibraryStatus = SvenLibraryStatus.OWNED
-                notifyAuthStateChanged()
-            } catch (error: Exception) {
-                if (!librarySessionActive(session)) return@launch
-                svenLibraryStatus = SvenLibraryStatus.ERROR
-                svenLibraryError = error.message ?: "Could not add Sven Co-op. Please try again later."
-                Log.w(TAG, "Steam free license request failed: ${error.message}")
-                notifyAuthStateChanged()
-            }
-        }
     }
 
     fun isBrokerRunning(): Boolean = brokerServer?.let { it.isBound && !it.isClosed } == true

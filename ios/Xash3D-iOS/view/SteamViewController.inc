@@ -2,7 +2,6 @@
 
 static __weak UIAlertController *svenLibraryAlert;
 static NSUInteger svenLibraryAlertSession;
-static NSUInteger svenLibraryErrorSession = NSNotFound;
 static BOOL svenLibraryPromptRetry;
 
 static void SvenPresentLibraryPrompt(UIViewController *controller) {
@@ -11,8 +10,7 @@ static void SvenPresentLibraryPrompt(UIViewController *controller) {
     if (svenLibraryAlert && (!steam.loggedIn || svenLibraryAlertSession != session)) {
         [svenLibraryAlert dismissViewControllerAnimated:NO completion:nil]; svenLibraryAlert = nil;
     }
-    if (!steam.loggedIn || (!steam.svenLibraryPromptPending &&
-        (!steam.svenLibraryError.length || svenLibraryErrorSession == session))) return;
+    if (!steam.loggedIn || !steam.svenLibraryPromptPending) return;
     UIViewController *presenter = controller.navigationController.visibleViewController ?: controller;
     if (!presenter.viewIfLoaded.window || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
     if (svenLibraryAlert) return;
@@ -30,21 +28,12 @@ static void SvenPresentLibraryPrompt(UIViewController *controller) {
         }
         return;
     }
-    BOOL consent = steam.svenLibraryPromptPending;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Sven Co-op library access"
-        message:consent ? @"Sven Co-op must be in your Steam library to play online. Would you like to add it to your library for free now?" : steam.svenLibraryError
+        message:@"Sven Co-op must be in your Steam library to play online. Please open Steam & add Sven Co-op to your library for free, then reopen SvenClient."
         preferredStyle:UIAlertControllerStyleAlert];
-    if (consent) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"NO" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){
-            [SteamService.shared answerSvenLibraryPrompt:NO session:session];
-        }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"YES" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-            [SteamService.shared answerSvenLibraryPrompt:YES session:session];
-        }]];
-    } else {
-        svenLibraryErrorSession = session;
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [SteamService.shared acknowledgeSvenLibraryNotice:session];
+    }]];
     svenLibraryAlert = alert; svenLibraryAlertSession = session;
     [presenter presentViewController:alert animated:YES completion:nil];
 }
