@@ -55,6 +55,9 @@ GNU General Public License for more details.
 #define SBRK_TICKET_RESPONSE_TIMEOUT	15.0
 #define SBRK_MASTERLIST_TIMEOUT	15.0
 #define SBRK_TICKET_SIZE_MAX 		2048
+#define SBRK_P2P_MAX_RETRIES		2
+#define SBRK_P2P_RETRY_DELAY		2.0
+#define SBRK_P2P_SILENCE_TIMEOUT	30.0
 
 static CVAR_DEFINE_AUTO( cl_steam_broker_addr, "127.0.0.1:27420", FCVAR_PRIVILEGED|FCVAR_ARCHIVE, "address of steam broker instance" );
 static CVAR_DEFINE_AUTO( cl_steam_appid, "0", FCVAR_PRIVILEGED|FCVAR_ARCHIVE, "Steam appid used for GoldSrc auth tickets (0 = auto-detect from gamedir; 10 half-life/cs1.6, 50 opposing force, 130 blue shift, 225840 svencoop)" );
@@ -118,6 +121,8 @@ static uint32_t p2p_serial, p2p_request;
 static qboolean p2p_ready;
 static qboolean p2p_failed;
 static double p2p_deadline;
+static unsigned int p2p_retries;
+static double p2p_healthy_since;
 static unsigned int p2p_read, p2p_write;
 typedef struct
 {
@@ -132,6 +137,7 @@ static void SteamBroker_ClearP2P( void )
 	p2p_ready = false;
 	p2p_failed = false;
 	p2p_deadline = 0;
+	p2p_healthy_since = 0;
 	p2p_read = p2p_write = 0;
 	memset( &p2p_peer, 0, sizeof( p2p_peer ));
 }
@@ -173,6 +179,22 @@ static void SteamBroker_P2PState( uint32_t request, const char *state )
 		p2p_deadline = Platform_DoubleTime() + 60.0;
 	}
 }
+static void SteamBroker_P2PError( uint32_t request, const char *error )
+{
+	if( !p2p_request || p2p_failed || request != p2p_request )
+		return;
+	Con_Printf( S_ERROR "%s\n", error );
+	p2p_failed = true;
+	p2p_ready = false;
+	if( Q_stristr( error, "timed out" ) || Q_stristr( error, "timeout" ))
+		p2p_deadline = Platform_DoubleTime() + SBRK_P2P_RETRY_DELAY;
+	else
+	{
+		p2p_deadline = 0;
+		Cbuf_AddText( "disconnect\n" );
+	}
+}
+
 void Steam_MasterlistScanBegin( void );
 static qboolean Steam_MasterlistSeenBefore( const netadr_t *adr );
 static qboolean SteamTracker_RequestPage( int page );
@@ -460,13 +482,8 @@ static qboolean SteamBroker_ProcessFrame( void )
 		memcpy( error, payload, size );
 		error[size] = 0;
 		unsigned int request;
-		if( sscanf( error + 13, "%u", &request ) == 1 && request == p2p_request && p2p_request )
-		{
-			Con_Printf( S_ERROR "%s\n", error );
-			p2p_failed = true;
-			p2p_ready = false;
-			Cbuf_AddText( "disconnect\n" );
-		}
+		if( sscanf( error + 13, "%u", &request ) == 1 )
+			SteamBroker_P2PError( request, error );
 	}
 	else if( payload_size >= SBRK_FRIEND_RESPONSE_HEADER_SIZE &&
 		!memcmp( broker.rx_buffer + SBRK_FRAME_HEADER_SIZE + SBRK_FRAME_LENGTH_SIZE,
@@ -809,7 +826,7 @@ qboolean SteamBroker_StartP2P( netadr_t peer )
 	if( broker.state != SBRK_STATE_CONNECTED || NET_NetadrType( &peer ) != NA_STEAM_P2P )
 		return false;
 	if( p2p_request && NET_CompareAdr( peer, p2p_peer ))
-		return !p2p_failed;
+		return !p2p_failed || p2p_deadline > 0;
 	SteamBroker_ClearP2P();
 	p2p_peer = peer;
 	p2p_request = ++p2p_serial;
@@ -824,6 +841,14 @@ qboolean SteamBroker_StartP2P( netadr_t peer )
 	}
 	SteamBroker_ClearP2P();
 	return false;
+}
+
+qboolean SteamBroker_P2PConnectTimedOut( netadr_t peer )
+{
+	if( !p2p_request || !NET_CompareAdr( peer, p2p_peer ))
+		return false;
+	SteamBroker_P2PError( p2p_request, "Steam P2P: server handshake timed out" );
+	return p2p_deadline > 0;
 }
 
 qboolean SteamBroker_P2PReady( netadr_t peer )
@@ -1378,6 +1403,7 @@ qboolean SteamBroker_InitiateGameConnection( netadr_t serveradr, int challenge )
 
 void SteamBroker_TerminateGameConnection( void )
 {
+	p2p_retries = 0;
 	SteamBroker_CancelTicket();
 	if( p2p_request )
 	{
@@ -1546,6 +1572,68 @@ void Test_RunSteamConnection( void )
 }
 #endif
 
+static void SteamBroker_RetryP2P( void )
+{
+	netadr_t peer = p2p_peer;
+	unsigned int retries = p2p_retries;
+
+	if( cls.demoplayback || cls.state < ca_connecting || cls.state > ca_active )
+	{
+		SteamBroker_ClearP2P();
+		return;
+	}
+
+	if( retries >= SBRK_P2P_MAX_RETRIES )
+	{
+		Con_Printf( S_ERROR "Steam P2P: connection did not recover after %u retries; disconnecting\n", retries );
+		CL_Disconnect();
+		return;
+	}
+
+	Con_Printf( "Steam P2P: reconnecting after timeout (attempt %u/%u)\n", retries + 1, SBRK_P2P_MAX_RETRIES );
+	CL_Disconnect();
+	p2p_retries = retries + 1;
+	cls.state = ca_connecting;
+	cls.net_protocol = PROTO_GOLDSRC;
+	cls.serveradr = peer;
+	cls.connect_time = host.realtime;
+	cls.max_fragment_size = FRAGMENT_MAX_SIZE;
+	UI_SetActiveMenu( false );
+}
+
+static void SteamBroker_UpdateP2P( void )
+{
+	if( p2p_request && !p2p_failed && !p2p_ready && p2p_deadline && Platform_DoubleTime() >= p2p_deadline )
+	{
+		Con_Printf( S_ERROR "Steam P2P: broker negotiation timed out\n" );
+		p2p_failed = true;
+		p2p_deadline = Platform_DoubleTime() + SBRK_P2P_RETRY_DELAY;
+	}
+	if( p2p_request && p2p_ready && !p2p_failed && cls.state == ca_active && !cls.demoplayback )
+	{
+		double silence = host.realtime - cls.netchan.last_received;
+		double now = Platform_DoubleTime();
+		if( silence > SBRK_P2P_SILENCE_TIMEOUT && host.status == HOST_FRAME && host.pureframetime < 5.0 )
+		{
+			Con_Printf( S_WARN "Steam P2P: no server packets for %.0fs\n", silence );
+			p2p_ready = false;
+			p2p_failed = true;
+			p2p_deadline = now + SBRK_P2P_RETRY_DELAY;
+		}
+		if( silence < 5.0 )
+		{
+			if( !p2p_healthy_since )
+				p2p_healthy_since = now;
+			if( now - p2p_healthy_since >= SBRK_P2P_SILENCE_TIMEOUT )
+				p2p_retries = 0;
+		}
+		else p2p_healthy_since = 0;
+	}
+	else p2p_healthy_since = 0;
+	if( p2p_request && p2p_failed && p2p_deadline && Platform_DoubleTime() >= p2p_deadline )
+		SteamBroker_RetryP2P();
+}
+
 void SteamBroker_Frame( void )
 {
 	if( FBitSet( cl_steam_broker_addr.flags | cl_ticket_generator.flags, FCVAR_CHANGED ))
@@ -1581,12 +1669,7 @@ void SteamBroker_Frame( void )
 		// do nothing, just wait for game shutdown
 		break;
 	}
-	if( p2p_request && !p2p_failed && !p2p_ready && p2p_deadline && Platform_DoubleTime() >= p2p_deadline )
-	{
-		Con_Printf( S_ERROR "Steam P2P: broker negotiation timed out\n" );
-		p2p_failed = true;
-		Cbuf_AddText( "disconnect\n" );
-	}
+	SteamBroker_UpdateP2P();
 }
 
 void SteamBroker_Init( void )

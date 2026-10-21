@@ -1718,6 +1718,8 @@ static void CL_CheckForResend( void )
 		// only retry so many times before failure.
 		if( cls.connect_retry >= CL_CONNECTION_RETRIES )
 		{
+			if( NET_NetadrType( &adr ) == NA_STEAM_P2P && SteamBroker_P2PConnectTimedOut( adr ))
+				return;
 			Con_DPrintf( S_ERROR "%s: couldn't connect\n", __func__ );
 			CL_Disconnect();
 			return;

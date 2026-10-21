@@ -1319,6 +1319,7 @@ void Steam_MasterlistScanBegin( void );
 void SteamBroker_ConnectBySteamID( const char *text );
 qboolean SteamBroker_StartP2P( netadr_t peer );
 qboolean SteamBroker_P2PReady( netadr_t peer );
+qboolean SteamBroker_P2PConnectTimedOut( netadr_t peer );
 void SteamBroker_SendP2P( netadr_t peer, const void *data, size_t length );
 qboolean SteamBroker_GetP2P( netadr_t *peer, byte *data, size_t *length );
 

@@ -64,6 +64,11 @@ static const char *SDLash_CategoryToString( int category )
 
 static void SDLCALL SDLash_LogOutputFunction( void *userdata, int category, SDL_LogPriority priority, const char *message )
 {
+#if XASH_ANDROID || XASH_IOS
+	if( category == SDL_LOG_CATEGORY_ERROR && priority == SDL_LOG_PRIORITY_ERROR
+		&& !Q_strcmp( message, "That operation is not supported" ))
+		return;
+#endif
 	const char *str = "";
 
 	switch( priority )
