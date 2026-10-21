@@ -40,6 +40,19 @@ static TEMPENTITY *cl_active_tents;
 static TEMPENTITY *cl_free_tents;
 static TEMPENTITY *cl_tempents = NULL;		// entities pool
 static int cl_num_tempents;
+static int cl_tempentity_type = -1;
+static CVAR_DEFINE_AUTO( cl_trace_tempmodels, "0", 0, "trace model indices used by projectile and fading temporary effects" );
+
+static void CL_TraceTempModel( const char *effect, int modelIndex, const vec3_t origin )
+{
+	const model_t *model;
+	if( !cl_trace_tempmodels.value )
+		return;
+	model = CL_ModelHandle( modelIndex );
+	Con_Printf( "TEMP-MODEL %s wire=%d index=%d name=%s type=%d models=%d limit=%d origin=%.1f %.1f %.1f\n",
+		effect, cl_tempentity_type, modelIndex, model ? model->name : "<unresolved>", model ? (int)model->type : -1,
+		cl.nummodels, MAX_MODELS, origin[0], origin[1], origin[2] );
+}
 
 static model_t *cl_sprite_muzzleflash[MAX_MUZZLEFLASH];	// muzzle flashes
 static model_t *cl_sprite_ricochet = NULL;
@@ -178,6 +191,7 @@ CL_ClearTempEnts
 */
 static void CL_ClearTempEnts( void )
 {
+	cl_tempentity_type = -1;
 	if( !cl_tempents ) return;
 
 	for( int i = 0; i < cl_num_tempents - 1; i++ )
@@ -199,6 +213,8 @@ CL_InitTempents
 */
 void CL_InitTempEnts( void )
 {
+	if( Cvar_FindVar( cl_trace_tempmodels.name ) != &cl_trace_tempmodels )
+		Cvar_RegisterVariable( &cl_trace_tempmodels );
 	cl_num_tempents = GI->max_tents;
 	if( !Q_stricmp( GI->gamefolder, "svencoop" ))
 		cl_num_tempents = Q_max( cl_num_tempents, 2048 );
@@ -957,6 +973,7 @@ Create a shards
 */
 void GAME_EXPORT R_BreakModel( const vec3_t pos, const vec3_t size, const vec3_t dir, float random, float life, int count, int modelIndex, char flags )
 {
+	CL_TraceTempModel( __func__, modelIndex, pos );
 	TEMPENTITY	*pTemp;
 	model_t		*pmodel;
 
@@ -1044,6 +1061,7 @@ Create a temp model with gravity, sounds and fadeout
 */
 TEMPENTITY *R_TempModel( const vec3_t pos, const vec3_t dir, const vec3_t angles, float life, int modelIndex, int soundtype )
 {
+	CL_TraceTempModel( __func__, modelIndex, pos );
 	// alloc a new tempent
 	TEMPENTITY	*pTemp;
 	model_t		*pmodel;
@@ -1240,6 +1258,7 @@ void GAME_EXPORT R_Sprite_Smoke( TEMPENTITY *pTemp, float scale )
 
 static void R_Spray_Generic( const char *func, const vec3_t pos, const vec3_t dir, int modelIndex, int count, int speed, int spread, int rendermode, qboolean sprite_spray )
 {
+	CL_TraceTempModel( func, modelIndex, pos );
 	model_t *mod = CL_ModelHandle( modelIndex );
 	float noise = spread / 100.0f;
 	float znoise = noise * 1.5f;
@@ -1487,6 +1506,7 @@ Create an projectile entity
 */
 void GAME_EXPORT R_Projectile( const vec3_t origin, const vec3_t velocity, int modelIndex, int life, int owner, void (*hitcallback)( TEMPENTITY*, pmtrace_t* ))
 {
+	CL_TraceTempModel( __func__, modelIndex, origin );
 	TEMPENTITY	*pTemp;
 	model_t		*pmodel;
 	vec3_t		dir;
@@ -1536,6 +1556,7 @@ Spherical shower of models, picks from set
 */
 void GAME_EXPORT R_TempSphereModel( const vec3_t pos, float speed, float life, int count, int modelIndex )
 {
+	CL_TraceTempModel( __func__, modelIndex, pos );
 	TEMPENTITY	*pTemp;
 
 	// create temp models
@@ -1883,6 +1904,7 @@ void CL_ParseTempEntity( sizebuf_t *msg, connprotocol_t proto )
 	}
 
 	type = MSG_ReadByte( pbuf );
+	cl_tempentity_type = type;
 
 	switch( type )
 	{
@@ -2367,6 +2389,7 @@ void CL_ParseTempEntity( sizebuf_t *msg, connprotocol_t proto )
 	}
 
 	// throw warning
+	cl_tempentity_type = -1;
 	if( MSG_CheckOverflow( pbuf ))
 		Con_DPrintf( S_WARN "%s: overflow TE message %i\n", __func__, type );
 }

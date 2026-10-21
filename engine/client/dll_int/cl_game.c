@@ -1640,6 +1640,8 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 	}
 
 	int texnum = R_GetSpriteTexture( clgame.ds.pSprite, frame );
+	if( texnum <= 0 || width <= 0 || height <= 0 )
+		return;
 
 	if( prc )
 	{

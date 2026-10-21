@@ -39,6 +39,8 @@ mspriteframe_t *R_GetSpriteFrame( const model_t *pModel, int frame, float yaw )
 		return NULL;
 
 	psprite = pModel->cache.data;
+	if( !psprite || psprite->numframes <= 0 )
+		return NULL;
 
 	if( frame < 0 )
 	{
@@ -46,9 +48,13 @@ mspriteframe_t *R_GetSpriteFrame( const model_t *pModel, int frame, float yaw )
 	}
 	else if( frame >= psprite->numframes )
 	{
-		if( frame > psprite->numframes )
-			Con_Printf( S_WARN "%s: no such frame %d (%s)\n", __func__, frame, pModel->name );
-		frame = psprite->numframes - 1;
+		static double nextReport;
+		if( host.realtime >= nextReport )
+		{
+			Con_DPrintf( S_WARN "%s: no such frame %d (%s), using frame 0\n", __func__, frame, pModel->name );
+			nextReport = host.realtime + 1.0;
+		}
+		frame = 0;
 	}
 
 	if( psprite->frames[frame].type == SPR_SINGLE )
@@ -89,11 +95,16 @@ mspriteframe_t *R_GetSpriteFrame( const model_t *pModel, int frame, float yaw )
 void R_GetSpriteParms( int *frameWidth, int *frameHeight, int *numFrames, int currentFrame, const model_t *pSprite )
 {
 	mspriteframe_t *pFrame;
+	if( frameWidth ) *frameWidth = 0;
+	if( frameHeight ) *frameHeight = 0;
+	if( numFrames ) *numFrames = 0;
 
 	if( !pSprite || pSprite->type != mod_sprite )
 		return;
 
 	pFrame = R_GetSpriteFrame( pSprite, currentFrame, 0.0f );
+	if( !pFrame )
+		return;
 
 	if( frameWidth )
 		*frameWidth = pFrame->width;
@@ -105,10 +116,12 @@ void R_GetSpriteParms( int *frameWidth, int *frameHeight, int *numFrames, int cu
 
 int R_GetSpriteTexture( const model_t *m_pSpriteModel, int frame )
 {
+	mspriteframe_t *spriteFrame;
 	if( !m_pSpriteModel || m_pSpriteModel->type != mod_sprite || !m_pSpriteModel->cache.data )
 		return 0;
 
-	return R_GetSpriteFrame( m_pSpriteModel, frame, 0.0f )->gl_texturenum;
+	spriteFrame = R_GetSpriteFrame( m_pSpriteModel, frame, 0.0f );
+	return spriteFrame ? spriteFrame->gl_texturenum : 0;
 }
 
 static void Mod_SpriteTextureReplacementReport( const char *modelname, int gl_texturenum, const char *foundpath )
