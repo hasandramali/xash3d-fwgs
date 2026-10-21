@@ -1,8 +1,12 @@
 package su.xash.svencoop.ui.settings
 
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
+import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreferenceCompat
@@ -10,6 +14,11 @@ import su.xash.svencoop.MainActivity
 import su.xash.svencoop.R
 import android.content.SharedPreferences
 import androidx.preference.PreferenceManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileNotFoundException
 
 class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
     SharedPreferences.OnSharedPreferenceChangeListener {
@@ -51,9 +60,52 @@ class AppSettingsPreferenceFragment() : PreferenceFragmentCompat(),
             true
         }
 
+        findPreference<Preference>("share_engine_log")?.setOnPreferenceClickListener {
+            shareEngineLog(it)
+            true
+        }
+
         updateGamePathSummary()
         updateGlobalArgsSummary()
         updateRenderResolutionSummary()
+    }
+
+    private fun shareEngineLog(preference: Preference) {
+        val context = requireContext()
+        val storagePath = (activity as? MainActivity)?.getStoragePath() ?: return
+        preference.isEnabled = false
+        lifecycleScope.launch {
+            try {
+                val uri = withContext(Dispatchers.IO) {
+                    val source = File(storagePath, "engine.log")
+                    if (!source.isFile) throw FileNotFoundException()
+                    val directory = File(context.cacheDir, "shared_logs").apply { mkdirs() }
+                    val snapshot = File(directory, "engine.log")
+                    source.copyTo(snapshot, overwrite = true)
+                    FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", snapshot)
+                }
+                if (!isAdded) return@launch
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = ClipData.newRawUri("engine.log", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(intent, getString(R.string.share_engine_log)))
+            } catch (error: java.util.concurrent.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (isAdded) {
+                    AlertDialog.Builder(context)
+                        .setTitle(R.string.share_engine_log)
+                        .setMessage(if (error is FileNotFoundException) R.string.engine_log_not_found else R.string.engine_log_share_failed)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+            } finally {
+                preference.isEnabled = true
+            }
+        }
     }
 
     private fun showExternalStorageWarning() {

@@ -49,6 +49,10 @@
             app:title="@string/fix_font"
             app:summary="@string/fix_font_summary"
             app:defaultValue="true" />
+
+        <Preference
+            app:key="share_engine_log"
+            app:title="@string/share_engine_log" />
     </PreferenceCategory>
 
 </PreferenceScreen>
