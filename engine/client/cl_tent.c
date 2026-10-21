@@ -39,6 +39,7 @@ TEMPENTS MANAGEMENT
 static TEMPENTITY *cl_active_tents;
 static TEMPENTITY *cl_free_tents;
 static TEMPENTITY *cl_tempents = NULL;		// entities pool
+static int cl_num_tempents;
 
 static model_t *cl_sprite_muzzleflash[MAX_MUZZLEFLASH];	// muzzle flashes
 static model_t *cl_sprite_ricochet = NULL;
@@ -179,13 +180,13 @@ static void CL_ClearTempEnts( void )
 {
 	if( !cl_tempents ) return;
 
-	for( int i = 0; i < GI->max_tents - 1; i++ )
+	for( int i = 0; i < cl_num_tempents - 1; i++ )
 	{
 		cl_tempents[i].next = &cl_tempents[i+1];
 		cl_tempents[i].entity.trivial_accept = INVALID_HANDLE;
 	}
 
-	cl_tempents[GI->max_tents-1].next = NULL;
+	cl_tempents[cl_num_tempents-1].next = NULL;
 	cl_free_tents = cl_tempents;
 	cl_active_tents = NULL;
 }
@@ -198,7 +199,10 @@ CL_InitTempents
 */
 void CL_InitTempEnts( void )
 {
-	cl_tempents = Mem_Calloc( cls.mempool, sizeof( TEMPENTITY ) * GI->max_tents );
+	cl_num_tempents = GI->max_tents;
+	if( !Q_stricmp( GI->gamefolder, "svencoop" ))
+		cl_num_tempents = Q_max( cl_num_tempents, 2048 );
+	cl_tempents = Mem_Calloc( cls.mempool, sizeof( TEMPENTITY ) * cl_num_tempents );
 	CL_ClearTempEnts();
 
 	// load tempent sprites (glowshell, muzzleflashes etc)
@@ -216,6 +220,8 @@ void CL_FreeTempEnts( void )
 	if( cl_tempents )
 		Mem_Free( cl_tempents );
 	cl_tempents = NULL;
+	cl_active_tents = cl_free_tents = NULL;
+	cl_num_tempents = 0;
 }
 
 /*
@@ -371,9 +377,7 @@ static int CL_TempEntAddEntity( cl_entity_t *pEntity )
 		VectorCopy( pEntity->origin, pEntity->latched.prevorigin );
 
 		// add to list
-		CL_AddVisibleEntity( pEntity, ET_TEMPENTITY );
-
-		return 1;
+		return CL_AddVisibleEntity( pEntity, ET_TEMPENTITY );
 	}
 
 	return 0;
@@ -445,7 +449,7 @@ TEMPENTITY *CL_TempEntAlloc( const vec3_t org, model_t *pmodel )
 	{
 		if( cl_lasttimewarn < host.realtime )
 		{
-			Con_DPrintf( "Overflow %d temporary ents!\n", GI->max_tents );
+			Con_DPrintf( "Overflow %d temporary ents!\n", cl_num_tempents );
 			cl_lasttimewarn = host.realtime + 1.0f;
 		}
 		return NULL;

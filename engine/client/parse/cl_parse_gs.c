@@ -54,8 +54,6 @@ void CL_GSBaselinesComplete( void )
 	gs_baselines_ready = true;
 }
 
-static void CL_GSGarbageReset( void );
-
 qboolean CL_GSBaselineReceived( int entnum )
 {
 	if( entnum < 0 || entnum >= GS_BASELINE_SLOTS ) return false;
@@ -72,7 +70,6 @@ void CL_GSBaselineResetAll( void )
 {
 	gs_baselines_ready = false;
 	memset( gs_baseline_rx, 0, sizeof( gs_baseline_rx ));
-	CL_GSGarbageReset();
 }
 
 static void CL_ParseExtraInfo( sizebuf_t *msg )
@@ -276,81 +273,18 @@ static void CL_GSAbortDesync( frame_t *frame, sizebuf_t *msg )
 	msg->bOverflow = false;
 }
 
-// Silent-garbage tracker (VPN baseline loss): an active-play entity decoded
-// without a baseline to modelindex 0 / solid 0 is not a legitimate late
-// spawn (those arrive full and carry their model) — its signon baseline was
-// lost and every later delta decodes against zeros, leaving the entity (and
-// players: same modelindex-0 fate) invisible forever with frames still
-// "valid", so the overflow/signon resync paths never fire and no full update
-// is ever requested. Count persistent garbage and force a capped
-// auto-reconnect (fresh signon = fresh baselines = the only cure); the
-// garbage entity is dropped from the frame either way so it can't poison
-// later deltas as a decode base. Legitimate model-less entities (triggers)
-// always carry a baseline in normal play, so they never trip this.
-#define GS_GARBAGE_MAXAUTO	2
-#define GS_GARBAGE_DISTINCT	8
-#define GS_GARBAGE_REPEATS	60
-
-static int gs_garbage_ring[GS_GARBAGE_DISTINCT];
-static int gs_garbage_total = 0;
-static int gs_garbage_autos = 0;
-static int gs_garbage_print = 0;
-
-static void CL_GSGarbageReset( void )
-{
-	memset( gs_garbage_ring, 0, sizeof( gs_garbage_ring ));
-	gs_garbage_total = 0;
-	gs_garbage_autos = 0;
-	gs_garbage_print = 0;
-}
-
-static void CL_GSGarbageNote( int newnum )
-{
-	int distinct = 0;
-
-	gs_garbage_total++;
-	for( int i = 0; i < GS_GARBAGE_DISTINCT; i++ )
-	{
-		if( gs_garbage_ring[i] == newnum )
-			break;
-		if( gs_garbage_ring[i] == 0 )
-		{
-			gs_garbage_ring[i] = newnum;
-			break;
-		}
-	}
-	for( int i = 0; i < GS_GARBAGE_DISTINCT && gs_garbage_ring[i] != 0; i++ )
-		distinct++;
-
-	if(( gs_garbage_print++ % 64 ) == 0 )
-		Con_Printf( S_WARN "%s: eindex %d decoded garbage (no signon baseline, model 0); dropped from frame, %d auto-resyncs left\n",
-			__func__, newnum, GS_GARBAGE_MAXAUTO - gs_garbage_autos );
-
-	if( gs_garbage_autos < GS_GARBAGE_MAXAUTO
-		&& ( distinct >= GS_GARBAGE_DISTINCT - 2 || gs_garbage_total >= GS_GARBAGE_REPEATS ))
-	{
-		Con_Printf( "Garbage entities persist with no baselines (%d distinct, %d total), reconnecting fresh (attempt %d/%d)...\n",
-			distinct, gs_garbage_total, gs_garbage_autos + 1, GS_GARBAGE_MAXAUTO );
-		gs_garbage_autos++;
-		gs_garbage_total = 0; // fresh budget for the new connect
-		CL_Disconnect(); // clears the server-side slot
-		cls.state = ca_connecting; // CheckForResend fetches a new challenge
-		cls.signon = 0;
-		cls.connect_time = MAX_HEARTBEAT;
-		cls.connect_retry = 0;
-	}
-}
-
-static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from, qboolean delta_update )
+static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, frame_t *frame, int newnum, const entity_state_t *from, qboolean delta_update, int count )
 {
 	cl_entity_t	*ent;
 	entity_state_t	*to;
 	qboolean newent = from == NULL;
 	qboolean append = true;
-	qboolean nobaseline = false;
 	int pack = frame->num_entities;
 	qboolean has_update = msg != NULL;
 	static entity_state_t nullent;
+
+	if( !hdr->remove && frame->num_entities >= count )
+		return false;
 
 	// alloc next slot to store update
 	to = &cls.packet_entities[cls.next_client_entities % cls.num_client_entities];
@@ -429,7 +363,6 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 			{
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 2 )
 					Con_DPrintf( "%s: eindex %d late spawn without spawnbaseline, decoding vanilla-style\n", __func__, newnum );
-				nobaseline = true;
 			}
 		}
 	}
@@ -441,19 +374,6 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 
 	to->entityType = hdr->custom ? ENTITY_BEAM : ENTITY_NORMAL;
 	to->number = newnum;
-
-	// Silent-garbage detector: a baseline-less active-play decode that still
-	// lands on modelindex 0 / solid 0 (SOLID_NOT) is a lost-baseline entity,
-	// not a late spawn (those arrive full and carry their model). Appending
-	// it would render it invisible and poison later deltas as a decode base,
-	// while the frame stays "valid" so no resync is ever requested. Drop it
-	// and let the tracker force a capped auto-reconnect if it persists.
-	if( nobaseline && has_update && !cls.demoplayback && newnum != 0
-		&& to->modelindex == 0 && to->solid == 0 )
-	{
-		CL_GSGarbageNote( newnum );
-		return true; // fields consumed above; garbage stays out of the frame
-	}
 
 	if( !append )
 		return true; // fields consumed above; dropped entity stays out of the frame
@@ -480,13 +400,13 @@ static qboolean CL_DeltaEntityGS( const delta_header_t *hdr, sizebuf_t *msg, fra
 	return true;
 }
 
-static qboolean CL_CopyPacketEntity( frame_t *frame, int num, const entity_state_t *from )
+static qboolean CL_CopyPacketEntity( frame_t *frame, int num, const entity_state_t *from, int count )
 {
 	delta_header_t fakehdr =
 	{
 		.custom = FBitSet( from->entityType, ENTITY_BEAM ) == ENTITY_BEAM,
 	};
-	return CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from, false );
+	return CL_DeltaEntityGS( &fakehdr, NULL, frame, num, from, false, count );
 }
 
 static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
@@ -501,6 +421,12 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 		CL_WriteDemoJumpTime();
 
 	int count = MSG_ReadWord( msg );
+	if( MSG_CheckOverflow( msg ) || count > MAX_SVEN_PACKET_ENTITIES )
+	{
+		CL_GSAbortDesync( &cl.frames[cl.parsecountmod], msg );
+		return playerbytes;
+	}
+	CL_EnsurePacketEntityCapacity( count );
 
 	frame_t *frame = &cl.frames[cl.parsecountmod];
 	memset( frame->flags, 0, sizeof( frame->flags ));
@@ -515,7 +441,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 		uint oldpacket = MSG_ReadWord( msg );
 		oldframe = &cl.frames[oldpacket & CL_UPDATE_MASK];
 
-		if( !CL_ValidateDeltaPacket( oldpacket, oldframe ))
+		if( !CL_ValidateDeltaPacket( oldpacket, oldframe, count ))
 		{
 			static double nextReport;
 			if( host.realtime >= nextReport )
@@ -592,7 +518,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 				Con_Printf( S_WARN "%s: old frame copy on non-delta update (%d < %d)\n", __func__, oldnum, newnum );
 
 			// one or more entities from the old packet are unchanged
-			if( !CL_CopyPacketEntity( frame, oldnum, oldent ))
+			if( !CL_CopyPacketEntity( frame, oldnum, oldent, count ))
 			{
 				CL_GSAbortDesync( frame, msg );
 				return playerbytes;
@@ -609,7 +535,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 
 			// from delta
 			srcMark = "old-delta";
-			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent, delta ))
+			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, oldent, delta, count ))
 			{
 				CL_GSAbortDesync( frame, msg );
 				return playerbytes;
@@ -620,7 +546,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 		{
 			// from baseline
 			srcMark = "baseline";
-			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL, delta ))
+			if( !CL_DeltaEntityGS( &hdr, msg, frame, newnum, NULL, delta, count ))
 			{
 				CL_GSAbortDesync( frame, msg );
 				return playerbytes;
@@ -644,7 +570,7 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 				delta, newnum, entStartBit, MSG_GetNumBitsRead( msg ));
 		}
 
-		if( player ) playerbytes += MSG_GetNumBitsRead( msg ) - bufstart;
+		if( player ) playerbytes += MSG_GetNumBytesRead( msg ) - bufstart;
 	}
 
 	if( MSG_CheckOverflow( msg ))
@@ -662,14 +588,21 @@ static int CL_ParsePacketEntitiesGS( sizebuf_t *msg, qboolean delta )
 	while( oldnum != MAX_ENTNUMBER )
 	{
 		// one or more entities from the old packet are unchanged
-		CL_CopyPacketEntity( frame, oldnum, oldent );
+		if( !CL_CopyPacketEntity( frame, oldnum, oldent, count ))
+		{
+			CL_GSAbortDesync( frame, msg );
+			return playerbytes;
+		}
 		oldnum = CL_UpdateOldEntNum( ++oldindex, oldframe, &oldent );
 	}
 
 	MSG_EndBitWriting( msg );
 
 	if( frame->num_entities != count )
+	{
 		Con_Reportf( S_WARN "CL_Parse%sPacketEntitiesGS: (%i should be %i)\n", delta ? "Delta" : "", frame->num_entities, count );
+		frame->valid = false;
+	}
 
 	// Unreliable entity updates can arrive before the fragmented reliable
 	// baseline stream has been parsed. Never acknowledge those snapshots as

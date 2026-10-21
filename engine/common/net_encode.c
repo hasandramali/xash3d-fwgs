@@ -1546,7 +1546,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 	int entryBit;
 	int i;
 
-	entryBit = MSG_GetNumBitsRead( msg );
+	entryBit = dbg >= 6 ? MSG_GetNumBitsRead( msg ) : 0;
 
 	byte c = MSG_ReadUBitLong( msg, 4 );
 
@@ -1579,7 +1579,7 @@ static void Delta_ParseGSFields( sizebuf_t *msg, const delta_info_t *dt, const v
 	{
 		int b = Q_min( i >> 3, (int)sizeof( bits ) - 1 );
 		int n = 1 << ( i & 7 );
-		int bitBefore = MSG_GetNumBitsRead( msg );
+		int bitBefore = dbg >= 6 ? MSG_GetNumBitsRead( msg ) : 0;
 
 		if( FBitSet( bits[b], n ))
 		{

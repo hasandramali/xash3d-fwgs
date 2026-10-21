@@ -762,7 +762,44 @@ static void CL_FlushEntityPacket( sizebuf_t *msg, connprotocol_t proto )
 	}
 }
 
-qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe )
+void CL_EnsurePacketEntityCapacity( int count )
+{
+	int capacity = cls.num_client_entities;
+	int perframe = capacity / CL_UPDATE_BACKUP;
+	int first = Q_max( 0, cls.next_client_entities - capacity );
+	entity_state_t *entities;
+
+	if( !cl_sven_proto || count <= perframe || count > MAX_SVEN_PACKET_ENTITIES || perframe <= 0 )
+		return;
+
+	while( perframe < count )
+		perframe *= 2;
+	perframe = Q_min( perframe, MAX_SVEN_PACKET_ENTITIES );
+	entities = Mem_Calloc( clgame.mempool, sizeof( *entities ) * perframe * CL_UPDATE_BACKUP );
+
+	for( int index = first; index < cls.next_client_entities; )
+	{
+		int source = index % capacity;
+		int target = index % ( perframe * CL_UPDATE_BACKUP );
+		int length = Q_min( capacity - source, perframe * CL_UPDATE_BACKUP - target );
+		length = Q_min( length, cls.next_client_entities - index );
+		memcpy( entities + target, cls.packet_entities + source, sizeof( *entities ) * length );
+		index += length;
+	}
+
+	for( int index = 0; index < CL_UPDATE_BACKUP; index++ )
+	{
+		frame_t *frame = &cl.frames[index];
+		if( frame->first_entity < first )
+			frame->valid = false;
+	}
+
+	Mem_Free( cls.packet_entities );
+	cls.packet_entities = entities;
+	cls.num_client_entities = perframe * CL_UPDATE_BACKUP;
+}
+
+qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe, int reserve )
 {
 	int mask = cl_sven_proto ? 0xFFFF : 0xFF;
 	int subtracted = ( cls.netchan.incoming_sequence - oldpacket ) & mask;
@@ -784,7 +821,8 @@ qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe )
 		return false;
 	}
 
-	if(( cls.next_client_entities - oldframe->first_entity ) > ( cls.num_client_entities - NUM_PACKET_ENTITIES ))
+	if( reserve < 0 || reserve > cls.num_client_entities
+		|| ( cls.next_client_entities - oldframe->first_entity ) > ( cls.num_client_entities - reserve ))
 	{
 		Con_NPrintf( 2, "^3Warning:^1 delta frame is too old^7\n" );
 		return false;
@@ -911,7 +949,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta, connprotocol_t proto
 		uint oldpacket = MSG_ReadByte( msg );
 		oldframe = &cl.frames[oldpacket & CL_UPDATE_MASK];
 
-		if( !CL_ValidateDeltaPacket( oldpacket, oldframe ))
+		if( !CL_ValidateDeltaPacket( oldpacket, oldframe, NUM_PACKET_ENTITIES ))
 		{
 			CL_FlushEntityPacket( msg, proto );
 			return playerbytes;

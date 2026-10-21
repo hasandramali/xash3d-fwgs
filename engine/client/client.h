@@ -68,7 +68,7 @@ typedef struct frame_s
 	entity_state_t	playerstate[MAX_CLIENTS];
 	weapon_data_t	weapondata[CL_WEAPONLISTFIX_MAX_WEAPONS];
 	netbandwidthgraph_t graphdata;
-	byte		flags[MAX_VISIBLE_PACKET_VIS_BYTES];
+	byte		flags[Q_max( MAX_VISIBLE_PACKET_VIS_BYTES, ( MAX_SVEN_PACKET_ENTITIES + 7 ) / 8 )];
 	int		num_entities;
 	int		first_entity;	// into the circular cl_packet_entities[]
 } frame_t;
@@ -1119,7 +1119,8 @@ void CL_ParseQuakeMessage( sizebuf_t *msg );
 //
 struct channel_s;
 struct rawchan_s;
-qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe );
+void CL_EnsurePacketEntityCapacity( int count );
+qboolean CL_ValidateDeltaPacket( uint oldpacket, frame_t *oldframe, int reserve );
 int CL_UpdateOldEntNum( int oldindex, frame_t *oldframe, entity_state_t **oldent );
 int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta, connprotocol_t proto );
 qboolean CL_AddVisibleEntity( cl_entity_t *ent, int entityType );

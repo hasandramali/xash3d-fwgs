@@ -77,6 +77,7 @@ GNU General Public License for more details.
 #define CMD_BACKUP			64	// allow a lot of command backups for very fast systems
 #define CMD_MASK			(CMD_BACKUP - 1)
 #define NUM_PACKET_ENTITIES		256	// 170 Mb for multiplayer with 32 players
+#define MAX_SVEN_PACKET_ENTITIES	1024
 #define MAX_CUSTOM_BASELINES		64
 
 #if XASH_LOW_MEMORY == 2
