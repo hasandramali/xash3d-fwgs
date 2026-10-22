@@ -1524,7 +1524,7 @@ void CL_CenterPrint( const char *text, float y )
 		return;
 
 	clgame.centerPrint.totalWidth = 0;
-	clgame.centerPrint.time = cl.mtime[0]; // allow pause for centerprint
+	clgame.centerPrint.time = cl.time;
 	Q_strncpy( clgame.centerPrint.message, text, sizeof( clgame.centerPrint.message ));
 
 	CL_DrawStringLen( font,
@@ -2286,20 +2286,18 @@ void CL_DrawHUD( int state )
 	switch( state )
 	{
 	case CL_ACTIVE:
-		if( !cl.intermission )
-			CL_DrawScreenFade ();
+		CL_DrawScreenFade ();
 		CL_DrawCrosshair ();
-		CL_DrawCenterPrint ();
 		clgame.dllFuncs.pfnRedraw( cl.time, cl.intermission );
 		CL_WeaponListFix_Draw();
-		if( cl.intermission ) CL_DrawScreenFade ();
+		CL_DrawCenterPrint ();
 		break;
 	case CL_PAUSED:
 		CL_DrawScreenFade ();
 		CL_DrawCrosshair ();
-		CL_DrawCenterPrint ();
 		clgame.dllFuncs.pfnRedraw( cl.time, cl.intermission );
 		CL_WeaponListFix_Draw();
+		CL_DrawCenterPrint ();
 		if( showpause.value )
 		{
 			if( !cls.pauseIcon )

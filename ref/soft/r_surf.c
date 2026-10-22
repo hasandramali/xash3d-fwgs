@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_local.h"
 #include "../common/ref_texture_anim.h"
 #include "mod_local.h"
+#include "pm_defs.h"
 
 drawsurf_t r_drawsurf;
 
@@ -312,7 +313,13 @@ void R_ResetFlashlightBake( void )
 
 void R_FlashlightBake( const vec3_t pos, float radius, const vec3_t eye )
 {
-	VectorCopy( pos, flashBakePos );
+	vec3_t start, end;
+	VectorCopy( eye, start );
+	VectorCopy( pos, end );
+	pmtrace_t trace = gEngfuncs.CL_TraceLine( start, end, PM_STUDIO_IGNORE );
+	if( trace.fraction == 1.0f || trace.startsolid || trace.allsolid )
+		return;
+	VectorCopy( trace.endpos, flashBakePos );
 	VectorCopy( eye, flashBakeEye );
 	flashBakeRadius = radius;
 	flashBakePending = true;

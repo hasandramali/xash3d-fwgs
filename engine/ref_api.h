@@ -87,7 +87,8 @@ GNU General Public License for more details.
 //     front-face test; the old hit-point-only test rejected surfaces by
 //     float noise (the hit point lies on the plane, so the facing dot was
 //     ~0 and almost always <= 0).
-#define REF_API_VERSION 22
+// 23. R_FlashlightBake receives a beam endpoint; the renderer finds the lit surface.
+#define REF_API_VERSION 23
 
 #define TF_SKY		(TF_SKYSIDE|TF_NOMIPMAP|TF_ALLOW_NEAREST)
 #define TF_FONT		(TF_NOMIPMAP|TF_CLAMP|TF_ALLOW_NEAREST)
@@ -597,11 +598,11 @@ typedef struct ref_interface_s
 	void (*R_DecalRemoveAll)( int texture );
 	int (*R_CreateDecalList)( struct decallist_s *pList );
 	void (*R_ClearAllDecals)( qboolean includePermanent );
-	// Flashlight with r_dynamic 0: permanently paint the lightmaps
-	// fullbright around pos (surface coords) within radius, for surfaces
-	// facing eye (flashlight origin, same coords). Renderers that cannot
+	// Flashlight with r_dynamic 0: trace from eye to end and paint the lightmaps
+	// fullbright around the nearest surface within radius, for surfaces
+	// facing eye (flashlight origin, world coords). Renderers that cannot
 	// bake may ignore it. Throttled and deduplicated internally.
-	void (*R_FlashlightBake)( const vec3_t pos, float radius, const vec3_t eye );
+	void (*R_FlashlightBake)( const vec3_t end, float radius, const vec3_t eye );
 
 	// studio interface
 	float (*R_StudioEstimateFrame)( cl_entity_t *e, mstudioseqdesc_t *pseqdesc, double time );

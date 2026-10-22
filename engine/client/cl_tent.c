@@ -32,7 +32,7 @@ TEMPENTS MANAGEMENT
 ==============================================================
 */
 #define FLASHLIGHT_DISTANCE		2000	// in units
-#define FLASHLIGHT_BAKE_DISTANCE		65536.0f
+#define FLASHLIGHT_BAKE_DISTANCE		131072.0f
 #define FLASHLIGHT_BAKE_RADIUS		256.0f	// fullbright bake pool around the hit point (r_dynamic 0)
 #define SHARD_VOLUME		12.0f	// on shard ever n^3 units
 #define MAX_MUZZLEFLASH		3
@@ -2664,27 +2664,18 @@ static void CL_UpdateFlashlight( cl_entity_t *ent )
 	VectorAdd( ent->origin, view_ofs, vecSrc );
 	VectorMA( vecSrc, FLASHLIGHT_DISTANCE, forward, vecEnd );
 
-	trace = CL_TraceLine( vecSrc, vecEnd, PM_STUDIO_BOX );
-
-	// Flashlight with r_dynamic 0: permanently paint the world lightmaps
-	// fullbright around the hit point (the renderer skips this unless
-	// r_dynamic is off, throttles and dedups internally: ~zero steady cost).
-	// Accepted side effect per design: swept areas stay lit for the session.
-	// vecSrc (the flashlight origin) is passed for a robust front-face test:
-	// testing the hit point itself against the plane rejects surfaces by
-	// float noise, since the hit lies on the plane by construction.
-	if( ent->index == cl.playernum + 1 && !Cvar_VariableValue( "r_dynamic" ))
+	if( !Cvar_VariableValue( "r_dynamic" ))
 	{
-		pmtrace_t bakeTrace = trace;
-		if( trace.fraction == 1.0f )
+		if( ent->index == cl.playernum + 1 )
 		{
 			vec3_t bakeEnd;
 			VectorMA( vecSrc, FLASHLIGHT_BAKE_DISTANCE, forward, bakeEnd );
-			bakeTrace = CL_TraceLine( vecSrc, bakeEnd, PM_STUDIO_BOX );
+			ref.dllFuncs.R_FlashlightBake( bakeEnd, FLASHLIGHT_BAKE_RADIUS, vecSrc );
 		}
-		if( bakeTrace.fraction < 1.0f && !bakeTrace.startsolid && !bakeTrace.allsolid )
-			ref.dllFuncs.R_FlashlightBake( bakeTrace.endpos, FLASHLIGHT_BAKE_RADIUS, vecSrc );
+		return;
 	}
+
+	trace = CL_TraceLine( vecSrc, vecEnd, PM_STUDIO_BOX );
 
 	// update flashlight endpos
 	dl = CL_AllocDlight( ent->index );

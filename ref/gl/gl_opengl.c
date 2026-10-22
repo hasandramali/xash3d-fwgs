@@ -1389,6 +1389,7 @@ void R_Shutdown( void )
 		return;
 
 	GL_RemoveCommands();
+	R_ResetFlashlightBake();
 	GL_FreeRenderTargets();
 	R_ShutdownImages();
 #if !XASH_GLES && !XASH_GL_STATIC

@@ -53,6 +53,20 @@ static separate_pass_t draw_fullbrights = { 0, -1 };
 static separate_pass_t draw_details = { 0, -1 };
 static msurface_t		*skychain = NULL;
 static gllightmapstate_t	gl_lms;
+static byte		*flashBakeSurfaces;
+static int		flashBakeSurfaceCount;
+
+static int R_FlashlightSurfaceIndex( const msurface_t *surf )
+{
+	if( !WORLDMODEL || !flashBakeSurfaces )
+		return -1;
+
+	uintptr_t address = (uintptr_t)surf;
+	uintptr_t base = (uintptr_t)WORLDMODEL->surfaces;
+	if( address < base || ( address - base ) / sizeof( *surf ) >= (size_t)flashBakeSurfaceCount )
+		return -1;
+	return ( address - base ) / sizeof( *surf );
+}
 
 /*
  * Dynamic lightmap frame cache.
@@ -856,6 +870,13 @@ static void R_BuildLightMap( const msurface_t *surf, byte *restrict dest, int st
 	const int smax = ( info->lightextents[0] / sample_size ) + 1;
 	const int tmax = ( info->lightextents[1] / sample_size ) + 1;
 	const int size = smax * tmax;
+	const int flashIndex = R_FlashlightSurfaceIndex( surf );
+	if( !r_dynamic->value && flashIndex >= 0 && flashBakeSurfaces[flashIndex] )
+	{
+		for( int row = 0; row < tmax; row++ )
+			memset( dest + row * stride, 255, smax * 4 );
+		return;
+	}
 
 	if( gl_overbright.value )
 		lightscale = ( R_HasEnabledVBO() && !r_vbo_overbrightmode.value) ? 171 : 256;
@@ -1621,12 +1642,6 @@ static qboolean R_CheckLightMap( msurface_t *fa )
 	return false; // no change
 }
 
-// Flashlight fullbright bake (r_dynamic 0): permanently whiten the
-// lightmap samples of world/brush surfaces near pos, re-uploading each
-// affected lightmap texture once. Repeat walks are throttled and skip
-// already-white surfaces, so the steady-state cost is ~zero (no per-frame
-// dynamic pass). Requested by the client when the flashlight is on;
-// processed on the render thread at the next R_RenderScene.
 #define FLASHLIGHT_BAKE_INTERVAL	0.25f
 
 static vec3_t flashBakePos;
@@ -1637,6 +1652,10 @@ static float flashBakeLastTime;
 
 void R_ResetFlashlightBake( void )
 {
+	if( flashBakeSurfaces )
+		Mem_Free( flashBakeSurfaces );
+	flashBakeSurfaces = NULL;
+	flashBakeSurfaceCount = 0;
 	VectorClear( flashBakePos );
 	VectorClear( flashBakeEye );
 	flashBakeRadius = 0.0f;
@@ -1652,47 +1671,7 @@ void R_FlashlightBake( const vec3_t pos, float radius, const vec3_t eye )
 	flashBakePending = true;
 }
 
-// whiten every non-white texel of all valid style maps; true if anything
-// changed. (The old first-texel shortcut skipped surfaces whose first
-// sample was already white while the rest was not, leaving them half-lit.)
-static qboolean R_WhitenSurfaceSamples( msurface_t *surf )
-{
-	qboolean changed = false;
-
-	if( !surf->samples )
-		return false;
-	if( FBitSet( surf->flags, SURF_DRAWTURB | SURF_DRAWSKY | SURF_DRAWTILED ))
-		return false;
-
-	mextrasurf_t *info = surf->info;
-	int sample_size = gEngfuncs.Mod_SampleSizeForFace( surf );
-	int smax = ( info->lightextents[0] / sample_size ) + 1;
-	int tmax = ( info->lightextents[1] / sample_size ) + 1;
-	int size = smax * tmax;
-
-	for( int map = 0; map < MAXLIGHTMAPS; map++ )
-	{
-		if( surf->styles[map] >= 255 )
-			break;
-		color24 *lm = &surf->samples[map * size];
-		for( int i = 0; i < size; i++ )
-		{
-			if( lm[i].r != 255 || lm[i].g != 255 || lm[i].b != 255 )
-			{
-				lm[i].r = lm[i].g = lm[i].b = 255;
-				changed = true;
-			}
-		}
-	}
-	return changed;
-}
-
-// rebuild one surface from its (possibly whitened) samples and sub-upload
-// its lightmap rect. Same shape as the style-change path in R_CheckLightMap.
-// Large surfaces (beyond the stack temp) use a transient heap buffer:
-// silently skipping their upload while whitening samples left them
-// permanently dark with dedup thinking them done.
-static void R_UploadSurfaceLightmap( msurface_t *surf )
+static qboolean R_UploadSurfaceLightmap( msurface_t *surf )
 {
 	byte temp[132*132*4];
 	byte *buf = temp;
@@ -1702,15 +1681,15 @@ static void R_UploadSurfaceLightmap( msurface_t *surf )
 	int tmax = ( info->lightextents[1] / sample_size ) + 1;
 
 	if( smax <= 0 || tmax <= 0 )
-		return;
+		return false;
 	if( smax > BLOCK_SIZE_MAX || tmax > BLOCK_SIZE_MAX )
-		return; // beyond any lightmap atlas; cannot be addressed
+		return false;
 
 	if( (size_t)smax * tmax * 4 > sizeof( temp ))
 	{
 		buf = Mem_Calloc( r_temppool, (size_t)smax * tmax * 4 );
 		if( !buf )
-			return;
+			return false;
 	}
 
 	R_BuildLightMap( surf, buf, smax * 4, false );
@@ -1729,10 +1708,16 @@ static void R_UploadSurfaceLightmap( msurface_t *surf )
 
 	if( buf != temp )
 		Mem_Free( buf );
+	return true;
 }
 
 static void R_TryBakeSurface( msurface_t *surf, const vec3_t pos, const vec3_t eye, float radius )
 {
+	int surfaceIndex = R_FlashlightSurfaceIndex( surf );
+	if( surfaceIndex < 0 || flashBakeSurfaces[surfaceIndex]
+		|| FBitSet( surf->flags, SURF_DRAWTURB | SURF_DRAWSKY | SURF_DRAWTILED ))
+		return;
+
 	glpoly2_t *poly = surf->polys;
 	vec3_t mins, maxs, closest, delta;
 	int i;
@@ -1772,20 +1757,93 @@ static void R_TryBakeSurface( msurface_t *surf, const vec3_t pos, const vec3_t e
 	if( planeDistance <= 0.0f )
 		return; // backface: no light bleed through walls
 
-	if( R_WhitenSurfaceSamples( surf ))
-		R_UploadSurfaceLightmap( surf );
+	flashBakeSurfaces[surfaceIndex] = true;
+	if( !R_UploadSurfaceLightmap( surf ))
+		flashBakeSurfaces[surfaceIndex] = false;
+}
+
+static void R_TraceFlashlightModel( const model_t *model, const vec3_t start, const vec3_t end, float *fraction )
+{
+	for( int surfaceIndex = 0; surfaceIndex < model->nummodelsurfaces; surfaceIndex++ )
+	{
+		msurface_t *surf = &model->surfaces[model->firstmodelsurface + surfaceIndex];
+		if( FBitSet( surf->flags, SURF_DRAWTURB ))
+			continue;
+		float front = DotProduct( start, surf->plane->normal ) - surf->plane->dist;
+		float back = DotProduct( end, surf->plane->normal ) - surf->plane->dist;
+		if( FBitSet( surf->flags, SURF_PLANEBACK ))
+		{
+			front = -front;
+			back = -back;
+		}
+		if( front <= 0.0f || back >= front )
+			continue;
+		float hitFraction = front / ( front - back );
+		if( hitFraction >= *fraction )
+			continue;
+
+		vec3_t point;
+		VectorLerp( start, hitFraction, end, point );
+		for( glpoly2_t *poly = surf->polys; poly; poly = poly->next )
+		{
+			qboolean positive = false, negative = false;
+			if( poly->numverts < 3 )
+				continue;
+			for( int vertex = 0; vertex < poly->numverts; vertex++ )
+			{
+				vec3_t edge, offset, cross;
+				VectorSubtract( poly->verts[( vertex + 1 ) % poly->numverts], poly->verts[vertex], edge );
+				VectorSubtract( point, poly->verts[vertex], offset );
+				CrossProduct( edge, offset, cross );
+				float side = DotProduct( cross, surf->plane->normal );
+				float tolerance = 0.03125f * VectorLength( edge );
+				positive |= side > tolerance;
+				negative |= side < -tolerance;
+				if( positive && negative )
+					break;
+			}
+			if( !( positive && negative ))
+			{
+				*fraction = hitFraction;
+				break;
+			}
+		}
+	}
 }
 
 void R_ProcessFlashlightBake( void )
 {
 	int i;
 
+	if( r_dynamic->value )
+	{
+		flashBakePending = false;
+		if( flashBakeSurfaces )
+		{
+			qboolean retry = false;
+			for( i = 0; i < flashBakeSurfaceCount; i++ )
+			{
+				if( !flashBakeSurfaces[i] )
+					continue;
+				if( R_UploadSurfaceLightmap( &WORLDMODEL->surfaces[i] ))
+					flashBakeSurfaces[i] = false;
+				else
+					retry = true;
+			}
+			if( !retry )
+			{
+				Mem_Free( flashBakeSurfaces );
+				flashBakeSurfaces = NULL;
+				flashBakeSurfaceCount = 0;
+			}
+		}
+		return;
+	}
+
 	if( !flashBakePending )
 		return;
 	flashBakePending = false;
 
-	if( r_dynamic->value )
-		return; // dynamic path handles the flashlight; nothing to bake
 	if( !WORLDMODEL || !WORLDMODEL->lightdata )
 		return;
 	if( gp_cl->time >= flashBakeLastTime && gp_cl->time - flashBakeLastTime < FLASHLIGHT_BAKE_INTERVAL )
@@ -1795,8 +1853,36 @@ void R_ProcessFlashlightBake( void )
 	}
 	flashBakeLastTime = gp_cl->time;
 
-	for( i = 0; i < WORLDMODEL->numsurfaces; i++ )
-		R_TryBakeSurface( &WORLDMODEL->surfaces[i], flashBakePos, flashBakeEye, flashBakeRadius );
+	float fraction = 1.0f;
+	R_TraceFlashlightModel( WORLDMODEL, flashBakeEye, flashBakePos, &fraction );
+	if( tr.draw_list )
+	{
+		for( i = 0; i < (int)tr.draw_list->num_solid_entities; i++ )
+		{
+			cl_entity_t *ent = tr.draw_list->solid_entities[i];
+			if( !ent || !ent->model || ent->model->type != mod_brush || ent->model == WORLDMODEL )
+				continue;
+			matrix4x4 matrix;
+			vec3_t localStart, localEnd;
+			Matrix4x4_CreateFromEntity( matrix, ent->angles, ent->origin, 1.0f );
+			Matrix4x4_VectorITransform( matrix, flashBakeEye, localStart );
+			Matrix4x4_VectorITransform( matrix, flashBakePos, localEnd );
+			R_TraceFlashlightModel( ent->model, localStart, localEnd, &fraction );
+		}
+	}
+	if( fraction == 1.0f )
+		return;
+
+	vec3_t spot;
+	VectorLerp( flashBakeEye, fraction, flashBakePos, spot );
+	if( !flashBakeSurfaces )
+	{
+		flashBakeSurfaceCount = WORLDMODEL->numsurfaces;
+		flashBakeSurfaces = Mem_Calloc( r_temppool, flashBakeSurfaceCount );
+	}
+
+	for( i = 0; i < WORLDMODEL->nummodelsurfaces; i++ )
+		R_TryBakeSurface( &WORLDMODEL->surfaces[WORLDMODEL->firstmodelsurface + i], spot, flashBakeEye, flashBakeRadius );
 
 	if( tr.draw_list )
 	{
@@ -1811,7 +1897,7 @@ void R_ProcessFlashlightBake( void )
 				continue;
 
 			Matrix4x4_CreateFromEntity( matrix, ent->angles, ent->origin, 1.0f );
-			Matrix4x4_VectorITransform( matrix, flashBakePos, localPos );
+			Matrix4x4_VectorITransform( matrix, spot, localPos );
 			Matrix4x4_VectorITransform( matrix, flashBakeEye, localEye );
 
 			for( int s = 0; s < model->nummodelsurfaces; s++ )
