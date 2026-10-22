@@ -105,6 +105,8 @@ void *Android_GetNativeObject( const char *name );
 void Android_GetWindowInsets( float insets[4] );
 int Android_GetKeyboardHeight( void );
 void Android_Shutdown( void );
+qboolean Android_PrepareVoiceCapture( int samplerate, int frames );
+void Android_ReleaseVoiceCapture( void );
 #endif
 
 #if XASH_WIN32

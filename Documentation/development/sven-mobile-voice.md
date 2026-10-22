@@ -39,3 +39,31 @@ receive-only regression tests pass with sanitizers. Microphone hardware,
 platform audio routing and reception by original PC clients still require
 device/server testing. Server voice enablement, mute masks and team/alltalk
 rules remain authoritative; microphone permission does not override them.
+
+## Microphone processing
+
+`voice_inputprocessing 1` is the default. Both mobile platforms use an 80 Hz
+high-pass filter, a gently smoothed low-level noise expander and frame-based
+level control with peak headroom. Gain no longer targets full scale or boosts
+idle noise fivefold. Filter state resets on each push-to-talk session. Pending
+PCM and processing state remain unchanged if an encoded frame does not fit.
+
+On Android, the launcher prepares SDL's capture record using
+`VOICE_COMMUNICATION`, attaches available `NoiseSuppressor` and
+`AcousticEchoCanceler` effects and disables controllable hardware AGC to avoid
+stacking it with software level control. Effects and the record are released
+on stop and failure. Unsupported capture configurations fall back to SDL's
+normal microphone path, retaining the software gain protection. No SDL
+submodule changes are needed.
+
+See Android's [voice communication source](https://developer.android.com/reference/android/media/MediaRecorder.AudioSource#VOICE_COMMUNICATION)
+and [NoiseSuppressor](https://developer.android.com/reference/android/media/audiofx/NoiseSuppressor)
+documentation. Device support and cancellation strength vary. This is not a
+bundled WebRTC/RNNoise implementation and does not promise Discord-equivalent
+denoising on every microphone.
+
+For comparison or a device with problematic hardware processing, set
+`voice_inputprocessing 0` before pressing push-to-talk again. Safe gain and peak
+protection remain active. `voice_transmit_scale` still controls microphone
+level; `voice_maxgain` now defaults to 2 instead of 5, while existing saved
+values remain respected.

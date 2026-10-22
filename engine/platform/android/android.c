@@ -57,6 +57,38 @@ void Android_Init( void )
 #endif // !XASH_SDL
 }
 
+qboolean Android_PrepareVoiceCapture( int samplerate, int frames )
+{
+	if( !jni.env || !jni.activity || !jni.actcls ) return false;
+	jmethodID method = (*jni.env)->GetMethodID( jni.env, jni.actcls, "prepareVoiceCapture", "(II)Z" );
+	if( (*jni.env)->ExceptionCheck( jni.env ))
+	{
+		(*jni.env)->ExceptionClear( jni.env );
+		return false;
+	}
+	if( !method ) return false;
+	jboolean result = (*jni.env)->CallBooleanMethod( jni.env, jni.activity, method, samplerate, frames );
+	if( (*jni.env)->ExceptionCheck( jni.env ))
+	{
+		(*jni.env)->ExceptionClear( jni.env );
+		return false;
+	}
+	return result == JNI_TRUE;
+}
+
+void Android_ReleaseVoiceCapture( void )
+{
+	if( !jni.env || !jni.activity || !jni.actcls ) return;
+	jmethodID method = (*jni.env)->GetMethodID( jni.env, jni.actcls, "releaseVoiceCapture", "()V" );
+	if( (*jni.env)->ExceptionCheck( jni.env ))
+	{
+		(*jni.env)->ExceptionClear( jni.env );
+		return;
+	}
+	if( method ) (*jni.env)->CallVoidMethod( jni.env, jni.activity, method );
+	if( (*jni.env)->ExceptionCheck( jni.env )) (*jni.env)->ExceptionClear( jni.env );
+}
+
 /*
 ========================
 Android_GetNativeObject

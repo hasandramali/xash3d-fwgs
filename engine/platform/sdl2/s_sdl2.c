@@ -280,15 +280,22 @@ qboolean VoiceCapture_Init( void )
 	wanted.samples = voice.frame_size;
 	wanted.callback = SDL_SoundInputCallback;
 
+#if XASH_ANDROID
+	if( Cvar_VariableInteger( "voice_inputprocessing" ) && !Android_PrepareVoiceCapture( voice.samplerate, voice.frame_size ))
+		Android_ReleaseVoiceCapture();
+#endif
 	in_dev = SDL_OpenAudioDevice( NULL, SDL_TRUE, &wanted, &spec, 0 );
 
 	if( SDLash_IsAudioError( in_dev ))
 	{
+#if XASH_ANDROID
+		Android_ReleaseVoiceCapture();
+#endif
 		Con_Printf( "%s: error creating capture device (%s)\n", __func__, SDL_GetError() );
 		return false;
 	}
 		
-	Con_Printf( S_NOTE "%s: capture device creation success (%i: %s)\n", __func__, in_dev, SDL_GetAudioDeviceName( in_dev, SDL_TRUE ) );
+	Con_Printf( S_NOTE "%s: capture device creation success (%i, %i Hz mono)\n", __func__, in_dev, spec.freq );
 	return true;
 }
 
@@ -329,9 +336,9 @@ VoiceCapture_Shutdown
 */
 void VoiceCapture_Shutdown( void )
 {
-	if( SDLash_IsAudioError( in_dev ))
-		return;
-
-	SDL_CloseAudioDevice( in_dev );
+	if( !SDLash_IsAudioError( in_dev )) SDL_CloseAudioDevice( in_dev );
 	in_dev = 0;
+#if XASH_ANDROID
+	Android_ReleaseVoiceCapture();
+#endif
 }

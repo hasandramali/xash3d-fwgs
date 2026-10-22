@@ -26,12 +26,23 @@ import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
 
 import su.xash.svencoop.util.SoftKeyboardPan;
+import su.xash.svencoop.util.VoiceAudioCapture;
 
 import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 
 public class XashActivity extends SDLActivity {
+    public boolean prepareVoiceCapture(int sampleRate, int frames) {
+        return getBooleanPreference("microphone", true)
+                && checkCallingOrSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                && VoiceAudioCapture.prepare(sampleRate, frames);
+    }
+
+    public void releaseVoiceCapture() {
+        VoiceAudioCapture.releaseCapture();
+    }
+
     private boolean mUseVolumeKeys;
     private String mPackageName;
     private static final String TAG = "XashActivity";

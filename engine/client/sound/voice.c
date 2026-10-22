@@ -36,7 +36,8 @@ static CVAR_DEFINE_AUTO( voice_scale, "1.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "
 static CVAR_DEFINE_AUTO( voice_showincoming, "0", FCVAR_PRIVILEGED, "print incoming voice packet sizes and decoded samples" );
 static CVAR_DEFINE_AUTO( voice_transmit_scale, "1.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "outcoming voice volume scale" );
 static CVAR_DEFINE_AUTO( voice_avggain, "0.5", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "automatic voice gain control (average)" );
-static CVAR_DEFINE_AUTO( voice_maxgain, "5.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "automatic voice gain control (maximum)" );
+static CVAR_DEFINE_AUTO( voice_maxgain, "2.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "automatic voice gain control (maximum)" );
+static CVAR_DEFINE_AUTO( voice_inputprocessing, "1", FCVAR_PRIVILEGED | FCVAR_ARCHIVE, "microphone noise suppression and speech filtering" );
 static CVAR_DEFINE_AUTO( voice_inputfromfile, "0", FCVAR_PRIVILEGED, "input voice from voice_input.wav" );
 
 static void Voice_StartChannel( uint samples, byte *data, int entnum );
@@ -206,6 +207,7 @@ static qboolean Voice_InitOpusEncoder( int quality )
 		}
 		opus_encoder_ctl( voice.gs_encoder, OPUS_SET_DTX( 1 ));
 		opus_encoder_ctl( voice.gs_encoder, OPUS_SET_BITRATE( bitrate ));
+		opus_encoder_ctl( voice.gs_encoder, OPUS_SET_SIGNAL( OPUS_SIGNAL_VOICE ));
 	}
 	else
 	{
@@ -304,7 +306,6 @@ Initialize GoldSrc voice mode
 static qboolean Voice_InitGoldSrcMode( int quality )
 {
 	voice.goldsrc = true;
-	voice.autogain.block_size = 128;
 	voice.width = sizeof( int16_t );
 	voice.samplerate = GS_DEFAULT_SAMPLE_RATE;
 	voice.frame_size = GS_DEFAULT_FRAME_SIZE;
@@ -335,7 +336,6 @@ Initialize Opus Custom voice mode
 static qboolean Voice_InitOpusCustomMode( int quality )
 {
 	voice.goldsrc = false;
-	voice.autogain.block_size = 128;
 	voice.samplerate = VOICE_OPUS_CUSTOM_SAMPLERATE;
 	voice.frame_size = VOICE_OPUS_CUSTOM_FRAME_SIZE;
 	voice.width = sizeof( int16_t );
@@ -399,43 +399,57 @@ Apply automatic gain control to voice samples
 */
 static void Voice_ApplyGainAdjust( int16_t *samples, int count, float scale )
 {
-	int   blockOffset = 0;
+	float filtered[VOICE_OPUS_CUSTOM_FRAME_SIZE];
+	float energy = 0.0f, peak = 0.0f;
+	voice_autogain_t *state = &voice.autogain;
+	qboolean processing = voice_inputprocessing.value != 0;
 
-	for( ;; )
+	if( count <= 0 || count > ARRAYSIZE( filtered ) || !voice.samplerate ) return;
+	float coefficient = expf( -2.0f * M_PI * 80.0f / voice.samplerate );
+	if( !isfinite( scale )) scale = 1.0f;
+	scale = bound( 0.0f, scale, 4.0f );
+	if( !state->initialized )
 	{
-		int localMax = 0, localSum = 0;
-		int blockSize = Q_min( count - blockOffset, voice.autogain.block_size );
-
-		if( blockSize < 1 )
-			break;
-
-		for( int i = 0; i < blockSize; ++i )
-		{
-			int sample = samples[blockOffset + i];
-			int absSample = abs( sample );
-
-			if( absSample > localMax )
-				localMax = absSample;
-
-			localSum += absSample;
-			float gain = voice.autogain.current_gain + i * voice.autogain.gain_multiplier;
-			samples[blockOffset + i] = bound( SHRT_MIN, (int)( sample * gain ), SHRT_MAX );
-		}
-
-		if( blockOffset % voice.autogain.block_size == 0 )
-		{
-			int average = localSum / blockSize;
-			float modifiedMax = average + ( localMax - average ) * voice_avggain.value;
-
-			voice.autogain.current_gain = voice.autogain.next_gain * scale;
-			voice.autogain.next_gain = Q_min((float)SHRT_MAX / ( modifiedMax > 1 ? modifiedMax : 1 ), voice_maxgain.value ) * scale;
-			if( blockSize > 1 )
-				voice.autogain.gain_multiplier = ( voice.autogain.next_gain - voice.autogain.current_gain ) / ( blockSize - 1 );
-			else
-				voice.autogain.gain_multiplier = 0.0f;
-		}
-		blockOffset += blockSize;
+		state->current_gain = 1.0f;
+		state->gate_gain = 1.0f;
+		state->noise_rms = 64.0f;
+		state->previous_input = samples[0];
+		state->initialized = true;
 	}
+	for( int index = 0; index < count; index++ )
+	{
+		float input = samples[index];
+		float output = coefficient * ( state->highpass_output + input - state->previous_input );
+		state->previous_input = input;
+		state->highpass_output = output;
+		filtered[index] = processing ? output : input;
+		energy += filtered[index] * filtered[index];
+		peak = Q_max( peak, fabsf( filtered[index] ));
+	}
+	float rms = sqrtf( energy / count );
+	if( rms < state->noise_rms * 1.5f )
+		state->noise_rms += 0.05f * ( rms - state->noise_rms );
+	state->noise_rms = bound( 16.0f, state->noise_rms, 128.0f );
+	float threshold = Q_max( 96.0f, state->noise_rms * 2.5f );
+	float gate = processing ? bound( 0.1f, rms * rms / ( threshold * threshold ), 1.0f ) : 1.0f;
+	float target = 4096.0f * ( 0.5f + bound( 0.0f, voice_avggain.value, 1.0f ));
+	float desired = rms > threshold ? Q_min( target / rms, bound( 1.0f, voice_maxgain.value, 10.0f )) : 1.0f;
+	float duration = (float)count / voice.samplerate;
+	float smoothing = 1.0f - expf( -duration / ( desired < state->current_gain ? 0.02f : 0.5f ));
+	float gain = state->current_gain + smoothing * ( desired - state->current_gain );
+	float ceiling = peak > 0.0f ? 28000.0f / peak : 10.0f;
+	float start = Q_min( state->current_gain * scale, ceiling );
+	float finish = Q_min( gain * scale, ceiling );
+	float gate_end = state->gate_gain + ( 1.0f - expf( -duration / ( gate > state->gate_gain ? 0.01f : 0.15f ))) * ( gate - state->gate_gain );
+	for( int index = 0; index < count; index++ )
+	{
+		float fraction = (float)( index + 1 ) / count;
+		float amplitude = start + ( finish - start ) * fraction;
+		float attenuation = state->gate_gain + ( gate_end - state->gate_gain ) * fraction;
+		samples[index] = (int16_t)bound( -28000.0f, filtered[index] * amplitude * attenuation, 28000.0f );
+	}
+	state->current_gain = gain;
+	state->gate_gain = gate_end;
 }
 
 /*
@@ -546,7 +560,9 @@ static uint Voice_GetGSCompressedData( byte *out, uint maxsize, uint *frames )
 	{
 		int     bytes;
 		int     is_silence = 1;
-		int16_t *samples = (int16_t *)( voice.input_buffer + ofs );
+		int16_t samples[GS_DEFAULT_FRAME_SIZE];
+		voice_autogain_t saved_gain = voice.autogain;
+		memcpy( samples, voice.input_buffer + ofs, frame_size_bytes );
 
 		for( uint i = 0; i < frame_size_samples; ++i )
 		{
@@ -582,6 +598,7 @@ static uint Voice_GetGSCompressedData( byte *out, uint maxsize, uint *frames )
 		}
 		else if( bytes == OPUS_BUFFER_TOO_SMALL )
 		{
+			voice.autogain = saved_gain;
 			break;
 		}
 		else
@@ -865,6 +882,7 @@ void Voice_RecordStop( void )
 
 	voice.input_buffer_pos = 0;
 	memset( voice.input_buffer, 0, sizeof( voice.input_buffer ));
+	memset( &voice.autogain, 0, sizeof( voice.autogain ));
 }
 
 /*
@@ -1128,6 +1146,7 @@ void Voice_RegisterCvars( void )
 	Cvar_RegisterVariable( &voice_transmit_scale );
 	Cvar_RegisterVariable( &voice_avggain );
 	Cvar_RegisterVariable( &voice_maxgain );
+	Cvar_RegisterVariable( &voice_inputprocessing );
 	Cvar_RegisterVariable( &voice_inputfromfile );
 }
 
@@ -1254,6 +1273,45 @@ voice_audio_info_t Voice_GetAudioInfo( void )
 }
 
 #if XASH_ENGINE_TESTS
+static void Test_VoiceInputProcessing( void )
+{
+	voice_autogain_t saved_gain = voice.autogain;
+	uint saved_rate = voice.samplerate;
+	float saved_processing = voice_inputprocessing.value;
+	float saved_maxgain = voice_maxgain.value;
+	float saved_avggain = voice_avggain.value;
+	int16_t samples[GS_DEFAULT_FRAME_SIZE];
+	int peak = 0;
+	memset( &voice.autogain, 0, sizeof( voice.autogain ));
+	voice.samplerate = GS_DEFAULT_SAMPLE_RATE;
+	voice_inputprocessing.value = 1;
+	voice_maxgain.value = 5;
+	voice_avggain.value = 0.5f;
+	for( int frame = 0; frame < 100; frame++ )
+	{
+		for( int index = 0; index < ARRAYSIZE( samples ); index++ ) samples[index] = index & 1 ? 32 : -32;
+		Voice_ApplyGainAdjust( samples, ARRAYSIZE( samples ), 1.0f );
+	}
+	for( int index = 0; index < ARRAYSIZE( samples ); index++ ) peak = Q_max( peak, abs( samples[index] ));
+	TASSERT( peak < 16 );
+	for( int index = 0; index < ARRAYSIZE( samples ); index++ ) samples[index] = index & 1 ? 1000 : -1000;
+	samples[100] = 30000;
+	samples[300] = -30000;
+	Voice_ApplyGainAdjust( samples, ARRAYSIZE( samples ), 4.0f );
+	peak = 0;
+	for( int index = 0; index < ARRAYSIZE( samples ); index++ ) peak = Q_max( peak, abs( samples[index] ));
+	TASSERT( peak <= 28000 );
+	memset( &voice.autogain, 0, sizeof( voice.autogain ));
+	for( int index = 0; index < ARRAYSIZE( samples ); index++ ) samples[index] = 2000;
+	Voice_ApplyGainAdjust( samples, ARRAYSIZE( samples ), 1.0f );
+	TASSERT_EQi( samples[100], 0 );
+	voice.autogain = saved_gain;
+	voice.samplerate = saved_rate;
+	voice_inputprocessing.value = saved_processing;
+	voice_maxgain.value = saved_maxgain;
+	voice_avggain.value = saved_avggain;
+}
+
 static uint Voice_TestPacketCRC( byte *packet, uint payload_size )
 {
 	uint32_t checksum = CRC32_INIT_VALUE;
@@ -1275,6 +1333,7 @@ void Test_RunVoice( void )
 	uint size;
 	uint chunk_size;
 
+	TRUN( Test_VoiceInputProcessing() );
 	memset( &voice, 0, sizeof( voice ));
 	cl.maxclients = 1;
 	voice.gs_decoders[0] = opus_decoder_create( GS_DEFAULT_SAMPLE_RATE, 1, &error );

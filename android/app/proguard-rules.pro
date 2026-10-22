@@ -21,6 +21,8 @@
 #-renamesourcefileattribute SourceFile
 
 -keep class su.xash.svencoop.XashActivity {
+    boolean prepareVoiceCapture(int, int);
+    void releaseVoiceCapture();
     java.lang.String loadAndroidID();
     java.lang.String getAndroidID();
     void saveAndroidID(java.lang.String);

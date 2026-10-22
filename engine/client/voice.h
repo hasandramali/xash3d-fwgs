@@ -71,10 +71,12 @@ typedef struct voice_status_s
 
 typedef struct voice_autogain_s
 {
-	int   block_size;
 	float current_gain;
-	float next_gain;
-	float gain_multiplier;
+	float previous_input;
+	float highpass_output;
+	float noise_rms;
+	float gate_gain;
+	qboolean initialized;
 } voice_autogain_t;
 
 typedef struct voice_state_s
