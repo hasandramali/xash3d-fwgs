@@ -32,6 +32,7 @@ TEMPENTS MANAGEMENT
 ==============================================================
 */
 #define FLASHLIGHT_DISTANCE		2000	// in units
+#define FLASHLIGHT_BAKE_DISTANCE		65536.0f
 #define FLASHLIGHT_BAKE_RADIUS		256.0f	// fullbright bake pool around the hit point (r_dynamic 0)
 #define SHARD_VOLUME		12.0f	// on shard ever n^3 units
 #define MAX_MUZZLEFLASH		3
@@ -2672,7 +2673,18 @@ static void CL_UpdateFlashlight( cl_entity_t *ent )
 	// vecSrc (the flashlight origin) is passed for a robust front-face test:
 	// testing the hit point itself against the plane rejects surfaces by
 	// float noise, since the hit lies on the plane by construction.
-	ref.dllFuncs.R_FlashlightBake( trace.endpos, FLASHLIGHT_BAKE_RADIUS, vecSrc );
+	if( ent->index == cl.playernum + 1 && !Cvar_VariableValue( "r_dynamic" ))
+	{
+		pmtrace_t bakeTrace = trace;
+		if( trace.fraction == 1.0f )
+		{
+			vec3_t bakeEnd;
+			VectorMA( vecSrc, FLASHLIGHT_BAKE_DISTANCE, forward, bakeEnd );
+			bakeTrace = CL_TraceLine( vecSrc, bakeEnd, PM_STUDIO_BOX );
+		}
+		if( bakeTrace.fraction < 1.0f && !bakeTrace.startsolid && !bakeTrace.allsolid )
+			ref.dllFuncs.R_FlashlightBake( bakeTrace.endpos, FLASHLIGHT_BAKE_RADIUS, vecSrc );
+	}
 
 	// update flashlight endpos
 	dl = CL_AllocDlight( ent->index );

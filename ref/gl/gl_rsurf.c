@@ -1745,8 +1745,11 @@ static void R_TryBakeSurface( msurface_t *surf, const vec3_t pos, const vec3_t e
 	// test missed large walls/floors whose center lies outside the bake
 	// radius even when the flashlight spot sits on the surface.
 	ClearBounds( mins, maxs );
-	for( i = 0; i < poly->numverts; i++ )
-		AddPointToBounds( poly->verts[i], mins, maxs );
+	for( ; poly; poly = poly->next )
+	{
+		for( i = 0; i < poly->numverts; i++ )
+			AddPointToBounds( poly->verts[i], mins, maxs );
+	}
 
 	// squared distance from pos to the AABB (0 when projecting inside)
 	for( i = 0; i < 3; i++ )

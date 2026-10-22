@@ -25,6 +25,7 @@ static struct
 static int svenPendingCount;
 static sound_t svenSoundHandles[SVEN_SOUND_COUNT];
 static qboolean svenSoundsPrecached;
+static int svenSoundPrecacheIndex;
 static qboolean svenFreshTable;
 
 static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed );
@@ -106,6 +107,7 @@ void CL_SvenSoundCacheReset( void )
 	svenRequestSignon = -1;
 	svenPendingCount = 0;
 	svenSoundsPrecached = false;
+	svenSoundPrecacheIndex = 0;
 	svenFreshTable = false;
 	memset( &svenSoundTable, 0, sizeof( svenSoundTable ));
 }
@@ -113,6 +115,7 @@ void CL_SvenSoundCacheReset( void )
 void CL_SvenSoundCacheInvalidate( void )
 {
 	svenSoundsPrecached = false;
+	svenSoundPrecacheIndex = 0;
 }
 
 qboolean CL_SvenSoundCacheRequest( sizebuf_t *message, const char *filename )
@@ -205,9 +208,16 @@ void CL_SvenSoundFrame( void )
 	if( !cl.audio_prepped || !svenSoundLoaded || !Cvar_VariableInteger( "cl_sven_soundcache" )) return;
 	if( !svenSoundsPrecached )
 	{
-		for( int index = 0; index < svenSoundTable.soundCount; index++ )
+		double deadline = Sys_DoubleTime() + 0.002;
+		int count = 0;
+		while( svenSoundPrecacheIndex < svenSoundTable.soundCount && count < 8 )
+		{
+			int index = svenSoundPrecacheIndex++;
 			svenSoundHandles[index] = S_RegisterSvenSound( svenSoundTable.sounds[index] );
-		svenSoundsPrecached = true;
+			count++;
+			if( Sys_DoubleTime() >= deadline ) break;
+		}
+		svenSoundsPrecached = svenSoundPrecacheIndex == svenSoundTable.soundCount;
 	}
 	for( int index = 0; index < svenPendingCount; index++ )
 		CL_SvenPlaySound( &svenPending[index].event, Q_max( 0.0, host.realtime - svenPending[index].received ));
@@ -222,9 +232,9 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 	Q_snprintf( path, sizeof( path ), "maps/soundcache/%s.txt", map );
 	if( Q_strcmp( path, filename ))
 	{
-		if( svenSoundLoaded && svenSoundsPrecached )
+		if( svenSoundLoaded )
 		{
-			for( int index = 0; index < svenSoundTable.soundCount; index++ )
+			for( int index = 0; index < svenSoundPrecacheIndex; index++ )
 			{
 				const char *sample = svenSoundTable.sounds[index];
 				if( *sample == '*' ) sample++;
@@ -245,6 +255,7 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 	Q_strncpy( svenRequestedMap, map, sizeof( svenRequestedMap ));
 	svenRequestSignon = cls.signon;
 	svenSoundsPrecached = false;
+	svenSoundPrecacheIndex = 0;
 	svenNextLoad = 0;
 	CL_LoadSvenSoundCache();
 }
@@ -332,7 +343,7 @@ static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed )
 	else sample = CL_SvenSoundName( event->index );
 	if( !sample ) return;
 	if( event->flags & SVEN_SND_SENTENCE ) handle = S_RegisterSound( sample );
-	else if( svenSoundsPrecached ) handle = svenSoundHandles[event->index];
+	else if( event->index < svenSoundPrecacheIndex ) handle = svenSoundHandles[event->index];
 	else handle = S_RegisterSvenSound( sample );
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
