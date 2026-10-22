@@ -336,11 +336,10 @@ qboolean VoiceCapture_Init( void )
 		VoiceCapture_Shutdown();
 		return false;
 	}
-	Con_Printf( S_NOTE "%s: iOS capture %i Hz / 0x%x / %u channels -> %u Hz S16 mono\n",
+	Con_Reportf( S_NOTE "%s: iOS capture %i Hz / 0x%x / %u channels -> %u Hz S16 mono\n",
 		__func__, spec.freq, spec.format, spec.channels, voice.samplerate );
 #else
-		
-	Con_Printf( S_NOTE "%s: capture device creation success (%i, %i Hz mono)\n", __func__, in_dev, spec.freq );
+	Con_Reportf( S_NOTE "%s: capture device creation success (%i, %i Hz mono)\n", __func__, in_dev, spec.freq );
 #endif
 	return true;
 }

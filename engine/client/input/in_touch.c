@@ -1365,6 +1365,10 @@ void Touch_Init( void )
 
 	// fill default buttons list
 	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "look", "", "_look", 0.52, -0.0454545, 1, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "move", "", "_move", 0, 0.136364, 0.46, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "attack", "touch_default/shoot", "+attack", 0.76, 0.545455, 0.88, 0.818182, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 255 );
 	Touch_AddDefaultButton( "tduck", "touch_default/tduck", ";+duck", 0.82, 0.863636, 0.88, 1, color, 0, 0, 0 );
@@ -1380,20 +1384,6 @@ void Touch_Init( void )
 	Touch_AddDefaultButton( "invprev", "touch_default/prev_weap", "invprev", 0.82, 0, 0.9, 0.136364, color, 0, 0, 0 );
 	MakeRGBA( color, 255, 255, 255, 51 );
 	Touch_AddDefaultButton( "altattack", "gfx/touch/alt_fire.png", "+alt1", 0.72, 0, 0.8, 0.181818, color, 0, 0, 128 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "medic", "touch_default/microphone", "medic", 0.34, 0.863636, 0.4, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 70 );
-	Touch_AddDefaultButton( "drop", "touch_default/edit_close.png", "drop", 0.4, 0.818182, 0.48, 1, color, 0, 0, 128 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "show_numbers", "touch_default/show_weapons", "numericalmenu", 0.48, 0.818182, 0.56, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "scores", "touch_default/map", "+showscores", 0.56, 0.818182, 0.64, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "flashlight", "touch_default/flash_light_filled", "impulse 100", 0.64, 0.863636, 0.7, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "look", "", "_look", 0.52, -0.0454545, 1, 1, color, 0, 0, 0 );
-	MakeRGBA( color, 255, 255, 255, 255 );
-	Touch_AddDefaultButton( "move", "", "_move", 0, 0, 0.48, 1, color, 0, 0, 0 );
 	MakeRGBA( color, 200, 200, 200, 200 );
 	Touch_AddDefaultButton( "duck", "touch_default/crouch", "+duck", 0.88, 0.727273, 1, 1, color, 0, 0, 0 );
 	MakeRGBA( color, 200, 200, 200, 200 );
@@ -1410,6 +1400,18 @@ void Touch_Init( void )
 	Touch_AddDefaultButton( "cmdmenu", "touch_default/cmdmenu.png", "+commandmenu", 0.4, 0, 0.46, 0.136364, color, 0, 0, 128 );
 	MakeRGBA( color, 255, 255, 255, 67 );
 	Touch_AddDefaultButton( "sc_chassecam", "touch_default/edit_show.png", "sc_chasecam", 0.32, 0, 0.38, 0.136364, color, 0, 0, 160 );
+	MakeRGBA( color, 255, 255, 255, 16 );
+	Touch_AddDefaultButton( "npc_moveto", "gfx/touch/stick_thumb.png", "npc_moveto", 0.2, 0, 0.26, 0.136364, color, 0, 0, 128 );
+	MakeRGBA( color, 255, 255, 255, 70 );
+	Touch_AddDefaultButton( "drop", "touch_default/edit_close.png", "drop", 0.38, 0.818182, 0.46, 1, color, 0, 0, 128 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "show_numbers", "touch_default/show_weapons", "numericalmenu", 0.46, 0.818182, 0.54, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "scores", "touch_default/map", "+showscores", 0.54, 0.818182, 0.62, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "voice", "touch_default/microphone", "+voicerecord", 0.62, 0.863636, 0.68, 1, color, 0, 0, 0 );
+	MakeRGBA( color, 255, 255, 255, 255 );
+	Touch_AddDefaultButton( "flashlight", "touch_default/flash_light_filled", "impulse 100", 0.68, 0.863636, 0.74, 1, color, 0, 0, 0 );
 
 	Cmd_AddCommand( "touch_addbutton", Touch_AddButton_f, "add native touch button" );
 	Cmd_AddRestrictedCommand( "numericalmenu", Touch_NumericalMenu_f, "open the touch slot menu" );
