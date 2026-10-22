@@ -818,7 +818,7 @@ static void Voice_StatusTimeout( voice_status_t *status, int entindex, double fr
 	if( status->talking_ack )
 	{
 		status->talking_timeout += frametime;
-		if( status->talking_timeout > 0.2 )
+		if( status->talking_timeout > 0.4 )
 		{
 			status->talking_ack = false;
 			Voice_Status( entindex, false );
@@ -836,6 +836,7 @@ zeroes timeouts for this client
 */
 static void Voice_StatusAck( voice_status_t *status, int playerIndex )
 {
+	if( cls.state != ca_active ) return;
 	if( !status->talking_ack )
 		Voice_Status( playerIndex, true );
 
@@ -955,6 +956,7 @@ void Voice_Disconnect( void )
 
 	for( int i = 1; i <= MAX_CLIENTS; i++ )
 		Voice_Status( i, false );
+	memset( voice.remote, 0, sizeof( voice.remote ));
 
 	VoiceCapture_Shutdown();
 	voice.device_opened = false;
@@ -984,7 +986,8 @@ static void Voice_StartChannel( uint samples, byte *data, int entnum )
 
 	SND_ForceInitMouth( entnum );
 	S_RawEntSamples( entnum, samples, voice.samplerate, voice.width, VOICE_PCM_CHANNELS, data, bound( 0, 255 * voice_scale.value, 255 ), ATTN_NONE );
-	Voice_Status( entnum, true );
+	if( entnum > 0 && entnum <= MAX_CLIENTS )
+		Voice_StatusAck( &voice.remote[entnum - 1], entnum );
 }
 
 /*
@@ -996,7 +999,13 @@ Called by mixer when channel idles
 */
 void Voice_StopChannel( int entnum )
 {
-	Voice_Status( entnum, false );
+	if( entnum <= 0 || entnum > MAX_CLIENTS ) return;
+	voice_status_t *status = &voice.remote[entnum - 1];
+	if( status->talking_ack && status->talking_timeout > 0.4 && !S_IsRawVoicePlaying( entnum ))
+	{
+		status->talking_ack = false;
+		Voice_Status( entnum, false );
+	}
 }
 
 
@@ -1205,6 +1214,12 @@ void Voice_Idle( double frametime )
 
 	// update local player status first
 	Voice_StatusTimeout( &voice.local, VOICE_LOOPBACK_INDEX, frametime );
+	for( int index = 0; index < MAX_CLIENTS; index++ )
+	{
+		if( !voice.remote[index].talking_ack ) continue;
+		voice.remote[index].talking_timeout += frametime;
+		Voice_StopChannel( index + 1 );
+	}
 }
 
 /*

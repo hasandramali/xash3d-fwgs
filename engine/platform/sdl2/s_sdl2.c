@@ -34,6 +34,9 @@ so it can unlock and free the data block after it has been played.
 */
 static int sdl_dev;
 static SDL_AudioDeviceID in_dev = 0;
+#if XASH_IOS
+static SDL_AudioStream *capture_stream;
+#endif
 static SDL_AudioFormat sdl_format;
 static char sdl_backend_name[32];
 
@@ -249,6 +252,33 @@ SDL_SoundInputCallback
 */
 static void SDL_SoundInputCallback( void *userdata, Uint8 *stream, int len )
 {
+#if XASH_IOS
+	if( capture_stream )
+	{
+		if( SDL_AudioStreamPut( capture_stream, stream, len ) < 0 )
+		{
+			SDL_AudioStreamClear( capture_stream );
+			return;
+		}
+		while( SDL_AudioStreamAvailable( capture_stream ) > 0 )
+		{
+			int available = ( sizeof( voice.input_buffer ) - voice.input_buffer_pos ) & ~1;
+			if( available <= 0 )
+			{
+				SDL_AudioStreamClear( capture_stream );
+				break;
+			}
+			int converted = SDL_AudioStreamGet( capture_stream, voice.input_buffer + voice.input_buffer_pos, available );
+			if( converted <= 0 )
+			{
+				if( converted < 0 ) SDL_AudioStreamClear( capture_stream );
+				break;
+			}
+			voice.input_buffer_pos += converted;
+		}
+		return;
+	}
+#endif
 	int size = Q_min( len, sizeof( voice.input_buffer ) - voice.input_buffer_pos );
 
 	// engine can't keep up, skip audio
@@ -284,7 +314,11 @@ qboolean VoiceCapture_Init( void )
 	if( Cvar_VariableInteger( "voice_inputprocessing" ) && !Android_PrepareVoiceCapture( voice.samplerate, voice.frame_size ))
 		Android_ReleaseVoiceCapture();
 #endif
+#if XASH_IOS
+	in_dev = SDL_OpenAudioDevice( NULL, SDL_TRUE, &wanted, &spec, SDL_AUDIO_ALLOW_ANY_CHANGE );
+#else
 	in_dev = SDL_OpenAudioDevice( NULL, SDL_TRUE, &wanted, &spec, 0 );
+#endif
 
 	if( SDLash_IsAudioError( in_dev ))
 	{
@@ -294,8 +328,20 @@ qboolean VoiceCapture_Init( void )
 		Con_Printf( "%s: error creating capture device (%s)\n", __func__, SDL_GetError() );
 		return false;
 	}
+#if XASH_IOS
+	capture_stream = SDL_NewAudioStream( spec.format, spec.channels, spec.freq, AUDIO_S16SYS, VOICE_PCM_CHANNELS, voice.samplerate );
+	if( !capture_stream )
+	{
+		Con_Printf( "%s: capture conversion failed (%s)\n", __func__, SDL_GetError() );
+		VoiceCapture_Shutdown();
+		return false;
+	}
+	Con_Printf( S_NOTE "%s: iOS capture %i Hz / 0x%x / %u channels -> %u Hz S16 mono\n",
+		__func__, spec.freq, spec.format, spec.channels, voice.samplerate );
+#else
 		
 	Con_Printf( S_NOTE "%s: capture device creation success (%i, %i Hz mono)\n", __func__, in_dev, spec.freq );
+#endif
 	return true;
 }
 
@@ -310,6 +356,14 @@ qboolean VoiceCapture_Activate( qboolean activate )
 		return false;
 
 	SDL_PauseAudioDevice( in_dev, activate ? SDL_FALSE : SDL_TRUE );
+#if XASH_IOS
+	if( !activate && capture_stream )
+	{
+		SDL_LockAudioDevice( in_dev );
+		SDL_AudioStreamClear( capture_stream );
+		SDL_UnlockAudioDevice( in_dev );
+	}
+#endif
 	return true;
 }
 
@@ -338,6 +392,10 @@ void VoiceCapture_Shutdown( void )
 {
 	if( !SDLash_IsAudioError( in_dev )) SDL_CloseAudioDevice( in_dev );
 	in_dev = 0;
+#if XASH_IOS
+	SDL_FreeAudioStream( capture_stream );
+	capture_stream = NULL;
+#endif
 #if XASH_ANDROID
 	Android_ReleaseVoiceCapture();
 #endif

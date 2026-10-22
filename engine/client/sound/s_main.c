@@ -1475,6 +1475,13 @@ uint S_RawSamplesStereo( portable_samplepair_t *rawsamples, uint rawend, uint ma
 	return rawend;
 }
 
+qboolean S_IsRawVoicePlaying( int entnum )
+{
+	if( !snd.initialized ) return false;
+	rawchan_t *channel = S_FindRawChannel( entnum, false );
+	return channel && channel->s_rawend > snd.soundtime;
+}
+
 /*
 ===================
 S_RawEntSamples

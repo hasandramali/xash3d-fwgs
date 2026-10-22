@@ -91,6 +91,7 @@ typedef struct voice_state_s
 	double   start_time;
 
 	voice_status_t    local;
+	voice_status_t    remote[MAX_CLIENTS];
 
 	// opus stuff
 	OpusCustomMode    *custom_mode;

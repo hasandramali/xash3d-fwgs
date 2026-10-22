@@ -67,3 +67,30 @@ For comparison or a device with problematic hardware processing, set
 protection remain active. `voice_transmit_scale` still controls microphone
 level; `voice_maxgain` now defaults to 2 instead of 5, while existing saved
 values remain respected.
+
+## iOS capture conversion and speaking indicators
+
+SDL 2.32.10's CoreAudio `inputCallback` delivers its native queue buffer
+directly to the application's callback, without using the conversion stream
+created by SDL's generic audio layer. The backend can change the requested
+24 kHz capture rate to the audio session's actual rate. Treating those bytes
+as 24 kHz PCM changes speech speed and pitch; other formats or channel counts
+can corrupt it further. See the upstream
+[CoreAudio backend](https://github.com/libsdl-org/SDL/blob/release-2.32.10/src/audio/coreaudio/SDL_coreaudio.m).
+
+On iOS only, the engine accepts the native capture specification and owns an
+explicit `SDL_AudioStream` converter to codec-rate S16 mono. Android keeps its
+existing capture path. The converter is cleared on pause, freed after the
+capture device closes, and drops conversion backlog if the input buffer fills.
+The capture initialization log records both the native and codec formats.
+
+Remote speaking notifications now use a 400 ms packet grace period and the
+actual raw playback cursor. A mixer underrun against its look-ahead cursor
+does not immediately hide the speaker icon. Notifications are deduplicated,
+queued audio keeps its indicator, and disconnect clears all speaker state.
+This does not infer a remote push-to-talk button state when no packets arrive.
+
+Tests cover real SDL resampling of 48/44.1/16/24 kHz S16 and float input,
+mono/stereo downmixing, tone pitch/duration, full-buffer recovery, continuous
+Opus reception across mixer underruns, queued playback, and disconnect cleanup.
+Actual iPhone microphone/audio-session behavior still needs device testing.

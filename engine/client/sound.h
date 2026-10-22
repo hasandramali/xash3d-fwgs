@@ -120,6 +120,7 @@ int S_GetCurrentStaticSounds( soundlist_t *pout, int size );
 int S_GetCurrentDynamicSounds( soundlist_t *pout, int size );
 sfx_t *S_GetSfxByHandle( sound_t handle );
 rawchan_t *S_FindRawChannel( int entnum, qboolean create );
+qboolean S_IsRawVoicePlaying( int entnum );
 uint S_RawSamplesStereo( portable_samplepair_t *rawsamples, uint rawend, uint max_samples, uint samples, uint rate, word width, word channels, const byte *data );
 void S_RawEntSamples( int entnum, uint samples, uint rate, word width, word channels, const byte *data, int snd_vol, float attn );
 void S_StopSound( int entnum, int channel, const char *soundname );
