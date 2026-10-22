@@ -1,6 +1,11 @@
 package su.xash.svencoop
 
 import android.os.Bundle
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -27,6 +32,24 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var navController: NavController
+    private var pendingMicrophoneLaunch: (() -> Unit)? = null
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val launch = pendingMicrophoneLaunch
+        pendingMicrophoneLaunch = null
+        if (!granted) Toast.makeText(this, R.string.microphone_permission_denied, Toast.LENGTH_LONG).show()
+        if (!isFinishing && !isDestroyed) launch?.invoke()
+    }
+
+    fun launchWithMicrophonePermission(launch: () -> Unit) {
+        if (pendingMicrophoneLaunch != null) return
+        val enabled = PreferenceManager.getDefaultSharedPreferences(this).getBoolean("microphone", true)
+        if (!enabled || ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            launch()
+        } else {
+            pendingMicrophoneLaunch = launch
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
     private var steamLibraryDialog: AlertDialog? = null
     private var steamLibraryDialogSession = -1L
     private val steamLibraryListener: () -> Unit = { runOnUiThread { refreshSteamLibraryPrompt() } }

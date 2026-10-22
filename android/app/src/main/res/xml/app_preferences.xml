@@ -18,6 +18,11 @@
 
     <PreferenceCategory app:title="@string/global_settings">
         <SwitchPreferenceCompat
+            app:key="microphone"
+            app:title="@string/microphone"
+            app:defaultValue="true" />
+
+        <SwitchPreferenceCompat
             app:key="use_volume_buttons"
             app:title="@string/game_settings_volume_buttons"
             app:defaultValue="false" />

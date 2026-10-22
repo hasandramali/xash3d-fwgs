@@ -26,6 +26,8 @@
 	<string>1.0</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>SvenClient uses Bluetooth for game controller support.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SvenClient uses the microphone for in-game push-to-talk voice chat.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

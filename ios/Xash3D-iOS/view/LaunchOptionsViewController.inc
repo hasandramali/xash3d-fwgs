@@ -1,18 +1,20 @@
 @interface LaunchOptionsViewController : UIViewController
 @property (nonatomic, copy) NSString *arguments;
 @property (nonatomic) BOOL immersive;
-@property (nonatomic, copy) void (^onLaunch)(NSString *, BOOL);
+@property (nonatomic) BOOL microphone;
+@property (nonatomic, copy) void (^onLaunch)(NSString *, BOOL, BOOL);
 @end
 
 @implementation LaunchOptionsViewController {
     UITextField *_argumentsField;
     UISwitch *_immersiveSwitch;
+    UISwitch *_microphoneSwitch;
     UIScrollView *_scroll;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.preferredContentSize = CGSizeMake(420, 360);
+    self.preferredContentSize = CGSizeMake(420, 440);
     _scroll = [[UIScrollView alloc] init];
     _scroll.translatesAutoresizingMaskIntoConstraints = NO;
     _scroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
@@ -43,6 +45,18 @@
     [_immersiveSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
     [immersiveRow addArrangedSubview:immersiveLabel]; [immersiveRow addArrangedSubview:_immersiveSwitch];
     [stack addArrangedSubview:immersiveRow];
+    UIStackView *microphoneRow = [[UIStackView alloc] init];
+    microphoneRow.axis = UILayoutConstraintAxisHorizontal; microphoneRow.spacing = 16;
+    microphoneRow.alignment = UIStackViewAlignmentCenter;
+    UILabel *microphoneLabel = [[UILabel alloc] init];
+    microphoneLabel.text = @"Microphone";
+    microphoneLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    _microphoneSwitch = [[UISwitch alloc] init]; _microphoneSwitch.on = self.microphone;
+    _microphoneSwitch.accessibilityLabel = @"Microphone";
+    [_microphoneSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_microphoneSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
+    [microphoneRow addArrangedSubview:microphoneLabel]; [microphoneRow addArrangedSubview:_microphoneSwitch];
+    [stack addArrangedSubview:microphoneRow];
     UIStackView *buttons = [[UIStackView alloc] init];
     buttons.axis = UILayoutConstraintAxisHorizontal; buttons.spacing = 24;
     buttons.distribution = UIStackViewDistributionFillEqually;
@@ -65,6 +79,7 @@
         [stack.widthAnchor constraintEqualToAnchor:_scroll.frameLayoutGuide.widthAnchor constant:-48],
         [_argumentsField.heightAnchor constraintGreaterThanOrEqualToConstant:48],
         [immersiveRow.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [microphoneRow.heightAnchor constraintGreaterThanOrEqualToConstant:44],
         [buttons.heightAnchor constraintGreaterThanOrEqualToConstant:44]
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardChanged:) name:UIKeyboardWillChangeFrameNotification object:nil];
@@ -84,8 +99,9 @@
 - (void)launchTapped {
     NSString *arguments = _argumentsField.text ?: @"";
     BOOL immersive = _immersiveSwitch.on;
-    void (^launch)(NSString *, BOOL) = self.onLaunch;
+    BOOL microphone = _microphoneSwitch.on;
+    void (^launch)(NSString *, BOOL, BOOL) = self.onLaunch;
     [self.view endEditing:YES];
-    [self dismissViewControllerAnimated:YES completion:^{ if (launch) launch(arguments, immersive); }];
+    [self dismissViewControllerAnimated:YES completion:^{ if (launch) launch(arguments, immersive, microphone); }];
 }
 @end

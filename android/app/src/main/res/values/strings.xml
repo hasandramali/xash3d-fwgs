@@ -166,4 +166,6 @@
     <string name="share_engine_log">Share engine.log</string>
     <string name="engine_log_not_found">engine.log was not found. Run the game with -log enabled, then try again.</string>
     <string name="engine_log_share_failed">Unable to share engine.log. Please check file access and make sure a sharing app is installed.</string>
+    <string name="microphone">Microphone</string>
+    <string name="microphone_permission_denied">Microphone access was denied. You can still hear other players. Enable microphone access in Android Settings to speak.</string>
 </resources>

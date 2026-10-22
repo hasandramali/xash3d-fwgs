@@ -1,6 +1,7 @@
 package su.xash.svencoop.model
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import su.xash.svencoop.R
+import su.xash.svencoop.MainActivity
 import su.xash.svencoop.XashActivity
 import java.io.File
 import java.io.FileInputStream
@@ -125,7 +127,7 @@ class Game(val ctx: Context, val basedir: File) {
 		packageName: String? = null,
 		gameLibDir: String? = null
 	) {
-		ctx.startActivity(Intent(ctx, XashActivity::class.java).apply {
+		val intent = Intent(ctx, XashActivity::class.java).apply {
 			flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
 			putExtra("gamedir", defaultGameDir)
 			putExtra("argv", commandLineArgs)
@@ -134,7 +136,18 @@ class Game(val ctx: Context, val basedir: File) {
 			putExtra("basedir", basedir.parent)
 			if (gameLibDir != null) putExtra("gamelibdir", gameLibDir)
 			if (packageName != null) putExtra("package", packageName)
-		})
+		}
+		var activityContext = ctx
+		while (activityContext is ContextWrapper && activityContext !is MainActivity) {
+			val base = activityContext.baseContext
+			if (base === activityContext) break
+			activityContext = base
+		}
+		if (activityContext is MainActivity) {
+			activityContext.launchWithMicrophonePermission { ctx.startActivity(intent) }
+		} else {
+			ctx.startActivity(intent)
+		}
 	}
 
 	private fun showDownloadDialog(ctx: Context, downloader: GameLibDownloader, commandLineArgs: String) {

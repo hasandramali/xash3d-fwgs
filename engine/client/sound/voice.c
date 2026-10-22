@@ -26,7 +26,7 @@ GNU General Public License for more details.
 voice_state_t voice = { 0 };
 
 static CVAR_DEFINE_AUTO( voice_enable, "1", FCVAR_PRIVILEGED, "enable voice chat reception" );
-#if XASH_ANDROID
+#if XASH_ANDROID || XASH_IOS
 static CVAR_DEFINE_AUTO( voice_receiveonly, "1", FCVAR_PRIVILEGED, "receive voice without opening a microphone" );
 #else
 static CVAR_DEFINE_AUTO( voice_receiveonly, "0", FCVAR_PRIVILEGED, "receive voice without opening a microphone" );
@@ -40,6 +40,16 @@ static CVAR_DEFINE_AUTO( voice_maxgain, "5.0", FCVAR_PRIVILEGED | FCVAR_ARCHIVE,
 static CVAR_DEFINE_AUTO( voice_inputfromfile, "0", FCVAR_PRIVILEGED, "input voice from voice_input.wav" );
 
 static void Voice_StartChannel( uint samples, byte *data, int entnum );
+
+static qboolean Voice_ReceiveOnly( void )
+{
+#if XASH_ANDROID || XASH_IOS
+	const char *microphone = getenv( "XASH3D_MICROPHONE" );
+	if( !microphone || Q_strcmp( microphone, "1" ))
+		return true;
+#endif
+	return voice_receiveonly.value != 0;
+}
 
 /*
 ===============================================================================
@@ -298,6 +308,7 @@ static qboolean Voice_InitGoldSrcMode( int quality )
 	voice.width = sizeof( int16_t );
 	voice.samplerate = GS_DEFAULT_SAMPLE_RATE;
 	voice.frame_size = GS_DEFAULT_FRAME_SIZE;
+	voice.gs_sequence = 0;
 
 	if( !Voice_InitOpusDecoder())
 	{
@@ -305,7 +316,7 @@ static qboolean Voice_InitGoldSrcMode( int quality )
 		return false;
 	}
 
-	if( !voice_receiveonly.value && !Voice_InitOpusEncoder( quality ))
+	if( !Voice_ReceiveOnly() && !Voice_InitOpusEncoder( quality ))
 	{
 		Con_Printf( S_WARN "Other players will not be able to hear you.\n" );
 		return false;
@@ -335,7 +346,7 @@ static qboolean Voice_InitOpusCustomMode( int quality )
 		return false;
 	}
 
-	if( !voice_receiveonly.value && !Voice_InitOpusEncoder( quality ))
+	if( !Voice_ReceiveOnly() && !Voice_InitOpusEncoder( quality ))
 	{
 		Con_Printf( S_WARN "Other players will not be able to hear you.\n" );
 		return false;
@@ -510,7 +521,6 @@ static uint Voice_GetGSCompressedData( byte *out, uint maxsize, uint *frames )
 	uint ofs = 0, size = 0;
 	const uint      frame_size_samples = GS_DEFAULT_FRAME_SIZE;
 	const uint      frame_size_bytes = GS_DEFAULT_FRAME_SIZE * voice.width;
-	static uint16_t sequence = 0;
 
 	if( voice.input_file )
 	{
@@ -532,7 +542,7 @@ static uint Voice_GetGSCompressedData( byte *out, uint maxsize, uint *frames )
 
 	*frames = 0;
 
-	while( voice.input_buffer_pos - ofs >= frame_size_bytes )
+	while( voice.input_buffer_pos - ofs >= frame_size_bytes && maxsize > sizeof( uint32_t ))
 	{
 		int     bytes;
 		int     is_silence = 1;
@@ -560,14 +570,19 @@ static uint Voice_GetGSCompressedData( byte *out, uint maxsize, uint *frames )
 
 		if( bytes > 0 )
 		{
-			*(uint16_t *)( out + size ) = LittleShort( bytes );
-			*(uint16_t *)( out + size + 2 ) = LittleShort( sequence );
-			sequence++;
+			uint16_t frameBytes = LittleShort( bytes );
+			uint16_t sequence = LittleShort( voice.gs_sequence++ );
+			memcpy( out + size, &frameBytes, sizeof( frameBytes ));
+			memcpy( out + size + 2, &sequence, sizeof( sequence ));
 
 			size += bytes + sizeof( uint32_t );
 			maxsize -= bytes + sizeof( uint32_t );
 
 			( *frames )++;
+		}
+		else if( bytes == OPUS_BUFFER_TOO_SMALL )
+		{
+			break;
 		}
 		else
 		{
@@ -715,33 +730,28 @@ static uint Voice_CreateGSVoicePacket( byte *out, const byte *voice_data, uint v
 	uint     offset = 0;
 	uint32_t crc;
 
-	if( !out || !voice_data || voice_size == 0 )
+	if( !out || !voice_data || voice_size == 0 || voice_size > VOICE_MAX_GS_DATA_SIZE - 18 )
 	{
 		Con_Printf( S_WARN "Invalid voice data for packet creation\n" );
 		return 0;
 	}
 
-	if( cls.steamid )
-	{
-		memcpy( out + offset, cls.steamid, 8 );
-	}
-	else
-	{
-		memset( out + offset, 0, 8 ); // fallback: 0
-	}
+	memcpy( out + offset, cls.steamid, sizeof( cls.steamid ));
 
 	offset += sizeof( uint64_t );
 
 	out[offset] = GS_VPC_SETSAMPLERATE;
 	offset++;
 
-	*(uint16_t *)( out + offset ) = LittleShort( GS_DEFAULT_SAMPLE_RATE );
+	uint16_t sample_rate = LittleShort( GS_DEFAULT_SAMPLE_RATE );
+	memcpy( out + offset, &sample_rate, sizeof( sample_rate ));
 	offset += sizeof( uint16_t );
 
 	out[offset] = GS_VPC_VDATA_OPUS_PLC;
 	offset++;
 
-	*(uint16_t *)( out + offset ) = LittleShort( voice_size );
+	uint16_t payload_size = LittleShort( voice_size );
+	memcpy( out + offset, &payload_size, sizeof( payload_size ));
 	offset += sizeof( uint16_t );
 
 	memcpy( out + offset, voice_data, voice_size );
@@ -750,7 +760,8 @@ static uint Voice_CreateGSVoicePacket( byte *out, const byte *voice_data, uint v
 	crc = CRC32_INIT_VALUE;
 	CRC32_ProcessBuffer( &crc, out, offset );
 	crc = CRC32_Final( crc );
-	*(uint32_t *)( out + offset ) = LittleLong( crc );
+	crc = LittleLong( crc );
+	memcpy( out + offset, &crc, sizeof( crc ));
 	offset += sizeof( uint32_t );
 
 	return offset;
@@ -843,6 +854,11 @@ void Voice_RecordStop( void )
 	}
 
 	VoiceCapture_Activate( false );
+	if( voice.device_opened )
+	{
+		VoiceCapture_Shutdown();
+		voice.device_opened = false;
+	}
 	voice.is_recording = false;
 
 	Voice_Status( VOICE_LOCALCLIENT_INDEX, false );
@@ -862,7 +878,11 @@ void Voice_RecordStart( void )
 {
 	Voice_RecordStop();
 
-	if( !voice.initialized || voice_receiveonly.value )
+	if( !voice_enable.value || Voice_ReceiveOnly() )
+		return;
+	if( !voice.initialized && cl_sven_proto && cls.net_protocol == PROTO_GOLDSRC && cls.state == ca_active )
+		Voice_Init( "", 5, false );
+	if( !voice.initialized || ( voice.goldsrc ? !voice.gs_encoder : !voice.encoder ))
 		return;
 
 	if( voice_inputfromfile.value )
@@ -884,8 +904,14 @@ void Voice_RecordStart( void )
 		}
 	}
 
-	if( !Voice_IsRecording( ) && voice.device_opened )
-		voice.is_recording = VoiceCapture_Activate( true );
+	if( !Voice_IsRecording() )
+	{
+		voice.device_opened = VoiceCapture_Init();
+		if( voice.device_opened )
+			voice.is_recording = VoiceCapture_Activate( true );
+		else
+			Con_Printf( S_WARN "No microphone is available. Voice reception remains enabled.\n" );
+	}
 
 	if( Voice_IsRecording())
 		Voice_Status( VOICE_LOCALCLIENT_INDEX, true );
@@ -1045,7 +1071,7 @@ void CL_AddVoiceToDatagram( void )
 	byte buffer[VOICE_MAX_DATA_SIZE];
 	uint size, frames = 0;
 
-	if( cls.state != ca_active || !voice.device_opened || !Voice_IsRecording())
+	if( cls.state != ca_active || !voice_enable.value || Voice_ReceiveOnly() || !Voice_IsRecording())
 		return;
 
 	if( voice.goldsrc )
@@ -1053,8 +1079,11 @@ void CL_AddVoiceToDatagram( void )
 		if( !voice.gs_encoder )
 			return;
 
-		size = Voice_GetGSCompressedData( buffer, sizeof( buffer ), &frames );
-		if( size > 0 && MSG_GetNumBytesLeft( &cls.datagram ) >= size + 32 )
+		uint available = MSG_GetNumBytesLeft( &cls.datagram );
+		if( available <= 21 ) return;
+		uint packet_limit = Q_min( available - 3, 1200 );
+		size = Voice_GetGSCompressedData( buffer, packet_limit - 18, &frames );
+		if( size > 0 && MSG_GetNumBytesLeft( &cls.datagram ) >= size + 21 )
 		{
 			uint packet_size = Voice_CreateGSVoicePacket( voice.compress_buffer, buffer, size );
 			MSG_BeginClientCmd( &cls.datagram, clc_voicedata );
@@ -1089,6 +1118,10 @@ void Voice_RegisterCvars( void )
 {
 	Cvar_RegisterVariable( &voice_enable );
 	Cvar_RegisterVariable( &voice_receiveonly );
+#if XASH_ANDROID || XASH_IOS
+	const char *microphone = getenv( "XASH3D_MICROPHONE" );
+	Cvar_SetValue( "voice_receiveonly", !microphone || Q_strcmp( microphone, "1" ));
+#endif
 	Cvar_RegisterVariable( &voice_showincoming );
 	Cvar_RegisterVariable( &voice_loopback );
 	Cvar_RegisterVariable( &voice_scale );
@@ -1135,6 +1168,8 @@ Run timeout for clients
 */
 void Voice_Idle( double frametime )
 {
+	if( Voice_IsRecording() && ( host.status != HOST_FRAME || !voice_enable.value || Voice_ReceiveOnly() ))
+		Voice_RecordStop();
 	if( FBitSet( voice_enable.flags | voice_receiveonly.flags, FCVAR_CHANGED ))
 	{
 		ClearBits( voice_enable.flags, FCVAR_CHANGED );
@@ -1200,14 +1235,9 @@ qboolean Voice_Init( const char *pszCodecName, int quality, qboolean preinit )
 		return false;
 	}
 
-	voice.device_opened = !voice_receiveonly.value && VoiceCapture_Init();
-
-	if( !voice.device_opened && !voice_receiveonly.value )
-		Con_Printf( S_WARN "No microphone is available.\n" );
-
 	voice.initialized = true;
 	Con_Printf( "Voice initialized: %s, %u Hz%s\n", voice.goldsrc ? "Steam/Opus" : voice.codec,
-		voice.samplerate, voice_receiveonly.value ? ", receive only" : "" );
+		voice.samplerate, Voice_ReceiveOnly() ? ", receive only" : ", push-to-talk" );
 	return true;
 }
 

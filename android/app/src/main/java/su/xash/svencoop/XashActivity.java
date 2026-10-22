@@ -1,6 +1,8 @@
 package su.xash.svencoop;
 
 import android.annotation.SuppressLint;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.content.pm.ActivityInfo;
 import android.content.Context;
 import android.content.res.AssetManager;
@@ -297,6 +299,9 @@ public class XashActivity extends SDLActivity {
         }
 
         String argv = getIntent().getStringExtra("argv");
+        boolean microphone = getBooleanPreference("microphone", true)
+                && checkCallingOrSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        nativeSetenv("XASH3D_MICROPHONE", microphone ? "1" : "0");
         if (argv == null) argv = "-console -log";
 
         // Background map (renderer kick): keeps the renderer fed from the first

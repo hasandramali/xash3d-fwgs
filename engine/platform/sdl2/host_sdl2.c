@@ -22,6 +22,7 @@ GNU General Public License for more details.
 #include "vgui_draw.h"
 #include "platform_sdl2.h"
 #include "sound.h"
+#include "voice.h"
 #include "vid_common.h"
 
 /*
@@ -252,6 +253,7 @@ static void SDLash_ActiveEvent( int gain )
 	else
 	{
 		host.status = HOST_NOFOCUS;
+		if( Voice_IsRecording() ) Voice_RecordStop();
 
 		if( cls.key_dest == key_game )
 		{
@@ -392,6 +394,7 @@ static void SDLash_EventHandler( SDL_Event *event )
 			break;
 		case SDL_WINDOWEVENT_MINIMIZED:
 			host.status = HOST_SLEEP;
+			if( Voice_IsRecording() ) Voice_RecordStop();
 			Cvar_DirectSet( &vid_maximized, "0" );
 			VID_RestoreScreenResolution( (window_mode_t)vid_fullscreen.value );
 			break;

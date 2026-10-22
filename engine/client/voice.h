@@ -96,6 +96,7 @@ typedef struct voice_state_s
 	OpusCustomDecoder *decoders[MAX_CLIENTS];
 
 	OpusEncoder *gs_encoder;
+	uint16_t gs_sequence;
 	OpusDecoder *gs_decoders[MAX_CLIENTS];
 
 	// audio info
