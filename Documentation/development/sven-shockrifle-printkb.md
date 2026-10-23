@@ -10,13 +10,17 @@ That routine removes the item through the player's virtual method at offset
 `0x94` (`0x102462BE`), implemented at `0x10200800`.
 
 WeaponListFix must not treat `SELECTONEMPTY` as an ownership exemption:
-`EXHAUSTIBLE` still applies once the weapon is inactive and all known reserves
-and its clip are empty. The fix uses the advertised flags and ammo indices,
+`EXHAUSTIBLE` still applies once the weapon is inactive, a fresh depletion has
+been observed during its current ownership, and all known reserves and its
+clip are empty. A cached zero from before a pickup is not depletion evidence.
+The fix uses the advertised flags and ammo indices,
 not a classname or hardcoded weapon ID, and works without `cl_lw` prediction.
 Active weapons, unknown ammo, remaining ammunition and authoritative predicted
 weapon-data ownership retain their previous guards. `SRDetonate` remains a
 visual effect only: its broadcast payload has no owner ID, so another player's
 or NPC's explosion cannot remove a local inventory entry.
+
+See `sven-weapon-ownership.md` for the subsequent pickup/strip regression fix.
 
 ## Verified reference behavior
 

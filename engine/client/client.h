@@ -762,6 +762,8 @@ typedef struct
 	qboolean valid;
 	qboolean owned_hint;
 	qboolean removed_hint;
+	qboolean exhausted_hint;
+	qboolean ammo_confirmed;
 	qboolean real_name;
 	char name[64];
 	char sprdir[64]; // CustWeapon sprite subdirectory (e.g. "hunger/weapons").
@@ -794,6 +796,13 @@ typedef struct
 	qboolean weapondata_valid;
 	int ammo_counts[256];
 	qboolean ammo_valid[256];
+	int zero_ammo_count;
+	int zero_ammo_first;
+	float zero_ammo_time;
+	qboolean strip_pending;
+	float strip_pending_time;
+	qboolean no_active_reset;
+	float no_active_time;
 	char pending_name[64];
 	float pending_time;
 	int drop_pending;
