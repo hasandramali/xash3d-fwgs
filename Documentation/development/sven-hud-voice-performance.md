@@ -66,6 +66,34 @@ all output-affecting parameters remain represented, including light indices.
 Each surface stops scanning lights after its highest set bit. Per-column
 distance is calculated once per light instead of once per luxel row.
 
+For fading map lights, the lightmap builder now reuses a bounded RGB contribution
+table for integer luxel distances when the surface is large enough to amortize
+its construction. Small surfaces and very large light radii keep the direct
+calculation. The table occupies 12 KiB of static renderer memory, not the ARMv7
+stack; no NEON or ARM64-only instructions are required. Rows outside the light
+are skipped. Zero-intensity secondary lightstyles skip their sample pass.
+
+The dynamic-atlas signature now includes only lights and styles referenced by
+its surface chain, plus the current brush-model transform. Unrelated fading
+lights no longer invalidate it. A chain spanning multiple atlas uploads cannot
+be reused: only the final atlas page survives in the GPU texture.
+
+`r_lightstyle_updates` defaults to 30 and limits interpolated lightstyle fades
+to three steps per original 100 ms animation frame. Animation time still advances
+every frame; static on/off styles are immediate. This only applies when
+`cl_lightstyle_lerping` is enabled. It does not throttle moving lights, muzzle
+flashes, ordinary non-interpolated styles or network processing. Set
+`r_lightstyle_updates 0` for the previous every-frame interpolation. Positive
+settings are rounded up to multiples of 10 Hz within 10–200 Hz.
+
+The October 23 log completes a roughly 16-minute session without a capture,
+codec or packet-overflow error and exits through the menu normally. It does
+report unimplemented `SRPrimed`, `SRPrimedOff`, `SRDetonate` and `PrintKB` client
+handlers, missing server content and two rejected Ogg files. These are separate
+from lighting. The subsequent Shock Rifle/PrintKB port addresses those four
+message handlers; see `sven-shockrifle-printkb.md`. Missing content and rejected
+Ogg files are not fixed or hidden by either change.
+
 Particle/tracer allocation attempts to reclaim expired objects before reporting
 an exhausted pool. Reclaim walks occur at most once per frame's clock value.
 Map resets clear stale callbacks as well as list links. Genuine exhaustion
@@ -87,6 +115,16 @@ budgets, capture-stall recovery, focus privacy and expired particle reclamation.
 Five hundred randomized light configurations produce bit-identical luxels before
 and after optimization, including transformed brush models. Real SDL converters
 retain the expected pitch/duration for native 16/24/44.1/48-kHz inputs.
+
+The fading-light follow-up expands the exact-light comparison to 5,000 cases,
+including fractional radii. Another 10,000 cases compare unlimited lightstyle
+updates with the previous code. Rate-limited tests verify clock continuity,
+pause behavior and immediate static-style changes; cache tests cover unrelated
+lights/styles, light index 31, expiry and brush transforms. Both light calculation
+and lightstyle routines cross-compile as freestanding Android ARMv7 objects.
+This is not a full ARMv7 APK build or device test. An ARM64 CPU-only microbenchmark
+showed about 28% less light-addition time for a 64×64-luxel, four-light example;
+that number does not predict whole-frame FPS or GPU upload cost.
 
 The client library builds and engine/renderer syntax checks pass. FPS gains and
 long-session microphone stability still require testing on the affected devices;

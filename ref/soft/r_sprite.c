@@ -64,9 +64,12 @@ static float R_SpriteGlowBlend( vec3_t origin, int rendermode, int renderfx, flo
 	VectorSubtract( origin, RI.rvp.vieworigin, glowDist );
 	dist = VectorLength( glowDist );
 
-	pmtrace_t *tr = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, r_traceglow.value ? PM_GLASS_IGNORE : ( PM_GLASS_IGNORE | PM_STUDIO_IGNORE ));
-	if(( 1.0f - tr->fraction ) * dist > 8.0f )
-		return 0.0f;
+	if( r_traceglow.value )
+	{
+		pmtrace_t *trace = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, PM_GLASS_IGNORE | PM_STUDIO_IGNORE );
+		if(( 1.0f - trace->fraction ) * dist > 8.0f )
+			return 0.0f;
+	}
 
 	if( renderfx == kRenderFxNoDissipation )
 		return 1.0f;

@@ -223,9 +223,9 @@ static float R_SpriteGlowBlend( vec3_t origin, int rendermode, int renderfx, flo
 	VectorSubtract( origin, RI.rvp.vieworigin, glowDist );
 	float dist = VectorLength( glowDist );
 
-	if( !FBitSet( RI.rvp.flags, RF_DRAW_CUBEMAP ))
+	if( r_traceglow.value && !FBitSet( RI.rvp.flags, RF_DRAW_CUBEMAP ))
 	{
-		pmtrace_t *tr = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, r_traceglow.value ? PM_GLASS_IGNORE : (PM_GLASS_IGNORE|PM_STUDIO_IGNORE));
+		pmtrace_t *tr = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, PM_GLASS_IGNORE | PM_STUDIO_IGNORE );
 
 		if(( 1.0f - tr->fraction ) * dist > 8.0f )
 			return 0.0f;
@@ -412,7 +412,7 @@ void R_DrawSpriteModel( cl_entity_t *e )
 		pglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 		break;
 	case kRenderGlow:
-		pglDisable( GL_DEPTH_TEST );
+		pglEnable( GL_DEPTH_TEST );
 		// fallthrough
 	case kRenderTransAdd:
 		pglEnable( GL_BLEND );

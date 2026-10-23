@@ -935,7 +935,7 @@ void R_PolysetDrawSpansGlow( spanpackage_t *pspanpackage )
 #endif
 			do
 			{
-				// if ((lzi >> 16) >= *lpz)
+				if(( lzi >> 16 ) >= *lpz )
 				{
 #if BOUNDCHECK_MODE == 1
 					if( !R_DrawCheckBounds( lptex ))

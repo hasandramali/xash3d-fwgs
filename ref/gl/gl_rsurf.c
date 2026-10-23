@@ -39,6 +39,7 @@ typedef struct
 static vec2_t		world_orthocenter;
 static vec2_t		world_orthohalf;
 static uint		r_blocklights[BLOCK_SIZE_MAX*BLOCK_SIZE_MAX*3];
+static uint		r_lightcontributions[1024][3];
 static mextrasurf_t		*fullbright_surfaces[MAX_TEXTURES];
 static mextrasurf_t		*detail_surfaces[MAX_TEXTURES];
 
@@ -112,19 +113,31 @@ static uint64_t DLight_HashBytes( uint64_t hash, const void *data, size_t len )
 static uint64_t R_DynamicStateHash( void )
 {
 	uint64_t hash = 14695981039346656037ULL; // FNV offset basis
+	uint lightbits = 0;
+	qboolean styles[MAX_LIGHTSTYLES] = { false };
+
+	for( const msurface_t *surf = gl_lms.dynamic_surfaces; surf; surf = surf->info->lightmapchain )
+	{
+		lightbits |= (uint)surf->dlightbits;
+		for( int map = 0; map < MAXLIGHTMAPS && surf->styles[map] != 255; map++ )
+			styles[surf->styles[map]] = true;
+	}
 
 	// map + texture generation identity
 	hash = DLight_HashBytes( hash, &WORLDMODEL, sizeof( WORLDMODEL ));
 	hash = DLight_HashBytes( hash, &dlight_cache_gen, sizeof( dlight_cache_gen ));
 	hash = DLight_HashBytes( hash, &tr.dlightTexture, sizeof( tr.dlightTexture ));
 	hash = DLight_HashBytes( hash, &tr.block_size, sizeof( tr.block_size ));
+	hash = DLight_HashBytes( hash, &tr.modelviewIdentity, sizeof( tr.modelviewIdentity ));
+	if( !tr.modelviewIdentity )
+		hash = DLight_HashBytes( hash, RI.objectMatrix, sizeof( RI.objectMatrix ));
 
 	// live dynamic lights, field by field (no padding bytes)
 	for( int i = 0; i < MAX_DLIGHTS; i++ )
 	{
 		const dlight_t *dl = &gp_dlights[i];
 
-		if( dl->die < gp_cl->time || !dl->radius )
+		if( !( lightbits & ( 1u << i )) || dl->die < gp_cl->time || !dl->radius )
 			continue;
 
 		hash = DLight_HashBytes( hash, &i, sizeof( i ));
@@ -136,7 +149,13 @@ static uint64_t R_DynamicStateHash( void )
 	}
 
 	// light styles (flicker switches surface rebuilds on/off)
-	hash = DLight_HashBytes( hash, g_lightstylevalue, sizeof( g_lightstylevalue ));
+	for( int style = 0; style < MAX_LIGHTSTYLES; style++ )
+	{
+		if( !styles[style] )
+			continue;
+		hash = DLight_HashBytes( hash, &style, sizeof( style ));
+		hash = DLight_HashBytes( hash, &g_lightstylevalue[style], sizeof( g_lightstylevalue[style] ));
+	}
 
 	// build config scalars affecting R_BuildLightMap output
 	hash = DLight_HashBytes( hash, &v_lightgamma->value, sizeof( float ));
@@ -768,6 +787,22 @@ static void R_AddDynamicLights( const msurface_t *surf, float sample_size, int s
 			int distance = ( sl - sample_size * column ) * sample_frac;
 			columnDistance[column] = distance < 0 ? -distance : distance;
 		}
+		qboolean useContributions = false;
+		if( minlight > 0.0f && minlight <= ARRAYSIZE( r_lightcontributions ))
+		{
+			int distances = (int)ceilf( minlight );
+			if(( s1 - s0 + 1 ) * ( t1 - t0 + 1 ) >= distances * 4 )
+			{
+				for( int distance = 0; distance < distances; distance++ )
+				{
+					int brightness = (int)(( rad - distance ) * 256 );
+					r_lightcontributions[distance][0] = ( brightness * dl->color.r ) / 256;
+					r_lightcontributions[distance][1] = ( brightness * dl->color.g ) / 256;
+					r_lightcontributions[distance][2] = ( brightness * dl->color.b ) / 256;
+				}
+				useContributions = true;
+			}
+		}
 
 		for( int t = t0; t <= t1; t++ )
 		{
@@ -775,6 +810,8 @@ static void R_AddDynamicLights( const msurface_t *surf, float sample_size, int s
 
 			if( td < 0 )
 				td = -td;
+			if( td >= minlight )
+				continue;
 
 			for( int s = s0; s <= s1; s++ )
 			{
@@ -790,9 +827,19 @@ static void R_AddDynamicLights( const msurface_t *surf, float sample_size, int s
 				{
 					uint *bl = &r_blocklights[(s + (t * smax)) * 3];
 
-					bl[0] += ((int)((rad - dist) * 256) * dl->color.r ) / 256;
-					bl[1] += ((int)((rad - dist) * 256) * dl->color.g ) / 256;
-					bl[2] += ((int)((rad - dist) * 256) * dl->color.b ) / 256;
+					if( useContributions )
+					{
+						const uint *contribution = r_lightcontributions[(int)dist];
+						bl[0] += contribution[0];
+						bl[1] += contribution[1];
+						bl[2] += contribution[2];
+					}
+					else
+					{
+						bl[0] += ((int)((rad - dist) * 256) * dl->color.r ) / 256;
+						bl[1] += ((int)((rad - dist) * 256) * dl->color.g ) / 256;
+						bl[2] += ((int)((rad - dist) * 256) * dl->color.b ) / 256;
+					}
 				}
 			}
 		}
@@ -917,6 +964,8 @@ static void R_BuildLightMap( const msurface_t *surf, byte *restrict dest, int st
 				break;
 
 			uint scale = g_lightstylevalue[surf->styles[map]];
+			if( !scale )
+				continue;
 			const color24 *lm = &surf->samples[map * size];
 			for( int i = 0; i < size; i++ )
 			{
@@ -1388,6 +1437,7 @@ static void R_BlendLightmaps( void )
 			}
 			else
 			{
+				dlight_cache_valid = false;
 				// upload what we have so far
 				if( !dlight_skip )
 					LM_UploadBlock( true );
