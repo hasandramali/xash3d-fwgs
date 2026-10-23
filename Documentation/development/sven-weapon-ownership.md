@@ -35,17 +35,54 @@ The supplied Windows binaries confirm two distinct information paths:
 
 ## Regression fixes
 
-Exhaustion now needs positive ammo observed during the current pickup lifetime
-followed by depletion, or a positive-to-empty CurWeapon update. New pickups
+Exhaustion needs a fresh positive-to-zero AmmoX transition, positive ammo
+observed during the current pickup lifetime followed by depletion, or a
+positive-to-empty CurWeapon update. The first case also covers AmmoX arriving
+before WeapPickup. New pickups
 clear old depletion, clip/reserve observations and matching drop suppression.
 This prevents a newly picked grenade from being pruned by the previous one's
 cached zero before its new AmmoX message arrives. A refill cancels depletion.
-Active weapons, positive clips, unknown reserves, nonempty secondary reserves
+Positive clips (including the second CurWeapon clip), unknown reserves, nonempty secondary reserves
 and non-exhaustible weapons retain their guards. Prediction snapshots, when
 available, override these depletion heuristics.
 
-`ITEM_FLAG_SELECTONEMPTY` is bit 0, not bit 2 (`NOAUTORELOAD`). It does not
-override `EXHAUSTIBLE` and it is not evidence of possession.
+`ITEM_FLAG_SELECTONEMPTY` is bit 0, not bit 2 (`NOAUTORELOAD`). It is not
+ownership proof, but it prevents reserve-only removal of controller weapons.
+
+## Tripmine and satchel retirement
+
+The supplied `server.dll` distinguishes these lifetimes:
+
+- Tripmine item info at `0x10295DE0` advertises flags `0x18`. Its holster
+  routine at `0x102962E0` checks empty reserve at `0x10296349` and schedules
+  destruction at `0x10296359`. An exhausted non-SELECTONEMPTY item can be
+  removed even before the next active-weapon update. Repeated empty active
+  reports must not resurrect that entry; a fresh pickup or unambiguous ammo
+  reacquisition can still restore it.
+- Satchel item info at `0x10229E60` advertises flags `0x19`. CanDeploy at
+  `0x1022A340` and IsUsable at `0x1022A5B0` accept its internal charge mode
+  even with no reserve. Holster at `0x1022A600` schedules destruction for
+  empty mode 0 or 2 (`0x1022A6EB` onward), but preserves mode 1: the remote
+  remains usable even after selecting another weapon. The last throw sets
+  mode 1 at `0x1022ABBD`; detonation changes it to mode 2. WeaponIdle at
+  `0x1022A760` retires an empty mode-2 weapon through `0x1022A7E8`.
+- The generic CurWeapon sender at `0x102AAC90` sends the two clip values at
+  offsets `0x1F4` and `0x1F8`, not the satchel mode at `0x228`. State 0 is an
+  inactive weapon report, not an inventory-removal notification.
+
+Without predicted weapon data, SELECTONEMPTY exhaustion therefore requires
+both fresh depletion and a server-confirmed active-ID change following a
+recent primary/secondary attack. Depletion and retirement can arrive in either
+order. A manual weapon selection/drop cancels the candidate; held attack input
+cannot immediately re-arm it while waiting for that selection's reply. Empty
+reserve alone never removes a satchel remote, active or holstered. Reset and
+pickup clear old candidates. The same generic path covers the Shock Rifle's
+last-shot retirement without special-casing weapon names or IDs.
+
+This is conservative input/message correlation, not access to the server's
+private charge mode or a complete ownership table with `cl_lw 0`. A server
+silently changing ownership without a corresponding transition remains
+unobservable through this fallback.
 
 An outstanding ammo-less alternate action now accepts the server's negative
 no-active ID as a transition. Previously that branch discarded the pending

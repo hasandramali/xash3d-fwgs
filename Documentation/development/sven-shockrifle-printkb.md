@@ -9,14 +9,15 @@ primary ammo to zero and calls the detonation/removal routine at `0x10245FF0`.
 That routine removes the item through the player's virtual method at offset
 `0x94` (`0x102462BE`), implemented at `0x10200800`.
 
-WeaponListFix must not treat `SELECTONEMPTY` as an ownership exemption:
-`EXHAUSTIBLE` still applies once the weapon is inactive, a fresh depletion has
-been observed during its current ownership, and all known reserves and its
-clip are empty. A cached zero from before a pickup is not depletion evidence.
-The fix uses the advertised flags and ammo indices,
-not a classname or hardcoded weapon ID, and works without `cl_lw` prediction.
-Active weapons, unknown ammo, remaining ammunition and authoritative predicted
-weapon-data ownership retain their previous guards. `SRDetonate` remains a
+`SELECTONEMPTY` also describes satchel remotes, so neither zero reserve nor
+inactivity alone is sufficient ownership-removal evidence. Without predicted
+weapon data, WeaponListFix correlates a recent attack with a server-confirmed
+active-ID change and fresh depletion, while respecting manual selections.
+All known reserves and both observed clip values must be empty. A cached
+zero from before a pickup is not depletion evidence. The fix uses advertised
+flags and ammo indices, not a classname or hardcoded weapon ID. Unknown ammo,
+remaining ammunition and authoritative predicted weapon-data ownership retain
+their guards. `SRDetonate` remains a
 visual effect only: its broadcast payload has no owner ID, so another player's
 or NPC's explosion cannot remove a local inventory entry.
 

@@ -810,6 +810,11 @@ typedef struct
 	float drop_pending_time;
 	int alt_pending;
 	float alt_pending_time;
+	int attack_pending;
+	float attack_pending_time;
+	int retire_pending;
+	float retire_pending_time;
+	float attack_block_until;
 	float expire_time;
 } cl_weaponlistfix_t;
 

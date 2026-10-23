@@ -488,6 +488,10 @@ static void CL_WeaponListFix_ForgetWeapon( int id )
 	weapon->exhausted_hint = false;
 	weapon->ammo_confirmed = false;
 	weapon->ammo_recoverable = false;
+	if( cl_weaponlistfix_state.attack_pending == id )
+		cl_weaponlistfix_state.attack_pending = 0;
+	if( cl_weaponlistfix_state.retire_pending == id )
+		cl_weaponlistfix_state.retire_pending = 0;
 	if( cl_weaponlistfix_state.active_weapon == id )
 		cl_weaponlistfix_state.active_weapon = -1;
 	if( cl_weaponlistfix_state.selected_weapon == id )
@@ -512,6 +516,43 @@ static void CL_WeaponListFix_ConfirmAlternateAction( int id )
 	}
 }
 
+static void CL_WeaponListFix_ConfirmRetirement( int id )
+{
+	int pending = cl_weaponlistfix_state.attack_pending;
+	float elapsed = cl.time - cl_weaponlistfix_state.attack_pending_time;
+	if( pending && id != pending )
+	{
+		if( !cl_weaponlistfix_state.weapondata_valid && elapsed >= 0
+			&& elapsed <= CL_WEAPONLISTFIX_PENDING_TIMEOUT )
+		{
+			cl_weaponlistfix_state.retire_pending = pending;
+			cl_weaponlistfix_state.retire_pending_time = cl.time;
+		}
+		cl_weaponlistfix_state.attack_pending = 0;
+	}
+	if( id != cl_weaponlistfix_state.active_weapon )
+		cl_weaponlistfix_state.attack_block_until = 0;
+}
+
+static void CL_WeaponListFix_CancelRetirement( void )
+{
+	cl_weaponlistfix_state.attack_pending = 0;
+	cl_weaponlistfix_state.retire_pending = 0;
+	cl_weaponlistfix_state.attack_block_until = cl.time + CL_WEAPONLISTFIX_PENDING_TIMEOUT;
+}
+
+static qboolean CL_WeaponListFix_KnownEmpty( const cl_weaponlistfix_weapon_t *weapon )
+{
+	if( weapon->clip > 0 || weapon->ammo > 0 || weapon->ammo1 < 0
+		|| weapon->ammo1 >= ARRAYSIZE( cl_weaponlistfix_state.ammo_counts )
+		|| !cl_weaponlistfix_state.ammo_valid[weapon->ammo1]
+		|| cl_weaponlistfix_state.ammo_counts[weapon->ammo1] != 0 )
+		return false;
+	return weapon->ammo2 < 0 || ( weapon->ammo2 < ARRAYSIZE( cl_weaponlistfix_state.ammo_counts )
+		&& cl_weaponlistfix_state.ammo_valid[weapon->ammo2]
+		&& cl_weaponlistfix_state.ammo_counts[weapon->ammo2] == 0 );
+}
+
 static void CL_WeaponListFix_PruneExhaustedWeapons( void )
 {
 	if( cl_weaponlistfix_state.weapondata_valid )
@@ -521,15 +562,12 @@ static void CL_WeaponListFix_PruneExhaustedWeapons( void )
 		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
 		if( !weapon || !weapon->owned_hint || !weapon->exhausted_hint
 			|| !( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
-			|| cl_weaponlistfix_state.active_weapon == id || weapon->clip > 0 )
+			|| !CL_WeaponListFix_KnownEmpty( weapon ))
 			continue;
-		if( weapon->ammo1 < 0 || weapon->ammo1 >= ARRAYSIZE( cl_weaponlistfix_state.ammo_counts )
-			|| !cl_weaponlistfix_state.ammo_valid[weapon->ammo1]
-			|| cl_weaponlistfix_state.ammo_counts[weapon->ammo1] != 0 )
-			continue;
-		if( weapon->ammo2 >= 0 && ( weapon->ammo2 >= ARRAYSIZE( cl_weaponlistfix_state.ammo_counts )
-			|| !cl_weaponlistfix_state.ammo_valid[weapon->ammo2]
-			|| cl_weaponlistfix_state.ammo_counts[weapon->ammo2] != 0 ))
+		if( ( weapon->flags & CL_WEAPONLISTFIX_SELECTONEMPTY )
+			&& ( cl_weaponlistfix_state.retire_pending != id
+			|| cl.time < cl_weaponlistfix_state.retire_pending_time
+			|| cl.time - cl_weaponlistfix_state.retire_pending_time > 1.0f ))
 			continue;
 		CL_WeaponListFix_ForgetWeapon( id );
 		weapon->ammo_recoverable = true;
@@ -570,6 +608,9 @@ static void CL_WeaponListFix_ClearOwnership( void )
 	cl_weaponlistfix_state.selected_weapon = -1;
 	cl_weaponlistfix_state.select_pending = 0;
 	cl_weaponlistfix_state.alt_pending = 0;
+	cl_weaponlistfix_state.attack_pending = 0;
+	cl_weaponlistfix_state.retire_pending = 0;
+	cl_weaponlistfix_state.attack_block_until = 0;
 	cl_weaponlistfix_state.drop_pending = 0;
 	cl_weaponlistfix_state.pending_name[0] = '\0';
 	cl_weaponlistfix_state.expire_time = 0;
@@ -594,7 +635,7 @@ static void CL_WeaponListFix_UpdateAmmo( int ammo, int count )
 		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
 		if( !weapon || !weapon->owned_hint || ( weapon->ammo1 != ammo && weapon->ammo2 != ammo ))
 			continue;
-		if( count == 0 && weapon->ammo_confirmed )
+		if( count == 0 && ( weapon->ammo_confirmed || depleted ))
 			weapon->exhausted_hint = true;
 		else if( count > 0 )
 		{
@@ -634,6 +675,7 @@ static void CL_WeaponListFix_UpdateAmmo( int ammo, int count )
 
 static void CL_WeaponListFix_NoActiveWeapon( int state, int id, int clip, int ammo )
 {
+	CL_WeaponListFix_ConfirmRetirement( id );
 	CL_WeaponListFix_ConfirmAlternateAction( id );
 	cl_weaponlistfix_state.active_weapon = -1;
 	cl_weaponlistfix_state.no_active_reset = id == -1 && state == 0 && clip == 0 && ammo == 0;
@@ -648,6 +690,10 @@ static void CL_WeaponListFix_NoActiveWeapon( int state, int id, int clip, int am
 
 static void CL_WeaponListFix_PickupWeapon( cl_weaponlistfix_weapon_t *weapon )
 {
+	if( cl_weaponlistfix_state.attack_pending == weapon->id )
+		cl_weaponlistfix_state.attack_pending = 0;
+	if( cl_weaponlistfix_state.retire_pending == weapon->id )
+		cl_weaponlistfix_state.retire_pending = 0;
 	weapon->removed_hint = false;
 	weapon->owned_hint = true;
 	weapon->exhausted_hint = false;
@@ -953,7 +999,7 @@ void Test_RunWeaponListFix( void )
 	cl_weaponlistfix_weapon_t *exhaustible = &cl_weaponlistfix_state.weapons[28];
 	exhaustible->id = 28;
 	exhaustible->valid = exhaustible->owned_hint = true;
-	exhaustible->flags = CL_WEAPONLISTFIX_EXHAUSTIBLE | CL_WEAPONLISTFIX_SELECTONEMPTY;
+	exhaustible->flags = CL_WEAPONLISTFIX_EXHAUSTIBLE;
 	exhaustible->clip = -1;
 	exhaustible->ammo1 = 7;
 	exhaustible->ammo2 = -1;
@@ -976,7 +1022,7 @@ void Test_RunWeaponListFix( void )
 	exhaustible->flags = CL_WEAPONLISTFIX_SELECTONEMPTY;
 	CL_WeaponListFix_PruneExhaustedWeapons();
 	TASSERT( exhaustible->owned_hint );
-	exhaustible->flags |= CL_WEAPONLISTFIX_EXHAUSTIBLE;
+	exhaustible->flags = CL_WEAPONLISTFIX_EXHAUSTIBLE;
 	cl_weaponlistfix_state.weapondata_valid = true;
 	CL_WeaponListFix_PruneExhaustedWeapons();
 	TASSERT( exhaustible->owned_hint );
@@ -997,7 +1043,7 @@ void Test_RunWeaponListFix( void )
 	cl_weaponlistfix_state.active_weapon = 28;
 	CL_WeaponListFix_UpdateAmmo( 7, 2 );
 	CL_WeaponListFix_UpdateAmmo( 7, 0 );
-	TASSERT( exhaustible->owned_hint );
+	TASSERT( !exhaustible->owned_hint );
 	CL_WeaponListFix_NoActiveWeapon( 0, -1, 0, 0 );
 	TASSERT( !exhaustible->owned_hint );
 	CL_WeaponListFix_PickupWeapon( exhaustible );
@@ -1024,7 +1070,7 @@ void Test_RunWeaponListFix( void )
 	CL_WeaponListFix_UpdateAmmo( 8, 2 );
 	for( int ammo = 0; ammo < 64; ammo++ )
 		CL_WeaponListFix_UpdateAmmo( ammo, 0 );
-	TASSERT( exhaustible->owned_hint && cl_weaponlistfix_state.strip_pending );
+	TASSERT( !exhaustible->owned_hint && cl_weaponlistfix_state.strip_pending );
 	CL_WeaponListFix_NoActiveWeapon( 0, -1, 0, 0 );
 	TASSERT( !exhaustible->owned_hint && !cl_weaponlistfix_state.strip_pending );
 	CL_WeaponListFix_PickupWeapon( exhaustible );
@@ -1166,6 +1212,80 @@ void Test_RunWeaponListFix( void )
 	cl_weaponlistfix_state.weapondata_valid = true;
 	CL_WeaponListFix_OnUserMessage( "AmmoPickup", sizeof( largePickup ), largePickup );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	cl_weaponlistfix_state.weapondata_valid = false;
+	CL_WeaponListFix_OnResetHUD();
+	throwable->flags = CL_WEAPONLISTFIX_EXHAUSTIBLE | BIT( 3 );
+	ammoUpdate[1] = 1;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	ammoUpdate[1] = 0;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnResetHUD();
+	throwable->flags |= CL_WEAPONLISTFIX_SELECTONEMPTY;
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
+	ammoUpdate[1] = 1;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	usercmd_t attack = { .buttons = IN_ATTACK };
+	CL_WeaponListFix_AppendMove( &attack );
+	ammoUpdate[1] = 0;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_DispatchCommand( "weapon_test_other" );
+	CL_WeaponListFix_AppendMove( &attack );
+	byte otherWeapon[] = { 1, 1, 0, 255, 255, 255, 255, 0, 0, 0, 0 };
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( otherWeapon ), otherWeapon );
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	CL_WeaponListFix_AppendMove( &attack );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( noWeapon ), noWeapon );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	ammoUpdate[1] = 1;
+	CL_WeaponListFix_OnUserMessage( "AmmoPickup", sizeof( ammoUpdate ), ammoUpdate );
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	CL_WeaponListFix_AppendMove( &attack );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( otherWeapon ), otherWeapon );
+	ammoUpdate[1] = 0;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
+	ammoUpdate[1] = 1;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	CL_WeaponListFix_AppendMove( &attack );
+	ammoUpdate[1] = 0;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	cl.time += CL_WEAPONLISTFIX_PENDING_TIMEOUT + 1;
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( otherWeapon ), otherWeapon );
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	CL_WeaponListFix_AppendMove( &attack );
+	usercmd_t manual = { .buttons = IN_ATTACK, .weaponselect = 1 };
+	CL_WeaponListFix_AppendMove( &manual );
+	CL_WeaponListFix_AppendMove( &attack );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( otherWeapon ), otherWeapon );
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	CL_WeaponListFix_AppendMove( &attack );
+	CL_WeaponListFix_OnResetHUD();
+	TASSERT( !cl_weaponlistfix_state.attack_pending && !cl_weaponlistfix_state.retire_pending );
+	throwable->flags &= ~CL_WEAPONLISTFIX_SELECTONEMPTY;
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
+	ammoUpdate[1] = 1;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	current[7] = 1;
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	ammoUpdate[1] = 0;
+	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
+	current[7] = 0;
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	cl_weaponlistfix.value = savedMode;
 	cls.state = savedConnection;
 	cl_weaponlistfix_state = saved;
@@ -1186,6 +1306,7 @@ static void CL_WeaponListFix_ShowMenu( const cl_weaponlistfix_weapon_t *weapon )
 static void CL_WeaponListFix_SelectWeapon( cl_weaponlistfix_weapon_t *weapon )
 {
 	cl_weaponlistfix_state.alt_pending = 0;
+	CL_WeaponListFix_CancelRetirement();
 	if( !weapon || COM_StringEmpty( weapon->name ))
 		return;
 
@@ -1209,7 +1330,22 @@ static void CL_WeaponListFix_SelectWeapon( cl_weaponlistfix_weapon_t *weapon )
 
 void CL_WeaponListFix_AppendMove( usercmd_t *cmd )
 {
-	if( cmd && cl_weaponlistfix_state.select_pending > 0 )
+	if( !cmd )
+		return;
+	if( cmd->weaponselect || cl_weaponlistfix_state.select_pending )
+		CL_WeaponListFix_CancelRetirement();
+	cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.active_weapon );
+	if( cl_weaponlistfix.value && cls.state == ca_active && !cl_weaponlistfix_state.weapondata_valid
+		&& weapon && weapon->owned_hint && ( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
+		&& ( weapon->flags & CL_WEAPONLISTFIX_SELECTONEMPTY )
+		&& cl.time >= cl_weaponlistfix_state.attack_block_until
+		&& !cmd->weaponselect && !cl_weaponlistfix_state.select_pending
+		&& ( cmd->buttons & ( IN_ATTACK | IN_ATTACK2 )))
+	{
+		cl_weaponlistfix_state.attack_pending = weapon->id;
+		cl_weaponlistfix_state.attack_pending_time = cl.time;
+	}
+	if( cl_weaponlistfix_state.select_pending > 0 )
 	{
 		cmd->weaponselect = (byte)cl_weaponlistfix_state.select_pending;
 		cl_weaponlistfix_state.select_pending = 0;
@@ -1268,7 +1404,10 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	if( !Q_strncmp( cmd_name, "weapon_", 7 ) || !Q_strncmp( cmd_name, "slot", 4 )
 		|| !Q_stricmp( cmd_name, "invnext" ) || !Q_stricmp( cmd_name, "invprev" )
 		|| !Q_stricmp( cmd_name, "lastinv" ) || !Q_stricmp( cmd_name, "drop" ))
+	{
 		cl_weaponlistfix_state.alt_pending = 0;
+		CL_WeaponListFix_CancelRetirement();
+	}
 
 	// slot1..slot9 are swallowed ONLY in the aggressive cl_weaponlistfix 2 mode.
 	// In mode 1 the keys stay on the vanilla path so server-side menus
@@ -1575,6 +1714,12 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		}
 
 		CL_WeaponListFix_ObserveWeaponAmmo( weapon, clip, ammo );
+		if( !cl_weaponlistfix_state.weapondata_valid && weapon->removed_hint
+			&& weapon->ammo_recoverable && ( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
+			&& !( weapon->flags & CL_WEAPONLISTFIX_SELECTONEMPTY )
+			&& CL_WeaponListFix_KnownEmpty( weapon ))
+			return;
+		if( state & 1 ) CL_WeaponListFix_ConfirmRetirement( id );
 		if( state & 1 ) weapon->removed_hint = false;
 		weapon->owned_hint = !weapon->removed_hint;
 
@@ -1716,6 +1861,9 @@ void CL_WeaponListFix_OnResetHUD( void )
 	}
 	cl_weaponlistfix_state.alt_pending = 0;
 	cl_weaponlistfix_state.zero_ammo_count = 0;
+	cl_weaponlistfix_state.attack_pending = 0;
+	cl_weaponlistfix_state.retire_pending = 0;
+	cl_weaponlistfix_state.attack_block_until = 0;
 	cl_weaponlistfix_state.strip_pending = false;
 	cl_weaponlistfix_state.strip_pending_time = 0;
 	cl_weaponlistfix_state.no_active_reset = false;
