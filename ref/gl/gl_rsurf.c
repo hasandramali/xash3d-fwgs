@@ -30,6 +30,7 @@ static const float r_turbsin[] =
 typedef struct
 {
 	atlas_t		atlas;
+	int		upload_width;
 	int		current_lightmap_texture;
 	msurface_t	*dynamic_surfaces;
 	msurface_t	*lightmap_surfaces[MAX_LIGHTMAPS];
@@ -56,6 +57,105 @@ static msurface_t		*skychain = NULL;
 static gllightmapstate_t	gl_lms;
 static byte		*flashBakeSurfaces;
 static int		flashBakeSurfaceCount;
+
+#define LIGHTMAP_SHADOW_BUDGET ( 16 * 1024 * 1024 )
+
+typedef struct
+{
+	byte *pixels;
+	int left, top, right, bottom;
+} lightmap_upload_t;
+
+static lightmap_upload_t lightmap_uploads[MAX_LIGHTMAPS];
+static size_t lightmap_shadow_bytes;
+static byte lightmap_upload_buffer[BLOCK_SIZE_MAX * BLOCK_SIZE_MAX * 4];
+static byte lightstyle_pixels[MAX_LIGHTSTYLES][256];
+static struct
+{
+	int frame, scale, lightscale;
+	qboolean valid, linear;
+} lightstyle_pixel_keys[MAX_LIGHTSTYLES];
+
+static void LM_ResetUploads( void )
+{
+	for( int index = 0; index < MAX_LIGHTMAPS; index++ )
+	{
+		if( lightmap_uploads[index].pixels )
+			Mem_Free( lightmap_uploads[index].pixels );
+	}
+	memset( lightmap_uploads, 0, sizeof( lightmap_uploads ));
+	memset( lightstyle_pixel_keys, 0, sizeof( lightstyle_pixel_keys ));
+	lightmap_shadow_bytes = 0;
+}
+
+static void LM_FlushStaticBlock( int index, int unit )
+{
+	lightmap_upload_t *upload = &lightmap_uploads[index];
+	if( upload->right <= upload->left || upload->bottom <= upload->top )
+		return;
+
+	int width = upload->right - upload->left;
+	int height = upload->bottom - upload->top;
+	for( int row = 0; row < height; row++ )
+		memcpy( lightmap_upload_buffer + row * width * 4,
+			upload->pixels + (( upload->top + row ) * BLOCK_SIZE + upload->left ) * 4, width * 4 );
+
+	GL_Bind( unit, tr.lightmapTextures[index] );
+#if XASH_WES
+	pglTexParameteri( GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE );
+#endif
+	pglTexSubImage2D( GL_TEXTURE_2D, 0, upload->left, upload->top, width, height,
+		GL_RGBA, GL_UNSIGNED_BYTE, lightmap_upload_buffer );
+	upload->left = upload->right = upload->top = upload->bottom = 0;
+}
+
+static void LM_UpdateStaticBlock( const msurface_t *surf, const byte *pixels, int width, int height )
+{
+	int index = surf->lightmaptexturenum;
+	lightmap_upload_t *upload = &lightmap_uploads[index];
+	if( upload->pixels )
+	{
+		int first = height, last = -1;
+		for( int row = 0; row < height; row++ )
+		{
+			byte *output = upload->pixels + (( surf->light_t + row ) * BLOCK_SIZE + surf->light_s ) * 4;
+			const byte *input = pixels + row * width * 4;
+			if( !memcmp( output, input, width * 4 ))
+				continue;
+			memcpy( output, input, width * 4 );
+			first = Q_min( first, row );
+			last = row;
+		}
+		if( last < first )
+			return;
+		if( upload->right == upload->left )
+		{
+			upload->left = surf->light_s;
+			upload->top = surf->light_t + first;
+			upload->right = surf->light_s + width;
+			upload->bottom = surf->light_t + last + 1;
+		}
+		else
+		{
+			upload->left = Q_min( upload->left, surf->light_s );
+			upload->top = Q_min( upload->top, surf->light_t + first );
+			upload->right = Q_max( upload->right, surf->light_s + width );
+			upload->bottom = Q_max( upload->bottom, surf->light_t + last + 1 );
+		}
+		return;
+	}
+#if XASH_WES
+	GL_Bind( XASH_TEXTURE1, tr.lightmapTextures[index] );
+	pglTexParameteri( GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE );
+#else
+	GL_Bind( XASH_TEXTURE0, tr.lightmapTextures[index] );
+#endif
+	pglTexSubImage2D( GL_TEXTURE_2D, 0, surf->light_s, surf->light_t, width, height,
+		GL_RGBA, GL_UNSIGNED_BYTE, pixels );
+#if XASH_WES
+	GL_SelectTexture( XASH_TEXTURE0 );
+#endif
+}
 
 static int R_FlashlightSurfaceIndex( const msurface_t *surf )
 {
@@ -856,15 +956,31 @@ static void R_AddDynamicLights( const msurface_t *surf, float sample_size, int s
 static void LM_InitBlock( void )
 {
 	Atlas_Init( &gl_lms.atlas, BLOCK_SIZE );
+	gl_lms.upload_width = 0;
 }
 
 static qboolean LM_AllocBlock( int w, int h, int *x, int *y )
 {
-	return Atlas_AllocBlock( &gl_lms.atlas, w, h, x, y );
+	if( !Atlas_AllocBlock( &gl_lms.atlas, w, h, x, y ))
+		return false;
+	gl_lms.upload_width = Q_max( gl_lms.upload_width, *x + w );
+	return true;
 }
 
 static void LM_UploadDynamicBlock( void )
 {
+	int width = gl_lms.upload_width;
+	int height = gl_lms.atlas.max_height;
+	if( width <= 0 || height <= 0 )
+		return;
+	if( width <= BLOCK_SIZE * 3 / 4 )
+	{
+		for( int row = 0; row < height; row++ )
+			memcpy( lightmap_upload_buffer + row * width * 4,
+				gl_lms.lightmap_buffer + row * BLOCK_SIZE * 4, width * 4 );
+		pglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, lightmap_upload_buffer );
+		return;
+	}
 	pglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, BLOCK_SIZE, gl_lms.atlas.max_height, GL_RGBA, GL_UNSIGNED_BYTE, gl_lms.lightmap_buffer );
 }
 
@@ -892,6 +1008,12 @@ static void LM_UploadBlock( qboolean dynamic )
 		r_lightmap.flags = IMAGE_HAS_COLOR;
 		r_lightmap.buffer = gl_lms.lightmap_buffer;
 		tr.lightmapTextures[i] = GL_LoadTextureInternal( lmName, &r_lightmap, TF_NOMIPMAP|TF_ATLAS_PAGE );
+		if( lightmap_shadow_bytes + r_lightmap.size <= LIGHTMAP_SHADOW_BUDGET )
+		{
+			lightmap_uploads[i].pixels = Mem_Calloc( r_temppool, r_lightmap.size );
+			memcpy( lightmap_uploads[i].pixels, r_lightmap.buffer, r_lightmap.size );
+			lightmap_shadow_bytes += r_lightmap.size;
+		}
 
 		if( ++gl_lms.current_lightmap_texture == MAX_LIGHTMAPS )
 			gEngfuncs.Host_Error( "%s: full\n", __func__ );
@@ -933,6 +1055,44 @@ static void R_BuildLightMap( const msurface_t *surf, byte *restrict dest, int st
 		lightscale = ( R_HasEnabledVBO() && !r_vbo_overbrightmode.value) ? 171 : 256;
 	else
 		lightscale = ( pow( 2.0f, 1.0f / v_lightgamma->value ) * 256 ) + 0.5;
+
+	if( !turb && surf->samples && surf->styles[0] != 255 && surf->styles[1] == 255
+		&& !( surf->dlightframe == tr.framecount && dynamic ))
+	{
+		int style = surf->styles[0];
+		uint scale = g_lightstylevalue[style];
+		byte *table = lightstyle_pixels[style];
+		if( !lightstyle_pixel_keys[style].valid || lightstyle_pixel_keys[style].frame != tr.framecount
+			|| lightstyle_pixel_keys[style].scale != scale
+			|| lightstyle_pixel_keys[style].lightscale != lightscale
+			|| lightstyle_pixel_keys[style].linear != linear_gamma )
+		{
+			for( uint sample = 0; sample < 256; sample++ )
+			{
+				uint value = sample * scale * lightscale >> 14;
+				value = Q_min( value, 1023 );
+				table[sample] = ( linear_gamma ? value : lightgammatable[value] ) >> 2;
+			}
+			lightstyle_pixel_keys[style].valid = true;
+			lightstyle_pixel_keys[style].frame = tr.framecount;
+			lightstyle_pixel_keys[style].scale = scale;
+			lightstyle_pixel_keys[style].lightscale = lightscale;
+			lightstyle_pixel_keys[style].linear = linear_gamma;
+		}
+		for( int row = 0; row < tmax; row++ )
+		{
+			const color24 *samples = surf->samples + row * smax;
+			byte *output = dest + row * stride;
+			for( int column = 0; column < smax; column++, output += 4 )
+			{
+				output[0] = table[samples[column].r];
+				output[1] = table[samples[column].g];
+				output[2] = table[samples[column].b];
+				output[3] = 255;
+			}
+		}
+		return;
+	}
 
 	int map;
 	qboolean init = false;
@@ -1380,6 +1540,7 @@ static void R_BlendLightmaps( void )
 	{
 		if( gl_lms.lightmap_surfaces[i] )
 		{
+			LM_FlushStaticBlock( i, XASH_TEXTURE0 );
 			GL_Bind( XASH_TEXTURE0, tr.lightmapTextures[i] );
 
 			for( msurface_t *surf = gl_lms.lightmap_surfaces[i]; surf != NULL; surf = surf->info->lightmapchain )
@@ -1678,18 +1839,7 @@ static qboolean R_CheckLightMap( msurface_t *fa )
 		}
 
 		R_UpdateSurfaceCachedLight( fa );
-
-#if XASH_WES
-		GL_Bind( XASH_TEXTURE1, tr.lightmapTextures[fa->lightmaptexturenum] );
-		pglTexParameteri( GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE );
-#else
-		GL_Bind( XASH_TEXTURE0, tr.lightmapTextures[fa->lightmaptexturenum] );
-#endif
-		pglTexSubImage2D( GL_TEXTURE_2D, 0, fa->light_s, fa->light_t, smax, tmax, GL_RGBA, GL_UNSIGNED_BYTE, temp );
-
-#if XASH_WES
-		GL_SelectTexture( XASH_TEXTURE0 );
-#endif
+		LM_UpdateStaticBlock( fa, temp, smax, tmax );
 		return false;
 	}
 
@@ -1706,6 +1856,7 @@ static float flashBakeLastTime;
 
 void R_ResetFlashlightBake( void )
 {
+	LM_ResetUploads();
 	if( flashBakeSurfaces )
 		Mem_Free( flashBakeSurfaces );
 	flashBakeSurfaces = NULL;
@@ -1747,14 +1898,12 @@ static qboolean R_UploadSurfaceLightmap( msurface_t *surf )
 	}
 
 	R_BuildLightMap( surf, buf, smax * 4, false );
-
+	LM_UpdateStaticBlock( surf, buf, smax, tmax );
 #if XASH_WES
-	GL_Bind( XASH_TEXTURE1, tr.lightmapTextures[surf->lightmaptexturenum] );
-	pglTexParameteri( GL_TEXTURE_2D, GL_GENERATE_MIPMAP_SGIS, GL_TRUE );
+	LM_FlushStaticBlock( surf->lightmaptexturenum, XASH_TEXTURE1 );
 #else
-	GL_Bind( XASH_TEXTURE0, tr.lightmapTextures[surf->lightmaptexturenum] );
+	LM_FlushStaticBlock( surf->lightmaptexturenum, XASH_TEXTURE0 );
 #endif
-	pglTexSubImage2D( GL_TEXTURE_2D, 0, surf->light_s, surf->light_t, smax, tmax, GL_RGBA, GL_UNSIGNED_BYTE, buf );
 
 #if XASH_WES
 	GL_SelectTexture( XASH_TEXTURE0 );
@@ -3789,6 +3938,7 @@ void R_DrawVBO( qboolean drawlightmap, qboolean drawtextures )
 	{
 		if( drawlightmap )
 		{
+			LM_FlushStaticBlock( k, mtst.tmu_lm );
 			GL_Bind( mtst.tmu_lm, mtst.lm = tr.lightmapTextures[k] );
 		}
 
@@ -4347,6 +4497,7 @@ void GL_RebuildLightmaps( void )
 {
 	if( !ENGINE_GET_PARM( PARM_CLIENT_ACTIVE ) )
 		return; // wait for worldmodel
+	LM_ResetUploads();
 
 	// release old lightmaps
 	for( int i = 0; i < MAX_LIGHTMAPS; i++ )
@@ -4395,6 +4546,7 @@ with all the surfaces from all brush models
 void GL_BuildLightmaps( void )
 {
 	int	nColinElim = 0;
+	LM_ResetUploads();
 
 	// release old lightmaps
 	for( int i = 0; i < MAX_LIGHTMAPS; i++ )

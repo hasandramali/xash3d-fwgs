@@ -20,7 +20,6 @@ GNU General Public License for more details.
 
 CVAR_DEFINE_AUTO( r_dlight_virtual_radius, "1", FCVAR_GLCONFIG, "increase dlight radius virtually by this amount" );
 CVAR_DEFINE_AUTO( r_lighting_extended, "0", FCVAR_GLCONFIG, "allow to get lighting from world and bmodels" );
-CVAR_DEFINE_AUTO( r_lightstyle_updates, "30", FCVAR_GLCONFIG, "interpolated lightstyle updates per second (0: every frame)" );
 
 /*
 ==================
@@ -32,9 +31,6 @@ void CL_RunLightStyles( lightstyle_t *ls )
 {
 	const model_t *world = gp_cl->models[1];
 	float frametime = gp_cl->time - gp_cl->oldtime;
-	int steps = 0;
-	if( r_lightstyle_updates.value > 0.0f )
-		steps = (int)ceilf( bound( 10.0f, r_lightstyle_updates.value, 200.0f ) / 10.0f );
 
 	if( !world )
 		return;
@@ -75,8 +71,6 @@ void CL_RunLightStyles( lightstyle_t *ls )
 
 		int clight = (int)ceil( ls[i].time * 10 );
 		float lerpfrac = ( ls[i].time * 10 ) - flight;
-		if( steps )
-			lerpfrac = floorf( bound( 0.0f, lerpfrac, 1.0f ) * steps ) / steps;
 		float backlerp = 1.0f - lerpfrac;
 
 		// interpolate animating light

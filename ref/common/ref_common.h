@@ -62,7 +62,6 @@ extern poolhandle_t r_temppool;
 // ref_common cvars
 //
 extern convar_t r_dlight_virtual_radius;
-extern convar_t r_lightstyle_updates;
 extern convar_t r_lighting_extended;
 
 //

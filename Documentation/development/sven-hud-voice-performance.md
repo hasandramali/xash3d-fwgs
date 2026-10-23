@@ -78,13 +78,24 @@ its surface chain, plus the current brush-model transform. Unrelated fading
 lights no longer invalidate it. A chain spanning multiple atlas uploads cannot
 be reused: only the final atlas page survives in the GPU texture.
 
-`r_lightstyle_updates` defaults to 30 and limits interpolated lightstyle fades
-to three steps per original 100 ms animation frame. Animation time still advances
-every frame; static on/off styles are immediate. This only applies when
-`cl_lightstyle_lerping` is enabled. It does not throttle moving lights, muzzle
-flashes, ordinary non-interpolated styles or network processing. Set
-`r_lightstyle_updates 0` for the previous every-frame interpolation. Positive
-settings are rounded up to multiples of 10 Hz within 10–200 Hz.
+Lightstyle interpolation runs at its original cadence; the experimental
+update-rate cvar has been removed. Animated baked-lightmap changes are queued
+in CPU atlas shadows and uploaded as one dirty rectangle per atlas before its
+draw, instead of binding and uploading once per changed surface. Both classic
+and VBO draws flush their atlas before use. Byte-identical rows are not marked
+dirty, including fades too small to change the final gamma-corrected texels.
+Shadows are capped at 16 MiB; pages
+outside that budget retain immediate uploads. Rebuilds, map changes and renderer
+shutdown release the shadows. Flashlight painting updates the shadow as well.
+Dynamic point-light atlases also omit unused right-hand columns when at least
+a quarter of the atlas width is empty, in both the classic and VBO paths.
+
+Single-style, non-water surfaces without dynamic point lights use a shared
+256-entry sample-to-output table per style and frame, avoiding the intermediate
+RGB accumulator and repeated scaling/gamma conversion. Multi-style surfaces,
+water and point lights retain the general builder. These paths preserve light
+values and timing rather than skipping fade frames. Device FPS still needs to
+be measured on the affected map; CPU/upload tests are not a GPU benchmark.
 
 The October 23 log completes a roughly 16-minute session without a capture,
 codec or packet-overflow error and exits through the menu normally. It does
