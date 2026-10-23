@@ -517,7 +517,6 @@ static void CL_WeaponListFix_PruneExhaustedWeapons( void )
 	{
 		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
 		if( !weapon || !weapon->owned_hint || !( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
-			|| ( weapon->flags & CL_WEAPONLISTFIX_SELECTONEMPTY )
 			|| cl_weaponlistfix_state.active_weapon == id || weapon->clip > 0 )
 			continue;
 		if( weapon->ammo1 < 0 || weapon->ammo1 >= ARRAYSIZE( cl_weaponlistfix_state.ammo_counts )
@@ -805,6 +804,38 @@ void Test_RunWeaponListFix( void )
 	TASSERT( !CL_WeaponListFix_PickWeaponInSlot( 5 ));
 	cl_weaponlistfix_state.count = 0;
 	TASSERT( !CL_WeaponListFix_PickWeaponInSlot( 4 ));
+	memset( &cl_weaponlistfix_state, 0, sizeof( cl_weaponlistfix_state ));
+	cl_weaponlistfix_weapon_t *exhaustible = &cl_weaponlistfix_state.weapons[28];
+	exhaustible->id = 28;
+	exhaustible->valid = exhaustible->owned_hint = true;
+	exhaustible->flags = CL_WEAPONLISTFIX_EXHAUSTIBLE | CL_WEAPONLISTFIX_SELECTONEMPTY;
+	exhaustible->clip = -1;
+	exhaustible->ammo1 = 7;
+	exhaustible->ammo2 = -1;
+	cl_weaponlistfix_state.active_weapon = 28;
+	cl_weaponlistfix_state.selected_weapon = 28;
+	cl_weaponlistfix_state.select_pending = 28;
+	cl_weaponlistfix_state.ammo_valid[7] = true;
+	CL_WeaponListFix_PruneExhaustedWeapons();
+	TASSERT( exhaustible->owned_hint );
+	cl_weaponlistfix_state.active_weapon = 1;
+	cl_weaponlistfix_state.ammo_counts[7] = 1;
+	CL_WeaponListFix_PruneExhaustedWeapons();
+	TASSERT( exhaustible->owned_hint );
+	cl_weaponlistfix_state.ammo_counts[7] = 0;
+	CL_WeaponListFix_PruneExhaustedWeapons();
+	TASSERT( !exhaustible->owned_hint && exhaustible->removed_hint );
+	TASSERT_EQi( cl_weaponlistfix_state.selected_weapon, -1 );
+	TASSERT_EQi( cl_weaponlistfix_state.select_pending, 0 );
+	exhaustible->owned_hint = true;
+	exhaustible->removed_hint = false;
+	exhaustible->flags = CL_WEAPONLISTFIX_SELECTONEMPTY;
+	CL_WeaponListFix_PruneExhaustedWeapons();
+	TASSERT( exhaustible->owned_hint );
+	exhaustible->flags |= CL_WEAPONLISTFIX_EXHAUSTIBLE;
+	cl_weaponlistfix_state.weapondata_valid = true;
+	CL_WeaponListFix_PruneExhaustedWeapons();
+	TASSERT( exhaustible->owned_hint );
 	cl_weaponlistfix_state = saved;
 	cl.time = savedTime;
 }

@@ -1,5 +1,23 @@
 # Shock Rifle and key-binding messages
 
+## Exhausted inventory entry
+
+The reference `server.dll` Shock Rifle item-info routine at `0x102434D0`
+sets weapon ID 28 and flags `0x19` (`SELECTONEMPTY | LIMITINWORLD |
+EXHAUSTIBLE`). Its ammo-consumption path at `0x10245628` clamps exhausted
+primary ammo to zero and calls the detonation/removal routine at `0x10245FF0`.
+That routine removes the item through the player's virtual method at offset
+`0x94` (`0x102462BE`), implemented at `0x10200800`.
+
+WeaponListFix must not treat `SELECTONEMPTY` as an ownership exemption:
+`EXHAUSTIBLE` still applies once the weapon is inactive and all known reserves
+and its clip are empty. The fix uses the advertised flags and ammo indices,
+not a classname or hardcoded weapon ID, and works without `cl_lw` prediction.
+Active weapons, unknown ammo, remaining ammunition and authoritative predicted
+weapon-data ownership retain their previous guards. `SRDetonate` remains a
+visual effect only: its broadcast payload has no owner ID, so another player's
+or NPC's explosion cannot remove a local inventory entry.
+
 ## Verified reference behavior
 
 Addresses below refer to the supplied `steam-refs/sven/client.dll`, image base
