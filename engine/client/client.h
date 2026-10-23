@@ -764,6 +764,7 @@ typedef struct
 	qboolean removed_hint;
 	qboolean exhausted_hint;
 	qboolean ammo_confirmed;
+	qboolean ammo_recoverable;
 	qboolean real_name;
 	char name[64];
 	char sprdir[64]; // CustWeapon sprite subdirectory (e.g. "hunger/weapons").

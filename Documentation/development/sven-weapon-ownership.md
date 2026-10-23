@@ -56,6 +56,43 @@ A pending classname selection also cannot rename an unknown weapon just
 because the server repeats the same active ID: that can be a rejected switch
 or an older ammo update. Naming waits for an actual active-ID transition.
 
+## Ammo-only reacquisition regression
+
+Waiting exclusively for `WeapPickup` leaves a previously dropped/exhausted
+throwable permanently hidden when the server treats the next touch as an ammo
+transfer to an existing item. The regression test now runs the real command
+and user-message handlers, rather than simulating a call to the pickup helper:
+`WeaponList -> WeapPickup -> AmmoX -> CurWeapon -> drop -> AmmoX(0) ->
+AmmoPickup -> AmmoX(positive) -> inactive CurWeapon`. Before this fix, three
+assertions fail: ownership is not restored, drop suppression remains armed,
+and the item cannot return to its slot.
+
+Reference anchors from the supplied Windows binaries:
+
+- `client.dll` `AmmoPickup` handler `0x100048A0` reads a BYTE ammo index and a
+  LONG quantity. The local HUD handler also needs that LONG, not the inherited
+  Half-Life BYTE quantity. The packet is five bytes; malformed packets and
+  `INT_MIN` quantities are rejected before history's absolute-value operation.
+- `server.dll` registers `AmmoPickup` into `0x104FA334`. The grant path at
+  `0x1020240E` writes the ammo index and LONG added count (`0x10202455`).
+- The weapon duplicate dispatcher at `0x102A95D0` chooses ammo extraction
+  through virtual offsets `0x234`/`0x238`. The latter is `0x102A9850`, which
+  transfers ammo through the player's virtual grant method and does not emit
+  `WeapPickup`. The primary extraction method `0x102A9620` likewise grants ammo.
+- The separate weapon-pickup notifier at `0x102A9910` reads message ID
+  `0x104FA2DC` and writes a SHORT weapon ID. `client.dll` reads that SHORT
+  at `0x100048F0`. Ammo and weapon-pickup notifications are distinct events.
+
+The fallback now marks only drop/exhaustion removals as ammo-recoverable.
+An actual positive AmmoPickup or an increasing positive AmmoX can restore a
+previously known EXHAUSTIBLE item with a nonpositive observed clip, a unique primary-ammo mapping
+and no secondary ammo. This also cancels old drop suppression. It does not
+register new weapon names or treat every ammo update as a new weapon.
+Ambiguous shared pools, ordinary firearms, strip/reset removals, nonpositive
+quantities and authoritative weapon-data snapshots do not use this recovery.
+Explicit WeapPickup still works for ambiguous pools. No `cl_lw` or wire
+userinfo setting is changed.
+
 Tests in `Test_RunWeaponListFix` cover stale pickup ammo, replenishment,
 exhaustion, no-active transitions, alternate actions, bulk reset ordering,
 expired resets and existing slot cycling. These are state-machine tests, not
