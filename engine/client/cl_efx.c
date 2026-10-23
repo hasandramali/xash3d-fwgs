@@ -31,6 +31,16 @@ static particle_t	*cl_free_particles;
 static particle_t	*cl_particles = NULL;	// particle pool
 static vec3_t	cl_avelocities[NUMVERTEXNORMALS];
 static float	cl_lasttimewarn = 0.0f;
+static double cl_particle_reclaim_time = -1.0;
+
+static void CL_ReclaimExpiredParticles( void )
+{
+	if( cl_free_particles || cl_particle_reclaim_time == host.realtime )
+		return;
+	cl_particle_reclaim_time = host.realtime;
+	R_FreeDeadParticles( &cl_active_particles );
+	R_FreeDeadParticles( &cl_active_tracers );
+}
 
 // expand debugging BBOX particle hulls by this many units.
 #define BOX_GAP	0.0f
@@ -111,6 +121,9 @@ CL_ClearParticles
 void CL_ClearParticles( void )
 {
 	if( !cl_particles ) return;
+	memset( cl_particles, 0, sizeof( *cl_particles ) * GI->max_particles );
+	cl_particle_reclaim_time = -1.0;
+	cl_lasttimewarn = 0.0f;
 
 	cl_free_particles = cl_particles;
 	cl_active_particles = NULL;
@@ -145,6 +158,7 @@ unconditionally give new particle pointer from cl_free_particles
 particle_t *CL_AllocParticleFast( void )
 {
 	particle_t *p = NULL;
+	CL_ReclaimExpiredParticles();
 
 	if( cl_free_particles )
 	{
@@ -171,14 +185,15 @@ particle_t * GAME_EXPORT R_AllocParticle( void (*callback)( particle_t*, float )
 
 	// never alloc particles when we not in game
 	if( cl_clientframetime() == 0.0 ) return NULL;
+	CL_ReclaimExpiredParticles();
 
 	if( !cl_free_particles )
 	{
 		if( cl_lasttimewarn < host.realtime )
 		{
 			// don't spam about overflow
-			Con_DPrintf( S_ERROR "Overflow %d particles\n", GI->max_particles );
-			cl_lasttimewarn = host.realtime + 1.0f;
+			Con_Reportf( S_WARN "Particle pool exhausted (%d); skipping additional effects\n", GI->max_particles );
+			cl_lasttimewarn = host.realtime + 5.0f;
 		}
 		return NULL;
 	}
@@ -222,14 +237,15 @@ static particle_t *R_AllocTracer( const vec3_t org, const vec3_t vel, float life
 
 	// never alloc particles when we not in game
 	if( cl_clientframetime() == 0.0 ) return NULL;
+	CL_ReclaimExpiredParticles();
 
 	if( !cl_free_particles )
 	{
 		if( cl_lasttimewarn < host.realtime )
 		{
 			// don't spam about overflow
-			Con_DPrintf( S_ERROR "Overflow %d tracers\n", GI->max_particles );
-			cl_lasttimewarn = host.realtime + 1.0f;
+			Con_Reportf( S_WARN "Particle/tracer pool exhausted (%d); skipping additional effects\n", GI->max_particles );
+			cl_lasttimewarn = host.realtime + 5.0f;
 		}
 		return NULL;
 	}

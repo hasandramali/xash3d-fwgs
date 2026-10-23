@@ -485,22 +485,33 @@ static uint Voice_GetOpusCompressedData( byte *out, uint maxsize, uint *frames )
 	for( ofs = 0; voice.input_buffer_pos - ofs >= frame_size_bytes && ofs <= voice.input_buffer_pos; ofs += frame_size_bytes )
 	{
 		int bytes;
+		int16_t samples[VOICE_OPUS_CUSTOM_FRAME_SIZE];
+		voice_autogain_t saved_gain = voice.autogain;
+		if( maxsize <= sizeof( uint16_t ) || voice.frame_size > VOICE_OPUS_CUSTOM_FRAME_SIZE )
+			break;
+		memcpy( samples, voice.input_buffer + ofs, frame_size_bytes );
 
 		if( !voice.input_file )
-			Voice_ApplyGainAdjust((int16_t *)( voice.input_buffer + ofs ), voice.frame_size, voice_transmit_scale.value );
+			Voice_ApplyGainAdjust( samples, voice.frame_size, voice_transmit_scale.value );
 
-		bytes = opus_custom_encode( voice.encoder, (const int16_t *)( voice.input_buffer + ofs ),
-					    voice.frame_size, out + size + sizeof( uint16_t ), maxsize );
+		bytes = opus_custom_encode( voice.encoder, samples,
+					    voice.frame_size, out + size + sizeof( uint16_t ), maxsize - sizeof( uint16_t ));
 
 		if( bytes > 0 )
 		{
 			// write compressed frame size
-			*((uint16_t *)&out[size] ) = LittleShort( bytes );
+			uint16_t frameBytes = LittleShort( bytes );
+			memcpy( out + size, &frameBytes, sizeof( frameBytes ));
 
 			size += bytes + sizeof( uint16_t );
 			maxsize -= bytes + sizeof( uint16_t );
 
 			( *frames )++;
+		}
+		else if( bytes == OPUS_BUFFER_TOO_SMALL )
+		{
+			voice.autogain = saved_gain;
+			break;
 		}
 		else
 		{
@@ -882,6 +893,7 @@ void Voice_RecordStop( void )
 	Voice_Status( VOICE_LOCALCLIENT_INDEX, false );
 
 	voice.input_buffer_pos = 0;
+	voice.capture_time = 0.0;
 	memset( voice.input_buffer, 0, sizeof( voice.input_buffer ));
 	memset( &voice.autogain, 0, sizeof( voice.autogain ));
 }
@@ -895,6 +907,8 @@ Start voice recording
 */
 void Voice_RecordStart( void )
 {
+	if( Voice_IsRecording() && voice_enable.value && !Voice_ReceiveOnly() )
+		return;
 	Voice_RecordStop();
 
 	if( !voice_enable.value || Voice_ReceiveOnly() )
@@ -927,7 +941,10 @@ void Voice_RecordStart( void )
 	{
 		voice.device_opened = VoiceCapture_Init();
 		if( voice.device_opened )
+		{
+			voice.capture_time = Platform_DoubleTime();
 			voice.is_recording = VoiceCapture_Activate( true );
+		}
 		else
 			Con_Printf( S_WARN "No microphone is available. Voice reception remains enabled.\n" );
 	}
@@ -1093,20 +1110,20 @@ CL_AddVoiceToDatagram
 Encode our voice data and send it to server
 =========================
 */
-void CL_AddVoiceToDatagram( void )
+void CL_AddVoiceToDatagram( uint maxbytes )
 {
 	byte buffer[VOICE_MAX_DATA_SIZE];
 	uint size, frames = 0;
 
 	if( cls.state != ca_active || !voice_enable.value || Voice_ReceiveOnly() || !Voice_IsRecording())
 		return;
+	uint available = Q_min( MSG_GetNumBytesLeft( &cls.datagram ), maxbytes );
 
 	if( voice.goldsrc )
 	{
 		if( !voice.gs_encoder )
 			return;
 
-		uint available = MSG_GetNumBytesLeft( &cls.datagram );
 		if( available <= 21 ) return;
 		uint packet_limit = Q_min( available - 3, 1200 );
 		size = Voice_GetGSCompressedData( buffer, packet_limit - 18, &frames );
@@ -1123,7 +1140,9 @@ void CL_AddVoiceToDatagram( void )
 	if( !voice.encoder )
 		return;
 
-	size = Voice_GetOpusCompressedData( voice.compress_buffer, sizeof( voice.compress_buffer ), &frames );
+	if( available <= 32 )
+		return;
+	size = Voice_GetOpusCompressedData( voice.compress_buffer, Q_min( sizeof( voice.compress_buffer ), available - 32 ), &frames );
 	if( size > 0 && MSG_GetNumBytesLeft( &cls.datagram ) >= size + 32 )
 	{
 		MSG_BeginClientCmd( &cls.datagram, clc_voicedata );
@@ -1198,6 +1217,19 @@ void Voice_Idle( double frametime )
 {
 	if( Voice_IsRecording() && ( host.status != HOST_FRAME || !voice_enable.value || Voice_ReceiveOnly() ))
 		Voice_RecordStop();
+#if XASH_SDL == 2
+	if( Voice_IsRecording() && voice.device_opened && !voice.input_file && cls.state == ca_active && VoiceCapture_Lock( true ))
+	{
+		double lastCapture = voice.capture_time;
+		VoiceCapture_Lock( false );
+		if( Platform_DoubleTime() - lastCapture > 2.0 )
+		{
+			Con_Reportf( S_NOTE "Microphone capture stalled; reopening the input device\n" );
+			Voice_RecordStop();
+			Voice_RecordStart();
+		}
+	}
+#endif
 	if( FBitSet( voice_enable.flags | voice_receiveonly.flags, FCVAR_CHANGED ))
 	{
 		ClearBits( voice_enable.flags, FCVAR_CHANGED );
@@ -1234,6 +1266,10 @@ qboolean Voice_Init( const char *pszCodecName, int quality, qboolean preinit )
 	string codec;
 	Q_strncpy( codec, pszCodecName, sizeof( codec ));
 	pszCodecName = codec;
+	if( !preinit && cls.state == ca_active && voice.initialized && voice_enable.value && voice.quality == quality
+		&& !Q_strcmp( voice.codec, codec ) && ( Voice_ReceiveOnly() || ( voice.goldsrc ? voice.gs_encoder != NULL : voice.encoder != NULL )))
+		return true;
+	qboolean resumeRecording = !preinit && Voice_IsRecording() && host.status == HOST_FRAME && cls.state == ca_active;
 	Q_strncpy( voice.codec, pszCodecName, sizeof( voice.codec ));
 	voice.quality = quality;
 
@@ -1272,6 +1308,8 @@ qboolean Voice_Init( const char *pszCodecName, int quality, qboolean preinit )
 	voice.initialized = true;
 	Con_Printf( "Voice initialized: %s, %u Hz%s\n", voice.goldsrc ? "Steam/Opus" : voice.codec,
 		voice.samplerate, Voice_ReceiveOnly() ? ", receive only" : ", push-to-talk" );
+	if( resumeRecording )
+		Voice_RecordStart();
 	return true;
 }
 

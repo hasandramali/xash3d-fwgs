@@ -122,6 +122,7 @@
     <string name="game_data_already_downloaded">Game data already exists in this location. Download again to overwrite?</string>
     <string name="cancel">Cancel</string>
     <string name="download_cancelled">Download cancelled</string>
+    <string name="download_wait_before_play">Please wait for the game data download to finish before launching the game.</string>
     <string name="depot_settings_title">Download Options</string>
     <string name="depot_game_data">Game Data</string>
     <string name="depot_server_dlls">Server Libraries</string>

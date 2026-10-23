@@ -250,6 +250,37 @@ void SNDDMA_Activate( qboolean active )
 SDL_SoundInputCallback
 ===========
 */
+static void SDL_AppendVoicePCM( const Uint8 *stream, int len )
+{
+	int frameBytes = voice.frame_size * voice.width;
+	int capacity = sizeof( voice.input_buffer );
+	if( len <= 0 )
+		return;
+	if( frameBytes <= 0 || frameBytes > capacity )
+		frameBytes = sizeof( int16_t );
+	if( voice.goldsrc && frameBytes <= capacity / 8 )
+		capacity = frameBytes * 8;
+	len &= ~1;
+	if( len > capacity )
+	{
+		stream += len - capacity;
+		len = capacity;
+	}
+	if( voice.input_buffer_pos < 0 || voice.input_buffer_pos > capacity )
+		voice.input_buffer_pos = 0;
+	if( voice.input_buffer_pos + len > capacity )
+	{
+		int drop = ( ( voice.input_buffer_pos + len - capacity + frameBytes - 1 ) / frameBytes ) * frameBytes;
+		drop = Q_min( drop, voice.input_buffer_pos );
+		voice.input_buffer_pos -= drop;
+		memmove( voice.input_buffer, voice.input_buffer + drop, voice.input_buffer_pos );
+	}
+	memcpy( voice.input_buffer + voice.input_buffer_pos, stream, len );
+	voice.input_buffer_pos += len;
+	if( len > 0 )
+		voice.capture_time = Platform_DoubleTime();
+}
+
 static void SDL_SoundInputCallback( void *userdata, Uint8 *stream, int len )
 {
 #if XASH_IOS
@@ -262,31 +293,19 @@ static void SDL_SoundInputCallback( void *userdata, Uint8 *stream, int len )
 		}
 		while( SDL_AudioStreamAvailable( capture_stream ) > 0 )
 		{
-			int available = ( sizeof( voice.input_buffer ) - voice.input_buffer_pos ) & ~1;
-			if( available <= 0 )
-			{
-				SDL_AudioStreamClear( capture_stream );
-				break;
-			}
-			int converted = SDL_AudioStreamGet( capture_stream, voice.input_buffer + voice.input_buffer_pos, available );
+			Uint8 convertedPCM[2048];
+			int converted = SDL_AudioStreamGet( capture_stream, convertedPCM, sizeof( convertedPCM ));
 			if( converted <= 0 )
 			{
 				if( converted < 0 ) SDL_AudioStreamClear( capture_stream );
 				break;
 			}
-			voice.input_buffer_pos += converted;
+			SDL_AppendVoicePCM( convertedPCM, converted );
 		}
 		return;
 	}
 #endif
-	int size = Q_min( len, sizeof( voice.input_buffer ) - voice.input_buffer_pos );
-
-	// engine can't keep up, skip audio
-	if( !size )
-		return;
-
-	memcpy( voice.input_buffer + voice.input_buffer_pos, stream, size );
-	voice.input_buffer_pos += size;
+	SDL_AppendVoicePCM( stream, len );
 }
 
 /*

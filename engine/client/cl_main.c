@@ -53,7 +53,7 @@ static CVAR_DEFINE_AUTO( rcon_address, "", FCVAR_PRIVILEGED, "remote control add
 CVAR_DEFINE_AUTO( cl_timeout, "999999", 0, "connect timeout (in-seconds)" );
 CVAR_DEFINE_AUTO( cl_nopred, "0", FCVAR_USERINFO, "disable client movement prediction" );
 static CVAR_DEFINE_AUTO( cl_nodelta, "0", 0, "disable delta-compression for server messages" );
-CVAR_DEFINE( cl_crosshair, "crosshair", "1", FCVAR_ARCHIVE, "show weapon chrosshair" );
+CVAR_DEFINE( cl_crosshair, "crosshair", "1", FCVAR_ARCHIVE, "0: hide crosshair, 1: weapon crosshair, 2: weapon crosshair and HUD dot" );
 static CVAR_DEFINE_AUTO( cl_cmdbackup, "10", FCVAR_ARCHIVE, "how many additional history commands are sent" );
 CVAR_DEFINE_AUTO( cl_showerror, "0", FCVAR_ARCHIVE, "show prediction error (1 = screen, 2 = screen + verbose PRED-TRACE console log)" );
 CVAR_DEFINE_AUTO( cl_bmodelinterp, "1", 0, "enable bmodel interpolation" );
@@ -1205,7 +1205,7 @@ static void CL_WritePacket( void )
 		cls.lastoutgoingcommand = cls.netchan.outgoing_sequence;
 		pcmd->sendsize = MSG_GetNumBytesWritten( &buf );
 
-		CL_AddVoiceToDatagram();
+		CL_AddVoiceToDatagram( Q_max( 0, ( MSG_GetNumBitsLeft( &buf ) - MSG_GetNumBitsWritten( &cls.datagram )) / 8 ));
 
 		// now add unreliable, if there is enough space
 		if( MSG_GetNumBitsWritten( &cls.datagram ) <= MSG_GetNumBitsLeft( &buf ))

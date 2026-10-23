@@ -20,6 +20,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import su.xash.svencoop.databinding.ActivityMainBinding
 import su.xash.svencoop.model.SteamAuthManager
+import su.xash.svencoop.model.DownloadService
+import su.xash.svencoop.model.DownloadState
 import su.xash.svencoop.util.CrashReports
 import su.xash.svencoop.util.monospaceTextView
 import androidx.preference.PreferenceManager
@@ -37,10 +39,11 @@ class MainActivity : AppCompatActivity() {
         val launch = pendingMicrophoneLaunch
         pendingMicrophoneLaunch = null
         if (!granted) Toast.makeText(this, R.string.microphone_permission_denied, Toast.LENGTH_LONG).show()
-        if (!isFinishing && !isDestroyed) launch?.invoke()
+        if (launch != null && !isFinishing && !isDestroyed && canLaunchGame()) launch()
     }
 
     fun launchWithMicrophonePermission(launch: () -> Unit) {
+        if (!canLaunchGame()) return
         if (pendingMicrophoneLaunch != null) return
         val enabled = PreferenceManager.getDefaultSharedPreferences(this).getBoolean("microphone", true)
         if (!enabled || ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -49,6 +52,12 @@ class MainActivity : AppCompatActivity() {
             pendingMicrophoneLaunch = launch
             microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
         }
+    }
+
+    private fun canLaunchGame(): Boolean {
+        if (DownloadService.state.value !is DownloadState.Downloading) return true
+        Toast.makeText(this, R.string.download_wait_before_play, Toast.LENGTH_LONG).show()
+        return false
     }
     private var steamLibraryDialog: AlertDialog? = null
     private var steamLibraryDialogSession = -1L

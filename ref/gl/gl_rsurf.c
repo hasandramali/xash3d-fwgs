@@ -127,13 +127,11 @@ static uint64_t R_DynamicStateHash( void )
 		if( dl->die < gp_cl->time || !dl->radius )
 			continue;
 
+		hash = DLight_HashBytes( hash, &i, sizeof( i ));
 		hash = DLight_HashBytes( hash, dl->origin, sizeof( dl->origin ));
 		hash = DLight_HashBytes( hash, &dl->radius, sizeof( dl->radius ));
 		hash = DLight_HashBytes( hash, &dl->color, sizeof( dl->color ));
-		hash = DLight_HashBytes( hash, &dl->die, sizeof( dl->die ));
-		hash = DLight_HashBytes( hash, &dl->decay, sizeof( dl->decay ));
 		hash = DLight_HashBytes( hash, &dl->minlight, sizeof( dl->minlight ));
-		hash = DLight_HashBytes( hash, &dl->key, sizeof( dl->key ));
 		hash = DLight_HashBytes( hash, &dl->dark, sizeof( dl->dark ));
 	}
 
@@ -719,11 +717,13 @@ static void R_AddDynamicLights( const msurface_t *surf, float sample_size, int s
 		else sample_frac = LM_SAMPLE_SIZE;
 	}
 
-	for( int lnum = 0; lnum < MAX_DLIGHTS; lnum++ )
+	uint lightbits = (uint)surf->dlightbits;
+	int columnDistance[BLOCK_SIZE_MAX];
+	for( int lnum = 0; lnum < MAX_DLIGHTS && lightbits; lnum++, lightbits >>= 1 )
 	{
 		vec3_t impact, origin_l;
 
-		if( !FBitSet( surf->dlightbits, BIT( lnum )))
+		if( !( lightbits & 1 ))
 			continue;	// not lit by this light
 
 		dlight_t *dl = &gp_dlights[lnum];
@@ -761,6 +761,13 @@ static void R_AddDynamicLights( const msurface_t *surf, float sample_size, int s
 		int s1 = Q_min( smax - 1, (int)( sl / sample_size + half ));
 		int t0 = Q_max( 0, (int)( tl / sample_size - half ));
 		int t1 = Q_min( tmax - 1, (int)( tl / sample_size + half ));
+		if( s0 > s1 || t0 > t1 )
+			continue;
+		for( int column = s0; column <= s1; column++ )
+		{
+			int distance = ( sl - sample_size * column ) * sample_frac;
+			columnDistance[column] = distance < 0 ? -distance : distance;
+		}
 
 		for( int t = t0; t <= t1; t++ )
 		{
@@ -771,11 +778,8 @@ static void R_AddDynamicLights( const msurface_t *surf, float sample_size, int s
 
 			for( int s = s0; s <= s1; s++ )
 			{
-				int sd = (sl - sample_size * s) * sample_frac;
+				int sd = columnDistance[s];
 				float dist;
-
-				if( sd < 0 )
-					sd = -sd;
 
 				if( sd > td )
 					dist = sd + (td >> 1);

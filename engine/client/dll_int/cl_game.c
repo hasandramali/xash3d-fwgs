@@ -2079,6 +2079,18 @@ CL_DrawCrosshair
 Render crosshair
 ====================
 */
+static void CL_DrawCrosshairDot( void )
+{
+	if( cl_crosshair.value != 2.0f || cl.background || cl.intermission || refState.width <= 0 || refState.height <= 0
+		|| clgame.scrInfo.iWidth <= 0 || clgame.scrInfo.iHeight <= 0 )
+		return;
+
+	int x = ( clgame.viewport[0] + clgame.viewport[2] / 2 ) * (float)clgame.scrInfo.iWidth / refState.width;
+	int y = ( clgame.viewport[1] + clgame.viewport[3] / 2 ) * (float)clgame.scrInfo.iHeight / refState.height;
+	CL_FillRGBABlend( x - 1, y - 1, 3, 3, 0, 0, 0, 160 );
+	CL_FillRGBABlend( x, y, 1, 1, 255, 255, 255, 255 );
+}
+
 static void CL_DrawCrosshair( void )
 {
 	int	x, y, width, height;
@@ -2290,6 +2302,7 @@ void CL_DrawHUD( int state )
 		CL_DrawCrosshair ();
 		clgame.dllFuncs.pfnRedraw( cl.time, cl.intermission );
 		CL_WeaponListFix_Draw();
+		CL_DrawCrosshairDot();
 		CL_DrawCenterPrint ();
 		break;
 	case CL_PAUSED:
@@ -2297,6 +2310,7 @@ void CL_DrawHUD( int state )
 		CL_DrawCrosshair ();
 		clgame.dllFuncs.pfnRedraw( cl.time, cl.intermission );
 		CL_WeaponListFix_Draw();
+		CL_DrawCrosshairDot();
 		CL_DrawCenterPrint ();
 		if( showpause.value )
 		{
@@ -2761,10 +2775,11 @@ static model_t *CL_LoadSpriteModel( const char *filename, uint type, uint texFla
 	{
 		if( !Q_stricmp( mod->name, name ))
 		{
-			if( mod->needload == NL_NEEDS_LOADED )
+			if( mod->needload == NL_NEEDS_LOADED || !mod->cache.data )
 			{
 				if( CL_LoadHudSprite( name, mod, type, texFlags ))
 					return mod;
+				return NULL;
 			}
 
 			// prolonge registration
@@ -2847,7 +2862,7 @@ HSPRITE pfnSPR_LoadExt( const char *szPicName, uint texFlags )
 {
 	model_t *spr = CL_LoadSpriteModel( szPicName, SPR_CLIENT, texFlags );
 
-	if( spr == NULL )
+	if( spr == NULL || !spr->cache.data )
 		return 0;
 
 	return (spr - clgame.sprites) + 1; // return index
@@ -2865,7 +2880,7 @@ HSPRITE EXPORT pfnSPR_Load( const char *szPicName )
 {
 	model_t *spr = CL_LoadSpriteModel( szPicName, SPR_HUDSPRITE, 0 );
 
-	if( spr == NULL )
+	if( spr == NULL || !spr->cache.data )
 		return 0;
 
 	return (spr - clgame.sprites) + 1; // return index

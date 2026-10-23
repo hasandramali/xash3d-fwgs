@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import su.xash.svencoop.MainActivity
 import java.io.File
@@ -61,7 +62,7 @@ class DownloadService : Service() {
     }
 
     private fun startDownload(gamedir: String, targetDir: File, depotIds: List<Int>?) {
-        downloadJob?.cancel()
+        if (downloadJob?.isActive == true) return
         completedGamedir = gamedir
         displayName = GameDataDownloader.GAMES[gamedir]?.displayName ?: gamedir
         downloadTargetDir = targetDir
@@ -77,8 +78,12 @@ class DownloadService : Service() {
                         updateNotification(pct, "$current / $total files")
                     },
                     onStatus = { status ->
-                        _state.value = DownloadState.Downloading(0, 0, status)
-                        updateNotification(lastProgress, status)
+                        if (downloadJob?.isActive == true) {
+                            _state.update { state ->
+                                if (state is DownloadState.Downloading) state.copy(status = status) else state
+                            }
+                            updateNotification(lastProgress, status)
+                        }
                     },
                     depotIds = depotIds
                 )
@@ -255,12 +260,17 @@ class DownloadService : Service() {
         }
 
         fun resetState() {
-            _state.value = DownloadState.Idle
+            val current = _state.value
+            if (current is DownloadState.Downloading) return
+            if (!_state.compareAndSet(current, DownloadState.Idle)) return
             lastCompletedGamedir = null
         }
 
         fun start(context: Context, gamedir: String, targetDir: File, depotIds: List<Int>?) {
-            _state.value = DownloadState.Idle
+            val current = _state.value
+            if (current is DownloadState.Downloading) return
+            val starting = DownloadState.Downloading(0, 0, "Starting...")
+            if (!_state.compareAndSet(current, starting)) return
             val intent = Intent(context, DownloadService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_GAMEDIR, gamedir)
@@ -269,10 +279,15 @@ class DownloadService : Service() {
                     putIntegerArrayListExtra(EXTRA_DEPOT_IDS, ArrayList(depotIds))
                 }
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                _state.compareAndSet(starting, DownloadState.Error(e.message ?: "Could not start download"))
+                throw e
             }
         }
 

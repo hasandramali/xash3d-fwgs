@@ -2123,7 +2123,7 @@ static void S_VoiceRecordStop_f( void )
 	if( cls.state != ca_active || !Voice_IsRecording() )
 		return;
 
-	CL_AddVoiceToDatagram();
+	CL_AddVoiceToDatagram( MSG_GetNumBytesLeft( &cls.datagram ));
 	Voice_RecordStop();
 }
 
