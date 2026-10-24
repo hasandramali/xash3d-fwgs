@@ -130,6 +130,24 @@ quantities and authoritative weapon-data snapshots do not use this recovery.
 Explicit WeapPickup still works for ambiguous pools. No `cl_lw` or wire
 userinfo setting is changed.
 
+## AngelScript pickup widths
+
+Native Sven's WeapPickup uses a SHORT weapon ID, but the supplied
+`steam-refs/angelscripts/custom_weapons/cso/weapon_qbarrel.as` sends
+`WriteLong(g_ItemRegistry.GetIdForName(...))` from AddToPlayer. The supplied
+custom-weapons scripts contain 54 such LONG pickup senders. Enforcing only
+the native two-byte size silently discarded those ownership grants, leaving
+the HUD's pickup name without its WeaponListFix slot and making an inactive
+purchase unselectable until a later active-weapon report.
+
+Both the engine ownership handler and HUD pickup handler now accept exactly
+two-byte SHORT or four-byte LONG IDs, validating the entire decoded value
+against the supported 1..255 range. A malformed LONG must not alias a valid
+weapon through its low 16 bits. Null, truncated and unsupported-length
+packets are rejected. The existing pickup helper resets depletion and drop
+suppression and publishes the slot immediately, without changing the
+tripmine/satchel retirement rules or adding weapon-name exceptions.
+
 Tests in `Test_RunWeaponListFix` cover stale pickup ammo, replenishment,
 exhaustion, no-active transitions, alternate actions, bulk reset ordering,
 expired resets and existing slot cycling. These are state-machine tests, not

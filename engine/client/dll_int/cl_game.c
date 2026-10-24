@@ -1286,6 +1286,38 @@ void Test_RunWeaponListFix( void )
 	current[7] = 0;
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnResetHUD();
+	throwable->flags = 0;
+	byte longPickup[] = { 250, 0, 0, 0 };
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( longPickup ), longPickup );
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
+	TASSERT( CL_WeaponListFix_GetLayout( throwable, &pickupRow, NULL ));
+	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( pickupRow ), throwable );
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+	CL_WeaponListFix_DispatchCommand( "drop" );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( longPickup ), longPickup );
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ) && !cl_weaponlistfix_state.drop_pending );
+	CL_WeaponListFix_ForgetWeapon( 250 );
+	for( int size = 0; size <= sizeof( longPickup ); size++ )
+	{
+		if( size == 2 || size == 4 )
+			continue;
+		CL_WeaponListFix_OnUserMessage( "WeapPickup", size, longPickup );
+		TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	}
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( longPickup ), NULL );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	longPickup[2] = 1;
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( longPickup ), longPickup );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	memset( longPickup, 255, sizeof( longPickup ));
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( longPickup ), longPickup );
+	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	memset( longPickup, 0, sizeof( longPickup ));
+	longPickup[0] = 249;
+	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( longPickup ), longPickup );
+	TASSERT( CL_WeaponListFix_HasWeapon( &cl_weaponlistfix_state.weapons[249] ));
 	cl_weaponlistfix.value = savedMode;
 	cls.state = savedConnection;
 	cl_weaponlistfix_state = saved;
@@ -1756,10 +1788,12 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		int id;
 		cl_weaponlistfix_weapon_t *weapon;
 
-		if( !pbuf || iSize != 2 )
+		if( !pbuf || ( iSize != 2 && iSize != 4 ))
 			return;
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
-		id = CL_WeaponListFix_ReadShort( &msg );
+		id = iSize == 4 ? CL_WeaponListFix_ReadLong( &msg ) : CL_WeaponListFix_ReadShort( &msg );
+		if( id <= 0 || id >= CL_WEAPONLISTFIX_MAX_WEAPONS )
+			return;
 
 		// Auto-detect unknown weapons
 		CL_WeaponListFix_ScanForUnknownWeapons();
