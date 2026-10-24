@@ -1365,6 +1365,11 @@ void Cmd_ForwardToServer( void )
 		return; // not connected
 	}
 
+	if( ( !Q_stricmp( Cmd_Argv( 0 ), "status" ) && Cmd_Argc() == 1 )
+		|| ( !Q_stricmp( Cmd_Argv( 0 ), "cmd" ) && Cmd_Argc() == 2
+		&& !Q_stricmp( Cmd_Argv( 1 ), "status" )))
+		Con_Printf( "server address: %s\n", NET_AdrToString( cls.netchan.remote_address ));
+
 	MSG_BeginClientCmd( &cls.netchan.message, clc_stringcmd );
 
 	str[0] = 0;
