@@ -2086,7 +2086,13 @@ void CL_CenterPrint( const char *text, float y )
 {
 	cl_font_t *font = Con_GetCurFont();
 
-	if( COM_StringEmptyOrNULL( text ) || !font || !font->valid )
+	if( COM_StringEmptyOrNULL( text ))
+	{
+		clgame.centerPrint.time = 0.0f;
+		clgame.centerPrint.message[0] = '\0';
+		return;
+	}
+	if( !font || !font->valid )
 		return;
 
 	clgame.centerPrint.totalWidth = 0;

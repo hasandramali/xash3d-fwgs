@@ -1,5 +1,30 @@
 # Map-transition HUD and local flashlight
 
+## AntiRush countdown: corrected message path
+
+The previous HudText-only regression did not exercise the message path used by
+the reported multiplayer waiting countdown. The public AntiRush plugin calls
+`PrintKeyBindingStringAll` every second with `Level changing in N seconds.`
+and sends an empty string to clear it:
+https://github.com/wootguy/AntiRush/blob/master/AntiRush.as
+
+The supplied Windows server confirms the complete path: the AngelScript
+registration at `0x10312AF4` binds the all-player wrapper `0x103118A0`, which
+calls `0x10265B50`. That function sends one NUL-terminated PrintKB string to
+each player, using message global `0x104FA3D0` registered at `0x1021CAC5`.
+
+The supplied client PrintKB handler (`0x1005B890`) converts bindings, calls
+engine pointer `0x101F8A14` at `0x1005B8C0`, and frees the conversion. This
+pointer is CenterPrint, not ConsolePrint: it is six 32-bit callback slots after
+TextMessageGet (`0x101F89FC`), and is also called by the TextMsg center branch
+at `0x1005B738`. Our PrintKB handler incorrectly called ConsolePrint, explaining
+why changing HudText refresh did not restore this countdown on screen.
+
+PrintKB now uses CenterPrint. The engine also clears pending center text on
+an empty message, so countdown cancellation/end does not leave stale text
+until scr_centertime expires. No countdown text, 30-second duration, plugin
+name, map name, or trigger detection is hardcoded in the implementation.
+
 ## Original-client comparison
 
 The supplied `steam-refs/sven/client.dll` hooks `HudText` at `0x10043546`
@@ -55,6 +80,12 @@ the beam through its trace callback. The null renderer remains a no-op.
 
 ## Validation
 
+- A regression using the actual PrintKB handler fails before the callback fix
+  because center output stays empty. It passes after the fix, including
+  30-to-1 countdown updates, binding substitution, literal percent characters,
+  malformed-message rejection and the empty-string clear message.
+- The actual engine center-print function is checked for presentation-clock
+  refresh and empty/null cancellation with valid, invalid and absent fonts.
 - The old `MessageAdd` reproduces the raw-text refresh failure; the replacement
   sustains 31 countdown updates, named channels, full queues and bounded text.
 - Extracted engine draw cases verify that intermission fading precedes HUD and

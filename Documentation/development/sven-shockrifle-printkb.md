@@ -71,12 +71,18 @@ manager objects. Missing sprite models or exhausted effect pools do not cause
 unbounded retries or a disconnect.
 
 `PrintKB` calls the reference key converter at `0x10039C40`, prints the result
-through the engine console API, then frees it. Bound actions become bracketed
-key names; unbound actions retain their original text. It is not a HUD or chat
-message. The port uses the existing shared `KB_ConvertString` implementation,
+through the engine center-print API, then frees it. The indirect call at
+`0x1005B8C0` uses `0x101F8A14`, the same callback used by TextMsg's center branch
+at `0x1005B738`. Relative to TextMessageGet (`0x101F89FC`), this is slot +6:
+ConsolePrint is slot +5 (`0x101F8A10`), not +6. The earlier port and this
+document incorrectly identified that callback as console output.
+Bound actions become bracketed key names; unbound actions retain their
+original text. The port uses the existing shared `KB_ConvertString` implementation,
 with output bounds, allocation failure handling and unsigned-character
 classification added. This also protects menu text using the same converter.
-Console text remains literal, including `%` characters, and is never a command.
+Center text remains literal, including `%` characters, and is never a command.
+An empty message clears an existing center print, including when fonts are
+temporarily unavailable.
 
 ## Additional checks and remaining scope
 
