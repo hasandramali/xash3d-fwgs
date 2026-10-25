@@ -2188,13 +2188,15 @@ static void CL_ParseScreenShake( sizebuf_t *msg )
 	float frequency = (float)(word)MSG_ReadShort( msg ) * ( 1.0f / (float)( 1 << 8 ));
 
 	// don't overwrite larger existing shake
-	if( amplitude > clgame.shake.amplitude )
+	if( cl.time >= clgame.shake.time || amplitude > clgame.shake.amplitude )
 		clgame.shake.amplitude = amplitude;
 
 	clgame.shake.duration = duration;
 	clgame.shake.time = cl.time + clgame.shake.duration;
 	clgame.shake.frequency = frequency;
 	clgame.shake.next_shake = 0.0f; // apply immediately
+	clgame.shake.starttime = cl.time;
+	clgame.shake.last_update = cl.time - 1.0 / 30.0;
 }
 
 /*

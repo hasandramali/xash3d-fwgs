@@ -4282,7 +4282,8 @@ static void GAME_EXPORT pfnCalcShake( void )
 {
 	screen_shake_t *const shake = &clgame.shake;
 
-	if( cl.time > shake->time || shake->amplitude <= 0 || shake->frequency <= 0 || shake->duration <= 0 )
+	if( cl.time >= shake->time || cl.time < shake->starttime - 0.1
+		|| shake->amplitude <= 0 || shake->frequency <= 0 || shake->duration <= 0 )
 	{
 		// reset shake
 		if( shake->time != 0 )
@@ -4292,16 +4293,25 @@ static void GAME_EXPORT pfnCalcShake( void )
 			VectorClear( shake->applied_offset );
 			Mobile_StopVibration();
 		}
+		shake->amplitude = 0;
 
 		return;
 	}
 
-	float frametime = cl_clientframetime();
+	if( cl.time < shake->starttime )
+		return;
+	double sample_time = shake->starttime + floor( ( cl.time - shake->starttime + 0.000001 ) * 30.0 ) / 30.0;
+	if( sample_time <= shake->last_update + 0.000001 )
+		return;
+	double steps = Q_max( 1.0, floor( ( sample_time - shake->last_update ) * 30.0 + 0.5 ));
+	float damping = Q_max( 0.0f, 1.0f - 1.0f / ( 30.0f * shake->frequency * shake->duration ));
+	shake->amplitude *= pow( damping, steps - 1.0 );
+	shake->last_update = sample_time;
 
-	if( cl.time > shake->next_shake )
+	if( sample_time >= shake->next_shake )
 	{
 		// get next shake time based on frequency over duration
-		shake->next_shake = (float)cl.time + shake->frequency / shake->duration;
+		shake->next_shake = (float)sample_time + shake->frequency / shake->duration;
 
 		// randomize each shake
 		for( int i = 0; i < 3; i++ )
@@ -4310,14 +4320,14 @@ static void GAME_EXPORT pfnCalcShake( void )
 	}
 
 	// get initial fraction and frequency values over the duration
-	float fraction = ((float)cl.time - shake->time ) / shake->duration;
+	float fraction = ((float)sample_time - shake->time ) / shake->duration;
 	float freq = fraction != 0.0f ? ( shake->frequency / fraction ) * shake->frequency : 0.0f;
 
 	// keep motors running slightly past the frame so they stop by themselves if the shake is never updated again
 	Mobile_ShakeVibrate( shake->amplitude * fraction * fraction, shake->frequency, 100.0f );
 
 	// quickly approach zero but apply time over sine wave
-	fraction *= fraction * sin( cl.time * freq );
+	fraction *= fraction * sin( sample_time * freq );
 
 	// apply shake offset
 	for( int i = 0; i < 3; i++ )
@@ -4327,7 +4337,7 @@ static void GAME_EXPORT pfnCalcShake( void )
 	shake->applied_angle = shake->angle * fraction;
 
 	// decrease amplitude, but slower on longer shakes or higher frequency
-	shake->amplitude -= shake->amplitude * ( frametime / ( shake->frequency * shake->duration ));
+	shake->amplitude *= damping;
 }
 
 /*

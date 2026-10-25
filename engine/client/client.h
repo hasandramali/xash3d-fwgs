@@ -446,6 +446,8 @@ typedef struct
 	float		amplitude;
 	float		frequency;
 	float		next_shake;
+	double		starttime;
+	double		last_update;
 	vec3_t		offset;
 	float		angle;
 	vec3_t		applied_offset;
