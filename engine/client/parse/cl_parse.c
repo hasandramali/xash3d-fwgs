@@ -2679,6 +2679,8 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			clgame.msg[i].name, iSize, clgame.msg[i].number );
 	}
 
+	CL_WeaponListFix_OnUserMessage( clgame.msg[i].name, iSize, pbuf );
+
 	if( clgame.msg[i].func )
 	{
 		clgame.msg[i].func( clgame.msg[i].name, iSize, pbuf );
@@ -2702,7 +2704,6 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	// play them engine-side where the precache table and mixer live.
 	if( !Q_strcmp( clgame.msg[i].name, "StartSound" ) && !MSG_CheckOverflow( msg ))
 		CL_ParseSvenStartSound( clgame.msg[i].name, iSize, pbuf );
-	CL_WeaponListFix_OnUserMessage( clgame.msg[i].name, iSize, pbuf );
 }
 /*
 =====================================================================

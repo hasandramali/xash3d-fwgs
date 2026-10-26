@@ -810,6 +810,7 @@ typedef struct
 	float pending_time;
 	int drop_pending;
 	float drop_pending_time;
+	qboolean drop_pending_active;
 	int alt_pending;
 	float alt_pending_time;
 	int attack_pending;

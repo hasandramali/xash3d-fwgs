@@ -130,6 +130,30 @@ quantities and authoritative weapon-data snapshots do not use this recovery.
 Explicit WeapPickup still works for ambiguous pools. No `cl_lw` or wire
 userinfo setting is changed.
 
+## Rapid drop/pickup reconciliation
+
+Manual drop removal is optimistic because Sven does not send an explicit
+inventory-removal message for it. Previously a matching active CurWeapon
+inside the one-second stale-update window was discarded permanently. If
+the drop was rejected or the same item was reacquired quickly and no later
+ammo change occurred, that weapon could remain missing indefinitely.
+
+The fallback now remembers a suppressed active report and reconciles it
+when the window expires, even if no more user messages arrive. It does not
+restore an item merely because a timer elapsed: a matching server active
+report is required. A different active weapon, no-active report, explicit
+removal, new pickup, authoritative weapon data or clock reset prevents stale
+recovery. Depleted exhaustible weapons retain their removal guards. This
+remains a conservative `cl_lw 0` inference, not a full ownership snapshot.
+
+The network parser also updates WeaponListFix before invoking the HUD
+callback. Pickup-row metadata and ownership are therefore available during
+the notification itself, rather than only after the client has processed it.
+
+Regression tests exercise repeated drops, suppressed active updates with no
+follow-up message, slot recovery, successful drops to another/no weapon,
+reacquisition, authoritative snapshots and clock rewinds.
+
 ## AngelScript pickup widths
 
 Native Sven's WeapPickup uses a SHORT weapon ID, but the supplied
