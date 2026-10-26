@@ -811,6 +811,8 @@ typedef struct
 	int drop_pending;
 	float drop_pending_time;
 	qboolean drop_pending_active;
+	qboolean drop_command_valid;
+	double drop_command_time;
 	int alt_pending;
 	float alt_pending_time;
 	int attack_pending;

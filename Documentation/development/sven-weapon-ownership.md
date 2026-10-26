@@ -154,6 +154,44 @@ Regression tests exercise repeated drops, suppressed active updates with no
 follow-up message, slot recovery, successful drops to another/no weapon,
 reacquisition, authoritative snapshots and clock rewinds.
 
+## Server drop cooldown and pickup-row retention
+
+The supplied `server.dll` command dispatcher compares server time with the
+player's next-drop deadline at `0x10129EDE..0x10129EE9` and returns immediately
+when it has not elapsed. After processing a drop attempt it writes a new
+deadline at `0x10129F22..0x10129F3A`, adding the double at `0x103EB1F8`, whose
+value is exactly `0.5`. That early rejection need not send another CurWeapon
+or WeapPickup: the next active weapon simply stays owned.
+
+Previously every local drop press removed the current weapon immediately,
+including those rejected by this cooldown. After the first successful drop
+selected another weapon, a rapid second press could hide that second weapon
+indefinitely. The earlier stale-active-report recovery did not help if the
+server sent no new report at all.
+
+WeaponListFix now coalesces repeated drop commands during the same 0.5-second
+window, including the deadline itself, without deleting another inventory
+entry or forwarding another drop. It also waits for the outstanding active
+weapon transition, bounded by the existing one-second pending timeout, so
+extra commands cannot target an unknown server-active weapon in flight.
+Pickups do not reset the cooldown; session/spawn resets and clock rewinds
+allow a fresh attempt. Ordinary drops outside the window still reach the
+server, and no weapon names, ammo heuristics or `cl_lw` settings change.
+
+Pickup-row history now refreshes a repeated ID's recency. The HUD also stores
+the row when the pickup arrives, rather than depending on the ID remaining
+in the engine's four-entry history for the entire notification lifetime.
+Drawing can still fill in an initially unknown row later. A burst of pickups
+or engine-only recovery updates therefore cannot erase an already known
+slot prefix from a visible notification.
+
+Tests cover a successful drop followed by selection of another firearm,
+16 rejected spam presses without any further server messages, the exact
+cooldown boundary, subsequent accepted drops and immediate reacquisition,
+using repeated generic IDs and a `weapon_9mmAR` fixture. This reproduces the
+missing inactive weapon, rather than requiring a new active report to repair
+it. These checks supplement, not replace, testing on a live server.
+
 ## AngelScript pickup widths
 
 Native Sven's WeapPickup uses a SHORT weapon ID, but the supplied

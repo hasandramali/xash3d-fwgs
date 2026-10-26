@@ -117,6 +117,7 @@ static qboolean CL_WeaponListFix_FixedRow( const char *name, int *row, int *pos 
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
 #define CL_WEAPONLISTFIX_PENDING_TIMEOUT 3.0f
 #define CL_WEAPONLISTFIX_DROP_TIMEOUT 1.0f
+#define CL_WEAPONLISTFIX_DROP_COOLDOWN 0.5
 #define CL_WEAPONLISTFIX_SELECTONEMPTY BIT( 0 )
 #define CL_WEAPONLISTFIX_EXHAUSTIBLE BIT( 4 )
 #define CL_WEAPONLISTFIX_HIDEHUD_WEAPONS BIT( 0 )
@@ -353,7 +354,7 @@ static qboolean CL_WeaponListFix_GetLayout( const cl_weaponlistfix_weapon_t *wea
 }
 
 // Last pickup rows for the client HUD notifier ("[3] weapon_famas").
-// The client resolves rows lazily at draw time from this cvar, so the
+// The client snapshots rows on pickup (with a lazy draw fallback), so the
 // engine (the layout authority) publishes id->row pairs here on every
 // pickup: "id:row id:row ..." (newest last, capped). Rows are looked up
 // by weapon id, which survives WeaponList renames (auto weapon_<id> ->
@@ -388,7 +389,15 @@ static void CL_WeaponListFix_NotePickupRow( int id )
 		if( wl_pickup_hist_ids[i] == id )
 			break;
 	}
-	if( i >= wl_pickup_hist_count )
+	if( i < wl_pickup_hist_count )
+	{
+		memmove( wl_pickup_hist_ids + i, wl_pickup_hist_ids + i + 1,
+			( wl_pickup_hist_count - i - 1 ) * sizeof( wl_pickup_hist_ids[0] ));
+		memmove( wl_pickup_hist_rows + i, wl_pickup_hist_rows + i + 1,
+			( wl_pickup_hist_count - i - 1 ) * sizeof( wl_pickup_hist_rows[0] ));
+		i = wl_pickup_hist_count - 1;
+	}
+	else
 	{
 		if( wl_pickup_hist_count >= WL_PICKUP_ROWS_MAX )
 		{
@@ -397,8 +406,8 @@ static void CL_WeaponListFix_NotePickupRow( int id )
 			i = WL_PICKUP_ROWS_MAX - 1;
 		}
 		else i = wl_pickup_hist_count++;
-		wl_pickup_hist_ids[i] = id;
 	}
+	wl_pickup_hist_ids[i] = id;
 	wl_pickup_hist_rows[i] = row;
 
 	buf[0] = 0;
@@ -958,6 +967,12 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_PickWeaponInSlot( int slot )
 #if XASH_ENGINE_TESTS
 #include "tests.h"
 
+static void CL_WeaponListFix_TestDrop( void )
+{
+	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
+	CL_WeaponListFix_DispatchCommand( "drop" );
+}
+
 void Test_RunWeaponListFix( void )
 {
 	cl_weaponlistfix_t saved = cl_weaponlistfix_state;
@@ -1137,7 +1152,7 @@ void Test_RunWeaponListFix( void )
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	cl_weaponlistfix_weapon_t *throwable = &cl_weaponlistfix_state.weapons[250];
 	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	ammoUpdate[1] = 0;
 	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
@@ -1155,13 +1170,13 @@ void Test_RunWeaponListFix( void )
 	current[0] = 1;
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	TASSERT_EQi( cl_weaponlistfix_state.active_weapon, 250 );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "AmmoPickup", sizeof( ammoUpdate ), ammoUpdate );
 	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	ammoUpdate[1] = 0;
 	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
 	ammoUpdate[1] = 1;
@@ -1178,7 +1193,7 @@ void Test_RunWeaponListFix( void )
 	CL_WeaponListFix_OnUserMessage( "AmmoX", sizeof( ammoUpdate ), ammoUpdate );
 	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	ammoUpdate[1] = 0;
 	CL_WeaponListFix_OnUserMessage( "AmmoPickup", sizeof( ammoUpdate ), ammoUpdate );
 	CL_WeaponListFix_OnUserMessage( "AmmoPickup", 1, ammoUpdate );
@@ -1194,7 +1209,7 @@ void Test_RunWeaponListFix( void )
 	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	throwable->flags = 0;
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "AmmoPickup", sizeof( largePickup ), largePickup );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
@@ -1204,7 +1219,7 @@ void Test_RunWeaponListFix( void )
 	cl_weaponlistfix_state.weapons[251].id = 251;
 	cl_weaponlistfix_state.weapons[251].owned_hint = false;
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "AmmoPickup", sizeof( largePickup ), largePickup );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	TASSERT( !CL_WeaponListFix_HasWeapon( &cl_weaponlistfix_state.weapons[251] ));
@@ -1212,7 +1227,7 @@ void Test_RunWeaponListFix( void )
 	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	cl_weaponlistfix_state.weapons[251].valid = false;
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	cl_weaponlistfix_state.weapondata_valid = true;
 	CL_WeaponListFix_OnUserMessage( "AmmoPickup", sizeof( largePickup ), largePickup );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
@@ -1298,7 +1313,7 @@ void Test_RunWeaponListFix( void )
 	TASSERT( CL_WeaponListFix_GetLayout( throwable, &pickupRow, NULL ));
 	TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( pickupRow ), throwable );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( longPickup ), longPickup );
 	TASSERT( CL_WeaponListFix_HasWeapon( throwable ) && !cl_weaponlistfix_state.drop_pending );
@@ -1329,7 +1344,7 @@ void Test_RunWeaponListFix( void )
 		cl.time = 100 + cycle * 2;
 		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-		CL_WeaponListFix_DispatchCommand( "drop" );
+		CL_WeaponListFix_TestDrop();
 		CL_WeaponListFix_DispatchCommand( "drop" );
 		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 		TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
@@ -1341,7 +1356,7 @@ void Test_RunWeaponListFix( void )
 		TASSERT( CL_WeaponListFix_GetLayout( throwable, &pickupRow, NULL ));
 		TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( pickupRow ), throwable );
 	}
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( noWeapon ), noWeapon );
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
@@ -1349,7 +1364,7 @@ void Test_RunWeaponListFix( void )
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( otherWeapon ), otherWeapon );
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
@@ -1357,20 +1372,20 @@ void Test_RunWeaponListFix( void )
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
 	CL_WeaponListFix_AppendMove( &idle );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
 	CL_WeaponListFix_AppendMove( &idle );
 	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	cl_weaponlistfix_state.weapondata_valid = true;
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
@@ -1379,12 +1394,56 @@ void Test_RunWeaponListFix( void )
 	cl_weaponlistfix_state.weapondata_valid = false;
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	cl.time -= 10;
 	CL_WeaponListFix_AppendMove( &idle );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 	TASSERT_EQi( cl_weaponlistfix_state.drop_pending, 0 );
+	byte rifleCurrent[] = { 1, 249, 0, 30, 0, 0, 0, 0, 0, 0, 0 };
+	byte riflePickup[] = { 249, 0 };
+	cl_weaponlistfix_weapon_t *rifle = CL_WeaponListFix_AddNamedWeapon( 249, "weapon_9mmAR" );
+	for( int cycle = 0; cycle < 32; cycle++ )
+	{
+		cl.time = 300 + cycle * 2;
+		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
+		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( riflePickup ), riflePickup );
+		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
+		TASSERT( !CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+		TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( rifleCurrent ), rifleCurrent );
+		cl.time += 0.1;
+		for( int spam = 0; spam < 16; spam++ )
+			TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( CL_WeaponListFix_HasWeapon( rifle ));
+		TASSERT_EQi( cl_weaponlistfix_state.active_weapon, 249 );
+		TASSERT_EQi( cl_weaponlistfix_state.drop_pending, 0 );
+		cl.time = 300 + cycle * 2 + CL_WEAPONLISTFIX_DROP_COOLDOWN;
+		TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( CL_WeaponListFix_HasWeapon( rifle ));
+		cl.time += 0.01;
+		TASSERT( !CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( !CL_WeaponListFix_HasWeapon( rifle ));
+		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( riflePickup ), riflePickup );
+		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( rifleCurrent ), rifleCurrent );
+		TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( CL_WeaponListFix_HasWeapon( rifle ));
+		TASSERT( CL_WeaponListFix_GetLayout( rifle, &pickupRow, NULL ));
+		TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( pickupRow ), rifle );
+	}
+	CL_WeaponListFix_ClearPickupRows();
+	for( int id = 245; id <= 248; id++ )
+	{
+		CL_WeaponListFix_AddUnknownWeapon( id );
+		CL_WeaponListFix_NotePickupRow( id );
+	}
+	CL_WeaponListFix_NotePickupRow( 245 );
+	TASSERT_EQi( wl_pickup_hist_ids[WL_PICKUP_ROWS_MAX - 1], 245 );
+	CL_WeaponListFix_NotePickupRow( 249 );
+	TASSERT_EQi( wl_pickup_hist_ids[0], 247 );
+	TASSERT_EQi( wl_pickup_hist_ids[WL_PICKUP_ROWS_MAX - 2], 245 );
+	TASSERT_EQi( wl_pickup_hist_ids[WL_PICKUP_ROWS_MAX - 1], 249 );
 	cl_weaponlistfix.value = savedMode;
 	cls.state = savedConnection;
 	cl_weaponlistfix_state = saved;
@@ -1546,14 +1605,16 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 		return false;
 	}
 
-	// Manual drop: Sven sends NO inventory signal on drop (wire-proven across
-	// full sessions: InvRemove arrives only on death-strip/spawn, never on
-	// manual drop). The drop command always drops the CURRENT weapon, so
-	// forget it optimistically here. The server's follow-up CurWeapon re-arms
-	// the new active weapon; a rejected drop re-arms via the next CurWeapon/
-	// WeapPickup for the kept weapon. Don't swallow: it must reach the server.
 	if( !Q_stricmp( cmd_name, "drop" ))
 	{
+		if( cl_weaponlistfix_state.drop_command_valid && cl.time >= cl_weaponlistfix_state.drop_command_time
+			&& cl.time - cl_weaponlistfix_state.drop_command_time <= CL_WEAPONLISTFIX_DROP_COOLDOWN )
+			return true;
+		if( cl_weaponlistfix_state.drop_pending && cl.time >= cl_weaponlistfix_state.drop_pending_time
+			&& cl.time - cl_weaponlistfix_state.drop_pending_time <= CL_WEAPONLISTFIX_DROP_TIMEOUT )
+			return true;
+		cl_weaponlistfix_state.drop_command_valid = true;
+		cl_weaponlistfix_state.drop_command_time = cl.time;
 		int id = cl_weaponlistfix_state.active_weapon;
 		if( id > 0 && id < CL_WEAPONLISTFIX_MAX_WEAPONS )
 		{
@@ -1996,6 +2057,8 @@ void CL_WeaponListFix_OnResetHUD( void )
 	cl_weaponlistfix_state.active_weapon = -1;
 	cl_weaponlistfix_state.drop_pending = 0;
 	cl_weaponlistfix_state.drop_pending_time = 0;
+	cl_weaponlistfix_state.drop_command_valid = false;
+	cl_weaponlistfix_state.drop_command_time = 0;
 	cl_weaponlistfix_state.selected_weapon = -1;
 	cl_weaponlistfix_state.select_pending = 0;
 }
