@@ -440,6 +440,8 @@ static qboolean CL_WeaponListFix_HasWeapon( const cl_weaponlistfix_weapon_t *wea
 {
 	if( !weapon || !weapon->valid )
 		return false;
+	if( cl_weaponlistfix_state.drop_pending == weapon->id )
+		return false;
 	if( cl_weaponlistfix_state.active_weapon == weapon->id )
 		return true;
 	// Sven Co-op's server.dll never fills clientdata.weapons (binary-verified:
@@ -498,7 +500,10 @@ static void CL_WeaponListFix_ForgetWeapon( int id )
 	weapon->ammo_confirmed = false;
 	weapon->ammo_recoverable = false;
 	if( cl_weaponlistfix_state.drop_pending == id )
+	{
+		cl_weaponlistfix_state.drop_pending = 0;
 		cl_weaponlistfix_state.drop_pending_active = false;
+	}
 	if( cl_weaponlistfix_state.attack_pending == id )
 		cl_weaponlistfix_state.attack_pending = 0;
 	if( cl_weaponlistfix_state.retire_pending == id )
@@ -509,6 +514,22 @@ static void CL_WeaponListFix_ForgetWeapon( int id )
 		cl_weaponlistfix_state.selected_weapon = -1;
 	if( cl_weaponlistfix_state.select_pending == id )
 		cl_weaponlistfix_state.select_pending = 0;
+}
+
+static void CL_WeaponListFix_ConfirmDrop( int id )
+{
+	int pending = cl_weaponlistfix_state.drop_pending;
+	if( !pending || pending == id )
+		return;
+	cl_weaponlistfix_state.drop_pending = 0;
+	cl_weaponlistfix_state.drop_pending_active = false;
+	cl_weaponlistfix_state.drop_command_time = cl.time;
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_DPrintf( "CL_WeaponListFix: drop transition id=%d next=%d\n", pending, id );
+	cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( pending );
+	CL_WeaponListFix_ForgetWeapon( pending );
+	if( weapon )
+		weapon->ammo_recoverable = ( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE ) != 0;
 }
 
 static void CL_WeaponListFix_ConfirmAlternateAction( int id )
@@ -597,8 +618,9 @@ static void CL_WeaponListFix_RecoverAmmoWeapon( int ammo )
 		cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( id );
 		if( !weapon || ( weapon->ammo1 != ammo && weapon->ammo2 != ammo ))
 			continue;
-		if( candidate || !weapon->ammo_recoverable || !weapon->removed_hint
-			|| weapon->owned_hint || !( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
+		qboolean pending = cl_weaponlistfix_state.drop_pending == id;
+		if( candidate || !weapon->ammo_recoverable || ( !pending && ( !weapon->removed_hint
+			|| weapon->owned_hint )) || !( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
 			|| weapon->ammo1 != ammo || weapon->ammo2 >= 0 || weapon->clip > 0 )
 			return;
 		candidate = weapon;
@@ -686,8 +708,7 @@ static void CL_WeaponListFix_UpdateAmmo( int ammo, int count )
 
 static void CL_WeaponListFix_NoActiveWeapon( int state, int id, int clip, int ammo )
 {
-	cl_weaponlistfix_state.drop_pending = 0;
-	cl_weaponlistfix_state.drop_pending_active = false;
+	CL_WeaponListFix_ConfirmDrop( id );
 	CL_WeaponListFix_ConfirmRetirement( id );
 	CL_WeaponListFix_ConfirmAlternateAction( id );
 	cl_weaponlistfix_state.active_weapon = -1;
@@ -761,14 +782,7 @@ void CL_WeaponListFix_UpdateWeaponData( const weapon_data_t *weapons, int count 
 			continue;
 
 		if( cl_weaponlistfix_state.drop_pending == id )
-		{
-			if( !owned )
-				cl_weaponlistfix_state.drop_pending = 0;
-			else if( cl.time - cl_weaponlistfix_state.drop_pending_time <= CL_WEAPONLISTFIX_DROP_TIMEOUT )
-				owned = false;
-			else
-				cl_weaponlistfix_state.drop_pending = 0;
-		}
+			cl_weaponlistfix_state.drop_pending = 0;
 		weapon->owned_hint = owned;
 		if( owned )
 		{
@@ -964,13 +978,70 @@ static cl_weaponlistfix_weapon_t *CL_WeaponListFix_PickWeaponInSlot( int slot )
 	return CL_WeaponListFix_GetWeapon( owned[0] );
 }
 
+qboolean CL_WeaponListFix_PrepareDrop( const char *name, char *command, size_t command_size )
+{
+	if( !command || !command_size )
+		return true;
+	command[0] = '\0';
+	if( !cl_weaponlistfix.value || cls.state != ca_active || cls.demoplayback )
+		return false;
+	if( cl_weaponlistfix_state.drop_command_valid && cl.time >= cl_weaponlistfix_state.drop_command_time
+		&& cl.time - cl_weaponlistfix_state.drop_command_time <= CL_WEAPONLISTFIX_DROP_COOLDOWN )
+		return true;
+	if( cl_weaponlistfix_state.drop_pending && cl.time >= cl_weaponlistfix_state.drop_pending_time
+		&& cl.time - cl_weaponlistfix_state.drop_pending_time <= CL_WEAPONLISTFIX_DROP_TIMEOUT )
+		return true;
+
+	cl_weaponlistfix_weapon_t *weapon = NULL;
+	if( name && name[0] )
+	{
+		for( int id = 1; id < CL_WEAPONLISTFIX_MAX_WEAPONS; id++ )
+		{
+			cl_weaponlistfix_weapon_t *candidate = CL_WeaponListFix_GetWeapon( id );
+			if( candidate && CL_WeaponListFix_HasRealName( candidate ) && !Q_stricmp( candidate->name, name ))
+			{
+				weapon = candidate;
+				break;
+			}
+		}
+	}
+	else
+		weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.active_weapon );
+
+	cl_weaponlistfix_state.drop_command_valid = true;
+	cl_weaponlistfix_state.drop_command_time = cl.time;
+	if( !weapon || !weapon->owned_hint || !CL_WeaponListFix_HasRealName( weapon )
+		|| strpbrk( weapon->name, "\";\r\n\\" ))
+		return false;
+	int length = Q_snprintf( command, command_size, "drop \"%s\"\n", weapon->name );
+	if( length < 0 || (size_t)length >= command_size )
+		return true;
+	weapon->ammo_recoverable = ( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE ) != 0;
+	weapon->exhausted_hint = false;
+	weapon->ammo_confirmed = false;
+	cl_weaponlistfix_state.drop_pending = weapon->id;
+	cl_weaponlistfix_state.drop_pending_time = cl.time;
+	cl_weaponlistfix_state.drop_pending_active = false;
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_DPrintf( "CL_WeaponListFix: drop pending id=%d name=%s active=%d\n",
+			weapon->id, weapon->name, cl_weaponlistfix_state.active_weapon );
+	return false;
+}
+
 #if XASH_ENGINE_TESTS
 #include "tests.h"
+
+static qboolean CL_WeaponListFix_TestDispatchDrop( void )
+{
+	char command[96];
+	CL_WeaponListFix_DispatchCommand( "drop" );
+	return CL_WeaponListFix_PrepareDrop( NULL, command, sizeof( command ));
+}
 
 static void CL_WeaponListFix_TestDrop( void )
 {
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
-	CL_WeaponListFix_DispatchCommand( "drop" );
+	CL_WeaponListFix_TestDispatchDrop();
 }
 
 void Test_RunWeaponListFix( void )
@@ -1345,7 +1416,7 @@ void Test_RunWeaponListFix( void )
 		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 		CL_WeaponListFix_TestDrop();
-		CL_WeaponListFix_DispatchCommand( "drop" );
+		CL_WeaponListFix_TestDispatchDrop();
 		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 		TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
 		cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
@@ -1375,7 +1446,7 @@ void Test_RunWeaponListFix( void )
 	CL_WeaponListFix_TestDrop();
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
 	CL_WeaponListFix_AppendMove( &idle );
-	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
 	CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	CL_WeaponListFix_TestDrop();
@@ -1388,6 +1459,8 @@ void Test_RunWeaponListFix( void )
 	CL_WeaponListFix_TestDrop();
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	cl_weaponlistfix_state.weapondata_valid = true;
+	memset( authoritative, 0, sizeof( authoritative ));
+	CL_WeaponListFix_UpdateWeaponData( authoritative, ARRAYSIZE( authoritative ));
 	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
 	CL_WeaponListFix_AppendMove( &idle );
 	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
@@ -1398,7 +1471,7 @@ void Test_RunWeaponListFix( void )
 	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
 	cl.time -= 10;
 	CL_WeaponListFix_AppendMove( &idle );
-	TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
+	TASSERT( CL_WeaponListFix_HasWeapon( throwable ));
 	TASSERT_EQi( cl_weaponlistfix_state.drop_pending, 0 );
 	byte rifleCurrent[] = { 1, 249, 0, 30, 0, 0, 0, 0, 0, 0, 0 };
 	byte riflePickup[] = { 249, 0 };
@@ -1409,29 +1482,74 @@ void Test_RunWeaponListFix( void )
 		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( pickup ), pickup );
 		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( riflePickup ), riflePickup );
 		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( current ), current );
-		TASSERT( !CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( !CL_WeaponListFix_TestDispatchDrop());
 		TASSERT( !CL_WeaponListFix_HasWeapon( throwable ));
-		TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( CL_WeaponListFix_TestDispatchDrop());
 		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( rifleCurrent ), rifleCurrent );
 		cl.time += 0.1;
 		for( int spam = 0; spam < 16; spam++ )
-			TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+			TASSERT( CL_WeaponListFix_TestDispatchDrop());
 		TASSERT( CL_WeaponListFix_HasWeapon( rifle ));
 		TASSERT_EQi( cl_weaponlistfix_state.active_weapon, 249 );
 		TASSERT_EQi( cl_weaponlistfix_state.drop_pending, 0 );
 		cl.time = 300 + cycle * 2 + CL_WEAPONLISTFIX_DROP_COOLDOWN;
-		TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( CL_WeaponListFix_TestDispatchDrop());
 		TASSERT( CL_WeaponListFix_HasWeapon( rifle ));
 		cl.time += 0.01;
-		TASSERT( !CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( !CL_WeaponListFix_TestDispatchDrop());
 		TASSERT( !CL_WeaponListFix_HasWeapon( rifle ));
 		CL_WeaponListFix_OnUserMessage( "WeapPickup", sizeof( riflePickup ), riflePickup );
 		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( rifleCurrent ), rifleCurrent );
-		TASSERT( CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( CL_WeaponListFix_TestDispatchDrop());
 		TASSERT( CL_WeaponListFix_HasWeapon( rifle ));
 		TASSERT( CL_WeaponListFix_GetLayout( rifle, &pickupRow, NULL ));
 		TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( pickupRow ), rifle );
 	}
+	cl_weaponlistfix_weapon_t *shotgun = CL_WeaponListFix_AddNamedWeapon( 247, "weapon_shotgun" );
+	cl_weaponlistfix_weapon_t *crowbar = CL_WeaponListFix_AddNamedWeapon( 248, "weapon_crowbar" );
+	byte shotgunCurrent[] = { 1, 247, 0, 8, 0, 0, 0, 255, 255, 255, 255 };
+	byte crowbarCurrent[] = { 1, 248, 0, 255, 255, 255, 255, 255, 255, 255, 255 };
+	char dropCommand[96];
+	for( int cycle = 0; cycle < 32; cycle++ )
+	{
+		cl.time = 500 + cycle * 4;
+		CL_WeaponListFix_PickupWeapon( shotgun );
+		CL_WeaponListFix_PickupWeapon( crowbar );
+		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( shotgunCurrent ), shotgunCurrent );
+		TASSERT( !CL_WeaponListFix_DispatchCommand( "drop" ));
+		TASSERT( CL_WeaponListFix_HasWeapon( shotgun ));
+		TASSERT( !CL_WeaponListFix_PrepareDrop( NULL, dropCommand, sizeof( dropCommand )));
+		TASSERT_STR( dropCommand, "drop \"weapon_shotgun\"\n" );
+		TASSERT( shotgun->owned_hint && !CL_WeaponListFix_HasWeapon( shotgun ));
+		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( crowbarCurrent ), crowbarCurrent );
+		TASSERT( !CL_WeaponListFix_HasWeapon( shotgun ));
+		TASSERT( CL_WeaponListFix_HasWeapon( crowbar ));
+		cl.time += CL_WEAPONLISTFIX_DROP_COOLDOWN + 0.01;
+		TASSERT( !CL_WeaponListFix_PrepareDrop( NULL, dropCommand, sizeof( dropCommand )));
+		TASSERT_STR( dropCommand, "drop \"weapon_crowbar\"\n" );
+		TASSERT( crowbar->owned_hint && !CL_WeaponListFix_HasWeapon( crowbar ));
+		crowbarCurrent[0] = 0;
+		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( crowbarCurrent ), crowbarCurrent );
+		crowbarCurrent[0] = 1;
+		cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
+		CL_WeaponListFix_AppendMove( &idle );
+		TASSERT( CL_WeaponListFix_HasWeapon( crowbar ));
+		TASSERT( CL_WeaponListFix_GetLayout( crowbar, &pickupRow, NULL ));
+		TASSERT_EQp( CL_WeaponListFix_PickWeaponInSlot( pickupRow ), crowbar );
+		CL_WeaponListFix_PickupWeapon( shotgun );
+		TASSERT( !CL_WeaponListFix_PrepareDrop( "weapon_shotgun", dropCommand, sizeof( dropCommand )));
+		TASSERT_STR( dropCommand, "drop \"weapon_shotgun\"\n" );
+		TASSERT_EQi( cl_weaponlistfix_state.drop_pending, 247 );
+		TASSERT( CL_WeaponListFix_HasWeapon( crowbar ));
+		CL_WeaponListFix_PickupWeapon( shotgun );
+		CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( crowbarCurrent ), crowbarCurrent );
+		TASSERT( CL_WeaponListFix_HasWeapon( shotgun ));
+		TASSERT( CL_WeaponListFix_HasWeapon( crowbar ));
+	}
+	cl.time += CL_WEAPONLISTFIX_DROP_TIMEOUT + 0.01;
+	TASSERT( !CL_WeaponListFix_PrepareDrop( "weapon_missing", dropCommand, sizeof( dropCommand )));
+	TASSERT( !dropCommand[0] && CL_WeaponListFix_HasWeapon( crowbar ));
+	TASSERT( CL_WeaponListFix_PrepareDrop( NULL, NULL, 0 ));
 	CL_WeaponListFix_ClearPickupRows();
 	for( int id = 245; id <= 248; id++ )
 	{
@@ -1493,29 +1611,16 @@ void CL_WeaponListFix_AppendMove( usercmd_t *cmd )
 	if( cl_weaponlistfix_state.drop_pending && ( cl.time < cl_weaponlistfix_state.drop_pending_time
 		|| cl.time - cl_weaponlistfix_state.drop_pending_time > CL_WEAPONLISTFIX_DROP_TIMEOUT ))
 	{
-		int id = cl_weaponlistfix_state.drop_pending;
-		cl_weaponlistfix_weapon_t *pending = CL_WeaponListFix_GetWeapon( id );
+		if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+			Con_DPrintf( "CL_WeaponListFix: unresolved drop expired id=%d\n", cl_weaponlistfix_state.drop_pending );
 		cl_weaponlistfix_state.drop_pending = 0;
-		if( cl.time >= cl_weaponlistfix_state.drop_pending_time && cls.state == ca_active
-			&& !cl_weaponlistfix_state.weapondata_valid && cl_weaponlistfix_state.drop_pending_active
-			&& pending && ( !( pending->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
-			|| !CL_WeaponListFix_KnownEmpty( pending )))
-		{
-			int clip = pending->clip;
-			int ammo = pending->ammo;
-			CL_WeaponListFix_PickupWeapon( pending );
-			CL_WeaponListFix_ObserveWeaponAmmo( pending, clip, ammo );
-			cl_weaponlistfix_state.active_weapon = id;
-			cl_weaponlistfix_state.selected_weapon = id;
-			CL_WeaponListFix_NotePickupRow( id );
-		}
 		cl_weaponlistfix_state.drop_pending_active = false;
 	}
 	if( cmd->weaponselect || cl_weaponlistfix_state.select_pending )
 		CL_WeaponListFix_CancelRetirement();
 	cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.active_weapon );
 	if( cl_weaponlistfix.value && cls.state == ca_active && !cl_weaponlistfix_state.weapondata_valid
-		&& weapon && weapon->owned_hint && ( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
+		&& weapon && CL_WeaponListFix_HasWeapon( weapon ) && ( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
 		&& ( weapon->flags & CL_WEAPONLISTFIX_SELECTONEMPTY )
 		&& cl.time >= cl_weaponlistfix_state.attack_block_until
 		&& !cmd->weaponselect && !cl_weaponlistfix_state.select_pending
@@ -1572,7 +1677,7 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 		weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.active_weapon );
 		cl_weaponlistfix_state.alt_pending = 0;
 		if( cls.state == ca_active && !cl_weaponlistfix_state.weapondata_valid
-			&& weapon && weapon->real_name && weapon->owned_hint
+			&& weapon && weapon->real_name && CL_WeaponListFix_HasWeapon( weapon )
 			&& weapon->ammo1 < 0 && weapon->ammo2 < 0 && weapon->clip <= 0 )
 		{
 			cl_weaponlistfix_state.alt_pending = weapon->id;
@@ -1606,36 +1711,7 @@ qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name )
 	}
 
 	if( !Q_stricmp( cmd_name, "drop" ))
-	{
-		if( cl_weaponlistfix_state.drop_command_valid && cl.time >= cl_weaponlistfix_state.drop_command_time
-			&& cl.time - cl_weaponlistfix_state.drop_command_time <= CL_WEAPONLISTFIX_DROP_COOLDOWN )
-			return true;
-		if( cl_weaponlistfix_state.drop_pending && cl.time >= cl_weaponlistfix_state.drop_pending_time
-			&& cl.time - cl_weaponlistfix_state.drop_pending_time <= CL_WEAPONLISTFIX_DROP_TIMEOUT )
-			return true;
-		cl_weaponlistfix_state.drop_command_valid = true;
-		cl_weaponlistfix_state.drop_command_time = cl.time;
-		int id = cl_weaponlistfix_state.active_weapon;
-		if( id > 0 && id < CL_WEAPONLISTFIX_MAX_WEAPONS )
-		{
-			cl_weaponlistfix_weapon_t *drop = CL_WeaponListFix_GetWeapon( id );
-			if( drop && drop->owned_hint )
-			{
-				drop->owned_hint = false;
-				drop->removed_hint = true;
-				drop->ammo_recoverable = ( drop->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE ) != 0;
-				drop->exhausted_hint = false;
-				drop->ammo_confirmed = false;
-				cl_weaponlistfix_state.drop_pending = id;
-				cl_weaponlistfix_state.drop_pending_time = cl.time;
-				cl_weaponlistfix_state.drop_pending_active = false;
-				cl_weaponlistfix_state.active_weapon = -1;
-				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-					Con_DPrintf( "CL_WeaponListFix: drop clears %s (ID %d)\n", drop->name, id );
-			}
-		}
 		return false;
-	}
 
 	if( cmd_name[0] == 's' && cmd_name[1] == 'l' && cmd_name[2] == 'o' &&
 	    cmd_name[3] == 't' && cmd_name[4] >= '1' && cmd_name[4] <= '9' && cmd_name[5] == '\0' )
@@ -1914,17 +1990,15 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 			if( suppress_drop )
 			{
 				cl_weaponlistfix_state.drop_pending_active = true;
-				weapon->owned_hint = false;
-				weapon->removed_hint = true;
-				cl_weaponlistfix_state.active_weapon = -1;
+				weapon->owned_hint = true;
+				weapon->removed_hint = false;
 			}
 			else
 			{
 				if( cl_weaponlistfix_state.active_weapon != id )
 					cl_weaponlistfix_state.selected_weapon = id;
 				cl_weaponlistfix_state.active_weapon = id;
-				if( cl_weaponlistfix_state.drop_pending )
-					cl_weaponlistfix_state.drop_pending = 0;
+				CL_WeaponListFix_ConfirmDrop( id );
 			}
 		}
 

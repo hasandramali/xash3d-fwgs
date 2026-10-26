@@ -843,6 +843,7 @@ void CL_SetSky_f( void );
 void SCR_Viewpos_f( void );
 void CL_WavePlayLen_f( void );
 qboolean CL_WeaponListFix_DispatchCommand( const char *cmd_name );
+qboolean CL_WeaponListFix_PrepareDrop( const char *name, char *command, size_t command_size );
 void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf );
 void CL_WeaponListFix_OnResetHUD( void );
 void CL_WeaponListFix_UpdateWeaponData( const weapon_data_t *weapons, int count );

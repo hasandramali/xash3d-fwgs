@@ -132,27 +132,47 @@ userinfo setting is changed.
 
 ## Rapid drop/pickup reconciliation
 
-Manual drop removal is optimistic because Sven does not send an explicit
-inventory-removal message for it. Previously a matching active CurWeapon
-inside the one-second stale-update window was discarded permanently. If
-the drop was rejected or the same item was reacquired quickly and no later
-ammo change occurred, that weapon could remain missing indefinitely.
+A drop command is an attempt, not an ownership-removal notification. The
+pending entry is temporarily excluded from selection, but its last known
+ownership is retained. A subsequent active-ID transition or no-active report
+commits the fallback removal; a fresh pickup cancels it. If the server refuses
+the drop without sending anything, expiration clears only that temporary
+selection exclusion. The weapon returns to its slot without requiring an
+ammo change or manually selecting its classname. Authoritative weapon-data
+records always override the pending guess, including a still-owned record.
 
-The fallback now remembers a suppressed active report and reconciles it
-when the window expires, even if no more user messages arrive. It does not
-restore an item merely because a timer elapsed: a matching server active
-report is required. A different active weapon, no-active report, explicit
-removal, new pickup, authoritative weapon data or clock reset prevents stale
-recovery. Depleted exhaustible weapons retain their removal guards. This
-remains a conservative `cl_lw 0` inference, not a full ownership snapshot.
+Drop preparation now runs in Cmd_ForwardToServer, not while merely dispatching
+a token named `drop`. Aliases, command filtering and disconnected/demo paths
+therefore cannot erase ownership without actually queuing a server command.
+For a known weapon, a bare drop becomes `drop "<registered classname>"`.
+This binds local bookkeeping and the server command to the same item even if
+an intervening pickup auto-equips another weapon before the command arrives.
+An explicit `drop <classname>` targets that entry rather than blindly removing
+the locally active weapon. Unknown names/IDs do not delete a guessed entry.
+The `cmd drop` forwarding wrapper follows the same path.
+
+The supplied server.dll reads CMD_ARGV(1) at `0x10129E94..0x10129E98`, and
+only substitutes the active classname for an empty argument
+(`0x10129E9D..0x10129ED7`). The named target is passed to the drop routine at
+`0x10129F1D`; `0x10200CA0` resolves that name. Thus the explicit classname is
+a supported server operation, not a client-only custom command.
+
+This is still a conservative `cl_lw 0` inference, not a complete ownership
+snapshot or a dedicated drop acknowledgement. If a server silently changes an
+inactive item's ownership without sending any observation, that change cannot
+be reconstructed exactly. An unconfirmed attempt must not permanently hide an
+otherwise known weapon. No periodic weapon switching or inventory-probing
+commands are sent.
 
 The network parser also updates WeaponListFix before invoking the HUD
 callback. Pickup-row metadata and ownership are therefore available during
 the notification itself, rather than only after the client has processed it.
 
-Regression tests exercise repeated drops, suppressed active updates with no
-follow-up message, slot recovery, successful drops to another/no weapon,
-reacquisition, authoritative snapshots and clock rewinds.
+Regression tests exercise repeated drops, silent rejection without an active
+report, shotgun/crowbar auto-switch races, explicit inactive targets, slot
+recovery, successful drops to another/no weapon, reacquisition, authoritative
+snapshots and clock rewinds. An additional hosted test executes the real
+Cmd_ForwardToServer body and checks the queued command text.
 
 ## Server drop cooldown and pickup-row retention
 
@@ -175,8 +195,10 @@ entry or forwarding another drop. It also waits for the outstanding active
 weapon transition, bounded by the existing one-second pending timeout, so
 extra commands cannot target an unknown server-active weapon in flight.
 Pickups do not reset the cooldown; session/spawn resets and clock rewinds
-allow a fresh attempt. Ordinary drops outside the window still reach the
-server, and no weapon names, ammo heuristics or `cl_lw` settings change.
+allow a fresh attempt. A confirming active/no-active reply starts the local
+cooldown again, conservatively accounting for time spent in flight. Ordinary
+drops outside the window still reach the server, using registered classnames
+rather than a weapon-name whitelist. No `cl_lw` setting is changed.
 
 Pickup-row history now refreshes a repeated ID's recency. The HUD also stores
 the row when the pickup arrives, rather than depending on the ID remaining

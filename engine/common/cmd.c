@@ -1370,19 +1370,25 @@ void Cmd_ForwardToServer( void )
 		&& !Q_stricmp( Cmd_Argv( 1 ), "status" )))
 		Con_Printf( "server address: %s\n", NET_AdrToString( cls.netchan.remote_address ));
 
-	MSG_BeginClientCmd( &cls.netchan.message, clc_stringcmd );
-
 	str[0] = 0;
-	if( Q_stricmp( Cmd_Argv( 0 ), "cmd" ))
+	int command_index = !Q_stricmp( Cmd_Argv( 0 ), "cmd" ) ? 1 : 0;
+	if( !Q_stricmp( Cmd_Argv( command_index ), "drop" )
+		&& CL_WeaponListFix_PrepareDrop( Cmd_Argc() > command_index + 1 ? Cmd_Argv( command_index + 1 ) : NULL, str, sizeof( str )))
+		return;
+	if( !str[0] )
 	{
-		Q_strncat( str, Cmd_Argv( 0 ), sizeof( str ));
-		Q_strncat( str, " ", sizeof( str ));
+		if( Q_stricmp( Cmd_Argv( 0 ), "cmd" ))
+		{
+			Q_strncat( str, Cmd_Argv( 0 ), sizeof( str ));
+			Q_strncat( str, " ", sizeof( str ));
+		}
+
+		if( Cmd_Argc() > 1 )
+			Q_strncat( str, Cmd_Args( ), sizeof( str ));
+		else Q_strncat( str, "\n", sizeof( str ));
 	}
 
-	if( Cmd_Argc() > 1 )
-		Q_strncat( str, Cmd_Args( ), sizeof( str ));
-	else Q_strncat( str, "\n", sizeof( str ));
-
+	MSG_BeginClientCmd( &cls.netchan.message, clc_stringcmd );
 	MSG_WriteString( &cls.netchan.message, str );
 }
 #endif // XASH_DEDICATED
