@@ -1841,37 +1841,6 @@ static void Mod_SetParent( model_t *mod, mnode_t *node, mnode_t *parent )
 	Mod_SetParent( mod, node_child( node, 1, mod ), node );
 }
 
-/*
-==================
-CountClipNodes_r
-==================
-*/
-static void CountClipNodes16_r( mclipnode16_t *src, hull_t *hull, int nodenum )
-{
-	// leaf?
-	if( nodenum < 0 ) return;
-
-	if( hull->lastclipnode == MAX_MAP_CLIPNODES_HLBSP )
-		Host_Error( "%s: MAX_MAP_CLIPNODES_HLBSP limit exceeded\n", __func__ );
-	hull->lastclipnode++;
-
-	CountClipNodes16_r( src, hull, src[nodenum].children[0] );
-	CountClipNodes16_r( src, hull, src[nodenum].children[1] );
-}
-
-static void CountClipNodes32_r( mclipnode32_t *src, hull_t *hull, int nodenum )
-{
-	// leaf?
-	if( nodenum < 0 ) return;
-
-	if( hull->lastclipnode == MAX_MAP_CLIPNODES_BSP2 )
-		Host_Error( "%s: MAX_MAP_CLIPNODES_BSP2 limit exceeded\n", __func__ );
-	hull->lastclipnode++;
-
-	CountClipNodes32_r( src, hull, src[nodenum].children[0] );
-	CountClipNodes32_r( src, hull, src[nodenum].children[1] );
-}
-
 static void CountDClipNodes_r( dclipnode32_t *src, hull_t *hull, int nodenum, const int max_clipnodes )
 {
 	// leaf?
@@ -2100,6 +2069,7 @@ static void Mod_SetupHull( dbspmodel_t *bmod, model_t *mod, int headnode, int hu
 	hull->lastclipnode = 0; // restart counting
 
 	RemapClipNodes_r( bmod, bmod->clipnodes_out, hull, headnode ); // remap clipnodes to 16-bit indexes
+	hull->lastclipnode--;
 }
 
 static qboolean Mod_LoadLitfile( model_t *mod, const char *ext, size_t expected_size, color24 **out, size_t *outsize )
@@ -2190,13 +2160,7 @@ static void Mod_SetupSubmodels( model_t *mod, dbspmodel_t *bmod )
 
 		// hull 0 is just shared across all bmodels
 		mod->hulls[0].firstclipnode = bm->headnode[0];
-		mod->hulls[0].lastclipnode = bm->headnode[0]; // need to be real count
-
-		// counting a real number of clipnodes per each submodel
-		if( bmod->hulls32bit )
-			CountClipNodes32_r( mod->hulls[0].clipnodes32, &mod->hulls[0], bm->headnode[0] );
-		else
-			CountClipNodes16_r( mod->hulls[0].clipnodes16, &mod->hulls[0], bm->headnode[0] );
+		mod->hulls[0].lastclipnode = mod->numnodes - 1;
 
 		// but hulls1-3 is build individually for a each given submodel
 		for( int j = 1; j < MAX_MAP_HULLS; j++ )
@@ -4766,9 +4730,42 @@ static void Test_Mod_FrameIndexCalculation( void )
 	TASSERT_EQi( Q_toupper( '9' ) - '0', 9 );
 }
 
+static void Test_Mod_Hull0Bounds( void )
+{
+	mclipnode16_t nodes16[6] = { 0 };
+	mclipnode32_t nodes32[6] = { 0 };
+	dmodel_t submodel = { 0 };
+	model_t model = { 0 };
+	dbspmodel_t bmodel = { 0 };
+
+	nodes16[0].children[0] = nodes32[0].children[0] = 5;
+	nodes16[0].children[1] = nodes32[0].children[1] = CONTENTS_EMPTY;
+	nodes16[5].children[0] = nodes32[5].children[0] = CONTENTS_EMPTY;
+	nodes16[5].children[1] = nodes32[5].children[1] = CONTENTS_SOLID;
+	model.numsubmodels = 1;
+	model.submodels = &submodel;
+	model.numnodes = 6;
+
+	for( int format = 0; format < 2; format++ )
+	{
+		bmodel.hulls32bit = format;
+		if( format ) model.hulls[0].clipnodes32 = nodes32;
+		else model.hulls[0].clipnodes16 = nodes16;
+		submodel.headnode[0] = 0;
+		Mod_SetupSubmodels( &model, &bmodel );
+		TASSERT_EQi( model.hulls[0].firstclipnode, 0 );
+		TASSERT_EQi( model.hulls[0].lastclipnode, 5 );
+		submodel.headnode[0] = 5;
+		Mod_SetupSubmodels( &model, &bmodel );
+		TASSERT_EQi( model.hulls[0].firstclipnode, 5 );
+		TASSERT_EQi( model.hulls[0].lastclipnode, 5 );
+	}
+}
+
 void Test_RunModBmodel( void )
 {
 	TRUN( Test_Mod_NameImpliesTextureIsAnimated() );
 	TRUN( Test_Mod_FrameIndexCalculation() );
+	TRUN( Test_Mod_Hull0Bounds() );
 }
 #endif

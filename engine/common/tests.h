@@ -59,6 +59,7 @@ void Test_RunDelta( void );
 void Test_RunBuffer( void );
 void Test_RunMunge( void );
 void Test_RunModBmodel( void );
+void Test_RunPMTrace( void );
 void Test_RunTitles( void );
 void Test_RunConfig( void );
 #if XASH_NO_TOUCH
@@ -80,7 +81,8 @@ void Test_RunWindowInsets( void );
 	Test_RunBuffer(); \
 	Test_RunDelta(); \
 	Test_RunMunge(); \
-	Test_RunModBmodel();
+	Test_RunModBmodel(); \
+	Test_RunPMTrace();
 
 #define TEST_LIST_0_CLIENT \
 	Test_RunCon(); \

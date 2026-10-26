@@ -1907,6 +1907,9 @@ void CL_ClearState( void )
 	CL_GSBaselineResetAll();
 
 	PM_ClearPhysEnts( clgame.pmove );
+	clgame.pushed = false;
+	clgame.oldphyscount = 0;
+	clgame.oldviscount = 0;
 	NetAPI_CancelAllRequests();
 
 	// wipe the entire cl structure

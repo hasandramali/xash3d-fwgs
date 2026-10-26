@@ -526,7 +526,7 @@ static void CL_AddLinksToPmove( frame_t *frame )
 		if(( state->owner != 0 ) && ( state->owner == cl.playernum + 1 ))
 			continue;
 
-		if(( model->hulls[1].lastclipnode || model->type == mod_studio ) && clgame.pmove->numvisent < MAX_PHYSENTS )
+		if(( model->hulls[1].planes || model->type == mod_studio ) && clgame.pmove->numvisent < MAX_PHYSENTS )
 		{
 			pe = &clgame.pmove->visents[clgame.pmove->numvisent];
 			CL_CopyEntityToPhysEnt( pe, state, true );
@@ -556,7 +556,7 @@ static void CL_AddLinksToPmove( frame_t *frame )
 		}
 		else
 		{
-			if( !model->hulls[1].lastclipnode && model->type != mod_studio )
+			if( !model->hulls[1].planes && model->type != mod_studio )
 				continue;
 
 			// reserve slots for all the clients
@@ -580,6 +580,12 @@ Builds all the pmove physents for the current frame
 void CL_SetSolidEntities( void )
 {
 	physent_t	*pe = clgame.pmove->physents;
+
+	if( !cl.worldmodel )
+	{
+		PM_ClearPhysEnts( clgame.pmove );
+		return;
+	}
 
 	// setup physents
 	clgame.pmove->numvisent = 1;

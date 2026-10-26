@@ -117,6 +117,9 @@ int GAME_EXPORT PM_HullPointContents( hull_t *hull, int num, const vec3_t p )
 	{
 		while( num >= 0 )
 		{
+			if( num > hull->lastclipnode )
+				Host_Error( "%s: bad node number %i (root %i, last %i, BSP %i)\n",
+					__func__, num, hull->firstclipnode, hull->lastclipnode, world.version );
 			mplane_t *plane = &hull->planes[hull->clipnodes32[num].planenum];
 			num = hull->clipnodes32[num].children[PlaneDiff( p, plane ) < 0];
 		}
@@ -125,6 +128,9 @@ int GAME_EXPORT PM_HullPointContents( hull_t *hull, int num, const vec3_t p )
 	{
 		while( num >= 0 )
 		{
+			if( num > hull->lastclipnode )
+				Host_Error( "%s: bad node number %i (root %i, last %i, BSP %i)\n",
+					__func__, num, hull->firstclipnode, hull->lastclipnode, world.version );
 			mplane_t *plane = &hull->planes[hull->clipnodes16[num].planenum];
 			num = hull->clipnodes16[num].children[PlaneDiff( p, plane ) < 0];
 		}
@@ -214,7 +220,7 @@ loc0:
 		return true; // empty
 	}
 
-	if( hull->firstclipnode >= hull->lastclipnode )
+	if( !hull->planes || hull->lastclipnode < 0 )
 	{
 		// empty hull?
 		trace->allsolid = false;
@@ -222,8 +228,9 @@ loc0:
 		return true;
 	}
 
-	if( num < hull->firstclipnode || num > hull->lastclipnode )
-		Host_Error( "%s: bad node number %i\n", __func__, num );
+	if( num > hull->lastclipnode )
+		Host_Error( "%s: bad node number %i (root %i, last %i, BSP %i)\n",
+			__func__, num, hull->firstclipnode, hull->lastclipnode, world.version );
 
 	// find the point distances
 	if( world.version == QBSP2_VERSION )
@@ -866,3 +873,66 @@ void PM_StuckTouch( playermove_t *pmove, int hitent, pmtrace_t *tr )
 
 	pmove->touchindex[pmove->numtouch++] = *tr;
 }
+
+#if XASH_ENGINE_TESTS
+#include "tests.h"
+
+void Test_RunPMTrace( void )
+{
+	static mclipnode16_t nodes16[11425];
+	static mclipnode32_t nodes32[11425];
+	mplane_t plane = { 0 };
+	hull_t hull = { 0 };
+	const int saved_version = world.version;
+	vec3_t start = { 1.0f, 0.0f, 0.0f };
+	vec3_t end = { -1.0f, 0.0f, 0.0f };
+
+	plane.normal[0] = 1.0f;
+	hull.planes = &plane;
+
+	for( int format = 0; format < 2; format++ )
+	{
+		pmtrace_t trace = { 0 };
+
+		world.version = format ? QBSP2_VERSION : HLBSP_VERSION;
+		nodes16[0].children[0] = nodes32[0].children[0] = 11424;
+		nodes16[0].children[1] = nodes32[0].children[1] = CONTENTS_SOLID;
+		nodes16[11424].children[0] = nodes32[11424].children[0] = CONTENTS_EMPTY;
+		nodes16[11424].children[1] = nodes32[11424].children[1] = CONTENTS_SOLID;
+		if( format ) hull.clipnodes32 = nodes32;
+		else hull.clipnodes16 = nodes16;
+		hull.firstclipnode = 0;
+		hull.lastclipnode = 11424;
+		trace.allsolid = true;
+		trace.fraction = 1.0f;
+		TASSERT_EQi( PM_HullPointContents( &hull, 0, start ), CONTENTS_EMPTY );
+		TASSERT( !PM_RecursiveHullCheck( &hull, 0, 0.0f, 1.0f, start, end, &trace ));
+		TASSERT( !trace.allsolid && !trace.startsolid );
+		TASSERT( trace.fraction > 0.45f && trace.fraction < 0.5f );
+
+		hull.firstclipnode = 11424;
+		nodes16[11424].children[0] = nodes32[11424].children[0] = 3;
+		nodes16[3].children[0] = nodes32[3].children[0] = CONTENTS_EMPTY;
+		nodes16[3].children[1] = nodes32[3].children[1] = CONTENTS_SOLID;
+		trace.allsolid = true;
+		TASSERT_EQi( PM_HullPointContents( &hull, 11424, start ), CONTENTS_EMPTY );
+		TASSERT( PM_RecursiveHullCheck( &hull, 11424, 0.0f, 1.0f, start, start, &trace ));
+		TASSERT( !trace.allsolid );
+
+		hull.firstclipnode = hull.lastclipnode = 0;
+		nodes16[0].children[0] = nodes32[0].children[0] = CONTENTS_EMPTY;
+		trace.allsolid = true;
+		trace.fraction = 1.0f;
+		TASSERT( !PM_RecursiveHullCheck( &hull, 0, 0.0f, 1.0f, start, end, &trace ));
+		TASSERT( trace.fraction > 0.45f && trace.fraction < 0.5f );
+
+		hull.planes = NULL;
+		trace.allsolid = true;
+		TASSERT( PM_RecursiveHullCheck( &hull, 0, 0.0f, 1.0f, start, end, &trace ));
+		TASSERT( !trace.allsolid );
+		hull.planes = &plane;
+	}
+
+	world.version = saved_version;
+}
+#endif
