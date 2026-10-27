@@ -1696,7 +1696,7 @@ static void CL_SendConsistencyInfo( sizebuf_t *msg, connprotocol_t proto )
 		consistency_t *pc = &cl.consistency_list[i];
 
 		MSG_WriteOneBit( msg, 1 );
-		MSG_WriteUBitLong( msg, pc->orig_index, MAX_MODEL_BITS );
+		MSG_WriteUBitLong( msg, pc->orig_index, proto == PROTO_GOLDSRC ? MAX_GOLDSRC_CONSISTENCY_BITS : MAX_MODEL_BITS );
 
 		if( pc->issound )
 			Q_snprintf( filename, sizeof( filename ), DEFAULT_SOUNDPATH "%s", pc->filename );
@@ -1776,7 +1776,8 @@ static void CL_SendConsistencyInfo( sizebuf_t *msg, connprotocol_t proto )
 		MSG_EndBitWriting( msg );
 
 		int len = MSG_GetNumBytesWritten( msg ) - pos - 2;
-		*(short *)&msg->pData[pos] = len;
+		msg->pData[pos] = len & 0xff;
+		msg->pData[pos + 1] = ( len >> 8 ) & 0xff;
 
 		COM_Munge( &msg->pData[pos + 2], len, cl.servercount );
 	}
