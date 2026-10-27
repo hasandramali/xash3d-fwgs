@@ -823,6 +823,9 @@ extern convar_t r_scene_scale;
 //
 #include "crtlib.h"
 
-
+//
+// Trinity water shader (OpenGL ES compatible)
+//
+#include "gl_watershader.h"
 
 #endif // GL_LOCAL_H
