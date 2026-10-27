@@ -35,20 +35,6 @@ static rgbdata_t *CustomDecal_LoadImage( const char *path, void *raw, int size )
 	return FS_LoadImage( testname, raw, size );
 }
 
-static qboolean CustomDecal_Validate( const char *path, void *raw, int nFileSize )
-{
-	rgbdata_t *test = CustomDecal_LoadImage( path, raw, nFileSize );
-
-	if( test )
-	{
-		// all's ok, logo is valid
-		FS_FreeImage( test );
-		return true;
-	}
-
-	return false;
-}
-
 void COM_ClearCustomizationList( customization_t *pHead, qboolean bCleanDecals )
 {
 	customization_t	*pNext;
@@ -83,56 +69,53 @@ qboolean COM_CreateCustomization( customization_t *pListHead, resource_t *pResou
 	qboolean		bError = false;
 
 	if( pOut ) *pOut = NULL;
+	if( nLumps ) *nLumps = 0;
+	if( !pListHead || !pResource || pResource->nDownloadSize <= 0 )
+		return false;
+	if( FBitSet( pResource->ucFlags, RES_CUSTOM ) && pResource->type == t_decal
+		&& ( pResource->nDownloadSize < HPAK_ENTRY_MIN_SIZE || pResource->nDownloadSize > HPAK_ENTRY_MAX_SIZE ))
+		return false;
 
 	customization_t	*pCust = Z_Calloc( sizeof( customization_t ));
 	pCust->resource = *pResource;
-
-	if( pResource->nDownloadSize <= 0 )
-		goto CustomizationError;
 
 	pCust->bInUse = true;
 
 	if( FBitSet( flags, FCUST_FROMHPAK ))
 	{
-		if( !HPAK_GetDataPointer( hpk_custom_file.string, pResource, (byte **)&pCust->pBuffer, NULL ))
+		int checksize = 0;
+		if( !HPAK_GetDataPointer( hpk_custom_file.string, pResource, (byte **)&pCust->pBuffer, &checksize )
+			|| checksize != pResource->nDownloadSize )
 			bError = true;
 	}
 	else
 	{
 		fs_offset_t		checksize = 0;
 		pCust->pBuffer = FS_LoadFile( pResource->szFileName, &checksize, true );
-		if( (int)checksize != pCust->resource.nDownloadSize )
+		if( checksize != pCust->resource.nDownloadSize )
 			bError = true;
 	}
 
-	if( bError )
+	if( bError || !pCust->pBuffer )
 		goto CustomizationError;
 
 	if( FBitSet( pCust->resource.ucFlags, RES_CUSTOM ) && pCust->resource.type == t_decal )
 	{
 		pCust->resource.playernum = playernumber;
 
-		if( CustomDecal_Validate( pResource->szFileName, pCust->pBuffer, pResource->nDownloadSize ))
+		rgbdata_t *decal = CustomDecal_LoadImage( pResource->szFileName, pCust->pBuffer, pResource->nDownloadSize );
+		if( !decal )
+			goto CustomizationError;
+		if( !FBitSet( flags, FCUST_IGNOREINIT ))
 		{
-			if( !FBitSet( flags, FCUST_IGNOREINIT ))
-			{
-				if( pResource->nDownloadSize >= HPAK_ENTRY_MIN_SIZE && pResource->nDownloadSize <= HPAK_ENTRY_MAX_SIZE )
-				{
-					pCust->bTranslated = true;
-					pCust->nUserData1 = 0;
-					pCust->nUserData2 = 7;
-
-					if( !FBitSet( flags, FCUST_WIPEDATA ))
-						pCust->pInfo = CustomDecal_LoadImage( pResource->szFileName, pCust->pBuffer, pCust->resource.nDownloadSize );
-					else pCust->pInfo = NULL;
-					if( nLumps ) *nLumps = 1;
-				}
-				else
-				{
-					Con_Printf( S_WARN "Ignoring custom decal \"%s\": wrong size (%i bytes)\n", pResource->szFileName, pResource->nDownloadSize );
-				}
-			}
+			pCust->bTranslated = true;
+			pCust->nUserData1 = 0;
+			pCust->nUserData2 = 7;
+			if( nLumps ) *nLumps = 1;
 		}
+		if( FBitSet( flags, FCUST_IGNOREINIT | FCUST_WIPEDATA ))
+			FS_FreeImage( decal );
+		else pCust->pInfo = decal;
 	}
 
 	if( pOut ) *pOut = pCust;
@@ -146,7 +129,7 @@ CustomizationError:
 		Mem_Free( pCust->pBuffer );
 
 	if( pCust->pInfo )
-		Mem_Free( pCust->pInfo );
+		FS_FreeImage( pCust->pInfo );
 	Mem_Free( pCust );
 
 	return false;

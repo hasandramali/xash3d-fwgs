@@ -1334,9 +1334,17 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 	int nsize = 0;
 	while ( p )
 	{
-		nsize += MSG_GetNumBytesWritten( &p->frag_message ); // Size will include a bit of slop, oh well
+		int bytes = MSG_GetNumBytesWritten( &p->frag_message );
 		if( p == chan->incomingbufs[FRAG_FILE_STREAM] )
-			nsize -= MSG_GetNumBytesRead( msg );
+			bytes -= MSG_GetNumBytesRead( msg );
+		if( bytes < 0 || nsize > INT_MAX - bytes ||
+			( filename[0] == '!' && bytes > HPAK_ENTRY_MAX_SIZE + HPAK_ENTRY_MAX_SIZE / 100 + 600 - nsize ))
+		{
+			Con_DPrintf( S_WARN "Ignoring oversized or malformed file fragments for %s\n", filename );
+			Netchan_FlushIncoming( chan, FRAG_FILE_STREAM );
+			return false;
+		}
+		nsize += bytes;
 		p = p->next;
 	}
 
@@ -1379,10 +1387,12 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 	chan->incomingbufs[FRAG_FILE_STREAM] = NULL;
 	chan->incomingready[FRAG_FILE_STREAM] = false;
 
+	uint max_file_size = filename[0] == '!' ? HPAK_ENTRY_MAX_SIZE : MAX_NETCHAN_DECOMPRESSED_SIZE;
+	uint min_file_size = filename[0] == '!' ? HPAK_ENTRY_MIN_SIZE : 1;
 	if( chan->gs_netchan && chan->use_bz2 && !Q_stricmp( compressor, "bz2" ))
 	{
 #if !XASH_DEDICATED
-		if( uncompressedSize == 0 || uncompressedSize > MAX_NETCHAN_DECOMPRESSED_SIZE )
+		if( uncompressedSize < min_file_size || uncompressedSize > max_file_size )
 		{
 			Con_Printf( S_ERROR "BZ2 fragment uncompressed size out of range: %u for %s\n", uncompressedSize, filename );
 			Mem_Free( buffer );
@@ -1410,7 +1420,7 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 	{
 		uncompressedSize = LZSS_GetActualSize( buffer, nsize );
 
-		if( uncompressedSize == 0 || uncompressedSize > MAX_NETCHAN_DECOMPRESSED_SIZE )
+		if( uncompressedSize < min_file_size || uncompressedSize > max_file_size )
 		{
 			Con_Printf( S_ERROR "LZSS fragment uncompressed size out of range: %u for %s\n", uncompressedSize, filename );
 			Mem_Free( buffer );
@@ -1427,6 +1437,12 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 	// customization files goes int tempbuffer
 	if( filename[0] == '!' )
 	{
+		if( nsize < HPAK_ENTRY_MIN_SIZE || nsize > HPAK_ENTRY_MAX_SIZE )
+		{
+			Con_DPrintf( S_WARN "Ignoring custom decal with invalid size %i\n", nsize );
+			Mem_Free( buffer );
+			return false;
+		}
 		if( chan->tempbuffer )
 			Mem_Free( chan->tempbuffer );
 		chan->tempbuffer = buffer;

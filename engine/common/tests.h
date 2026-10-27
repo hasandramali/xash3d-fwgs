@@ -45,6 +45,8 @@ void Test_RunVOX( void );
 void Test_RunSvenSound( void );
 void Test_RunSvenSoundMixer( void );
 void Test_RunSoundFormats( void );
+void Test_RunMP3Tags( void );
+void Test_RunOggFilestream( void );
 void Test_RunWeaponListFix( void );
 void Test_RunVoice( void );
 void Test_RunSteamConnection( void );

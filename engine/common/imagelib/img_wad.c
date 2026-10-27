@@ -630,11 +630,13 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 {
 	dwadinfo_t whdr;
 
-	if( !buffer || filesize < sizeof( dwadinfo_t ))
+	if( !buffer || filesize < (fs_offset_t)sizeof( dwadinfo_t ))
 		return false;
 
 	memcpy( &whdr, buffer, sizeof( whdr ));
 	le_struct_swap( dwadinfo_swap, &whdr );
+	if( whdr.ident != IDWAD2HEADER && whdr.ident != IDWAD3HEADER )
+		return false;
 	if( whdr.numlumps <= 0 || whdr.infotableofs <= 0 || whdr.infotableofs >= (int)filesize )
 		return false;
 	if( whdr.numlumps > ( filesize - whdr.infotableofs ) / sizeof( dlumpinfo_t ))
@@ -651,12 +653,12 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 		memcpy( &lump, buffer + whdr.infotableofs + i * sizeof( dlumpinfo_t ), sizeof( lump ));
 		le_struct_swap( dlumpinfo_swap, &lump );
 
-		if( lump.type != TYP_MIPTEX && lump.type != TYP_PALETTE )
+		if(( lump.type != TYP_MIPTEX && lump.type != TYP_PALETTE ) || FBitSet( lump.attribs, ATTR_COMPRESSED ))
 			continue;
 
 		// get lump data and validate
 		int mip_size = lump.disksize;
-		if( lump.filepos < 0 || lump.filepos > filesize || mip_size < sizeof( mip ) ||
+		if( lump.filepos < 0 || lump.filepos > filesize || mip_size < (int)sizeof( mip ) ||
 			mip_size > filesize - lump.filepos )
 			continue;
 		const unsigned char *mipdata = (const unsigned char *)buffer + lump.filepos;
@@ -676,11 +678,21 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 
 		const unsigned char *pixels = mipdata + offset0;
 		uint32_t m0size = width * height;
-		uint32_t m1size = m0size / 4;
-		uint32_t m2size = m0size / 16;
 		uint32_t m3size = m0size / 64;
-		uint32_t palette_offset = sizeof( mip ) + m0size + m1size + m2size + m3size + 2;
+		qboolean valid_mips = true;
+		for( int level = 0; level < MIPLEVELS; level++ )
+		{
+			uint32_t mip_pixels = m0size >> ( level * 2 );
+			if( mip.offsets[level] < sizeof( mip ) || mip.offsets[level] > (uint32_t)mip_size
+				|| mip_pixels > (uint32_t)mip_size - mip.offsets[level] )
+				valid_mips = false;
+		}
+		if( !valid_mips )
+			continue;
+		uint32_t palette_offset = mip.offsets[3] + m3size + 2;
 		if( palette_offset > (uint32_t)mip_size || 256 * 3 > (uint32_t)mip_size - palette_offset )
+			continue;
+		if( mipdata[palette_offset - 2] != 0 || mipdata[palette_offset - 1] != 1 )
 			continue;
 		const unsigned char *palette = mipdata + palette_offset;
 		const unsigned char *use_palette = palette;

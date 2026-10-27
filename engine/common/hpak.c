@@ -627,7 +627,7 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 	hpak_header_t	header;
 	hpak_info_t	directory;
 
-	if( COM_StringEmptyOrNULL( filename ))
+	if( COM_StringEmptyOrNULL( filename ) || !pResource )
 		return false;
 
 	if( buffer ) *buffer = NULL;
@@ -637,6 +637,9 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 	{
 		if( !Q_stricmp( p->name, filename ) && !memcmp( p->resource.rgucMD5_hash, pResource->rgucMD5_hash, 16 ))
 		{
+			if( p->size < HPAK_ENTRY_MIN_SIZE || p->size > HPAK_ENTRY_MAX_SIZE
+				|| ( pResource->nDownloadSize > 0 && pResource->nDownloadSize != p->size ))
+				return false;
 			if( buffer )
 			{
 				byte *tmpbuf = Z_Malloc( p->size );
@@ -657,7 +660,12 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 	file_t *f = FS_Open( pakname, "rb", true );
 	if( !f ) return false;
 
-	FS_Read( f, &header, sizeof( header ));
+	fs_offset_t filesize = FS_FileLength( f );
+	if( filesize < (fs_offset_t)sizeof( header ) || FS_Read( f, &header, sizeof( header )) != sizeof( header ))
+	{
+		FS_Close( f );
+		return false;
+	}
 
 	if( header.ident != IDHPAKHEADER )
 	{
@@ -673,10 +681,16 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 		return false;
 	}
 
-	FS_Seek( f, header.infotableofs, SEEK_SET );
-	FS_Read( f, &directory.count, sizeof( directory.count ));
+	if( header.infotableofs < (int)sizeof( header ) || header.infotableofs > filesize - sizeof( directory.count )
+		|| FS_Seek( f, header.infotableofs, SEEK_SET ) == -1
+		|| FS_Read( f, &directory.count, sizeof( directory.count )) != sizeof( directory.count ))
+	{
+		FS_Close( f );
+		return false;
+	}
 
-	if( directory.count < 1 || directory.count > HPAK_MAX_ENTRIES )
+	if( directory.count < 1 || directory.count > HPAK_MAX_ENTRIES
+		|| directory.count > ( filesize - header.infotableofs - sizeof( directory.count )) / sizeof( hpak_lump_t ))
 	{
 		Con_DPrintf( S_ERROR "%s: %s has too many lumps %u.\n", __func__, filename, directory.count );
 		FS_Close( f );
@@ -684,14 +698,23 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 	}
 
 	directory.entries = Z_Malloc( sizeof( hpak_lump_t ) * directory.count );
-	FS_Read( f, directory.entries, sizeof( hpak_lump_t ) * directory.count );
+	if( FS_Read( f, directory.entries, sizeof( hpak_lump_t ) * directory.count ) != sizeof( hpak_lump_t ) * directory.count )
+	{
+		Mem_Free( directory.entries );
+		FS_Close( f );
+		return false;
+	}
 
 	for( int i = 0; i < directory.count; i++ )
 	{
 		hpak_lump_t *entry = &directory.entries[i];
 
-		if( entry->filepos > 0 &&
-			entry->disksize > 0 &&
+		if( entry->filepos >= (int)sizeof( header ) &&
+			entry->filepos <= header.infotableofs &&
+			entry->disksize >= HPAK_ENTRY_MIN_SIZE &&
+			entry->disksize <= HPAK_ENTRY_MAX_SIZE &&
+			entry->disksize <= header.infotableofs - entry->filepos &&
+			( pResource->nDownloadSize <= 0 || entry->disksize == pResource->nDownloadSize ) &&
 			!memcmp( entry->resource.rgucMD5_hash, pResource->rgucMD5_hash, 16 ))
 		{
 			FS_Seek( f, entry->filepos, SEEK_SET );
@@ -699,7 +722,13 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 			if( buffer )
 			{
 				byte *tmpbuf = Z_Malloc( entry->disksize );
-				FS_Read( f, tmpbuf, entry->disksize );
+				if( FS_Read( f, tmpbuf, entry->disksize ) != entry->disksize )
+				{
+					Mem_Free( tmpbuf );
+					Mem_Free( directory.entries );
+					FS_Close( f );
+					return false;
+				}
 				*buffer = tmpbuf;
 			}
 

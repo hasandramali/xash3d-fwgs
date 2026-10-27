@@ -129,7 +129,7 @@ qboolean Sound_LoadOggVorbis( const char *name, const byte *buffer, fs_offset_t 
 	ogg_filestream_t file;
 	OggVorbis_File   vorbisFile;
 
-	if( !buffer )
+	if( !buffer || filesize <= 0 )
 		return false;
 
 	OggFilestream_Init( &file, name, buffer, filesize );
@@ -140,9 +140,17 @@ qboolean Sound_LoadOggVorbis( const char *name, const byte *buffer, fs_offset_t 
 	}
 
 	info = ov_info( &vorbisFile, -1 );
-	if( info->channels < 1 || info->channels > 2 )
+	if( !info || info->channels < 1 || info->channels > 2 || info->rate <= 0 || info->rate > INT_MAX )
 	{
 		Con_DPrintf( S_ERROR "%s: failed to load (%s): unsuppored channels count\n", __func__, file.name );
+		ov_clear( &vorbisFile );
+		return false;
+	}
+
+	ogg_int64_t samples = ov_pcm_total( &vorbisFile, -1 );
+	if( samples <= 0 || samples > INT_MAX / ( 2 * info->channels ))
+	{
+		ov_clear( &vorbisFile );
 		return false;
 	}
 
@@ -150,25 +158,41 @@ qboolean Sound_LoadOggVorbis( const char *name, const byte *buffer, fs_offset_t 
 	sound.rate = info->rate;
 	sound.width = 2; // always 16-bit PCM
 	sound.type = WF_PCMDATA;
-	sound.samples = ov_pcm_total( &vorbisFile, -1 );
+	sound.samples = samples;
 	sound.size = sound.samples * sound.width * sound.channels;
 	sound.wav = (byte *)Mem_Calloc( host.soundpool, sound.size );
 
 	SetBits( sound.flags, SOUND_RESAMPLE );
 	Sound_ScanVorbisComments( &vorbisFile );
 
-	while(( ret = ov_read( &vorbisFile, (char *)sound.wav + written, sound.size - written, XASH_BIG_ENDIAN, sound.width, 1, &section )) != 0 )
+	while( written < sound.size
+		&& ( ret = ov_read( &vorbisFile, (char *)sound.wav + written, sound.size - written,
+			XASH_BIG_ENDIAN, sound.width, 1, &section )) != 0 )
 	{
 		if( ret < 0 )
 		{
 			Con_DPrintf( S_ERROR "%s: failed to load (%s): %s\n", __func__, file.name, Vorbis_GetErrorDesc( ret ));
+			ov_clear( &vorbisFile );
+			return false;
+		}
+		info = ov_info( &vorbisFile, section );
+		if( !info || info->channels != sound.channels || info->rate != sound.rate )
+		{
+			ov_clear( &vorbisFile );
 			return false;
 		}
 		written += ret;
 	}
 
 	ov_clear( &vorbisFile );
-	return true;
+	sound.samples = written / ( sound.width * sound.channels );
+	sound.size = sound.samples * sound.width * sound.channels;
+	if( sound.loopstart >= sound.samples )
+	{
+		sound.loopstart = 0;
+		ClearBits( sound.flags, SOUND_LOOPED );
+	}
+	return sound.samples > 0;
 }
 
 stream_t *Stream_OpenOggVorbis( const char *filename )
@@ -200,9 +224,10 @@ stream_t *Stream_OpenOggVorbis( const char *filename )
 	}
 
 	info = ov_info( &ctx->vf, -1 );
-	if( info->channels < 1 || info->channels > 2 )
+	if( !info || info->channels < 1 || info->channels > 2 || info->rate <= 0 || info->rate > INT_MAX )
 	{
 		Con_DPrintf( S_ERROR "%s: failed to load (%s): unsuppored channels count\n", __func__, filename );
+		ov_clear( &ctx->vf );
 		FS_Close( ctx->file );
 		Mem_Free( stream );
 		Mem_Free( ctx );
@@ -240,6 +265,8 @@ int Stream_ReadOggVorbis( stream_t *stream, int needBytes, void *buffer )
 			else if( stream->pos < 0 )
 			{
 				Con_DPrintf( S_ERROR "%s: error during read: %s\n", __func__, Vorbis_GetErrorDesc( stream->pos ));
+				stream->pos = 0;
+				break;
 			}
 		}
 

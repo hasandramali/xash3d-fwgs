@@ -50,7 +50,7 @@ qboolean Image_LoadBMP( const char *name, const byte *buffer, fs_offset_t filesi
 	qboolean	load_qfont = false;
 	bmp_t	bhdr;
 
-	if( filesize < sizeof( bhdr ))
+	if( !buffer || filesize < (fs_offset_t)sizeof( bhdr ))
 	{
 		Con_Reportf( S_ERROR "%s: %s have incorrect file size %li should be greater than %zu (header)\n", __func__, name, (long)filesize, sizeof( bhdr ));
 		return false;
@@ -59,7 +59,6 @@ qboolean Image_LoadBMP( const char *name, const byte *buffer, fs_offset_t filesi
 	byte *buf_p = (byte *)buffer;
 	memcpy( &bhdr, buf_p, sizeof( bmp_t ));
 	le_struct_swap( bmp_swap, &bhdr );
-	buf_p += BI_FILE_HEADER_SIZE + bhdr.bitmapHeaderSize;
 
 	// bogus file header check
 	if( bhdr.reserved0 != 0 ) return false;
@@ -76,6 +75,16 @@ qboolean Image_LoadBMP( const char *name, const byte *buffer, fs_offset_t filesi
 		Con_DPrintf( S_ERROR "%s: %s have non-standard header size %i\n", __func__, name, bhdr.bitmapHeaderSize );
 		return false;
 	}
+
+	if( BI_FILE_HEADER_SIZE + bhdr.bitmapHeaderSize > filesize )
+		return false;
+	buf_p += BI_FILE_HEADER_SIZE + bhdr.bitmapHeaderSize;
+	if( bhdr.width <= 0 || bhdr.width > IMAGE_MAXWIDTH || bhdr.height == INT_MIN
+		|| abs( bhdr.height ) > IMAGE_MAXHEIGHT )
+		return false;
+	if( bhdr.bitsPerPixel != 1 && bhdr.bitsPerPixel != 4 && bhdr.bitsPerPixel != 8
+		&& bhdr.bitsPerPixel != 16 && bhdr.bitsPerPixel != 24 && bhdr.bitsPerPixel != 32 )
+		return false;
 
 	// bogus info header check
 	if( bhdr.fileSize != filesize )
@@ -203,7 +212,18 @@ qboolean Image_LoadBMP( const char *name, const byte *buffer, fs_offset_t filesi
 		break;
 	}
 
-	estimatedSize = ( buf_p - buffer ) + image.width * image.height * ( bhdr.bitsPerPixel >> 3 );
+	if( bhdr.bitmapDataOffset )
+	{
+		if( bhdr.bitmapDataOffset < buf_p - buffer || bhdr.bitmapDataOffset > filesize )
+		{
+			if( image.palette ) Mem_Free( image.palette );
+			image.palette = NULL;
+			return false;
+		}
+		buf_p = (byte *)buffer + bhdr.bitmapDataOffset;
+	}
+	size_t row_size = (( (size_t)columns * bhdr.bitsPerPixel + 31 ) / 32 ) * 4;
+	estimatedSize = ( buf_p - buffer ) + row_size * rows;
 	if( filesize < estimatedSize )
 	{
 		if( image.palette )

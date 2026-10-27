@@ -1596,6 +1596,31 @@ static int NET_SendLong( netsrc_t sock, int net_socket, const char *buf, size_t 
 	}
 }
 
+static qboolean NET_ShouldReportSendError( netsrc_t sock, netadr_t to, int error )
+{
+	static struct
+	{
+		netadr_t address;
+		int error;
+		double time;
+	} reports[NS_COUNT];
+	if( !error )
+	{
+		if( reports[sock].error && NET_CompareAdr( reports[sock].address, to ))
+			reports[sock].error = 0;
+		return false;
+	}
+	double now = Platform_DoubleTime();
+	if( reports[sock].error == error && NET_CompareAdr( reports[sock].address, to )
+		&& now >= reports[sock].time && now - reports[sock].time < 5.0 )
+		return false;
+
+	reports[sock].address = to;
+	reports[sock].error = error;
+	reports[sock].time = now;
+	return true;
+}
+
 /*
 ==================
 NET_SendPacketEx
@@ -1699,19 +1724,24 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 		if( err == WSAEADDRNOTAVAIL && ( type == NA_BROADCAST || type == NA_MULTICAST_IP6 ))
 			return;
 
+		const char *reason = NET_ErrorString();
+		if( !NET_ShouldReportSendError( sock, to, err ))
+			return;
+
 		if( Host_IsDedicated( ))
 		{
-			Con_DPrintf( S_ERROR "%s: %s to %s\n", __func__, NET_ErrorString(), NET_AdrToString( to ));
+			Con_DPrintf( S_ERROR "%s: %s to %s\n", __func__, reason, NET_AdrToString( to ));
 		}
 		else if( err == WSAEADDRNOTAVAIL || err == WSAENOBUFS )
 		{
-			Con_DPrintf( S_ERROR "%s: %s to %s\n", __func__, NET_ErrorString(), NET_AdrToString( to ));
+			Con_DPrintf( S_ERROR "%s: %s to %s\n", __func__, reason, NET_AdrToString( to ));
 		}
 		else
 		{
-			Con_Printf( S_ERROR "%s: %s to %s\n", __func__, NET_ErrorString(), NET_AdrToString( to ));
+			Con_Printf( S_ERROR "%s: %s to %s\n", __func__, reason, NET_AdrToString( to ));
 		}
 	}
+	else NET_ShouldReportSendError( sock, to, 0 );
 
 }
 

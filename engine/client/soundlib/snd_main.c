@@ -67,6 +67,8 @@ void Test_RunSoundFormats( void )
 	TASSERT( !Sound_DetectFormat((const byte *)"Ogg", 3 ));
 	TASSERT( !Sound_DetectFormat((const byte *)"RIFF1234", 8 ));
 	TASSERT( !Sound_DetectFormat( NULL, 12 ));
+	Test_RunMP3Tags();
+	Test_RunOggFilestream();
 }
 #endif
 
