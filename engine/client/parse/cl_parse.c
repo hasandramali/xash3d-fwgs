@@ -1779,7 +1779,8 @@ static void CL_SendConsistencyInfo( sizebuf_t *msg, connprotocol_t proto )
 		msg->pData[pos] = len & 0xff;
 		msg->pData[pos + 1] = ( len >> 8 ) & 0xff;
 
-		COM_Munge( &msg->pData[pos + 2], len, cl.servercount );
+		if( !cl_sven_proto )
+			COM_Munge( &msg->pData[pos + 2], len, cl.servercount );
 	}
 }
 
@@ -1977,7 +1978,7 @@ static void CL_ParseConsistencyInfo( sizebuf_t *msg, connprotocol_t proto )
 
 		if( pResource->type == t_model && memcmp( nullbuffer, pResource->rguc_reserved, 32 ))
 		{
-			if( proto == PROTO_GOLDSRC )
+			if( proto == PROTO_GOLDSRC && !cl_sven_proto )
 				COM_UnMunge( pResource->rguc_reserved, sizeof( pResource->rguc_reserved ), cl.servercount );
 			pc->check_type = pResource->rguc_reserved[0];
 		}
