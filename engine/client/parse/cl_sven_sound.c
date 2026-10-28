@@ -156,7 +156,7 @@ static void CL_LoadSvenSoundCache( void )
 	fs_offset_t size;
 	byte *buffer;
 	sven_sound_table_t *table;
-	if( !cl_sven_proto || !Cvar_VariableInteger( "cl_sven_soundcache" ) || !clgame.mapname[0] ) return;
+	if( !cl_sven_proto || !clgame.mapname[0] ) return;
 	CL_SvenSoundMapName( map, sizeof( map ));
 	if( Q_strcmp( svenSoundMap, map ))
 	{
@@ -205,7 +205,7 @@ static void CL_LoadSvenSoundCache( void )
 void CL_SvenSoundFrame( void )
 {
 	if( cls.state >= ca_connected ) CL_LoadSvenSoundCache();
-	if( !cl.audio_prepped || !svenSoundLoaded || !Cvar_VariableInteger( "cl_sven_soundcache" )) return;
+	if( !cl.audio_prepped || !svenSoundLoaded ) return;
 	if( !svenSoundsPrecached )
 	{
 		double deadline = Sys_DoubleTime() + 0.002;
@@ -286,7 +286,7 @@ const char *CL_SvenSoundName( int index )
 
 qboolean CL_SvenSoundActive( void )
 {
-	return cl_sven_proto && svenSoundLoaded && Cvar_VariableInteger( "cl_sven_soundcache" );
+	return cl_sven_proto && svenSoundLoaded;
 }
 
 const char *CL_SvenSentenceText( int index )
@@ -386,7 +386,7 @@ static qboolean CL_SvenControlPending( const sven_sound_event_t *event )
 void CL_ParseSvenStartSound( const char *name, int size, void *buffer )
 {
 	sven_sound_event_t event;
-	if( !cl_sven_proto || !Cvar_VariableInteger( "cl_sven_soundcache" )) return;
+	if( !cl_sven_proto ) return;
 	if( !CL_SvenReadSound( size, buffer, &event ))
 	{
 		Con_DPrintf( "SVEN-SOUNDCACHE: malformed %s message (%d bytes)\n", name, size );
