@@ -2669,7 +2669,8 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 		|| iSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
 	{
 		if( !Q_strcmp( clgame.msg[i].name, "RampSprite" ) ||
-			!Q_strcmp( clgame.msg[i].name, "TracerDecal" ))
+			!Q_strcmp( clgame.msg[i].name, "TracerDecal" ) ||
+			!Q_strcmp( clgame.msg[i].name, "ToxicCloud" ))
 		{
 			Con_Printf( S_WARN "%s: malformed visual message %s size %d; dropping remainder of packet\n",
 				__func__, clgame.msg[i].name, iSize );

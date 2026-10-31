@@ -69,6 +69,27 @@ static void FS_AddSvenEventFallbacks( const char *active_event )
 	}
 }
 
+static qboolean FS_IsSvenEventSearchPath( const char *path )
+{
+	static const char *events[] = {
+		"svencoop_event_spooky", "svencoop_event_xmas",
+		"svencoop_event_anniv", "svencoop_event_april"
+	};
+	for( const char *p = path; *p; p++ )
+	{
+		if( p != path && p[-1] != '/' && p[-1] != '\\' )
+			continue;
+		for( size_t i = 0; i < sizeof( events ) / sizeof( events[0] ); i++ )
+		{
+			size_t len = Q_strlen( events[i] );
+			if( Q_strlen( p ) >= len && !Q_strnicmp( p, events[i], len ) &&
+				( p[len] == '/' || p[len] == '\\' || p[len] == '\0' ))
+				return true;
+		}
+	}
+	return false;
+}
+
 typedef struct fs_archive_s
 {
 	const char *ext;
@@ -864,11 +885,17 @@ and the file index in the package if relevant
 searchpath_t *FS_FindFile( const char *name, int *index, char *fixedname, size_t len, uint32_t flags )
 {
 	searchpath_t *search;
+	qboolean is_sven_resource = GI && !Q_stricmp( GI->gamefolder, "svencoop" ) &&
+		( !Q_strnicmp( name, "resources/", 10 ) || !Q_strnicmp( name, "resources\\", 10 ) ||
+		  !Q_strnicmp( name, "resource/", 9 ) || !Q_strnicmp( name, "resource\\", 9 ));
 
 	// search through the path, one element at a time
 	for( search = fs_searchpaths; search; search = search->next )
 	{
 		int pack_ind;
+
+		if( is_sven_resource && FS_IsSvenEventSearchPath( search->filename ))
+			continue;
 
 		if( flags && !FBitSet( search->flags, flags ))
 			continue;
