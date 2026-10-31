@@ -2668,6 +2668,14 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	if( MSG_CheckOverflow( msg ) || iSize < 0 || iSize >= MAX_USERMSG_LENGTH
 		|| iSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
 	{
+		if( !Q_strcmp( clgame.msg[i].name, "RampSprite" ) ||
+			!Q_strcmp( clgame.msg[i].name, "TracerDecal" ))
+		{
+			Con_Printf( S_WARN "%s: malformed visual message %s size %d; dropping remainder of packet\n",
+				__func__, clgame.msg[i].name, iSize );
+			MSG_SeekToBit( msg, 0, SEEK_END );
+			return;
+		}
 		Host_Error( "%s: invalid user message %s size %d (remaining %d, limit %d)\n", __func__,
 			clgame.msg[i].name, iSize, MSG_GetNumBitsLeft( msg ) >> 3, MAX_USERMSG_LENGTH );
 		return;

@@ -270,7 +270,9 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
         return when (gamedir) {
             "svencoop" -> (normalized.startsWith("svencoop/") ||
                 normalized.startsWith("svencoop_event_spooky/") ||
-                normalized.startsWith("svencoop_event_xmas/")) &&
+                normalized.startsWith("svencoop_event_xmas/") ||
+                normalized.startsWith("svencoop_event_anniv/") ||
+                normalized.startsWith("svencoop_event_april/")) &&
                 !normalized.endsWith(".exe", ignoreCase = true) &&
                 !normalized.endsWith(".dll", ignoreCase = true) &&
                 !normalized.endsWith(".so", ignoreCase = true) &&
@@ -399,11 +401,15 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                             val contentRoot = when {
                                 gamedir == "svencoop" && normalizedPath.startsWith("svencoop_event_spooky/") -> File(gameDataDir.parentFile, "svencoop_event_spooky")
                                 gamedir == "svencoop" && normalizedPath.startsWith("svencoop_event_xmas/") -> File(gameDataDir.parentFile, "svencoop_event_xmas")
+                                gamedir == "svencoop" && normalizedPath.startsWith("svencoop_event_anniv/") -> File(gameDataDir.parentFile, "svencoop_event_anniv")
+                                gamedir == "svencoop" && normalizedPath.startsWith("svencoop_event_april/") -> File(gameDataDir.parentFile, "svencoop_event_april")
                                 else -> gameDataDir
                             }
                             val contentPrefix = when {
                                 normalizedPath.startsWith("svencoop_event_spooky/") -> "svencoop_event_spooky/"
                                 normalizedPath.startsWith("svencoop_event_xmas/") -> "svencoop_event_xmas/"
+                                normalizedPath.startsWith("svencoop_event_anniv/") -> "svencoop_event_anniv/"
+                                normalizedPath.startsWith("svencoop_event_april/") -> "svencoop_event_april/"
                                 normalizedPath.startsWith("$gamedir/") -> "$gamedir/"
                                 else -> ""
                             }

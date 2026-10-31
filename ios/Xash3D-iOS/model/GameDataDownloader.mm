@@ -1331,7 +1331,8 @@ static BOOL assembleFileWithRetry(int depotId, NSDictionary *file, NSString *out
             for (NSDictionary *f in files) {
                 NSString *path = [f[@"path"] stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
                 BOOL isSvenContent = [path hasPrefix:@"svencoop/"] ||
-                    [path hasPrefix:@"svencoop_event_spooky/"] || [path hasPrefix:@"svencoop_event_xmas/"];
+                    [path hasPrefix:@"svencoop_event_spooky/"] || [path hasPrefix:@"svencoop_event_xmas/"] ||
+                    [path hasPrefix:@"svencoop_event_anniv/"] || [path hasPrefix:@"svencoop_event_april/"];
                 if (!isSvenContent || path.isAbsolutePath || [path.pathComponents containsObject:@".."] ||
                     svensteam::foreignGameBinary(path.UTF8String ?: "")) continue;
                 NSMutableDictionary *normalized = [f mutableCopy]; normalized[@"path"] = path;
@@ -1367,7 +1368,7 @@ static BOOL assembleFileWithRetry(int depotId, NSDictionary *file, NSString *out
                 NSString *relPath = mf[@"path"];
                 NSString *contentRoot = targetDir;
                 BOOL isEventContent = NO;
-                for (NSString *eventDir in @[@"svencoop_event_spooky", @"svencoop_event_xmas"]) {
+                for (NSString *eventDir in @[@"svencoop_event_spooky", @"svencoop_event_xmas", @"svencoop_event_anniv", @"svencoop_event_april"]) {
                     NSString *prefix = [eventDir stringByAppendingString:@"/"];
                     if ([relPath hasPrefix:prefix]) {
                         contentRoot = [_docsDir stringByAppendingPathComponent:eventDir];

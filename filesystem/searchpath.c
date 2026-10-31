@@ -25,6 +25,7 @@ GNU General Public License for more details.
 #include "filesystem_internal.h"
 #include "common/com_strings.h"
 #include "library_suffix.h"
+#include <time.h>
 
 searchpath_t *fs_searchpaths = NULL; // chain
 char fs_basedir[MAX_SYSPATH];        // base game directory
@@ -32,6 +33,41 @@ char fs_rodir[MAX_SYSPATH];
 static char fs_gamedir[MAX_SYSPATH]; // game current directory
 static string fs_language;
 static qboolean fs_ext_path = false; // attempt to read\write from ./ or ../ pathes
+
+static const char *FS_SvenActiveEvent( void )
+{
+	time_t now = time( NULL );
+	struct tm *utc = gmtime( &now );
+	int month, day;
+
+	if( !utc )
+		return NULL;
+	month = utc->tm_mon + 1;
+	day = utc->tm_mday;
+
+	if( month == 1 && day >= 19 && day <= 26 )
+		return "svencoop_event_anniv";
+	if( month == 4 && day == 1 )
+		return "svencoop_event_april";
+	if(( month == 10 && day >= 25 ) || ( month == 11 && day == 1 ))
+		return "svencoop_event_spooky";
+	if( month == 12 && day >= 24 && day <= 26 )
+		return "svencoop_event_xmas";
+	return NULL;
+}
+
+static void FS_AddSvenEventFallbacks( const char *active_event )
+{
+	static const char *events[] = {
+		"svencoop_event_spooky", "svencoop_event_xmas",
+		"svencoop_event_anniv", "svencoop_event_april"
+	};
+	for( size_t i = 0; i < sizeof( events ) / sizeof( events[0] ); i++ )
+	{
+		if( !active_event || Q_stricmp( events[i], active_event ))
+			FS_AddGameHierarchy( events[i], FS_NOWRITE_PATH );
+	}
+}
 
 typedef struct fs_archive_s
 {
@@ -453,14 +489,18 @@ void FS_Rescan( uint32_t flags, const char *language )
 	if( Q_stricmp( GI->basedir, GI->falldir ) && Q_stricmp( GI->gamefolder, GI->falldir ))
 		FS_AddGameHierarchy( GI->falldir, flags );
 
+	const char *active_event = NULL;
+	if( !Q_stricmp( GI->gamefolder, "svencoop" ))
+	{
+		active_event = FS_SvenActiveEvent();
+		FS_AddSvenEventFallbacks( active_event );
+	}
+
 	((gameinfo_t *)GI)->added = true; // getting rid of const here, as this modifier only for the engine
 	FS_AddGameHierarchy( GI->gamefolder, FS_GAMEDIR_PATH | flags );
 
-	if( !Q_stricmp( GI->gamefolder, "svencoop" ))
-	{
-		FS_AddGameHierarchy( "svencoop_event_spooky", FS_NOWRITE_PATH );
-		FS_AddGameHierarchy( "svencoop_event_xmas", FS_NOWRITE_PATH );
-	}
+	if( active_event )
+		FS_AddGameHierarchy( active_event, FS_NOWRITE_PATH );
 }
 
 /*
