@@ -25,6 +25,7 @@ static struct
 static int svenPendingCount;
 static sound_t svenSoundHandles[SVEN_SOUND_COUNT];
 static qboolean svenSoundHandleValid[SVEN_SOUND_COUNT];
+static int svenSoundPrecacheIndex;
 static qboolean svenFreshTable;
 
 static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed );
@@ -106,6 +107,7 @@ void CL_SvenSoundCacheReset( void )
 	svenRequestSignon = -1;
 	svenPendingCount = 0;
 	memset( svenSoundHandleValid, 0, sizeof( svenSoundHandleValid ));
+	svenSoundPrecacheIndex = 0;
 	svenFreshTable = false;
 	memset( &svenSoundTable, 0, sizeof( svenSoundTable ));
 }
@@ -113,6 +115,7 @@ void CL_SvenSoundCacheReset( void )
 void CL_SvenSoundCacheInvalidate( void )
 {
 	memset( svenSoundHandleValid, 0, sizeof( svenSoundHandleValid ));
+	svenSoundPrecacheIndex = 0;
 }
 
 qboolean CL_SvenSoundCacheRequest( sizebuf_t *message, const char *filename )
@@ -201,13 +204,37 @@ static void CL_LoadSvenSoundCache( void )
 
 void CL_SvenSoundFrame( void )
 {
-	int played = 0;
+	int registered = 0;
 	if( cls.state >= ca_connected ) CL_LoadSvenSoundCache();
 	if( !cl.audio_prepped || !svenSoundLoaded ) return;
-	while( played < 4 && svenPendingCount > 0 )
+	if( svenSoundPrecacheIndex < svenSoundTable.soundCount )
 	{
-		CL_SvenPlaySound( &svenPending[0].event, Q_max( 0.0, host.realtime - svenPending[0].received ));
-		memmove( svenPending, svenPending + 1, ( --svenPendingCount ) * sizeof( svenPending[0] ));
+		double deadline = Sys_DoubleTime() + 0.002;
+		while( svenSoundPrecacheIndex < svenSoundTable.soundCount && registered < 8 )
+		{
+			int index = svenSoundPrecacheIndex++;
+			if( !svenSoundHandleValid[index] )
+			{
+				svenSoundHandles[index] = S_RegisterSvenSound( svenSoundTable.sounds[index] );
+				svenSoundHandleValid[index] = true;
+				registered++;
+			}
+			if( Sys_DoubleTime() >= deadline ) break;
+		}
+	}
+	for( int index = 0, played = 0; index < svenPendingCount && played < 16; )
+	{
+		const sven_sound_event_t *event = &svenPending[index].event;
+		qboolean ready = ( event->flags & SVEN_SND_SENTENCE )
+			|| event->index < 0 || event->index >= svenSoundTable.soundCount
+			|| svenSoundHandleValid[event->index];
+		if( !ready )
+		{
+			index++;
+			continue;
+		}
+		CL_SvenPlaySound( event, Q_max( 0.0, host.realtime - svenPending[index].received ));
+		memmove( &svenPending[index], &svenPending[index + 1], ( --svenPendingCount - index ) * sizeof( svenPending[0] ));
 		played++;
 	}
 }
@@ -231,8 +258,9 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 				Q_snprintf( path, sizeof( path ), DEFAULT_SOUNDPATH "%s", sample );
 				if( !Q_strcmp( filename, path ) || !Q_strcmp( filename, sample ))
 				{
-					svenSoundHandles[index] = S_RegisterSvenSound( sample );
-					svenSoundHandleValid[index] = true;
+					svenSoundHandleValid[index] = false;
+					if( index < svenSoundPrecacheIndex )
+						svenSoundPrecacheIndex = index;
 				}
 			}
 		}
@@ -248,6 +276,7 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 	Q_strncpy( svenRequestedMap, map, sizeof( svenRequestedMap ));
 	svenRequestSignon = cls.signon;
 	memset( svenSoundHandleValid, 0, sizeof( svenSoundHandleValid ));
+	svenSoundPrecacheIndex = 0;
 	svenNextLoad = 0;
 	CL_LoadSvenSoundCache();
 }
@@ -335,17 +364,10 @@ static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed )
 	else sample = CL_SvenSoundName( event->index );
 	if( !sample ) return;
 	if( event->flags & SVEN_SND_SENTENCE ) handle = S_RegisterSound( sample );
-	else if( event->index >= 0 && event->index < SVEN_SOUND_COUNT && svenSoundHandleValid[event->index] )
+	else if( event->index >= 0 && event->index < svenSoundTable.soundCount
+		&& svenSoundHandleValid[event->index] )
 		handle = svenSoundHandles[event->index];
-	else
-	{
-		handle = S_RegisterSvenSound( sample );
-		if( event->index >= 0 && event->index < SVEN_SOUND_COUNT )
-		{
-			svenSoundHandles[event->index] = handle;
-			svenSoundHandleValid[event->index] = true;
-		}
-	}
+	else return;
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
 	if( elapsed > 1.0 && !( event->flags & SVEN_SND_LOOP )
@@ -405,7 +427,10 @@ void CL_ParseSvenStartSound( const char *name, int size, void *buffer )
 		CL_SvenQueueSound( &event );
 		return;
 	}
-	CL_SvenPlaySound( &event, 0 );
+	if(( event.flags & SVEN_SND_SENTENCE ) || event.index < 0
+		|| event.index >= svenSoundTable.soundCount || !svenSoundHandleValid[event.index] )
+		CL_SvenQueueSound( &event );
+	else CL_SvenPlaySound( &event, 0 );
 }
 
 #if XASH_ENGINE_TESTS

@@ -116,7 +116,7 @@ static void CL_ParseSoundPacket( sizebuf_t *msg, qboolean restore )
 		MSG_ReadBytes( msg, &forcedEnd, sizeof( forcedEnd ), sizeof( forcedEnd ));
 	}
 
-	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 3 )
 	{
 		const char *vname = "(not precached)";
 		char vsent[32];
@@ -2419,7 +2419,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	// NOTE: any user message is really parse at engine, not in client.dll
 	// TEMP-TRACE: print entry and constants so we know exactly which branch fires.
 	// Read the next byte without consuming it (peek at current read offset).
-	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 3 )
 	{
 		int nReg = 0;
 		for( int t = 0; t < MAX_USER_MESSAGES && clgame.msg[t].name[0]; t++ )

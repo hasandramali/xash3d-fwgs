@@ -676,24 +676,6 @@ static void S_StartSoundEx( const vec3_t pos, int ent, int chan, sound_t handle,
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
 
-	// TEMP-DIAG (hgrunt-source hunt): log every playback while goldsrc debug is on.
-// Short quiet repro only (crowbar wall-hits), then REVERT this block.
-// dist = units from the listener at start (0 = local/2D; large = distant
-// source). Settles "my crowbar makes spray sound" debates with data: the
-// metal is dist 0, a teammate's sprayer hundreds of units away.
-	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-	{
-		vec3_t delta;
-		float dist = -1.0f;
-		if( pos )
-		{
-			VectorSubtract( pos, refState.vieworg, delta );
-			dist = VectorLength( delta );
-		}
-		Con_Printf( "SND-PLAY: %s vol=%.2f attn=%.2f pitch=%d ch=%d ent=%d flags=%x dist=%.0f\n",
-			sfx->name, fvol, attn, pitch, chan, ent, flags, dist );
-	}
-
 	vol = bound( 0, fvol * 255, 255 );
 	if( pitch <= 1 ) pitch = PITCH_NORM; // Invasion issues
 
@@ -1057,20 +1039,6 @@ void S_AmbientSound( const vec3_t pos, int ent, sound_t handle, float fvol, floa
 	if( !snd.initialized ) return;
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
-
-	// TEMP-DIAG (hgrunt-source hunt, ambient path). dist as above.
-	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-	{
-		vec3_t delta;
-		float dist = -1.0f;
-		if( pos )
-		{
-			VectorSubtract( pos, refState.vieworg, delta );
-			dist = VectorLength( delta );
-		}
-		Con_Printf( "SND-AMBIENT: %s vol=%.2f attn=%.2f pitch=%d ent=%d flags=%x dist=%.0f\n",
-			sfx->name, fvol, attn, pitch, ent, flags, dist );
-	}
 
 	vol = bound( 0, fvol * 255, 255 );
 	if( pitch <= 1 ) pitch = PITCH_NORM; // Invasion issues
