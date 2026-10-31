@@ -50,7 +50,7 @@ class GameDataDownloader(private val ctx: Context) {
             // Anonymous access uses the dedicated-server tool 276060 (parent: 225840),
             // which mounts the same base-content depot 225841; the free client 225840
             // itself can't be claimed by an anonymous login.
-            "svencoop" to GameInfo(276060, listOf(225841), "Sven Co-op", 2_600_000_000L)
+            "svencoop" to GameInfo(276060, listOf(225841, 276062), "Sven Co-op", 2_600_000_000L)
         )
 
         // Hardcoded manifest IDs for anonymous downloads (from HLDS-appmanifest repo, July 2023)
@@ -64,7 +64,8 @@ class GameDataDownloader(private val ctx: Context) {
             1  to 5928322771446233610L,
             4  to 8690279432129063737L,
             1006 to 6912453647411644579L,
-            225841 to 7100405834093858048L
+            225841 to 7100405834093858048L,
+            276062 to 2096207717681437861L
         )
 
         private val nextJobId = AtomicLong(1L)
@@ -262,13 +263,20 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
 
     fun estimatedSize(gamedir: String): Long = GAMES[gamedir]?.estimatedSize ?: 0L
 
-    // svencoop's base-content depot (225841) only carries the svencoop/ tree.
-    // Keep it self-contained: no root files, and never pull Windows binaries (.exe/.dll).
+    // Limit Sven Co-op installs to its game and seasonal event trees; never pull native binaries.
     private fun shouldDownloadFile(gamedir: String, path: String): Boolean {
+        val normalized = path.replace('\\', '/')
+        if (normalized.startsWith('/') || normalized.split('/').any { it == ".." }) return false
         return when (gamedir) {
-            "svencoop" -> path.startsWith("svencoop/") &&
-                !path.endsWith(".exe", ignoreCase = true) &&
-                !path.endsWith(".dll", ignoreCase = true)
+            "svencoop" -> (normalized.startsWith("svencoop/") ||
+                normalized.startsWith("svencoop_event_spooky/") ||
+                normalized.startsWith("svencoop_event_xmas/")) &&
+                !normalized.endsWith(".exe", ignoreCase = true) &&
+                !normalized.endsWith(".dll", ignoreCase = true) &&
+                !normalized.endsWith(".so", ignoreCase = true) &&
+                !normalized.endsWith(".dylib", ignoreCase = true) &&
+                !normalized.endsWith(".a", ignoreCase = true) &&
+                !normalized.endsWith(".asi", ignoreCase = true)
             else -> true
         }
     }
@@ -387,9 +395,20 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                     async {
                         semaphore.withPermit {
                             yield()
-                            val relativePath = if (df.file.path.startsWith("$gamedir/"))
-                                df.file.path.removePrefix("$gamedir/") else df.file.path
-                            val outFile = File(gameDataDir, relativePath)
+                            val normalizedPath = df.file.path.replace('\\', '/')
+                            val contentRoot = when {
+                                gamedir == "svencoop" && normalizedPath.startsWith("svencoop_event_spooky/") -> File(gameDataDir.parentFile, "svencoop_event_spooky")
+                                gamedir == "svencoop" && normalizedPath.startsWith("svencoop_event_xmas/") -> File(gameDataDir.parentFile, "svencoop_event_xmas")
+                                else -> gameDataDir
+                            }
+                            val contentPrefix = when {
+                                normalizedPath.startsWith("svencoop_event_spooky/") -> "svencoop_event_spooky/"
+                                normalizedPath.startsWith("svencoop_event_xmas/") -> "svencoop_event_xmas/"
+                                normalizedPath.startsWith("$gamedir/") -> "$gamedir/"
+                                else -> ""
+                            }
+                            val relativePath = normalizedPath.removePrefix(contentPrefix)
+                            val outFile = File(contentRoot, relativePath)
                             outFile.parentFile?.mkdirs()
                             val success = assembleFileFromChunks(df.depotSetup.depotId, df.file, outFile, df.depotSetup.depotKey, cdnHosts)
                             if (!success) {

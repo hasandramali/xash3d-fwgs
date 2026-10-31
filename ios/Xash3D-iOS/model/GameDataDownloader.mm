@@ -92,11 +92,12 @@ static NSArray *CM_SERVERS() {
 }
 
 static NSDictionary *HARDCODED_MANIFEST_IDS() {
-    return @{@225841: @7100405834093858048ULL};
+    return @{@225841: @7100405834093858048ULL,
+             @276062: @2096207717681437861ULL};
 }
 
 static NSDictionary *GAMES() {
-    return @{@"svencoop": @{@"appId":@276060, @"depotIds":@[@225841], @"displayName":@"Sven Co-op"}};
+    return @{@"svencoop": @{@"appId":@276060, @"depotIds":@[@225841, @276062], @"displayName":@"Sven Co-op"}};
 }
 
 static NSData *steamPublicKey() {
@@ -1329,7 +1330,9 @@ static BOOL assembleFileWithRetry(int depotId, NSDictionary *file, NSString *out
             logToFile(@"[manifest] parseManifestFiles returned %lu files", (unsigned long)files.count);
             for (NSDictionary *f in files) {
                 NSString *path = [f[@"path"] stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
-                if (![path hasPrefix:@"svencoop/"] || path.isAbsolutePath || [path.pathComponents containsObject:@".."] ||
+                BOOL isSvenContent = [path hasPrefix:@"svencoop/"] ||
+                    [path hasPrefix:@"svencoop_event_spooky/"] || [path hasPrefix:@"svencoop_event_xmas/"];
+                if (!isSvenContent || path.isAbsolutePath || [path.pathComponents containsObject:@".."] ||
                     svensteam::foreignGameBinary(path.UTF8String ?: "")) continue;
                 NSMutableDictionary *normalized = [f mutableCopy]; normalized[@"path"] = path;
                 [allFiles addObject:@{@"depotId":@(depotId), @"file":normalized, @"depotKey":ds[@"depotKey"]}];
@@ -1362,9 +1365,20 @@ static BOOL assembleFileWithRetry(int depotId, NSDictionary *file, NSString *out
                 NSDictionary *mf = entry[@"file"];
                 NSData *depotKey = entry[@"depotKey"];
                 NSString *relPath = mf[@"path"];
-                if ([relPath hasPrefix:[NSString stringWithFormat:@"%@/", gameDir]])
+                NSString *contentRoot = targetDir;
+                BOOL isEventContent = NO;
+                for (NSString *eventDir in @[@"svencoop_event_spooky", @"svencoop_event_xmas"]) {
+                    NSString *prefix = [eventDir stringByAppendingString:@"/"];
+                    if ([relPath hasPrefix:prefix]) {
+                        contentRoot = [_docsDir stringByAppendingPathComponent:eventDir];
+                        relPath = [relPath substringFromIndex:prefix.length];
+                        isEventContent = YES;
+                        break;
+                    }
+                }
+                if (!isEventContent && [relPath hasPrefix:[NSString stringWithFormat:@"%@/", gameDir]])
                     relPath = [relPath substringFromIndex:gameDir.length + 1];
-                NSString *outPath = [targetDir stringByAppendingPathComponent:relPath];
+                NSString *outPath = [contentRoot stringByAppendingPathComponent:relPath];
                 BOOL success = assembleFileWithRetry(depotId, mf, outPath, depotKey, cdnHosts, ^BOOL{ return self.cancelled; });
                 @synchronized (self) { if (!success) { anyFailed = YES; [failedFiles addObject:relPath]; } }
                 @synchronized (self) { completed++;

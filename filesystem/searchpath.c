@@ -455,6 +455,12 @@ void FS_Rescan( uint32_t flags, const char *language )
 
 	((gameinfo_t *)GI)->added = true; // getting rid of const here, as this modifier only for the engine
 	FS_AddGameHierarchy( GI->gamefolder, FS_GAMEDIR_PATH | flags );
+
+	if( !Q_stricmp( GI->gamefolder, "svencoop" ))
+	{
+		FS_AddGameHierarchy( "svencoop_event_spooky", FS_NOWRITE_PATH );
+		FS_AddGameHierarchy( "svencoop_event_xmas", FS_NOWRITE_PATH );
+	}
 }
 
 /*

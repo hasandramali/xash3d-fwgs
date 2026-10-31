@@ -1261,7 +1261,7 @@ Netchan_CopyFileFragments
 */
 qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 {
-	char	filename[MAX_OSPATH], compressor[32];
+	char	filename[MAX_OSPATH], original_filename[MAX_OSPATH], compressor[32];
 	uint	uncompressedSize = 0;
 
 	if( !chan->incomingready[FRAG_FILE_STREAM] )
@@ -1311,6 +1311,7 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 	}
 
 	Q_strncpy( chan->incomingfilename, filename, sizeof( chan->incomingfilename ));
+	Q_strncpy( original_filename, filename, sizeof( original_filename ));
 
 #if !XASH_DEDICATED
 	if( chan->sock == NS_CLIENT && filename[0] == '!' && !Cvar_VariableInteger( "cl_customspray" ))
@@ -1396,6 +1397,9 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 		{
 			Con_Printf( S_ERROR "BZ2 fragment uncompressed size out of range: %u for %s\n", uncompressedSize, filename );
 			Mem_Free( buffer );
+#if !XASH_DEDICATED
+			if( chan->sock == NS_CLIENT ) CL_ProcessFile( false, original_filename );
+#endif
 			return false;
 		}
 
@@ -1407,6 +1411,9 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 			Con_DPrintf( S_ERROR "BZ2 decompression failed for %s\n", filename );
 			Mem_Free( buffer );
 			Mem_Free( uncompressedBuffer );
+#if !XASH_DEDICATED
+			if( chan->sock == NS_CLIENT ) CL_ProcessFile( false, original_filename );
+#endif
 			return false;
 		}
 		Mem_Free( buffer );
@@ -1424,6 +1431,9 @@ qboolean Netchan_CopyFileFragments( netchan_t *chan, sizebuf_t *msg )
 		{
 			Con_Printf( S_ERROR "LZSS fragment uncompressed size out of range: %u for %s\n", uncompressedSize, filename );
 			Mem_Free( buffer );
+#if !XASH_DEDICATED
+			if( chan->sock == NS_CLIENT ) CL_ProcessFile( false, original_filename );
+#endif
 			return false;
 		}
 
