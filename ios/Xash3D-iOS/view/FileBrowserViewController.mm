@@ -56,7 +56,7 @@ static NSString *kCellID = @"FileCell";
         launchSpacing,
         [[UIBarButtonItem alloc] initWithTitle:@"Steam" style:UIBarButtonItemStylePlain target:self action:@selector(steamTapped)]
     ];
-    [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"global_arguments": @"-console", @"immersive_mode_svencoop": @NO, @"microphone": @YES}];
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"global_arguments": @"-console", @"immersive_mode_svencoop": @NO, @"microphone": @YES, @"allow_event_resources": @YES}];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(steamLibraryChanged) name:SvenSteamStateChanged object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(steamLibraryChanged) name:UIApplicationDidBecomeActiveNotification object:nil];
     if (SteamService.shared.autoConnect) [SteamService.shared restoreSession];
@@ -105,21 +105,24 @@ static NSString *kCellID = @"FileCell";
     launch.arguments = [[NSUserDefaults standardUserDefaults] stringForKey:@"global_arguments"] ?: @"-console";
     launch.immersive = [[NSUserDefaults standardUserDefaults] boolForKey:@"immersive_mode_svencoop"];
     launch.microphone = [[NSUserDefaults standardUserDefaults] boolForKey:@"microphone"];
+    launch.allowEventResources = [[NSUserDefaults standardUserDefaults] boolForKey:@"allow_event_resources"];
     launch.modalPresentationStyle = UIModalPresentationPageSheet;
     if (@available(iOS 15.0, *)) {
         launch.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.largeDetent];
         launch.sheetPresentationController.prefersGrabberVisible = YES;
     }
-    launch.onLaunch = ^(NSString *arguments, BOOL immersive, BOOL microphone){
+    launch.onLaunch = ^(NSString *arguments, BOOL immersive, BOOL microphone, BOOL allowEventResources){
         if (self.dataDownloader.installing) return;
         [[NSUserDefaults standardUserDefaults] setObject:arguments forKey:@"global_arguments"];
         [[NSUserDefaults standardUserDefaults] setBool:immersive forKey:@"immersive_mode_svencoop"];
         [[NSUserDefaults standardUserDefaults] setBool:microphone forKey:@"microphone"];
+        [[NSUserDefaults standardUserDefaults] setBool:allowEventResources forKey:@"allow_event_resources"];
         UIBarButtonItem *play = self.navigationItem.rightBarButtonItems.firstObject;
         play.enabled = NO; play.title = @"Connecting…";
         void (^prepare)(BOOL) = ^(BOOL granted) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 setenv("XASH3D_MICROPHONE", granted ? "1" : "0", 1);
+                setenv("XASH3D_ALLOW_EVENT_RESOURCES", allowEventResources ? "1" : "0", 1);
                 if (microphone && !granted) IOS_Log("Microphone permission denied; voice reception remains enabled.");
                 [SteamService.shared prepareForLaunch:^(NSError *error){
                     play.enabled = YES; play.title = @"Play";

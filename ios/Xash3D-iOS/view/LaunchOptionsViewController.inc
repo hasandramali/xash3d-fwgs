@@ -2,19 +2,21 @@
 @property (nonatomic, copy) NSString *arguments;
 @property (nonatomic) BOOL immersive;
 @property (nonatomic) BOOL microphone;
-@property (nonatomic, copy) void (^onLaunch)(NSString *, BOOL, BOOL);
+@property (nonatomic) BOOL allowEventResources;
+@property (nonatomic, copy) void (^onLaunch)(NSString *, BOOL, BOOL, BOOL);
 @end
 
 @implementation LaunchOptionsViewController {
     UITextField *_argumentsField;
     UISwitch *_immersiveSwitch;
     UISwitch *_microphoneSwitch;
+    UISwitch *_eventResourcesSwitch;
     UIScrollView *_scroll;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.preferredContentSize = CGSizeMake(420, 440);
+    self.preferredContentSize = CGSizeMake(420, 500);
     _scroll = [[UIScrollView alloc] init];
     _scroll.translatesAutoresizingMaskIntoConstraints = NO;
     _scroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
@@ -57,6 +59,19 @@
     [_microphoneSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
     [microphoneRow addArrangedSubview:microphoneLabel]; [microphoneRow addArrangedSubview:_microphoneSwitch];
     [stack addArrangedSubview:microphoneRow];
+    UIStackView *eventResourcesRow = [[UIStackView alloc] init];
+    eventResourcesRow.axis = UILayoutConstraintAxisHorizontal; eventResourcesRow.spacing = 16;
+    eventResourcesRow.alignment = UIStackViewAlignmentCenter;
+    UILabel *eventResourcesLabel = [[UILabel alloc] init];
+    eventResourcesLabel.text = @"Allow event resources";
+    eventResourcesLabel.numberOfLines = 0;
+    eventResourcesLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    _eventResourcesSwitch = [[UISwitch alloc] init]; _eventResourcesSwitch.on = self.allowEventResources;
+    _eventResourcesSwitch.accessibilityLabel = eventResourcesLabel.text;
+    [_eventResourcesSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_eventResourcesSwitch setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
+    [eventResourcesRow addArrangedSubview:eventResourcesLabel]; [eventResourcesRow addArrangedSubview:_eventResourcesSwitch];
+    [stack addArrangedSubview:eventResourcesRow];
     UIStackView *buttons = [[UIStackView alloc] init];
     buttons.axis = UILayoutConstraintAxisHorizontal; buttons.spacing = 24;
     buttons.distribution = UIStackViewDistributionFillEqually;
@@ -80,6 +95,7 @@
         [_argumentsField.heightAnchor constraintGreaterThanOrEqualToConstant:48],
         [immersiveRow.heightAnchor constraintGreaterThanOrEqualToConstant:44],
         [microphoneRow.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [eventResourcesRow.heightAnchor constraintGreaterThanOrEqualToConstant:44],
         [buttons.heightAnchor constraintGreaterThanOrEqualToConstant:44]
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardChanged:) name:UIKeyboardWillChangeFrameNotification object:nil];
@@ -100,8 +116,9 @@
     NSString *arguments = _argumentsField.text ?: @"";
     BOOL immersive = _immersiveSwitch.on;
     BOOL microphone = _microphoneSwitch.on;
-    void (^launch)(NSString *, BOOL, BOOL) = self.onLaunch;
+    BOOL allowEventResources = _eventResourcesSwitch.on;
+    void (^launch)(NSString *, BOOL, BOOL, BOOL) = self.onLaunch;
     [self.view endEditing:YES];
-    [self dismissViewControllerAnimated:YES completion:^{ if (launch) launch(arguments, immersive, microphone); }];
+    [self dismissViewControllerAnimated:YES completion:^{ if (launch) launch(arguments, immersive, microphone, allowEventResources); }];
 }
 @end

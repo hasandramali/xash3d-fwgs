@@ -23,6 +23,12 @@
             app:defaultValue="true" />
 
         <SwitchPreferenceCompat
+            app:key="allow_event_resources"
+            app:title="@string/allow_event_resources"
+            app:summary="@string/allow_event_resources_summary"
+            app:defaultValue="true" />
+
+        <SwitchPreferenceCompat
             app:key="use_volume_buttons"
             app:title="@string/game_settings_volume_buttons"
             app:defaultValue="false" />

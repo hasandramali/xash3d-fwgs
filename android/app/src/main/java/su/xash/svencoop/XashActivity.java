@@ -313,6 +313,8 @@ public class XashActivity extends SDLActivity {
         boolean microphone = getBooleanPreference("microphone", true)
                 && checkCallingOrSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
         nativeSetenv("XASH3D_MICROPHONE", microphone ? "1" : "0");
+        nativeSetenv("XASH3D_ALLOW_EVENT_RESOURCES",
+                getBooleanPreference("allow_event_resources", true) ? "1" : "0");
         if (argv == null) argv = "-console -log";
 
         // Background map (renderer kick): keeps the renderer fed from the first

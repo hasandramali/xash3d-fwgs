@@ -24,8 +24,7 @@ static struct
 } svenPending[128];
 static int svenPendingCount;
 static sound_t svenSoundHandles[SVEN_SOUND_COUNT];
-static qboolean svenSoundsPrecached;
-static int svenSoundPrecacheIndex;
+static qboolean svenSoundHandleValid[SVEN_SOUND_COUNT];
 static qboolean svenFreshTable;
 
 static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed );
@@ -106,16 +105,14 @@ void CL_SvenSoundCacheReset( void )
 	svenNextLoad = 0;
 	svenRequestSignon = -1;
 	svenPendingCount = 0;
-	svenSoundsPrecached = false;
-	svenSoundPrecacheIndex = 0;
+	memset( svenSoundHandleValid, 0, sizeof( svenSoundHandleValid ));
 	svenFreshTable = false;
 	memset( &svenSoundTable, 0, sizeof( svenSoundTable ));
 }
 
 void CL_SvenSoundCacheInvalidate( void )
 {
-	svenSoundsPrecached = false;
-	svenSoundPrecacheIndex = 0;
+	memset( svenSoundHandleValid, 0, sizeof( svenSoundHandleValid ));
 }
 
 qboolean CL_SvenSoundCacheRequest( sizebuf_t *message, const char *filename )
@@ -204,24 +201,15 @@ static void CL_LoadSvenSoundCache( void )
 
 void CL_SvenSoundFrame( void )
 {
+	int played = 0;
 	if( cls.state >= ca_connected ) CL_LoadSvenSoundCache();
 	if( !cl.audio_prepped || !svenSoundLoaded ) return;
-	if( !svenSoundsPrecached )
+	while( played < 4 && svenPendingCount > 0 )
 	{
-		double deadline = Sys_DoubleTime() + 0.002;
-		int count = 0;
-		while( svenSoundPrecacheIndex < svenSoundTable.soundCount && count < 8 )
-		{
-			int index = svenSoundPrecacheIndex++;
-			svenSoundHandles[index] = S_RegisterSvenSound( svenSoundTable.sounds[index] );
-			count++;
-			if( Sys_DoubleTime() >= deadline ) break;
-		}
-		svenSoundsPrecached = svenSoundPrecacheIndex == svenSoundTable.soundCount;
+		CL_SvenPlaySound( &svenPending[0].event, Q_max( 0.0, host.realtime - svenPending[0].received ));
+		memmove( svenPending, svenPending + 1, ( --svenPendingCount ) * sizeof( svenPending[0] ));
+		played++;
 	}
-	for( int index = 0; index < svenPendingCount; index++ )
-		CL_SvenPlaySound( &svenPending[index].event, Q_max( 0.0, host.realtime - svenPending[index].received ));
-	svenPendingCount = 0;
 }
 
 void CL_SvenSoundCacheOnDownload( const char *filename )
@@ -234,13 +222,18 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 	{
 		if( svenSoundLoaded )
 		{
-			for( int index = 0; index < svenSoundPrecacheIndex; index++ )
+			for( int index = 0; index < svenSoundTable.soundCount; index++ )
 			{
+				if( !svenSoundHandleValid[index] )
+					continue;
 				const char *sample = svenSoundTable.sounds[index];
 				if( *sample == '*' ) sample++;
 				Q_snprintf( path, sizeof( path ), DEFAULT_SOUNDPATH "%s", sample );
 				if( !Q_strcmp( filename, path ) || !Q_strcmp( filename, sample ))
+				{
 					svenSoundHandles[index] = S_RegisterSvenSound( sample );
+					svenSoundHandleValid[index] = true;
+				}
 			}
 		}
 		return;
@@ -254,8 +247,7 @@ void CL_SvenSoundCacheOnDownload( const char *filename )
 	svenFreshTable = true;
 	Q_strncpy( svenRequestedMap, map, sizeof( svenRequestedMap ));
 	svenRequestSignon = cls.signon;
-	svenSoundsPrecached = false;
-	svenSoundPrecacheIndex = 0;
+	memset( svenSoundHandleValid, 0, sizeof( svenSoundHandleValid ));
 	svenNextLoad = 0;
 	CL_LoadSvenSoundCache();
 }
@@ -343,8 +335,17 @@ static void CL_SvenPlaySound( const sven_sound_event_t *event, double elapsed )
 	else sample = CL_SvenSoundName( event->index );
 	if( !sample ) return;
 	if( event->flags & SVEN_SND_SENTENCE ) handle = S_RegisterSound( sample );
-	else if( event->index < svenSoundPrecacheIndex ) handle = svenSoundHandles[event->index];
-	else handle = S_RegisterSvenSound( sample );
+	else if( event->index >= 0 && event->index < SVEN_SOUND_COUNT && svenSoundHandleValid[event->index] )
+		handle = svenSoundHandles[event->index];
+	else
+	{
+		handle = S_RegisterSvenSound( sample );
+		if( event->index >= 0 && event->index < SVEN_SOUND_COUNT )
+		{
+			svenSoundHandles[event->index] = handle;
+			svenSoundHandleValid[event->index] = true;
+		}
+	}
 	sfx = S_GetSfxByHandle( handle );
 	if( !sfx ) return;
 	if( elapsed > 1.0 && !( event->flags & SVEN_SND_LOOP )

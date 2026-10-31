@@ -885,27 +885,32 @@ and the file index in the package if relevant
 searchpath_t *FS_FindFile( const char *name, int *index, char *fixedname, size_t len, uint32_t flags )
 {
 	searchpath_t *search;
-	qboolean is_sven_resource = GI && !Q_stricmp( GI->gamefolder, "svencoop" ) &&
-		( !Q_strnicmp( name, "resources/", 10 ) || !Q_strnicmp( name, "resources\\", 10 ) ||
-		  !Q_strnicmp( name, "resource/", 9 ) || !Q_strnicmp( name, "resource\\", 9 ));
+	const char *event_override = getenv( "XASH3D_ALLOW_EVENT_RESOURCES" );
+	qboolean event_fallback_only = GI && !Q_stricmp( GI->gamefolder, "svencoop" ) && event_override &&
+		( !Q_stricmp( event_override, "0" ) || !Q_stricmp( event_override, "false" ));
 
 	// search through the path, one element at a time
-	for( search = fs_searchpaths; search; search = search->next )
+	for( int pass = 0; pass < ( event_fallback_only ? 2 : 1 ); pass++ )
 	{
-		int pack_ind;
-
-		if( is_sven_resource && FS_IsSvenEventSearchPath( search->filename ))
-			continue;
-
-		if( flags && !FBitSet( search->flags, flags ))
-			continue;
-
-		pack_ind = search->pfnFindFile( search, name, fixedname, len );
-		if( pack_ind >= 0 )
+		for( search = fs_searchpaths; search; search = search->next )
 		{
-			if( index )
-				*index = pack_ind;
-			return search;
+			int pack_ind;
+			qboolean is_event_path = GI && !Q_stricmp( GI->gamefolder, "svencoop" ) &&
+				FS_IsSvenEventSearchPath( search->filename );
+
+			if( event_fallback_only && (( pass == 0 && is_event_path ) || ( pass == 1 && !is_event_path )))
+				continue;
+
+			if( flags && !FBitSet( search->flags, flags ))
+				continue;
+
+			pack_ind = search->pfnFindFile( search, name, fixedname, len );
+			if( pack_ind >= 0 )
+			{
+				if( index )
+					*index = pack_ind;
+				return search;
+			}
 		}
 	}
 
