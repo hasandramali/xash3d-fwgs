@@ -839,7 +839,7 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 		if( cmd == svc_bad && cls.net_protocol == PROTO_GOLDSRC )
 		{
 			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-				Con_Printf( "SVC-PAD: skipping svc_bad(0x00) pad byte at offset %d (Sven stream padding)\n", bufStart );
+				Con_Printf( "SVC-PAD: skipping svc_bad(0x00) pad byte at offset %zu (Sven stream padding)\n", bufStart );
 			continue;
 		}
 
@@ -933,6 +933,15 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 			MSG_EndBitWriting( msg );
 			break;
 		case svc_goldsrc_damage:
+			if( cl_sven_proto || cls.signon < SIGNONS )
+			{
+				// Sven Co-op repurposes svc 19 as svc_weaponanimex:
+				// [byte]anim [long]... (hw.dll 0x1D2FAB0 reads BYTE then LONG).
+				// Vanilla GoldSrc svc_damage has no payload.
+				MSG_ReadByte( msg );
+				MSG_ReadLong( msg );
+			}
+			break;
 		case svc_spawnstatic:
 			// this does nothing
 			break;
@@ -954,14 +963,17 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 			// does nothing in Sven Co-op
 			break;
 		case svc_goldsrc_foundsecret:
-		{
-			// Sven Co-op sends a one-byte payload length, then that many bytes.
-			// Without consuming it the parser treats the next byte as a command (svc_bad).
-			int len = MSG_ReadByte( msg );
-			while( len-- > 0 )
-				MSG_ReadByte( msg );
+			if( cl_sven_proto || cls.signon < SIGNONS )
+			{
+				// Sven Co-op repurposes svc 28 as svc_eventlist, whose payload is a
+				// single string (semicolon-separated event list names). hw.dll
+				// 0x1D2FAD0 reads it with MSG_ReadString. Vanilla GoldSrc
+				// svc_foundsecret has no payload.
+				s = MSG_ReadString( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "SVC-EVENTLIST: %s\n", s );
+			}
 			break;
-		}
 		case svc_goldsrc_spawnstaticsound:
 			CL_ParseSpawnStaticSound( msg );
 			break;

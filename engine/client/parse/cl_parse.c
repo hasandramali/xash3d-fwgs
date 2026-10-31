@@ -2461,7 +2461,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 			case 80: case 81: case 86:   // CdAudio, GameTitle, GameMode
 			case 92: case 103:           // SetFOV, CbElec
 			case 117: case 121:          // SRPrimedOff, VGUIMenu
-			case 134: case 136: case 137: // ViewMode, ClassicMode (+/-1 ambiguity tail)
+			case 135: case 137:          // ViewMode, ClassicMode
 				MSG_ReadByte( msg );
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 1-byte msg)\n", svc_num );
@@ -2512,11 +2512,11 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven fixed 9-byte msg)\n", svc_num );
 				return;
-			case 148: case 149:          // VoiceMask (Sven 5.0 live server registers it at
-			                             // 149 on the wire, 148 in the server.dll sample; both
-			                             // are the 64-bit voice mask, wire-verified against
-			                             // buffer.dat: cmd 0x95 followed by 01 00 00 00 00
-			                             // 00 00 00 then svc_roomtype(37) + u16 room)
+			case 149:                    // VoiceMask (Sven 5.0 live server registers it at
+			                             // 149 on the wire; on 5.26 148 is ClExtrasInfo(-1),
+			                             // so only 149 keeps the 64-bit voice-mask layout:
+			                             // cmd 0x95 followed by 01 00 00 00 00 00 00 00
+			                             // then svc_roomtype(37) + u16 room)
 				MSG_ReadBytes( msg, pbuf, sizeof( pbuf ), 8 );
 				if( !MSG_CheckOverflow( msg ))
 					CL_DispatchUserMessage( "VoiceMask", 8, pbuf );
@@ -2535,6 +2535,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				return;
 			case 104:                    // EndVote (zero-size, no payload)
 				return;
+			case 134:                    // Concuss (live 5.26 registers 12, not ViewMode)
 			case 119: case 112:          // ShieldRic, GargSplash
 				for( int k = 0; k < 12; k++ )
 					MSG_ReadByte( msg );
@@ -2868,7 +2869,16 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 		S_StartBackgroundTrack( clgame.cdtracks[param1-1], clgame.cdtracks[param2-1], 0, false );
 		break;
 	case svc_restore:
-		CL_ParseRestore( msg );
+		if( proto == PROTO_GOLDSRC && cl_sven_proto )
+		{
+			// Sven svc_restore carries only the decal filename; hw.dll 0x1D2FA60
+			// reads a single MSG_ReadString (no mapCount byte / map list).
+			MSG_ReadString( msg );
+		}
+		else
+		{
+			CL_ParseRestore( msg );
+		}
 		break;
 	case svc_weaponanim:
 		param1 = MSG_ReadByte( msg );	// iAnim
@@ -2883,7 +2893,21 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 		CL_ParseAddAngle( msg );
 		break;
 	case svc_usermessage:
-		CL_RegisterUserMessage( msg, proto );
+		if( proto == PROTO_GOLDSRC && cl_sven_proto )
+		{
+			// Sven Co-op svc_newusermsg: [byte idx][byte size][16-byte message hash].
+			// Sven normally ships its usermsg table with client.dll and does not send
+			// registrations, but consume the native layout if one appears so the
+			// reliable stream stays aligned (hw.dll 0x1D2CA60: BYTE, BYTE, 4x LONG).
+			byte usermsg_hash[16];
+			MSG_ReadByte( msg );
+			MSG_ReadByte( msg );
+			MSG_ReadBytes( msg, usermsg_hash, sizeof( usermsg_hash ), sizeof( usermsg_hash ));
+		}
+		else
+		{
+			CL_RegisterUserMessage( msg, proto );
+		}
 		break;
 	case svc_choke:
 		cl.frames[cls.netchan.incoming_sequence & CL_UPDATE_MASK].choked = true;
@@ -2905,10 +2929,25 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 		CL_ParseFileTransferFailed( msg );
 		break;
 	case svc_hltv:
-		CL_ParseHLTV( msg );
+		if( proto == PROTO_GOLDSRC && cl_sven_proto )
+		{
+			// Sven svc_hltv has no payload (hw.dll 0x1D300F0: ret 0).
+		}
+		else
+		{
+			CL_ParseHLTV( msg );
+		}
 		break;
 	case svc_director:
-		CL_ParseDirector( msg );
+		if( proto == PROTO_GOLDSRC && cl_sven_proto )
+		{
+			// Sven svc_director carries a single byte (hw.dll 0x1D30100).
+			MSG_ReadByte( msg );
+		}
+		else
+		{
+			CL_ParseDirector( msg );
+		}
 		break;
 	case svc_voiceinit:
 		CL_ParseVoiceInit( msg );
