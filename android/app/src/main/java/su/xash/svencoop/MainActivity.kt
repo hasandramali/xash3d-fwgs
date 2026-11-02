@@ -254,9 +254,9 @@ class MainActivity : AppCompatActivity() {
 
         pendingUpdateCommit = null
         updateDialog = MaterialAlertDialogBuilder(this)
-            .setMessage(R.string.update_available_message)
+            .setMessage(R.string.app_update_available_message)
             .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.update_available_action) { _, _ ->
+            .setPositiveButton(R.string.app_update_action) { _, _ ->
                 startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
                     android.net.Uri.parse("https://github.com/hasandramali/xash3d-fwgs/releases/download/v1sc/svenclient-android.apk")))
             }
