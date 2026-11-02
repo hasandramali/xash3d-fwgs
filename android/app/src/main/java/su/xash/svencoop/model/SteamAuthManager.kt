@@ -77,7 +77,6 @@ class SteamAuthManager(private val ctx: Context) {
             "155.133.248.34" to 27017,
             "155.133.248.35" to 27017,
             "155.133.246.43" to 27017,
-            "ext1-sea1.steamserver.net" to 27017,
         )
 
         private const val PROTO_MASK = 0x80000000.toInt()
@@ -1346,28 +1345,34 @@ class SteamAuthManager(private val ctx: Context) {
                     prefs.edit()
                         .putString("last_cm_host", host)
                         .putInt("last_cm_port", port)
+                        .remove(cmFailureKey(host, port))
                         .apply()
                     Log.i(TAG, "connected to $host:$port")
                     return true
                 } catch (e: Exception) {
                     try { connectingSocket?.close() } catch (_: Exception) { }
-                    Log.w(TAG, "connect failed $host:$port: ${e.message}")
+                    if (cont.isActive) {
+                        prefs.edit().putLong(cmFailureKey(host, port), System.currentTimeMillis()).apply()
+                        Log.w(TAG, "connect failed $host:$port: ${e.message}")
+                    }
                     return false
                 }
             }
 
             val lastHost = prefs.getString("last_cm_host", null)
             val lastPort = prefs.getInt("last_cm_port", 0)
-            if (!lastHost.isNullOrBlank() && lastPort in 1..65535 && tryConnect(lastHost, lastPort)) {
+            if (!lastHost.isNullOrBlank() && lastPort in 1..65535 &&
+                !hasRecentCMFailure(lastHost, lastPort) && tryConnect(lastHost, lastPort)) {
                 cont.resume(Unit)
                 return@suspendCancellableCoroutine
             }
             if (!cont.isActive) return@suspendCancellableCoroutine
 
-            val servers = discoverCMServers() + CM_SERVERS
-            for ((host, port) in servers.distinct().take(12)) {
+            val servers = (discoverCMServers() + listOf("ext1-sea1.steamserver.net" to 27017) + CM_SERVERS)
+                .distinct()
+                .sortedBy { (host, port) -> hasRecentCMFailure(host, port) }
+            for ((host, port) in servers.take(12)) {
                 if (!cont.isActive) return@suspendCancellableCoroutine
-                if (host == lastHost && port == lastPort) continue
                 if (tryConnect(host, port)) {
                     cont.resume(Unit)
                     return@suspendCancellableCoroutine
@@ -1379,10 +1384,21 @@ class SteamAuthManager(private val ctx: Context) {
         }
     }
 
+    private fun cmFailureKey(host: String, port: Int) = "cm_connect_failed:$host:$port"
+
+    private fun hasRecentCMFailure(host: String, port: Int): Boolean {
+        val key = cmFailureKey(host, port)
+        val failedAt = prefs.getLong(key, 0L)
+        if (failedAt == 0L) return false
+        if (System.currentTimeMillis() - failedAt < TimeUnit.HOURS.toMillis(6)) return true
+        prefs.edit().remove(key).apply()
+        return false
+    }
+
     private fun discoverCMServers(): List<Pair<String, Int>> {
         var connection: HttpURLConnection? = null
         return try {
-            connection = URL("https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?cellid=0&maxcount=30")
+            connection = URL("https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?cellid=0&maxcount=100")
                 .openConnection() as HttpURLConnection
             connection.connectTimeout = 5_000
             connection.readTimeout = 5_000
@@ -1402,7 +1418,7 @@ class SteamAuthManager(private val ctx: Context) {
                     val port = endpoint.substring(separator + 1).toIntOrNull() ?: continue
                     if (host.isNotBlank() && port in 1..65535) add(host to port)
                 }
-            }.shuffled().also {
+            }.also {
                 Log.i(TAG, "Steam Directory returned ${it.size} TCP CM servers")
             }
         } catch (e: Exception) {
