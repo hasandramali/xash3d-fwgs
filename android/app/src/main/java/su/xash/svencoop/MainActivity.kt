@@ -25,7 +25,11 @@ import su.xash.svencoop.model.DownloadState
 import su.xash.svencoop.util.CrashReports
 import su.xash.svencoop.util.monospaceTextView
 import androidx.preference.PreferenceManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -35,6 +39,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var navController: NavController
     private var pendingMicrophoneLaunch: (() -> Unit)? = null
+    private var steamConnectDialog: AlertDialog? = null
+    private var steamErrorDialog: AlertDialog? = null
+    private var pendingUpdateCommit: String? = null
+    private var updateDialog: AlertDialog? = null
     private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val launch = pendingMicrophoneLaunch
         pendingMicrophoneLaunch = null
@@ -76,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPostResume() {
         super.onPostResume()
         refreshSteamLibraryPrompt()
+        showUpdatePromptIfReady()
     }
 
     override fun onDestroy() {
@@ -99,6 +108,10 @@ class MainActivity : AppCompatActivity() {
                 .setMessage(R.string.steam_library_notice)
                 .setCancelable(false)
                 .setPositiveButton(android.R.string.ok) { _, _ -> auth.acknowledgeSvenLibraryNotice(session) }
+                .setOnDismissListener {
+                    steamLibraryDialog = null
+                    showUpdatePromptIfReady()
+                }
                 .show()
 
         }
@@ -122,12 +135,16 @@ class MainActivity : AppCompatActivity() {
         val navHostFragment =
                 supportFragmentManager.findFragmentById(R.id.fragmentContainerView) as NavHostFragment
         navController = navHostFragment.navController
+        navController.addOnDestinationChangedListener { _, destination, _ ->
+            if (destination.id != R.id.steamAuthFragment) showUpdatePromptIfReady()
+        }
         appBarConfiguration = AppBarConfiguration(navController.graph)
         setupActionBarWithNavController(navController, appBarConfiguration)
 
         CrashReports.prune(this)
         showPendingCrashReport()
         maybeAutoConnectSteam()
+        checkForAppUpdate()
     }
 
     /**
@@ -147,6 +164,7 @@ class MainActivity : AppCompatActivity() {
             .setCancelable(false)
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+        steamConnectDialog = dialog
 
         var job: Job? = null
         job = lifecycleScope.launch {
@@ -158,6 +176,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (!dialog.isShowing) return@launch
                 dialog.dismiss()
+                steamConnectDialog = null
                 when (state) {
                     is SteamAuthManager.LoginState.Success -> auth.startBroker()
                     is SteamAuthManager.LoginState.Failed ->
@@ -166,8 +185,10 @@ class MainActivity : AppCompatActivity() {
                         showSteamConnectFailed(state.message)
                     else -> { /* guard states can't happen on stored login */ }
                 }
+                showUpdatePromptIfReady()
             } catch (e: Exception) {
                 if (dialog.isShowing) dialog.dismiss()
+                steamConnectDialog = null
                 if (e is kotlinx.coroutines.CancellationException) return@launch
                 showSteamConnectFailed(e.message ?: "unknown error")
             }
@@ -175,15 +196,78 @@ class MainActivity : AppCompatActivity() {
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setOnClickListener {
             job?.cancel()
             if (dialog.isShowing) dialog.dismiss()
+            steamConnectDialog = null
+            showUpdatePromptIfReady()
         }
     }
 
     private fun showSteamConnectFailed(message: String) {
-        MaterialAlertDialogBuilder(this)
+        steamErrorDialog = MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.steam_connect_failed, message))
             .setPositiveButton(R.string.steam_retry) { _, _ -> maybeAutoConnectSteam() }
             .setNegativeButton(android.R.string.ok, null)
-            .show()
+            .create().also { dialog ->
+                dialog.setOnDismissListener {
+                    steamErrorDialog = null
+                    showUpdatePromptIfReady()
+                }
+                dialog.show()
+            }
+    }
+
+    private fun checkForAppUpdate() {
+        lifecycleScope.launch {
+            val releaseCommit = withContext(Dispatchers.IO) {
+                var connection: HttpURLConnection? = null
+                try {
+                    connection = URL("https://api.github.com/repos/hasandramali/xash3d-fwgs/releases/tags/v1sc")
+                        .openConnection() as HttpURLConnection
+                    connection.connectTimeout = 5_000
+                    connection.readTimeout = 5_000
+                    connection.setRequestProperty("Accept", "application/vnd.github+json")
+                    connection.setRequestProperty("User-Agent", "SvenClient-Android")
+                    val release = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val body = release.optString("body")
+                    Regex("(?i)\\b[0-9a-f]{7,40}\\b")
+                        .find(body)?.value?.lowercase(Locale.ROOT)
+                } catch (_: Exception) {
+                    null
+                } finally {
+                    connection?.disconnect()
+                }
+            }
+            val installedCommit = BuildConfig.GIT_HASH.lowercase(Locale.ROOT)
+            if (releaseCommit != null && !installedCommit.startsWith(releaseCommit) &&
+                !releaseCommit.startsWith(installedCommit)) {
+                pendingUpdateCommit = releaseCommit
+                showUpdatePromptIfReady()
+            }
+        }
+    }
+
+    private fun showUpdatePromptIfReady() {
+        if (pendingUpdateCommit == null) return
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || isFinishing || isDestroyed ||
+            steamConnectDialog?.isShowing == true || steamErrorDialog?.isShowing == true ||
+            steamLibraryDialog?.isShowing == true || updateDialog?.isShowing == true ||
+            navController.currentDestination?.id == R.id.steamAuthFragment) return
+
+        pendingUpdateCommit = null
+        updateDialog = MaterialAlertDialogBuilder(this)
+            .setMessage(R.string.update_available_message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.update_available_action) { _, _ ->
+                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://github.com/hasandramali/xash3d-fwgs/releases/download/v1sc/svenclient-android.apk")))
+            }
+            .create()
+            .also { dialog ->
+                dialog.setOnDismissListener {
+                    updateDialog = null
+                    showUpdatePromptIfReady()
+                }
+                dialog.show()
+            }
     }
 
     fun getStoragePath(): String {

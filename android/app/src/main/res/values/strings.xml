@@ -163,6 +163,8 @@
     <string name="steam_broker_stopping">Stopping steam…</string>
     <string name="steam_broker_running">Ticket steam running on port %1$d</string>
     <string name="steam_library_title">Sven Co-op library access</string>
+    <string name="update_available_message">New version available. Please update the app.</string>
+    <string name="update_available_action">Update</string>
     <string name="steam_library_notice">Sven Co-op must be in your Steam library to play online. Please open Steam &amp; add Sven Co-op to your library for free, then restart SvenClient.</string>
     <string name="share_engine_log">Share engine.log</string>
     <string name="engine_log_not_found">engine.log was not found. Run the game with -log enabled, then try again.</string>

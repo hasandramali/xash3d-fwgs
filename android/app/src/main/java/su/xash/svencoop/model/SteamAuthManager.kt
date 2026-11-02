@@ -12,9 +12,11 @@ import android.os.SystemClock
 import java.io.OutputStream
 import java.math.BigInteger
 import java.net.InetAddress
+import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URL
 import java.security.KeyFactory
 import java.security.SecureRandom
 import java.security.spec.RSAPublicKeySpec
@@ -75,6 +77,7 @@ class SteamAuthManager(private val ctx: Context) {
             "155.133.248.34" to 27017,
             "155.133.248.35" to 27017,
             "155.133.246.43" to 27017,
+            "ext1-sea1.steamserver.net" to 27017,
         )
 
         private const val PROTO_MASK = 0x80000000.toInt()
@@ -1326,27 +1329,87 @@ class SteamAuthManager(private val ctx: Context) {
         currentSteamId = 0L
         currentSessionId = 0
         try {
-            for ((host, port) in CM_SERVERS) {
-                if (!cont.isActive) return@suspendCancellableCoroutine
+            fun tryConnect(host: String, port: Int): Boolean {
+                if (!cont.isActive) return false
                 try {
                     val sock = Socket()
                     connectingSocket = sock
-                    sock.connect(InetSocketAddress(host, port), 20_000)
+                    sock.connect(InetSocketAddress(host, port), 5_000)
+                    if (!cont.isActive) {
+                        sock.close()
+                        return false
+                    }
                     sock.soTimeout = 30_000
                     socket = sock
                     input = sock.getInputStream()
                     output = sock.getOutputStream()
+                    prefs.edit()
+                        .putString("last_cm_host", host)
+                        .putInt("last_cm_port", port)
+                        .apply()
                     Log.i(TAG, "connected to $host:$port")
-                    cont.resume(Unit)
-                    return@suspendCancellableCoroutine
+                    return true
                 } catch (e: Exception) {
                     try { connectingSocket?.close() } catch (_: Exception) { }
                     Log.w(TAG, "connect failed $host:$port: ${e.message}")
+                    return false
+                }
+            }
+
+            val lastHost = prefs.getString("last_cm_host", null)
+            val lastPort = prefs.getInt("last_cm_port", 0)
+            if (!lastHost.isNullOrBlank() && lastPort in 1..65535 && tryConnect(lastHost, lastPort)) {
+                cont.resume(Unit)
+                return@suspendCancellableCoroutine
+            }
+            if (!cont.isActive) return@suspendCancellableCoroutine
+
+            val servers = discoverCMServers() + CM_SERVERS
+            for ((host, port) in servers.distinct().take(12)) {
+                if (!cont.isActive) return@suspendCancellableCoroutine
+                if (host == lastHost && port == lastPort) continue
+                if (tryConnect(host, port)) {
+                    cont.resume(Unit)
+                    return@suspendCancellableCoroutine
                 }
             }
             cont.resumeWithException(IOException("No Steam CM server reachable"))
         } catch (e: Exception) {
             cont.resumeWithException(e)
+        }
+    }
+
+    private fun discoverCMServers(): List<Pair<String, Int>> {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = URL("https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?cellid=0&maxcount=30")
+                .openConnection() as HttpURLConnection
+            connection.connectTimeout = 5_000
+            connection.readTimeout = 5_000
+            connection.setRequestProperty("User-Agent", "SvenClient/1.0")
+            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val servers = org.json.JSONObject(response)
+                .getJSONObject("response")
+                .getJSONArray("serverlist")
+            buildList {
+                for (index in 0 until servers.length()) {
+                    val server = servers.getJSONObject(index)
+                    if (server.optString("type") != "netfilter") continue
+                    val endpoint = server.optString("endPoint", server.optString("endpoint"))
+                    val separator = endpoint.lastIndexOf(':')
+                    if (separator <= 0) continue
+                    val host = endpoint.substring(0, separator).trim('[', ']')
+                    val port = endpoint.substring(separator + 1).toIntOrNull() ?: continue
+                    if (host.isNotBlank() && port in 1..65535) add(host to port)
+                }
+            }.shuffled().also {
+                Log.i(TAG, "Steam Directory returned ${it.size} TCP CM servers")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Steam Directory lookup failed: ${e.message}")
+            emptyList()
+        } finally {
+            connection?.disconnect()
         }
     }
 
