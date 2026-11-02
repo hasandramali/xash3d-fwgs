@@ -91,6 +91,56 @@ static NSArray *CM_SERVERS() {
              @"155.133.248.34", @"155.133.248.35", @"155.133.246.43"];
 }
 
+static NSString *CMFailureKey(NSString *host, int port) {
+    return [NSString stringWithFormat:@"steam_cm_failed:%@:%d", host, port];
+}
+
+static BOOL CMHasRecentFailure(NSString *host, int port) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *key = CMFailureKey(host, port);
+    NSTimeInterval failedAt = [defaults doubleForKey:key];
+    if (failedAt <= 0) return NO;
+    NSTimeInterval age = NSDate.date.timeIntervalSince1970 - failedAt;
+    if (age >= 0 && age < 6 * 60 * 60) return YES;
+    [defaults removeObjectForKey:key];
+    return NO;
+}
+
+static NSArray<NSString *> *CMDirectoryServers() {
+    NSURL *url = [NSURL URLWithString:@"https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?cellid=0&maxcount=100"];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5.0];
+    [request setValue:@"SvenClient-iOS" forHTTPHeaderField:@"User-Agent"];
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    __block NSData *responseData = nil;
+    __block NSError *requestError = nil;
+    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *, NSError *error) {
+        responseData = data;
+        requestError = error;
+        dispatch_semaphore_signal(semaphore);
+    }];
+    [task resume];
+    if (dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
+        [task cancel];
+        return @[];
+    }
+    if (requestError || !responseData) return @[];
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
+    NSArray *records = [json[@"response"] isKindOfClass:NSDictionary.class] ? json[@"response"][@"serverlist"] : nil;
+    NSMutableArray<NSString *> *servers = [NSMutableArray array];
+    for (NSDictionary *record in records) {
+        if (![record isKindOfClass:NSDictionary.class] || ![record[@"type"] isEqual:@"netfilter"]) continue;
+        NSString *endpoint = record[@"endpoint"] ?: record[@"endPoint"];
+        if (![endpoint isKindOfClass:NSString.class]) continue;
+        NSRange separator = [endpoint rangeOfString:@":" options:NSBackwardsSearch];
+        if (separator.location == NSNotFound || separator.location == 0) continue;
+        NSString *host = [endpoint substringToIndex:separator.location];
+        NSInteger port = [[endpoint substringFromIndex:separator.location + 1] integerValue];
+        if (host.length && port > 0 && port <= 65535) [servers addObject:[NSString stringWithFormat:@"%@:%ld", host, (long)port]];
+    }
+    logToFile(@"Steam Directory returned %lu TCP CM servers", (unsigned long)servers.count);
+    return servers;
+}
+
 static NSDictionary *HARDCODED_MANIFEST_IDS() {
     return @{@225841: @7100405834093858048ULL,
              @276062: @2096207717681437861ULL};
@@ -528,40 +578,94 @@ static NSData *gzipDecompress(NSData *data) {
 }
 
 - (BOOL)connectWithError:(NSError **)error {
-    for (NSString *host in CM_SERVERS()) {
-        if (_closed) break;
-        sockaddr_in address = {}; address.sin_family = AF_INET; address.sin_port = htons(CM_PORT);
-        if (inet_pton(AF_INET, host.UTF8String, &address.sin_addr) != 1) continue;
-        int descriptor = socket(AF_INET, SOCK_STREAM, 0); if (descriptor < 0) continue;
-        int noSignal = 1; setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, sizeof(noSignal));
-        int flags = fcntl(descriptor, F_GETFL, 0);
-        if (flags < 0 || fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)) { close(descriptor); continue; }
-        _sock = descriptor;
-        int result = connect(descriptor, (sockaddr *)&address, sizeof(address));
-        if (result < 0 && errno == EINPROGRESS) {
-            uint64_t deadline = svensteam::milliseconds() + 12000;
-            while (!_closed && svensteam::milliseconds() < deadline) {
-                pollfd pending = {descriptor, POLLOUT, 0};
-                int polled = poll(&pending, 1, 100);
-                if (polled < 0 && errno == EINTR) continue;
-                if (polled > 0) {
-                    int socketError = 0; socklen_t length = sizeof(socketError);
-                    result = getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &socketError, &length) == 0 && socketError == 0 ? 0 : -1;
-                    break;
-                }
-                if (polled < 0) break;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *lastHost = [defaults stringForKey:@"steam_cm_last_host"];
+    NSInteger lastPort = [defaults integerForKey:@"steam_cm_last_port"];
+    BOOL (^tryEndpoint)(NSString *) = ^BOOL(NSString *endpoint) {
+        NSRange separator = [endpoint rangeOfString:@":" options:NSBackwardsSearch];
+        if (separator.location == NSNotFound || separator.location == 0 || _closed) return NO;
+        NSString *host = [endpoint substringToIndex:separator.location];
+        NSInteger port = [[endpoint substringFromIndex:separator.location + 1] integerValue];
+        if (port <= 0 || port > 65535) return NO;
+        addrinfo hints = {}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+        addrinfo *addresses = nullptr;
+        std::string service = std::to_string(port);
+        int resolveError = getaddrinfo(host.UTF8String, service.c_str(), &hints, &addresses);
+        if (resolveError || !addresses) {
+            if (!_closed) {
+                [defaults setDouble:NSDate.date.timeIntervalSince1970 forKey:CMFailureKey(host, (int)port)];
+                logToFile(@"Steam CM DNS failed %@:%ld (%s)", host, (long)port, gai_strerror(resolveError));
             }
+            return NO;
         }
-        if (!_closed && result == 0 && _sock == descriptor) {
-            if (fcntl(descriptor, F_SETFL, flags) == 0) {
+        BOOL connected = NO;
+        for (addrinfo *current = addresses; current && !_closed && !connected; current = current->ai_next) {
+            int descriptor = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+            if (descriptor < 0) continue;
+            int noSignal = 1; setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, sizeof(noSignal));
+            int flags = fcntl(descriptor, F_GETFL, 0);
+            if (flags < 0 || fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)) { close(descriptor); continue; }
+            _sock = descriptor;
+            int result = connect(descriptor, current->ai_addr, (socklen_t)current->ai_addrlen);
+            if (result < 0 && errno == EINPROGRESS) {
+                uint64_t deadline = svensteam::milliseconds() + 5000;
+                while (!_closed && _sock == descriptor && svensteam::milliseconds() < deadline) {
+                    pollfd pending = {descriptor, POLLOUT, 0};
+                    int polled = poll(&pending, 1, 100);
+                    if (polled < 0 && errno == EINTR) continue;
+                    if (polled > 0) {
+                        int socketError = 0; socklen_t length = sizeof(socketError);
+                        result = getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &socketError, &length) == 0 && socketError == 0 ? 0 : -1;
+                        break;
+                    }
+                    if (polled < 0) break;
+                }
+            }
+            if (!_closed && result == 0 && _sock == descriptor && fcntl(descriptor, F_SETFL, flags) == 0) {
                 timeval timeout = {15, 0};
                 setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
                 setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-                [self status:@"Connected to Steam"]; return YES;
+                [defaults setObject:host forKey:@"steam_cm_last_host"];
+                [defaults setInteger:port forKey:@"steam_cm_last_port"];
+                [defaults removeObjectForKey:CMFailureKey(host, (int)port)];
+                [self status:@"Connected to Steam"];
+                logToFile(@"Connected to Steam CM %@:%ld", host, (long)port);
+                connected = YES;
+            } else {
+                int expected = descriptor;
+                if (_sock.compare_exchange_strong(expected, -1)) close(descriptor);
+                if (!_closed) {
+                    [defaults setDouble:NSDate.date.timeIntervalSince1970 forKey:CMFailureKey(host, (int)port)];
+                    logToFile(@"Steam CM connect failed %@:%ld", host, (long)port);
+                }
             }
         }
-        int expected = descriptor;
-        if (_sock.compare_exchange_strong(expected, -1)) close(descriptor);
+        freeaddrinfo(addresses);
+        return connected;
+    };
+
+    NSString *lastEndpoint = lastHost.length && lastPort > 0 && lastPort <= 65535 ?
+        [NSString stringWithFormat:@"%@:%ld", lastHost, (long)lastPort] : nil;
+    if (lastEndpoint && !CMHasRecentFailure(lastHost, (int)lastPort) && tryEndpoint(lastEndpoint)) return YES;
+    if (_closed) return NO;
+    NSMutableArray<NSString *> *endpoints = [NSMutableArray arrayWithArray:CMDirectoryServers()];
+    [endpoints addObject:@"ext1-sea1.steamserver.net:27017"];
+    for (NSString *host in CM_SERVERS()) [endpoints addObject:[host stringByAppendingFormat:@":%d", CM_PORT]];
+    NSMutableArray<NSString *> *available = [NSMutableArray array];
+    NSMutableArray<NSString *> *recentlyFailed = [NSMutableArray array];
+    for (NSString *endpoint in [[NSOrderedSet orderedSetWithArray:endpoints] array]) {
+        if ([endpoint isEqualToString:lastEndpoint]) continue;
+        NSRange separator = [endpoint rangeOfString:@":" options:NSBackwardsSearch];
+        if (separator.location == NSNotFound || separator.location == 0) continue;
+        NSString *host = [endpoint substringToIndex:separator.location];
+        NSInteger port = [[endpoint substringFromIndex:separator.location + 1] integerValue];
+        if (CMHasRecentFailure(host, (int)port)) [recentlyFailed addObject:endpoint];
+        else [available addObject:endpoint];
+    }
+    [available addObjectsFromArray:recentlyFailed];
+    NSUInteger attemptCount = MIN((NSUInteger)12, available.count);
+    for (NSUInteger index = 0; index < attemptCount && !_closed; index++) {
+        if (tryEndpoint(available[index])) return YES;
     }
     if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:_closed ? @"Steam connection cancelled" : @"No Steam connection server is reachable. Check your connection and try again."}];
     return NO;
