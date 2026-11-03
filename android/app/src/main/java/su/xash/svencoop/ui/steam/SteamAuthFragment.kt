@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
@@ -17,6 +18,7 @@ import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -41,6 +43,7 @@ class SteamAuthFragment : Fragment() {
     private lateinit var logoutButton: MaterialButton
     private lateinit var brokerButton: MaterialButton
     private lateinit var autoConnectSwitch: SwitchMaterial
+    private lateinit var cmServerButton: MaterialButton
 
     private var pendingEmailCode = false
     private var pendingTwoFactor = false
@@ -70,6 +73,7 @@ class SteamAuthFragment : Fragment() {
         logoutButton = view.findViewById(R.id.logoutButton)
         brokerButton = view.findViewById(R.id.brokerButton)
         autoConnectSwitch = view.findViewById(R.id.autoConnectSwitch)
+        cmServerButton = view.findViewById(R.id.cmServerButton)
 
         usernameInput.setText(auth.currentUsername)
 
@@ -92,6 +96,43 @@ class SteamAuthFragment : Fragment() {
                 .show()
         }
         brokerButton.setOnClickListener { toggleBroker() }
+        cmServerButton.setOnClickListener {
+            cmServerButton.isEnabled = false
+            cmServerButton.setText(R.string.steam_cm_loading)
+            viewLifecycleOwner.lifecycleScope.launch {
+                try {
+                    val choices = auth.getCMServerChoices()
+                    if (!isAdded) return@launch
+                    val selectedEndpoint = auth.preferredCMServer
+                    val selectedIndex = choices.indexOfFirst {
+                        if (it.isDefault) selectedEndpoint == null else it.endpoint == selectedEndpoint
+                    }.coerceAtLeast(0)
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(R.string.steam_cm_dialog_title)
+                        .setMessage(R.string.steam_cm_dialog_message)
+                        .setSingleChoiceItems(choices.map { it.title }.toTypedArray(), selectedIndex) { dialog, index ->
+                            auth.setPreferredCMServer(choices[index])
+                            Toast.makeText(
+                                requireContext(),
+                                if (choices[index].isDefault) R.string.steam_cm_default_selected else R.string.steam_cm_server_selected,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    if (isAdded) Toast.makeText(requireContext(), R.string.steam_cm_list_failed, Toast.LENGTH_LONG).show()
+                } finally {
+                    if (isAdded && view != null) {
+                        cmServerButton.setText(R.string.steam_cm_change_button)
+                        cmServerButton.isEnabled = true
+                    }
+                }
+            }
+        }
 
         val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
         autoConnectSwitch.isChecked = prefs.getBoolean(SteamAuthManager.PREF_AUTO_CONNECT, true)

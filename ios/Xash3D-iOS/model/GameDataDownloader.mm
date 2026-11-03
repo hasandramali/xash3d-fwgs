@@ -107,7 +107,7 @@ static BOOL CMHasRecentFailure(NSString *host, int port) {
 }
 
 static NSArray<NSString *> *CMDirectoryServers() {
-    NSURL *url = [NSURL URLWithString:@"https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?cellid=0&maxcount=100"];
+    NSURL *url = [NSURL URLWithString:@"https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?maxcount=100"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5.0];
     [request setValue:@"SvenClient-iOS" forHTTPHeaderField:@"User-Agent"];
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);

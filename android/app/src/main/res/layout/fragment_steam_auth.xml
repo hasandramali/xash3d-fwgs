@@ -116,6 +116,14 @@
 				android:layout_marginTop="16dp"
 				android:text="@string/steam_auto_connect" />
 
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/cmServerButton"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="8dp"
+				android:text="@string/steam_cm_change_button"
+				style="@style/Widget.Material3.Button.OutlinedButton" />
+
 		</LinearLayout>
 	</ScrollView>
 

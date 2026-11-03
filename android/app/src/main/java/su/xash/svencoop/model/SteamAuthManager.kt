@@ -172,6 +172,51 @@ class SteamAuthManager(private val ctx: Context) {
         data class Error(val message: String) : LoginState()
     }
 
+    data class CMServerChoice(val title: String, val host: String?, val port: Int?, val isDefault: Boolean = false) {
+        val endpoint: String? get() = if (host != null && port != null) "$host:$port" else null
+    }
+
+    val preferredCMServer: String?
+        get() {
+            val host = prefs.getString("preferred_cm_host", null) ?: return null
+            val port = prefs.getInt("preferred_cm_port", 0)
+            return if (port in 1..65535) "$host:$port" else null
+        }
+
+    fun setPreferredCMServer(choice: CMServerChoice) {
+        val editor = prefs.edit()
+        if (choice.isDefault || choice.host.isNullOrBlank() || choice.port == null || choice.port !in 1..65535) {
+            editor.remove("preferred_cm_host").remove("preferred_cm_port")
+        } else {
+            editor.putString("preferred_cm_host", choice.host).putInt("preferred_cm_port", choice.port!!)
+        }
+        editor.apply()
+    }
+
+    suspend fun getCMServerChoices(): List<CMServerChoice> = withContext(Dispatchers.IO) {
+        val servers = orderedCMServers().toMutableList()
+        val preferredHost = prefs.getString("preferred_cm_host", null)
+        val preferredPort = prefs.getInt("preferred_cm_port", 0)
+        if (!preferredHost.isNullOrBlank() && preferredPort in 1..65535 &&
+            (preferredHost to preferredPort) !in servers) {
+            servers.add(0, preferredHost to preferredPort)
+        }
+        val lastHost = prefs.getString("last_cm_host", null)
+        val lastPort = prefs.getInt("last_cm_port", 0)
+        val defaultServer = if (!lastHost.isNullOrBlank() && lastPort in 1..65535 && !hasRecentCMFailure(lastHost, lastPort)) {
+            lastHost to lastPort
+        } else {
+            servers.firstOrNull { (host, port) -> !hasRecentCMFailure(host, port) }
+                ?: ("ext1-sea1.steamserver.net" to 27017)
+        }
+        buildList {
+            add(CMServerChoice("Default — ${defaultServer.first}:${defaultServer.second}", null, null, true))
+            servers.filter { it != defaultServer }.forEach { (host, port) ->
+                add(CMServerChoice("$host:$port", host, port))
+            }
+        }
+    }
+
     private class SteamMsg(val emsg: Int, val body: ByteArray, val header: ByteArray = ByteArray(0))
 
     // A decoded packet with the (already stripped) proto header kept for job correlation.
@@ -1359,20 +1404,28 @@ class SteamAuthManager(private val ctx: Context) {
                 }
             }
 
+            val preferredHost = prefs.getString("preferred_cm_host", null)
+            val preferredPort = prefs.getInt("preferred_cm_port", 0)
+            if (!preferredHost.isNullOrBlank() && preferredPort in 1..65535 &&
+                !hasRecentCMFailure(preferredHost, preferredPort) && tryConnect(preferredHost, preferredPort)) {
+                cont.resume(Unit)
+                return@suspendCancellableCoroutine
+            }
+            if (!cont.isActive) return@suspendCancellableCoroutine
+
             val lastHost = prefs.getString("last_cm_host", null)
             val lastPort = prefs.getInt("last_cm_port", 0)
-            if (!lastHost.isNullOrBlank() && lastPort in 1..65535 &&
+            if (lastHost != preferredHost && !lastHost.isNullOrBlank() && lastPort in 1..65535 &&
                 !hasRecentCMFailure(lastHost, lastPort) && tryConnect(lastHost, lastPort)) {
                 cont.resume(Unit)
                 return@suspendCancellableCoroutine
             }
             if (!cont.isActive) return@suspendCancellableCoroutine
 
-            val servers = (discoverCMServers() + listOf("ext1-sea1.steamserver.net" to 27017) + CM_SERVERS)
-                .distinct()
-                .sortedBy { (host, port) -> hasRecentCMFailure(host, port) }
+            val servers = orderedCMServers()
             for ((host, port) in servers.take(12)) {
                 if (!cont.isActive) return@suspendCancellableCoroutine
+                if ((host == preferredHost && port == preferredPort) || (host == lastHost && port == lastPort)) continue
                 if (tryConnect(host, port)) {
                     cont.resume(Unit)
                     return@suspendCancellableCoroutine
@@ -1386,6 +1439,11 @@ class SteamAuthManager(private val ctx: Context) {
 
     private fun cmFailureKey(host: String, port: Int) = "cm_connect_failed:$host:$port"
 
+    private fun orderedCMServers(): List<Pair<String, Int>> =
+        (discoverCMServers() + listOf("ext1-sea1.steamserver.net" to 27017) + CM_SERVERS)
+            .distinct()
+            .sortedBy { (host, port) -> hasRecentCMFailure(host, port) }
+
     private fun hasRecentCMFailure(host: String, port: Int): Boolean {
         val key = cmFailureKey(host, port)
         val failedAt = prefs.getLong(key, 0L)
@@ -1398,7 +1456,7 @@ class SteamAuthManager(private val ctx: Context) {
     private fun discoverCMServers(): List<Pair<String, Int>> {
         var connection: HttpURLConnection? = null
         return try {
-            connection = URL("https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?cellid=0&maxcount=100")
+            connection = URL("https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?maxcount=100")
                 .openConnection() as HttpURLConnection
             connection.connectTimeout = 5_000
             connection.readTimeout = 5_000
