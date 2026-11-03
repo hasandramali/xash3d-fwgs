@@ -544,44 +544,46 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
         private var currentSessionId: Int = 0
         private var currentSteamId: Long = ANON_STEAM_ID
 
-        suspend fun connect() = suspendCancellableCoroutine<Unit> { cont ->
-            try {
-                val auth = SteamAuthManager.get(ctx)
-                val choices = auth.getCMServerChoices()
-                val discovered = choices.mapNotNull { choice ->
-                    val endpoint = if (choice.isDefault) choice.title.substringAfter("Default: ", "") else choice.endpoint
-                    if (endpoint.isNullOrBlank()) return@mapNotNull null
-                    val separator = endpoint.lastIndexOf(':')
-                    if (separator <= 0) return@mapNotNull null
-                    val port = endpoint.substring(separator + 1).toIntOrNull() ?: return@mapNotNull null
-                    if (port !in 1..65535) null else endpoint.substring(0, separator) to port
-                }
-                val preferred = auth.preferredCMServer?.let { endpoint ->
-                    val separator = endpoint.lastIndexOf(':')
-                    val port = if (separator > 0) endpoint.substring(separator + 1).toIntOrNull() else null
-                    if (separator > 0 && port != null && port in 1..65535) endpoint.substring(0, separator) to port else null
-                }
-                val candidates = (listOfNotNull(preferred) + discovered + CM_SERVERS).distinct()
-                for ((host, port) in candidates) {
-                    try {
-                        Log.d("SteamCM", "Connecting to $host:$port...")
-                        val sock = Socket()
-                        sock.connect(InetSocketAddress(host, port), 10000)
-                        sock.soTimeout = 5000
-                        socket = sock
-                        input = sock.getInputStream()
-                        output = sock.getOutputStream()
-                        Log.d("SteamCM", "Connected to $host:$port!")
-                        onStatus("Connected to Steam")
-                        cont.resume(Unit)
-                        return@suspendCancellableCoroutine
-                    } catch (e: Exception) {
-                        Log.d("SteamCM", "Failed $host:$port: ${e.message}")
+        suspend fun connect() {
+            val auth = SteamAuthManager.get(ctx)
+            val choices = auth.getCMServerChoices()
+            val discovered = choices.mapNotNull { choice ->
+                val endpoint = if (choice.isDefault) choice.title.substringAfter("Default: ", "") else choice.endpoint
+                if (endpoint.isNullOrBlank()) return@mapNotNull null
+                val separator = endpoint.lastIndexOf(':')
+                if (separator <= 0) return@mapNotNull null
+                val port = endpoint.substring(separator + 1).toIntOrNull() ?: return@mapNotNull null
+                if (port !in 1..65535) null else endpoint.substring(0, separator) to port
+            }
+            val preferred = auth.preferredCMServer?.let { endpoint ->
+                val separator = endpoint.lastIndexOf(':')
+                val port = if (separator > 0) endpoint.substring(separator + 1).toIntOrNull() else null
+                if (separator > 0 && port != null && port in 1..65535) endpoint.substring(0, separator) to port else null
+            }
+            val candidates = (listOfNotNull(preferred) + discovered + CM_SERVERS).distinct()
+            suspendCancellableCoroutine<Unit> { cont ->
+                try {
+                    for ((host, port) in candidates) {
+                        try {
+                            Log.d("SteamCM", "Connecting to $host:$port...")
+                            val sock = Socket()
+                            sock.connect(InetSocketAddress(host, port), 10000)
+                            sock.soTimeout = 5000
+                            socket = sock
+                            input = sock.getInputStream()
+                            output = sock.getOutputStream()
+                            Log.d("SteamCM", "Connected to $host:$port!")
+                            onStatus("Connected to Steam")
+                            cont.resume(Unit)
+                            return@suspendCancellableCoroutine
+                        } catch (e: Exception) {
+                            Log.d("SteamCM", "Failed $host:$port: ${e.message}")
+                        }
                     }
+                    cont.resumeWithException(Exception("[connect] No Steam CM server reachable, try change SteamCM mirror"))
+                } catch (e: Exception) {
+                    cont.resumeWithException(e)
                 }
-                cont.resumeWithException(Exception("[connect] No Steam CM server reachable, try change SteamCM mirror"))
-            } catch (e: Exception) {
-                cont.resumeWithException(e)
             }
         }
 

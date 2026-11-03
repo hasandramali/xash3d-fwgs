@@ -122,7 +122,8 @@ class SteamAuthFragment : Fragment() {
                                     ?: LayoutInflater.from(context).inflate(android.R.layout.simple_list_item_1, parent, false) as TextView
                                 val choice = getItem(position)!!
                                 row.text = choice.title
-                                row.setTextColor(if (choice.isSelected) Color.rgb(144, 238, 144) else primaryTextColors)
+                                if (choice.isSelected) row.setTextColor(Color.rgb(144, 238, 144))
+                                else row.setTextColor(primaryTextColors)
                                 return row
                             }
                         }
