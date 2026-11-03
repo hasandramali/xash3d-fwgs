@@ -5,7 +5,9 @@ import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.EditText
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
@@ -103,20 +105,36 @@ class SteamAuthFragment : Fragment() {
                 try {
                     val choices = auth.getCMServerChoices()
                     if (!isAdded) return@launch
-                    MaterialAlertDialogBuilder(requireContext())
+                    val listView = ListView(requireContext()).apply {
+                        adapter = ArrayAdapter(
+                            requireContext(),
+                            android.R.layout.simple_list_item_1,
+                            choices.map { it.title }
+                        )
+                        isVerticalScrollBarEnabled = true
+                        dividerHeight = (resources.displayMetrics.density).toInt().coerceAtLeast(1)
+                    }
+                    val rowHeight = (48 * resources.displayMetrics.density).toInt()
+                    val maxListHeight = (resources.displayMetrics.heightPixels * 0.6f).toInt()
+                    listView.layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        (choices.size * rowHeight).coerceAtMost(maxListHeight)
+                    )
+                    val dialog = MaterialAlertDialogBuilder(requireContext())
                         .setTitle(R.string.steam_cm_dialog_title)
-                        .setMessage(R.string.steam_cm_dialog_message)
-                        .setItems(choices.map { it.title }.toTypedArray()) { dialog, index ->
-                            auth.setPreferredCMServer(choices[index])
-                            Toast.makeText(
-                                requireContext(),
-                                if (choices[index].isDefault) R.string.steam_cm_default_selected else R.string.steam_cm_server_selected,
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            dialog.dismiss()
-                        }
+                        .setView(listView)
                         .setNegativeButton(android.R.string.cancel, null)
-                        .show()
+                        .create()
+                    listView.setOnItemClickListener { _, _, index, _ ->
+                        auth.setPreferredCMServer(choices[index])
+                        Toast.makeText(
+                            requireContext(),
+                            if (choices[index].isDefault) R.string.steam_cm_default_selected else R.string.steam_cm_server_selected,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        dialog.dismiss()
+                    }
+                    dialog.show()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
