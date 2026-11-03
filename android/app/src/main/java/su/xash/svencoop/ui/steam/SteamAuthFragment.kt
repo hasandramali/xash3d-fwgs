@@ -103,14 +103,10 @@ class SteamAuthFragment : Fragment() {
                 try {
                     val choices = auth.getCMServerChoices()
                     if (!isAdded) return@launch
-                    val selectedEndpoint = auth.preferredCMServer
-                    val selectedIndex = choices.indexOfFirst {
-                        if (it.isDefault) selectedEndpoint == null else it.endpoint == selectedEndpoint
-                    }.coerceAtLeast(0)
                     MaterialAlertDialogBuilder(requireContext())
                         .setTitle(R.string.steam_cm_dialog_title)
                         .setMessage(R.string.steam_cm_dialog_message)
-                        .setSingleChoiceItems(choices.map { it.title }.toTypedArray(), selectedIndex) { dialog, index ->
+                        .setItems(choices.map { it.title }.toTypedArray()) { dialog, index ->
                             auth.setPreferredCMServer(choices[index])
                             Toast.makeText(
                                 requireContext(),
