@@ -2415,6 +2415,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 {
 	byte	pbuf[MAX_USERMSG_LENGTH];
 	int	i, iSize;
+	qboolean variableSize;
 
 	// NOTE: any user message is really parse at engine, not in client.dll
 	// TEMP-TRACE: print entry and constants so we know exactly which branch fires.
@@ -2656,24 +2657,28 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	}
 
 	iSize = clgame.msg[i].size;
+	variableSize = ( iSize == -1 );
 
 	// message with variable sizes receive an actual size as first byte:
 	// Sven Co-op writes variable-size user messages with a 16-bit size
 	// prefix (wire-verified: svc122 "ServerName" == [u16 len]["Sven Co-op
 	// 5.0 server\0"], and the following svc147 == [u16 len][payload]).
 	// Munge locked off: always the 16-bit form.
-	if( iSize == -1 )
+	if( variableSize )
 		iSize = MSG_ReadWord( msg );
 
 	if( MSG_CheckOverflow( msg ) || iSize < 0 || iSize >= MAX_USERMSG_LENGTH
 		|| iSize > ( MSG_GetNumBitsLeft( msg ) >> 3 ))
 	{
-		if( !Q_strcmp( clgame.msg[i].name, "RampSprite" ) ||
-			!Q_strcmp( clgame.msg[i].name, "TracerDecal" ) ||
-			!Q_strcmp( clgame.msg[i].name, "ToxicCloud" ))
+		if( variableSize )
 		{
-			Con_Printf( S_WARN "%s: malformed visual message %s size %d; dropping remainder of packet\n",
-				__func__, clgame.msg[i].name, iSize );
+			static double nextMalformedUserMsgWarning;
+			if( host.realtime >= nextMalformedUserMsgWarning )
+			{
+				Con_Printf( S_WARN "%s: malformed variable user message %s size %d; dropping remainder of packet\n",
+					__func__, clgame.msg[i].name, iSize );
+				nextMalformedUserMsgWarning = host.realtime + 1.0;
+			}
 			MSG_SeekToBit( msg, 0, SEEK_END );
 			return;
 		}
