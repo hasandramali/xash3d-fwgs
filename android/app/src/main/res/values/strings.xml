@@ -157,9 +157,9 @@
     <string name="steam_device_confirm_cancelled">Approval wait cancelled.</string>
     <string name="steam_waiting_elapsed">Waiting %1$s</string>
     <string name="steam_auto_connect">Auto-connect on app start</string>
-    <string name="steam_cm_change_button">Change Steam CM server</string>
+    <string name="steam_cm_change_button">Change SteamCM server</string>
     <string name="steam_cm_loading">Loading Steam CM servers…</string>
-    <string name="steam_cm_dialog_title">Change Steam CM server</string>
+    <string name="steam_cm_dialog_title">Change SteamCM server</string>
     <string name="steam_cm_dialog_message">The selected server will be used for the next Steam connection.</string>
     <string name="steam_cm_default_selected">Steam CM server selection reset to Default.</string>
     <string name="steam_cm_server_selected">Steam CM server selected for the next connection.</string>

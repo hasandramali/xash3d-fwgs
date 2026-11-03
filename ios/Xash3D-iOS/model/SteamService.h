@@ -18,6 +18,8 @@ FOUNDATION_EXPORT NSNotificationName const SvenSteamStateChanged;
 - (void)submitCode:(NSString *)code;
 - (void)restoreSession;
 - (void)acknowledgeSvenLibraryNotice:(NSUInteger)session;
+- (NSArray<NSDictionary *> *)cmServerChoices;
+- (void)setPreferredCMServer:(NSString *)endpoint;
 - (void)cancelLogin;
 - (void)logout;
 - (void)startBroker;

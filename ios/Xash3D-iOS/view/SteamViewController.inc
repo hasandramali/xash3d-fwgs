@@ -42,11 +42,43 @@ static void SvenPresentLibraryPrompt(UIViewController *controller) {
 @property (nonatomic, strong) GameDataDownloader *downloader;
 @end
 
+@interface SteamCMServerListController : UITableViewController
+@property (nonatomic, copy) NSArray<NSDictionary *> *choices;
+@end
+
+@implementation SteamCMServerListController
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Change SteamCM server";
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 52;
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.choices.count; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    static NSString *identifier = @"SteamCMServer";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
+    NSDictionary *choice = self.choices[indexPath.row];
+    NSString *title = choice[@"title"] ?: @"";
+    BOOL selected = [choice[@"selected"] boolValue];
+    cell.textLabel.text = selected ? [@"√ " stringByAppendingString:title] : title;
+    cell.textLabel.numberOfLines = 0;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *choice = self.choices[indexPath.row];
+    NSString *endpoint = choice[@"endpoint"];
+    [SteamService.shared setPreferredCMServer:endpoint.length ? endpoint : nil];
+    [self.navigationController popViewControllerAnimated:YES];
+}
+@end
+
 @implementation SteamViewController {
     UITextField *_username, *_password, *_code;
     UILabel *_statusLabel, *_warning, *_installStatus;
     UIActivityIndicatorView *_activity;
-    UIButton *_login, *_reconnect, *_cancel, *_logout, *_broker, *_install, *_cancelInstall;
+    UIButton *_login, *_reconnect, *_cancel, *_logout, *_broker, *_install, *_cancelInstall, *_cmServerButton;
     UISwitch *_autoConnect;
     UIProgressView *_progress;
 }
@@ -104,6 +136,7 @@ static void SvenPresentLibraryPrompt(UIViewController *controller) {
     _autoConnect = [[UISwitch alloc] init]; _autoConnect.on = SteamService.shared.autoConnect;
     [_autoConnect addTarget:self action:@selector(autoChanged) forControlEvents:UIControlEventValueChanged];
     [autoRow addArrangedSubview:autoLabel]; [autoRow addArrangedSubview:_autoConnect]; [stack addArrangedSubview:autoRow];
+    _cmServerButton = [self button:@"Change SteamCM server" action:@selector(changeCMServer)]; [stack addArrangedSubview:_cmServerButton];
     UILabel *privacy = [[UILabel alloc] init]; privacy.numberOfLines = 0; privacy.textColor = UIColor.secondaryLabelColor;
     privacy.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     privacy.text = @"Your password is sent encrypted to Steam and is never saved. Your saved session stays in this device’s Keychain."; [stack addArrangedSubview:privacy];
@@ -159,6 +192,21 @@ static void SvenPresentLibraryPrompt(UIViewController *controller) {
 - (void)cancelSignIn { [SteamService.shared cancelLogin]; }
 - (void)reconnect { [SteamService.shared restoreSession]; }
 - (void)autoChanged { SteamService.shared.autoConnect = _autoConnect.on; }
+- (void)changeCMServer {
+    _cmServerButton.enabled = NO;
+    __weak SteamViewController *weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSArray<NSDictionary *> *choices = SteamService.shared.cmServerChoices;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            SteamViewController *strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf->_cmServerButton.enabled = YES;
+            SteamCMServerListController *list = [[SteamCMServerListController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+            list.choices = choices;
+            [strongSelf.navigationController pushViewController:list animated:YES];
+        });
+    });
+}
 - (void)toggleBroker { if (SteamService.shared.brokerRunning) [SteamService.shared stopBroker]; else [SteamService.shared startBroker]; }
 - (void)logoutTapped {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Log out?" message:@"Your saved Steam session will be removed from this device." preferredStyle:UIAlertControllerStyleAlert];

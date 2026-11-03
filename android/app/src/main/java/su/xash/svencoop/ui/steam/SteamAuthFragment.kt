@@ -2,6 +2,9 @@ package su.xash.svencoop.ui.steam
 
 import android.os.Bundle
 import android.os.SystemClock
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -105,12 +108,24 @@ class SteamAuthFragment : Fragment() {
                 try {
                     val choices = auth.getCMServerChoices()
                     if (!isAdded) return@launch
+                    val primaryTextColors = requireContext().obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary)).let { attributes ->
+                        val colors = attributes.getColorStateList(0)
+                        attributes.recycle()
+                        colors ?: ColorStateList.valueOf(Color.DKGRAY)
+                    }
                     val listView = ListView(requireContext()).apply {
-                        adapter = ArrayAdapter(
-                            requireContext(),
-                            android.R.layout.simple_list_item_1,
-                            choices.map { it.title }
-                        )
+                        adapter = object : ArrayAdapter<SteamAuthManager.CMServerChoice>(
+                            requireContext(), android.R.layout.simple_list_item_1, choices
+                        ) {
+                            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                                val row = (convertView as? TextView)
+                                    ?: LayoutInflater.from(context).inflate(android.R.layout.simple_list_item_1, parent, false) as TextView
+                                val choice = getItem(position)!!
+                                row.text = choice.title
+                                row.setTextColor(if (choice.isSelected) Color.rgb(144, 238, 144) else primaryTextColors)
+                                return row
+                            }
+                        }
                         isVerticalScrollBarEnabled = true
                         dividerHeight = (resources.displayMetrics.density).toInt().coerceAtLeast(1)
                     }
@@ -120,18 +135,24 @@ class SteamAuthFragment : Fragment() {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         (choices.size * rowHeight).coerceAtMost(maxListHeight)
                     )
+                    val titleView = TextView(requireContext()).apply {
+                        setText(R.string.steam_cm_dialog_title)
+                        setTextSize(20f)
+                        setTypeface(typeface, Typeface.BOLD)
+                        val attributes = requireContext().obtainStyledAttributes(intArrayOf(android.R.attr.textColorPrimary))
+                        setTextColor(attributes.getColor(0, Color.DKGRAY))
+                        attributes.recycle()
+                        val horizontal = (24 * resources.displayMetrics.density).toInt()
+                        setPadding(horizontal, horizontal, horizontal, (20 * resources.displayMetrics.density).toInt())
+                    }
                     val dialog = MaterialAlertDialogBuilder(requireContext())
-                        .setTitle(R.string.steam_cm_dialog_title)
+                        .setCustomTitle(titleView)
                         .setView(listView)
                         .setNegativeButton(android.R.string.cancel, null)
                         .create()
                     listView.setOnItemClickListener { _, _, index, _ ->
                         auth.setPreferredCMServer(choices[index])
-                        Toast.makeText(
-                            requireContext(),
-                            if (choices[index].isDefault) R.string.steam_cm_default_selected else R.string.steam_cm_server_selected,
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(requireContext(), if (choices[index].isDefault) R.string.steam_cm_default_selected else R.string.steam_cm_server_selected, Toast.LENGTH_SHORT).show()
                         dialog.dismiss()
                     }
                     dialog.show()

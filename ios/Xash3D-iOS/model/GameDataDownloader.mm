@@ -106,6 +106,14 @@ static BOOL CMHasRecentFailure(NSString *host, int port) {
     return NO;
 }
 
+static BOOL CMEndpointHasRecentFailure(NSString *endpoint) {
+    NSRange separator = [endpoint rangeOfString:@":" options:NSBackwardsSearch];
+    if (separator.location == NSNotFound || separator.location == 0) return NO;
+    NSString *host = [endpoint substringToIndex:separator.location];
+    int port = [[endpoint substringFromIndex:separator.location + 1] intValue];
+    return port <= 0 || port > 65535 || CMHasRecentFailure(host, port);
+}
+
 static NSArray<NSString *> *CMDirectoryServers() {
     NSURL *url = [NSURL URLWithString:@"https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?maxcount=100"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5.0];
@@ -139,6 +147,22 @@ static NSArray<NSString *> *CMDirectoryServers() {
     }
     logToFile(@"Steam Directory returned %lu TCP CM servers", (unsigned long)servers.count);
     return servers;
+}
+
+static NSString *CMDefaultEndpoint() {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *endpoint = [defaults stringForKey:@"steam_cm_default_endpoint"];
+    if (endpoint.length) return endpoint;
+    NSString *lastHost = [defaults stringForKey:@"steam_cm_last_host"];
+    NSInteger lastPort = [defaults integerForKey:@"steam_cm_last_port"];
+    BOOL hasManualServer = [defaults stringForKey:@"steam_cm_preferred_endpoint"].length > 0;
+    if (!hasManualServer && lastHost.length && lastPort > 0 && lastPort <= 65535) {
+        endpoint = [NSString stringWithFormat:@"%@:%ld", lastHost, (long)lastPort];
+    } else {
+        endpoint = CMDirectoryServers().firstObject ?: @"ext1-sea1.steamserver.net:27017";
+    }
+    [defaults setObject:endpoint forKey:@"steam_cm_default_endpoint"];
+    return endpoint;
 }
 
 static NSDictionary *HARDCODED_MANIFEST_IDS() {
@@ -579,6 +603,8 @@ static NSData *gzipDecompress(NSData *data) {
 
 - (BOOL)connectWithError:(NSError **)error {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *preferredEndpoint = [defaults stringForKey:@"steam_cm_preferred_endpoint"];
+    NSString *defaultEndpoint = CMDefaultEndpoint();
     NSString *lastHost = [defaults stringForKey:@"steam_cm_last_host"];
     NSInteger lastPort = [defaults integerForKey:@"steam_cm_last_port"];
     BOOL (^tryEndpoint)(NSString *) = ^BOOL(NSString *endpoint) {
@@ -646,6 +672,10 @@ static NSData *gzipDecompress(NSData *data) {
 
     NSString *lastEndpoint = lastHost.length && lastPort > 0 && lastPort <= 65535 ?
         [NSString stringWithFormat:@"%@:%ld", lastHost, (long)lastPort] : nil;
+    if (preferredEndpoint.length && tryEndpoint(preferredEndpoint)) return YES;
+    if (_closed) return NO;
+    if (!preferredEndpoint.length && !CMEndpointHasRecentFailure(defaultEndpoint) && tryEndpoint(defaultEndpoint)) return YES;
+    if (_closed) return NO;
     if (lastEndpoint && !CMHasRecentFailure(lastHost, (int)lastPort) && tryEndpoint(lastEndpoint)) return YES;
     if (_closed) return NO;
     NSMutableArray<NSString *> *endpoints = [NSMutableArray arrayWithArray:CMDirectoryServers()];
@@ -654,7 +684,7 @@ static NSData *gzipDecompress(NSData *data) {
     NSMutableArray<NSString *> *available = [NSMutableArray array];
     NSMutableArray<NSString *> *recentlyFailed = [NSMutableArray array];
     for (NSString *endpoint in [[NSOrderedSet orderedSetWithArray:endpoints] array]) {
-        if ([endpoint isEqualToString:lastEndpoint]) continue;
+        if ([endpoint isEqualToString:lastEndpoint] || [endpoint isEqualToString:preferredEndpoint] || [endpoint isEqualToString:defaultEndpoint]) continue;
         NSRange separator = [endpoint rangeOfString:@":" options:NSBackwardsSearch];
         if (separator.location == NSNotFound || separator.location == 0) continue;
         NSString *host = [endpoint substringToIndex:separator.location];
@@ -667,7 +697,7 @@ static NSData *gzipDecompress(NSData *data) {
     for (NSUInteger index = 0; index < attemptCount && !_closed; index++) {
         if (tryEndpoint(available[index])) return YES;
     }
-    if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:_closed ? @"Steam connection cancelled" : @"No Steam connection server is reachable. Check your connection and try again."}];
+    if (error) *error = [NSError errorWithDomain:@"SteamCM" code:-1 userInfo:@{NSLocalizedDescriptionKey:_closed ? @"Steam connection cancelled" : @"[connect] No Steam CM server reachable, try change SteamCM mirror"}];
     return NO;
 }
 

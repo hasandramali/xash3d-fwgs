@@ -172,7 +172,13 @@ class SteamAuthManager(private val ctx: Context) {
         data class Error(val message: String) : LoginState()
     }
 
-    data class CMServerChoice(val title: String, val host: String?, val port: Int?, val isDefault: Boolean = false) {
+    data class CMServerChoice(
+        val title: String,
+        val host: String?,
+        val port: Int?,
+        val isDefault: Boolean = false,
+        val isSelected: Boolean = false
+    ) {
         val endpoint: String? get() = if (host != null && port != null) "$host:$port" else null
     }
 
@@ -201,18 +207,27 @@ class SteamAuthManager(private val ctx: Context) {
             (preferredHost to preferredPort) !in servers) {
             servers.add(0, preferredHost to preferredPort)
         }
-        val lastHost = prefs.getString("last_cm_host", null)
-        val lastPort = prefs.getInt("last_cm_port", 0)
-        val defaultServer = if (!lastHost.isNullOrBlank() && lastPort in 1..65535 && !hasRecentCMFailure(lastHost, lastPort)) {
-            lastHost to lastPort
-        } else {
-            servers.firstOrNull { (host, port) -> !hasRecentCMFailure(host, port) }
-                ?: ("ext1-sea1.steamserver.net" to 27017)
+        var defaultHost = prefs.getString("default_cm_host", null)
+        var defaultPort = prefs.getInt("default_cm_port", 0)
+        if (defaultHost.isNullOrBlank() || defaultPort !in 1..65535) {
+            val lastHost = prefs.getString("last_cm_host", null)
+            val lastPort = prefs.getInt("last_cm_port", 0)
+            val defaultServer = if (preferredHost.isNullOrBlank() && !lastHost.isNullOrBlank() && lastPort in 1..65535) {
+                lastHost to lastPort
+            } else {
+                servers.firstOrNull() ?: ("ext1-sea1.steamserver.net" to 27017)
+            }
+            defaultHost = defaultServer.first
+            defaultPort = defaultServer.second
+            prefs.edit().putString("default_cm_host", defaultHost).putInt("default_cm_port", defaultPort).apply()
         }
+        val defaultServer = defaultHost!! to defaultPort
+        val defaultIsSelected = preferredHost.isNullOrBlank() || preferredPort !in 1..65535 ||
+            (preferredHost == defaultServer.first && preferredPort == defaultServer.second)
         buildList {
-            add(CMServerChoice("Default — ${defaultServer.first}:${defaultServer.second}", null, null, true))
+            add(CMServerChoice("Default: ${defaultServer.first}:${defaultServer.second}", null, null, true, defaultIsSelected))
             servers.filter { it != defaultServer }.forEach { (host, port) ->
-                add(CMServerChoice("$host:$port", host, port))
+                add(CMServerChoice("$host:$port", host, port, isSelected = host == preferredHost && port == preferredPort))
             }
         }
     }
@@ -1392,6 +1407,9 @@ class SteamAuthManager(private val ctx: Context) {
                         .putInt("last_cm_port", port)
                         .remove(cmFailureKey(host, port))
                         .apply()
+                    if (prefs.getString("default_cm_host", null).isNullOrBlank()) {
+                        prefs.edit().putString("default_cm_host", host).putInt("default_cm_port", port).apply()
+                    }
                     Log.i(TAG, "connected to $host:$port")
                     return true
                 } catch (e: Exception) {
@@ -1413,6 +1431,17 @@ class SteamAuthManager(private val ctx: Context) {
             }
             if (!cont.isActive) return@suspendCancellableCoroutine
 
+            if (preferredHost.isNullOrBlank() || preferredPort !in 1..65535) {
+                val defaultHost = prefs.getString("default_cm_host", null)
+                val defaultPort = prefs.getInt("default_cm_port", 0)
+                if (!defaultHost.isNullOrBlank() && defaultPort in 1..65535 &&
+                    !hasRecentCMFailure(defaultHost, defaultPort) && tryConnect(defaultHost, defaultPort)) {
+                    cont.resume(Unit)
+                    return@suspendCancellableCoroutine
+                }
+            }
+            if (!cont.isActive) return@suspendCancellableCoroutine
+
             val lastHost = prefs.getString("last_cm_host", null)
             val lastPort = prefs.getInt("last_cm_port", 0)
             if (lastHost != preferredHost && !lastHost.isNullOrBlank() && lastPort in 1..65535 &&
@@ -1431,7 +1460,7 @@ class SteamAuthManager(private val ctx: Context) {
                     return@suspendCancellableCoroutine
                 }
             }
-            cont.resumeWithException(IOException("No Steam CM server reachable"))
+            cont.resumeWithException(IOException("[connect] No Steam CM server reachable, try change SteamCM mirror"))
         } catch (e: Exception) {
             cont.resumeWithException(e)
         }

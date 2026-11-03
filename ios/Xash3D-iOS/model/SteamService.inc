@@ -170,6 +170,31 @@ static bool SteamSocketWrite(int socket, const Buffer &data) {
     return self;
 }
 - (BOOL)autoConnect { return [[NSUserDefaults standardUserDefaults] boolForKey:@"steam_auto_connect"]; }
+- (NSArray<NSDictionary *> *)cmServerChoices {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *defaultEndpoint = CMDefaultEndpoint();
+    NSString *preferredEndpoint = [defaults stringForKey:@"steam_cm_preferred_endpoint"];
+    NSMutableArray<NSString *> *endpoints = [NSMutableArray arrayWithArray:CMDirectoryServers()];
+    [endpoints addObject:@"ext1-sea1.steamserver.net:27017"];
+    for (NSString *host in CM_SERVERS()) [endpoints addObject:[host stringByAppendingFormat:@":%d", CM_PORT]];
+    if (preferredEndpoint.length) [endpoints insertObject:preferredEndpoint atIndex:0];
+    NSArray<NSString *> *uniqueEndpoints = [[NSOrderedSet orderedSetWithArray:endpoints] array];
+    NSMutableArray<NSDictionary *> *choices = [NSMutableArray array];
+    BOOL defaultSelected = !preferredEndpoint.length || [preferredEndpoint isEqualToString:defaultEndpoint];
+    [choices addObject:@{@"title":[NSString stringWithFormat:@"Default: %@", defaultEndpoint],
+                         @"endpoint":@"", @"selected":@(defaultSelected), @"default":@YES}];
+    for (NSString *endpoint in uniqueEndpoints) {
+        if ([endpoint isEqualToString:defaultEndpoint]) continue;
+        [choices addObject:@{@"title":endpoint, @"endpoint":endpoint,
+                             @"selected":@([endpoint isEqualToString:preferredEndpoint]), @"default":@NO}];
+    }
+    return choices;
+}
+- (void)setPreferredCMServer:(NSString *)endpoint {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (endpoint.length) [defaults setObject:endpoint forKey:@"steam_cm_preferred_endpoint"];
+    else [defaults removeObjectForKey:@"steam_cm_preferred_endpoint"];
+}
 - (BOOL)hasSavedSession { return [SteamCredentials()[@"refresh"] length] > 0; }
 - (void)becameActive { if (self.autoConnect) { if (self.loggedIn) [self startBroker]; else [self restoreSession]; } }
 - (void)setAutoConnect:(BOOL)value { [[NSUserDefaults standardUserDefaults] setBool:value forKey:@"steam_auto_connect"]; }
