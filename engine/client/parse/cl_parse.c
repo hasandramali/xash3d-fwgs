@@ -878,6 +878,9 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 
 	// Re-init hud video, especially if we changed game directories
 	clgame.dllFuncs.pfnVidInit();
+	float defaultFov = Cvar_VariableValue( "default_fov" );
+	if( defaultFov <= 0.0f ) defaultFov = 90.0f;
+	cl.local.scr_fov = bound( 10.0f, defaultFov, 150.0f );
 
 	cls.state = ca_connected;
 
@@ -2521,6 +2524,11 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				MSG_ReadBytes( msg, pbuf, sizeof( pbuf ), 8 );
 				if( !MSG_CheckOverflow( msg ))
 					CL_DispatchUserMessage( "VoiceMask", 8, pbuf );
+				return;
+			case 150: case 192:
+				MSG_SeekToBit( msg, 0, SEEK_END );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven size-less message consumed to end)\n", svc_num );
 				return;
 			case 94:                     // ScreenShake
 				for( int k = 0; k < 6; k++ )

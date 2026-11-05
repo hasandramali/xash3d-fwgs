@@ -24,6 +24,11 @@ GNU General Public License for more details.
 
 static CVAR_DEFINE_AUTO( r_viewmodel_effects, "1", FCVAR_ARCHIVE, "control viewmodel render mode and render effects" );
 
+void V_RegisterCvars( void )
+{
+	Cvar_RegisterVariable( &r_viewmodel_effects );
+}
+
 /*
 ===============
 V_CalcViewRect

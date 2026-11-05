@@ -459,6 +459,9 @@ static void CL_CheckClientState( void )
 		}
 	}
 
+	if( cls.state == ca_active && cls.signon == SIGNONS && cls.changelevel )
+		cls.changelevel = false;
+
 	// Signon stall watchdog: a parked server (ghost slot, wedged changelevel,
 	// signon stream that ends without the closing svc_signonnum and stops) keeps
 	// ACKing our packets and sending keepalive/nop crumbs but never advances
@@ -4164,6 +4167,7 @@ static void CL_InitLocal( void )
 
 	Voice_RegisterCvars();
 	VGui_RegisterCvars();
+	V_RegisterCvars();
 
 	// register our variables
 	Cvar_RegisterVariable( &cl_crosshair );
