@@ -216,6 +216,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkForAppUpdate() {
+        if (!PreferenceManager.getDefaultSharedPreferences(this)
+                .getBoolean("update_checker_enabled", true)) return
         lifecycleScope.launch {
             val releaseCommit = withContext(Dispatchers.IO) {
                 var connection: HttpURLConnection? = null
@@ -246,6 +248,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showUpdatePromptIfReady() {
+        if (!PreferenceManager.getDefaultSharedPreferences(this)
+                .getBoolean("update_checker_enabled", true)) {
+            pendingUpdateCommit = null
+            return
+        }
         if (pendingUpdateCommit == null) return
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || isFinishing || isDestroyed ||
             steamConnectDialog?.isShowing == true || steamErrorDialog?.isShowing == true ||

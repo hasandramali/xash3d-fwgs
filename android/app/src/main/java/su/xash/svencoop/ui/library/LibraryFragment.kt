@@ -4,9 +4,13 @@ import android.Manifest
 import android.content.Intent
 import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Environment
 import android.provider.Settings
 import android.text.Annotation
@@ -22,6 +26,7 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import android.widget.ImageButton
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
@@ -34,6 +39,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
+import androidx.preference.PreferenceManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.launch
@@ -57,6 +63,10 @@ class LibraryFragment : Fragment(), MenuProvider {
 	private var hasShownFirstRunDialog = false
 	private var steamMenuItem: MenuItem? = null
 	private var downloadMenuItem: MenuItem? = null
+	private var settingsButton: ImageButton? = null
+	private val settingsPressHandler = Handler(Looper.getMainLooper())
+	private var settingsLongPressAction: Runnable? = null
+	private var settingsLongPressTriggered = false
 	private val authStateListener: () -> Unit = { refreshSteamIcon() }
 	private var progressContainer: View? = null
 	private var progressBar: LinearProgressIndicator? = null
@@ -356,8 +366,11 @@ class LibraryFragment : Fragment(), MenuProvider {
 
 	override fun onDestroyView() {
 		super.onDestroyView()
+		settingsLongPressAction?.let { settingsPressHandler.removeCallbacks(it) }
+		settingsLongPressAction = null
 		steamMenuItem = null
 		downloadMenuItem = null
+		settingsButton = null
 		_binding = null
 	}
 
@@ -365,8 +378,74 @@ class LibraryFragment : Fragment(), MenuProvider {
 		menuInflater.inflate(R.menu.menu_library, menu)
 		steamMenuItem = menu.findItem(R.id.action_steam)
 		downloadMenuItem = menu.findItem(R.id.action_download)
+		setupSettingsAction(menu.findItem(R.id.action_settings))
 		refreshSteamIcon()
 		refreshDownloadAction()
+	}
+
+	private fun setupSettingsAction(menuItem: MenuItem) {
+		val button = ImageButton(requireContext()).apply {
+			setImageResource(R.drawable.ic_baseline_settings_24)
+			contentDescription = getString(R.string.app_settings)
+			minimumWidth = (48 * resources.displayMetrics.density).toInt()
+			minimumHeight = (48 * resources.displayMetrics.density).toInt()
+			setPadding(0, 0, 0, 0)
+			setOnClickListener {
+				findNavController().navigate(R.id.action_libraryFragment_to_appSettingsFragment)
+			}
+		}
+		val background = android.util.TypedValue()
+		if (requireContext().theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, background, true)) {
+			button.setBackgroundResource(background.resourceId)
+		}
+		val longPress = Runnable {
+			settingsLongPressTriggered = true
+			showUpdateCheckerDialog()
+		}
+		settingsLongPressAction = longPress
+		button.setOnTouchListener { _, event ->
+			when (event.actionMasked) {
+				android.view.MotionEvent.ACTION_DOWN -> {
+					settingsLongPressTriggered = false
+					settingsPressHandler.postDelayed(longPress, 2_000L)
+					false
+				}
+				android.view.MotionEvent.ACTION_UP -> {
+					settingsPressHandler.removeCallbacks(longPress)
+					settingsLongPressTriggered
+				}
+				android.view.MotionEvent.ACTION_CANCEL -> {
+					settingsPressHandler.removeCallbacks(longPress)
+					settingsLongPressTriggered = false
+					false
+				}
+				else -> false
+			}
+		}
+		settingsButton = button
+		menuItem.actionView = button
+		refreshSettingsIcon()
+	}
+
+	private fun showUpdateCheckerDialog() {
+		val preferences = PreferenceManager.getDefaultSharedPreferences(requireContext())
+		val enabled = preferences.getBoolean("update_checker_enabled", true)
+		MaterialAlertDialogBuilder(requireContext())
+			.setMessage(if (enabled) R.string.disable_update_checker_prompt else R.string.enable_update_checker_prompt)
+			.setNegativeButton(R.string.update_checker_no, null)
+			.setPositiveButton(R.string.update_checker_yes) { _, _ ->
+				preferences.edit().putBoolean("update_checker_enabled", !enabled).apply()
+				refreshSettingsIcon()
+			}
+			.show()
+	}
+
+	private fun refreshSettingsIcon() {
+		val enabled = PreferenceManager.getDefaultSharedPreferences(requireContext())
+			.getBoolean("update_checker_enabled", true)
+		settingsButton?.imageTintList = ColorStateList.valueOf(
+			if (enabled) ContextCompat.getColor(requireContext(), R.color.sven_light_blue) else Color.WHITE
+		)
 	}
 
 	override fun onMenuItemSelected(menuItem: MenuItem): Boolean {

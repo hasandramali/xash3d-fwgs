@@ -214,7 +214,7 @@ double CL_GetDemoFramerate( void )
 {
 	if( cls.timedemo )
 		return 0.0;
-	return bound( MIN_FPS, demo.header.host_fps, MAX_FPS_HARD );
+	return bound( MIN_FPS, demo.header.host_fps, MAX_FPS_SERVER );
 }
 
 /*

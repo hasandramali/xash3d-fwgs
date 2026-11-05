@@ -104,7 +104,8 @@ typedef enum instance_e
 // PERFORMANCE INFO
 #define MIN_FPS         15.0f    // host minimum fps value for maxfps.
 #define MAX_FPS_SOFT    200.0f   // soft limit for maxfps.
-#define MAX_FPS_HARD	240.0f  // multiplayer hard limit for maxfps.
+#define MAX_FPS_HARD	999.0f  // hard limit when fps_override is enabled.
+#define MAX_FPS_SERVER	240.0f // server and recorded-demo compatibility limit.
 #define HOST_FPS	100.0f		// multiplayer games typical fps
 
 #define MAX_FRAMETIME	0.25f

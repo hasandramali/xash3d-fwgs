@@ -22,6 +22,8 @@ GNU General Public License for more details.
 #include "input.h" // touch
 #include "platform/platform.h" // GL_UpdateSwapInterval
 
+static CVAR_DEFINE_AUTO( r_viewmodel_effects, "1", FCVAR_ARCHIVE, "control viewmodel render mode and render effects" );
+
 /*
 ===============
 V_CalcViewRect
@@ -103,7 +105,8 @@ static void V_SetupViewModel( void )
 	view->model = CL_ModelHandle( cl.local.viewmodel );
 	view->curstate.modelindex = cl.local.viewmodel;
 	view->curstate.sequence = cl.local.weaponsequence;
-	view->curstate.rendermode = kRenderNormal;
+	if( r_viewmodel_effects.value )
+		view->curstate.rendermode = kRenderNormal;
 
 	// alias models has another animation methods
 	if( view->model && view->model->type == mod_studio )
@@ -431,6 +434,8 @@ void V_RenderView( void )
 	do
 	{
 		clgame.dllFuncs.pfnCalcRefdef( &rp );
+		if( !r_viewmodel_effects.value )
+			clgame.viewent.curstate.renderfx = kRenderFxNone;
 
 		// client dll may replace viewmodel in pfnCalcRefdef, so set animtime again
 		// V_SetupViewModel did it only for the model known before this call

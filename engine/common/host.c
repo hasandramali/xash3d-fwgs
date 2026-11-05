@@ -514,7 +514,8 @@ static double Host_CalcFPS( void )
 	{
 		// vsync is expected to limit the framerate, but some drivers
 		// ignore it, so never let the game run completely unlimited
-		fps = gl_vsync.value ? MAX_FPS_HARD : host_maxfps.value;
+		const double max_fps = fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT;
+		fps = gl_vsync.value ? max_fps : bound( MIN_FPS, host_maxfps.value, max_fps );
 	}
 	else if( !SV_Active() && CL_Protocol() == PROTO_GOLDSRC && cls.state != ca_disconnected && cls.state < ca_validate )
 	{
@@ -548,7 +549,8 @@ static qboolean Host_Autosleep( double dt, double scale )
 		return true;
 
 	// limit fps to withing tolerable range
-	fps = bound( MIN_FPS, fps, MAX_FPS_HARD );
+	fps = bound( MIN_FPS, fps, Host_IsDedicated() ? MAX_FPS_SERVER :
+		( fps_override.value ? MAX_FPS_HARD : MAX_FPS_SOFT ));
 
 	if( Host_IsDedicated( ))
 		targetframetime = ( 1.0 / ( fps + 1.0 ));
@@ -1092,7 +1094,7 @@ static void Host_InitCommon( int argc, char **argv, const char *progname, qboole
 
 	int ticrate;
 	if( Sys_GetIntFromCmdLine( "-sys_ticrate", &ticrate ))
-		Cvar_DirectSetValue( &sys_ticrate, bound( MIN_FPS, ticrate, MAX_FPS_HARD ));
+	Cvar_DirectSetValue( &sys_ticrate, bound( MIN_FPS, ticrate, MAX_FPS_SERVER ));
 
 	Sys_InitLog();
 	Con_Init(); // early console running to catch all the messages
