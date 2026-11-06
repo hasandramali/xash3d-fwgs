@@ -1164,6 +1164,16 @@ void Test_RunWeaponListFix( void )
 	CL_WeaponListFix_NoActiveWeapon( 0, -1, 0, 0 );
 	TASSERT( !exhaustible->owned_hint && !cl_weaponlistfix_state.strip_pending );
 	CL_WeaponListFix_PickupWeapon( exhaustible );
+	retained->owned_hint = true;
+	cl_weaponlistfix_state.active_weapon = 28;
+	CL_WeaponListFix_UpdateAmmo( 7, 3 );
+	CL_WeaponListFix_UpdateAmmo( 8, 2 );
+	for( int ammo = 0; ammo < 64; ammo++ )
+		CL_WeaponListFix_UpdateAmmo( ammo, 0 );
+	byte noActiveStandard[3] = { 0, 0, 0 };
+	CL_WeaponListFix_OnUserMessage( "CurWeapon", sizeof( noActiveStandard ), noActiveStandard );
+	TASSERT( !exhaustible->owned_hint && !retained->owned_hint );
+	CL_WeaponListFix_PickupWeapon( exhaustible );
 	cl_weaponlistfix_state.active_weapon = 28;
 	CL_WeaponListFix_UpdateAmmo( 7, 3 );
 	CL_WeaponListFix_UpdateAmmo( 8, 2 );
@@ -1904,14 +1914,25 @@ void CL_WeaponListFix_OnUserMessage( const char *pszName, int iSize, void *pbuf 
 		int clip;
 		int ammo;
 		cl_weaponlistfix_weapon_t *weapon;
-		if( !pbuf || iSize != 11 )
+		if( !pbuf || ( iSize != 3 && iSize != 11 ))
 			return;
 
 		CL_WeaponListFix_MsgInit( &msg, pbuf, iSize );
 		state = CL_WeaponListFix_ReadByte( &msg );
-		id = CL_WeaponListFix_ReadShort( &msg );
-		clip = CL_WeaponListFix_ReadLong( &msg );
-		ammo = CL_WeaponListFix_ReadLong( &msg );
+		if( iSize == 3 )
+		{
+			id = CL_WeaponListFix_ReadByte( &msg );
+			clip = CL_WeaponListFix_ReadChar( &msg );
+			ammo = -1;
+			if( id == 0 )
+				id = -1;
+		}
+		else
+		{
+			id = CL_WeaponListFix_ReadShort( &msg );
+			clip = CL_WeaponListFix_ReadLong( &msg );
+			ammo = CL_WeaponListFix_ReadLong( &msg );
+		}
 
 		// server sends 255 instead of -1 for infinite clip/ammo
 		if( clip == 0xFF )
