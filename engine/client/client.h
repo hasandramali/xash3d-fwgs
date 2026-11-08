@@ -62,6 +62,7 @@ typedef struct frame_s
 	qboolean		valid;		// cleared if delta parsing was invalid
 	int entity_sequence; // exact sequence whose entity snapshot occupies this slot
 	int clientdata_sequence; // independent identity: packets can omit entities
+	uint command_ack; // last usercmd the server had run when it built this frame
 	qboolean		choked;
 
 	clientdata_t	clientdata;	// local client private data

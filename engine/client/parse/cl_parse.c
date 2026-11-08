@@ -1127,6 +1127,7 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	cl.parsecountmod = cl.parsecount & CL_UPDATE_MASK;	// index into window.
 	frame = &cl.frames[cl.parsecountmod];			// frame at index.
 	if( cl_sven_proto ) frame->clientdata_sequence = -1;
+	frame->command_ack = command_ack;
 
 	if( cl_sven_proto ) frame->valid = false; // this slot has not received entities yet
 	frame->time = cl.mtime[0];				// mark network received time

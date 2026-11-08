@@ -1920,6 +1920,7 @@ void CL_ClearState( void )
 		clgame.events[i]->index = 0;
 
 	memset( &cl, 0, sizeof( cl ));
+	cls.correction_time = 0; // its prediction_error was just wiped with cl
 	MSG_Clear( &cls.netchan.message );
 	memset( &clgame.fade, 0, sizeof( clgame.fade ));
 	memset( &clgame.shake, 0, sizeof( clgame.shake ));

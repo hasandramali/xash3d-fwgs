@@ -88,6 +88,15 @@ void CL_RedoPrediction( void )
 {
 	if ( cls.netchan.incoming_sequence != cls.lastupdate_sequence )
 	{
+		// cl_showerror 2: a packet moved the ack without bringing a new snapshot
+		if( cl_sven_proto && cl_showerror.value >= 2.0f && host_developer.value
+			&& cls.netchan.incoming_acknowledged != cl.frames[cl.parsecountmod].command_ack )
+		{
+			Con_Printf( "PRED-STALE: seq=%d parse=%d ack=%u fack=%u valid=%d t=%.3f\n",
+				cls.netchan.incoming_sequence, cl.parsecount, cls.netchan.incoming_acknowledged,
+				cl.frames[cl.parsecountmod].command_ack, cl.frames[cl.parsecountmod].valid, cl.time );
+		}
+
 		CL_PredictMovement( true );
 		// Sven checks once, after a complete entity snapshot. A packet without
 		// entities must not compare an old playerstate from a recycled slot.
@@ -223,7 +232,7 @@ static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3
 		"srv_ang=(%.1f,%.1f,%.1f) onground=%d wlevel=%d move=%d hull=%d "
 		"fric=%.2f grav=%.2f maxspd=%.0f msec=%d btn=%d mid=%d pfuser=%.1f smid=%d "
 		"hp=%d deadf=%d flags=%d smove=%d "
-		"ack=%u out=%u cmd=%d pcmod=%d t=%.3f\n",
+		"ack=%u fack=%u out=%u cmd=%d pcmod=%d t=%.3f\n",
 		teleported ? "teleport" : "error", dist, delta[0], delta[1], delta[2],
 		ps->origin[0], ps->origin[1], ps->origin[2],
 		pred[0], pred[1], pred[2],
@@ -237,7 +246,7 @@ static void CL_PredictionErrorTrace( qboolean teleported, float dist, const vec3
 		cd->m_iId,
 		ps->health, cd->deadflag, cd->flags,
 		cl.predicted_frames[frame].playerstate.movetype,
-		cls.netchan.incoming_acknowledged, cls.netchan.outgoing_sequence,
+		cls.netchan.incoming_acknowledged, cl.frames[cmd].command_ack, cls.netchan.outgoing_sequence,
 		cmd, cl.parsecountmod, cl.time );
 
 	// On teleport-level snaps, dump nearby brush entities (submodel doors,
@@ -298,13 +307,13 @@ void CL_CheckPredictionError( void )
 		return;
 
 	// calculate the last usercmd_t we sent that the server has processed
-	frame = ( cls.netchan.incoming_acknowledged ) & CL_UPDATE_MASK;
 	cmd = cl.parsecountmod;
+	frame = ( cl_sven_proto ? cl.frames[cmd].command_ack : (uint)cls.netchan.incoming_acknowledged ) & CL_UPDATE_MASK;
 
 	// Ring indices alone do not identify a prediction. During entity resync
 	// prediction can stop while commands/ACKs continue and reuse these slots.
 	if( cl_sven_proto && ( !cl.local.predicted_command_valid[frame]
-		|| cl.local.predicted_commands[frame] != (uint)cls.netchan.incoming_acknowledged ))
+		|| cl.local.predicted_commands[frame] != cl.frames[cmd].command_ack ))
 		return;
 
 	// compare what the server returned with what we had predicted it to be
@@ -1181,7 +1190,13 @@ void CL_PredictMovement( qboolean repredicting )
 	if( !cl.validsequence )
 		return;
 
-	if(( cls.netchan.outgoing_sequence - cls.netchan.incoming_acknowledged ) >= CL_UPDATE_MASK )
+	// The replay must start at the command this snapshot already contains. A
+	// newer packet without clientdata advances the netchan ack but not the
+	// snapshot; replaying from that ack drops the commands in between and
+	// pulls the view back by that many commands.
+	const uint command_ack = cl_sven_proto ? frame->command_ack : (uint)cls.netchan.incoming_acknowledged;
+
+	if(( cls.netchan.outgoing_sequence - command_ack ) >= CL_UPDATE_MASK )
 		return;
 
 	// goldsrc checks for intermission here, so it technically allows sending commands
@@ -1207,7 +1222,7 @@ void CL_PredictMovement( qboolean repredicting )
 	}
 
 	from = &cl.predicted_frames[cl.parsecountmod];
-	from_cmd = &cl.commands[cls.netchan.incoming_acknowledged & CL_UPDATE_MASK];
+	from_cmd = &cl.commands[command_ack & CL_UPDATE_MASK];
 	memcpy( from->weapondata, frame->weapondata, sizeof( from->weapondata ));
 	from->playerstate = frame->playerstate[cl.playernum];
 	from->client = frame->clientdata;
@@ -1222,13 +1237,13 @@ void CL_PredictMovement( qboolean repredicting )
 	CL_PushPMStates();
 	CL_SetSolidPlayers( cl.playernum );
 
-	for( i = 1; i < CL_UPDATE_MASK && cls.netchan.incoming_acknowledged + i < cls.netchan.outgoing_sequence + stoppoint; i++ )
+	for( i = 1; i < CL_UPDATE_MASK && command_ack + i < cls.netchan.outgoing_sequence + stoppoint; i++ )
 	{
 		uint		current_command;
 		uint		current_command_mod;
 		qboolean		runfuncs;
 
-		current_command = cls.netchan.incoming_acknowledged + i;
+		current_command = command_ack + i;
 		current_command_mod = current_command & CL_UPDATE_MASK;
 
 		to = &cl.predicted_frames[(cl.parsecountmod + i) & CL_UPDATE_MASK];
