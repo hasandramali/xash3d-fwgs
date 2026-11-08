@@ -2526,7 +2526,11 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 				if( !MSG_CheckOverflow( msg ))
 					CL_DispatchUserMessage( "VoiceMask", 8, pbuf );
 				return;
-			case 150: case 192:
+			case 150:                    // no payload: live captures show the next svc
+			                             // directly after the id; skipping to the end
+			                             // threw away that packet's whole snapshot.
+				return;
+			case 192:
 				MSG_SeekToBit( msg, 0, SEEK_END );
 				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
 					Con_Printf( "USRMSG-SKIP: svc_num=%d (Sven size-less message consumed to end)\n", svc_num );
