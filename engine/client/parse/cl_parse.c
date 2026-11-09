@@ -1291,7 +1291,12 @@ void CL_ParseClientData( sizebuf_t *msg, connprotocol_t proto )
 	{
 		frame->clientdata_sequence = cls.netchan.incoming_sequence;
 		if( cl_lw.value )
+		{
 			CL_WeaponListFix_UpdateWeaponData( to_wd, CL_WEAPONLISTFIX_MAX_WEAPONS );
+			// local_state_t only carries 64 records; Sven ids go past that.
+			if( clgame.dllFuncs.pfnSvenWeaponData )
+				clgame.dllFuncs.pfnSvenWeaponData( to_wd, CL_WEAPONLISTFIX_MAX_WEAPONS );
+		}
 		else cl_weaponlistfix_state.weapondata_valid = false; // the server stopped sending records
 	}
 

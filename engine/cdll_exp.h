@@ -76,6 +76,7 @@ typedef struct cldll_func_s
 	// Xash3D extension
 	int	(*pfnGetRenderInterface)( int version, render_api_t *renderfuncs, render_interface_t *callback );
 	void	(*pfnClipMoveToEntity)( struct physent_s *pe, const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end, struct pmtrace_s *tr );
+	void	(*pfnSvenWeaponData)( const struct weapon_data_s *weapons, int count ); // Sven cl_lw 1 inventory
 	// Xash3D FWGS extension
 	int (*pfnTouchEvent)( int type, int fingerID, float x, float y, float dx, float dy );
 	void (*pfnMoveEvent)( float forwardmove, float sidemove );
