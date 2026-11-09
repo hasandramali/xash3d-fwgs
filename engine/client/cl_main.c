@@ -4381,7 +4381,12 @@ void Host_ClientFrame( void )
 	if( !cls.initialized ) return;
 
 	// cl_lw 1 delivers the server's own inventory, so the client HUD takes over.
-	cl_weaponlistfix.value = cl_lw.value ? 0.0f : Q_atof( cl_weaponlistfix.string );
+	// The cvar stays read-only for users; only cl_lw drives it.
+	{
+		const char *mode = cl_lw.value ? "0" : "2";
+		if( Q_strcmp( cl_weaponlistfix.string, mode ))
+			Cvar_DirectFullSet( &cl_weaponlistfix, mode, FCVAR_READ_ONLY );
+	}
 
 	if( cls.key_dest == key_game && cls.state == ca_active && !Con_Visible() )
 		Platform_SetTimer( cl_maxframetime.value );
