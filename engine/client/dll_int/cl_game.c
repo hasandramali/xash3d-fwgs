@@ -116,6 +116,7 @@ static qboolean CL_WeaponListFix_FixedRow( const char *name, int *row, int *pos 
 }
 #define CL_WEAPONLISTFIX_MENU_LIFETIME 1.5f
 #define CL_WEAPONLISTFIX_PENDING_TIMEOUT 3.0f
+#define CL_WEAPONLISTFIX_ATTACK_REMOVAL_WINDOW 1.0f
 #define CL_WEAPONLISTFIX_DROP_TIMEOUT 1.0f
 #define CL_WEAPONLISTFIX_DROP_COOLDOWN 0.5
 #define CL_WEAPONLISTFIX_SELECTONEMPTY BIT( 0 )
@@ -708,6 +709,22 @@ static void CL_WeaponListFix_UpdateAmmo( int ammo, int count )
 
 static void CL_WeaponListFix_NoActiveWeapon( int state, int id, int clip, int ammo )
 {
+	const int previous_id = cl_weaponlistfix_state.active_weapon;
+	const cl_weaponlistfix_weapon_t *previous = CL_WeaponListFix_GetWeapon( previous_id );
+	const float attack_age = cl.time - cl_weaponlistfix_state.last_attack_time;
+	const qboolean recent_attack = cl_weaponlistfix_state.last_attack_time > 0
+		&& attack_age >= 0 && attack_age <= CL_WEAPONLISTFIX_ATTACK_REMOVAL_WINDOW;
+	const qboolean action_pending = cl_weaponlistfix_state.drop_pending
+		|| cl_weaponlistfix_state.alt_pending || cl_weaponlistfix_state.retire_pending
+		|| cl_weaponlistfix_state.attack_pending;
+	// The server sends this once, when its active item goes away for good: a
+	// strip, a removal or a retirement with no replacement. Normal switches
+	// install the next item first. Without weapon_data it is the only strip
+	// signal when the player held few or no ammo types.
+	const qboolean item_gone = id == -1 && state == 0 && clip == 0 && ammo == 0
+		&& !cl_weaponlistfix_state.weapondata_valid && previous && previous->valid
+		&& !action_pending && !( previous->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE );
+
 	CL_WeaponListFix_ConfirmDrop( id );
 	CL_WeaponListFix_ConfirmRetirement( id );
 	CL_WeaponListFix_ConfirmAlternateAction( id );
@@ -718,6 +735,10 @@ static void CL_WeaponListFix_NoActiveWeapon( int state, int id, int clip, int am
 		&& cl_weaponlistfix_state.strip_pending && !cl_weaponlistfix_state.weapondata_valid
 		&& cl.time >= cl_weaponlistfix_state.strip_pending_time
 		&& cl.time - cl_weaponlistfix_state.strip_pending_time <= 1.0f )
+		CL_WeaponListFix_ClearOwnership();
+	else if( item_gone && recent_attack )
+		CL_WeaponListFix_ForgetWeapon( previous_id ); // consumed by its own attack, e.g. a thrown knife
+	else if( item_gone )
 		CL_WeaponListFix_ClearOwnership();
 	CL_WeaponListFix_PruneExhaustedWeapons();
 }
@@ -1183,6 +1204,22 @@ void Test_RunWeaponListFix( void )
 	retained->owned_hint = true;
 	CL_WeaponListFix_NoActiveWeapon( 0, -1, 0, 0 );
 	TASSERT( retained->owned_hint );
+	// Unsolicited loss of a plain active weapon is a strip, even with no ammo to zero.
+	CL_WeaponListFix_PickupWeapon( exhaustible );
+	retained->owned_hint = true;
+	cl_weaponlistfix_state.active_weapon = 200;
+	cl_weaponlistfix_state.last_attack_time = 0;
+	CL_WeaponListFix_NoActiveWeapon( 0, -1, 0, 0 );
+	TASSERT( !exhaustible->owned_hint && !retained->owned_hint );
+	// A weapon removed by its own attack leaves the others alone.
+	CL_WeaponListFix_PickupWeapon( exhaustible );
+	retained->owned_hint = true;
+	cl_weaponlistfix_state.active_weapon = 200;
+	cl_weaponlistfix_state.last_attack_time = cl.time;
+	CL_WeaponListFix_NoActiveWeapon( 0, -1, 0, 0 );
+	TASSERT( exhaustible->owned_hint && !retained->owned_hint );
+	retained->owned_hint = true;
+	cl_weaponlistfix_state.last_attack_time = 0;
 	CL_WeaponListFix_PickupWeapon( exhaustible );
 	CL_WeaponListFix_ObserveWeaponAmmo( exhaustible, 0, 3 );
 	CL_WeaponListFix_ObserveWeaponAmmo( exhaustible, 0, 0 );
@@ -1629,6 +1666,8 @@ void CL_WeaponListFix_AppendMove( usercmd_t *cmd )
 	if( cmd->weaponselect || cl_weaponlistfix_state.select_pending )
 		CL_WeaponListFix_CancelRetirement();
 	cl_weaponlistfix_weapon_t *weapon = CL_WeaponListFix_GetWeapon( cl_weaponlistfix_state.active_weapon );
+	if( cmd->buttons & ( IN_ATTACK | IN_ATTACK2 | IN_ALT1 ))
+		cl_weaponlistfix_state.last_attack_time = cl.time;
 	if( cl_weaponlistfix.value && cls.state == ca_active && !cl_weaponlistfix_state.weapondata_valid
 		&& weapon && CL_WeaponListFix_HasWeapon( weapon ) && ( weapon->flags & CL_WEAPONLISTFIX_EXHAUSTIBLE )
 		&& ( weapon->flags & CL_WEAPONLISTFIX_SELECTONEMPTY )

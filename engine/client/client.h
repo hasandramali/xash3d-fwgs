@@ -818,6 +818,7 @@ typedef struct
 	float alt_pending_time;
 	int attack_pending;
 	float attack_pending_time;
+	float last_attack_time;
 	int retire_pending;
 	float retire_pending_time;
 	float attack_block_until;
