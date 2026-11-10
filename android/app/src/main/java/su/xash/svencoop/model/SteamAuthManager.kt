@@ -1482,7 +1482,15 @@ class SteamAuthManager(private val ctx: Context) {
         return false
     }
 
+    // The directory answer changes rarely; asking on every connect cost a
+    // round trip (up to 10 s on bad networks) before each download.
+    @Volatile private var cmDirectoryCache: List<Pair<String, Int>> = emptyList()
+    @Volatile private var cmDirectoryCachedAt = 0L
+
     private fun discoverCMServers(): List<Pair<String, Int>> {
+        val cached = cmDirectoryCache
+        if (cached.isNotEmpty() && System.currentTimeMillis() - cmDirectoryCachedAt < TimeUnit.MINUTES.toMillis(30))
+            return cached
         var connection: HttpURLConnection? = null
         return try {
             connection = URL("https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?maxcount=100")
@@ -1507,6 +1515,10 @@ class SteamAuthManager(private val ctx: Context) {
                 }
             }.also {
                 Log.i(TAG, "Steam Directory returned ${it.size} TCP CM servers")
+                if (it.isNotEmpty()) {
+                    cmDirectoryCache = it
+                    cmDirectoryCachedAt = System.currentTimeMillis()
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Steam Directory lookup failed: ${e.message}")

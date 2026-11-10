@@ -41,6 +41,14 @@ import kotlin.coroutines.resumeWithException
 class GameDataDownloader(private val ctx: Context) {
 
     companion object {
+        // One budget for every chunk request, however they are spread over
+        // files: nested per-file limits allowed ~80 parallel HTTPS requests.
+        private val chunkGate = Semaphore(16)
+        private const val CDN_CONNECT_TIMEOUT_MS = 8000
+        private const val CDN_READ_TIMEOUT_MS = 10000
+        // Anonymous logins get no answer to the free-license request.
+        private const val LICENSE_READ_TIMEOUT_MS = 1500
+
         val GAMES = linkedMapOf(
             "valve" to GameInfo(90, listOf(71, 4, 1), "Half-Life", 400_000_000L),
             "cstrike" to GameInfo(90, listOf(11), "Counter-Strike", 280_000_000L),
@@ -867,7 +875,9 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
         }
 
         suspend fun requestLicense(appId: Int): Boolean = suspendCancellableCoroutine { cont ->
+            val previousTimeout = socket?.soTimeout ?: 5000
             try {
+                socket?.soTimeout = LICENSE_READ_TIMEOUT_MS
                 val body = ByteArrayOutputStream()
                 body.write(Proto.packVarint(2 shl 3 or 0))
                 body.write(Proto.packVarint(appId))
@@ -966,6 +976,8 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
             } catch (e: Exception) {
                 Log.e("SteamCM", "[license] Exception: ${e.message}")
                 cont.resumeWithException(e)
+            } finally {
+                try { socket?.soTimeout = previousTimeout } catch (_: Exception) { }
             }
         }
 
@@ -1650,10 +1662,17 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
     }
 
     suspend fun downloadManifestFromCDN(depotId: Int, manifestId: Long, requestCode: Long, cdnHosts: List<String> = listOf("liveru.steamcontent.com")): ByteArray? {
+        if (cdnHosts.isEmpty()) return null
         var hostIndex = 0
         var retryDelay = 500L
+        var attempts = 0
+        val maxAttempts = maxOf(8, cdnHosts.size * 3)
         while (true) {
             yield()
+            if (++attempts > maxAttempts) {
+                Log.w("SteamCM", "[cdn] Manifest for depot $depotId failed on every CDN host")
+                return null
+            }
             val host = cdnHosts[hostIndex % cdnHosts.size]
             try {
                 val rcUnsigned = requestCode.toULong()
@@ -1665,9 +1684,14 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                 val url = URL("https://$host/$path")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.setRequestProperty("User-Agent", "Valve/Steam HTTP Client 1.0")
-                conn.connectTimeout = 15000
-                conn.readTimeout = 15000
-                if (conn.responseCode != 200) { hostIndex++; delay(retryDelay); continue }
+                conn.connectTimeout = CDN_CONNECT_TIMEOUT_MS
+                conn.readTimeout = CDN_READ_TIMEOUT_MS
+                if (conn.responseCode != 200) {
+                    conn.disconnect()
+                    hostIndex++
+                    retryDelay = (retryDelay * 1.5).toLong().coerceAtMost(5000L)
+                    delay(retryDelay); continue
+                }
                 val data = conn.inputStream.readBytes()
                 if (data.isEmpty()) { Log.w("SteamCM", "[cdn] Empty response from $host, retrying..."); hostIndex++; delay(retryDelay); continue }
                 val zip = java.util.zip.ZipInputStream(ByteArrayInputStream(data))
@@ -1795,18 +1819,28 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
 
     suspend fun downloadChunkAndDecrypt(depotId: Int, chunk: ChunkInfo, depotKey: ByteArray, cdnHosts: List<String> = listOf("liveru.steamcontent.com")): ByteArray {
         val hex = chunk.sha1.joinToString("") { "%02x".format(it) }
-        var hostIndex = 0
+        if (cdnHosts.isEmpty()) throw Exception("No CDN hosts")
+        // Spread the first request over the CDN list instead of all hitting host 0.
+        var hostIndex = (chunk.sha1.firstOrNull()?.toInt() ?: 0) and 0xFF
         var retryDelay = 500L
+        var attempts = 0
+        val maxAttempts = maxOf(8, cdnHosts.size * 3)
         while (true) {
             yield()
+            if (++attempts > maxAttempts) throw Exception("chunk $hex failed on every CDN host")
             val host = cdnHosts[hostIndex % cdnHosts.size]
             try {
                 val url = URL("https://$host/depot/$depotId/chunk/$hex")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.setRequestProperty("User-Agent", "Valve/Steam HTTP Client 1.0")
-                conn.connectTimeout = 15000
-                conn.readTimeout = 15000
-                if (conn.responseCode != 200) { hostIndex++; delay(retryDelay); continue }
+                conn.connectTimeout = CDN_CONNECT_TIMEOUT_MS
+                conn.readTimeout = CDN_READ_TIMEOUT_MS
+                if (conn.responseCode != 200) {
+                    conn.disconnect()
+                    hostIndex++
+                    retryDelay = (retryDelay * 1.5).toLong().coerceAtMost(5000L)
+                    delay(retryDelay); continue
+                }
                 val encrypted = conn.inputStream.readBytes()
                 if (encrypted.size < 16) {
                     Log.w("SteamCM", "[chunk] Too small (${encrypted.size} bytes) from $host, retrying...")
@@ -1823,7 +1857,6 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
 
                 val decompressed = when {
                     decrypted.size >= 4 && decrypted[0] == 'P'.code.toByte() && decrypted[1] == 'K'.code.toByte() && decrypted[2] == 0x03.toByte() && decrypted[3] == 0x04.toByte() -> {
-                        Log.d("SteamCM", "[chunk] PKZip chunk=${hex.take(16)}")
                         val zis = ZipInputStream(ByteArrayInputStream(decrypted))
                         val entry = zis.nextEntry ?: throw Exception("Empty PKZip entry")
                         val data = zis.readBytes()
@@ -1834,7 +1867,6 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                         throw Exception("Zstd compression not supported")
                     }
                     decrypted.size >= 17 && decrypted[0] == 'V'.code.toByte() && decrypted[1] == 'Z'.code.toByte() && decrypted[2] == 'a'.code.toByte() -> {
-                        Log.d("SteamCM", "[chunk] VZip/LZMA chunk=${hex.take(16)}")
                         val compressed = decrypted
                         val propBits = compressed[7]
                         val dictSize = (compressed[8].toInt() and 0xFF) or
@@ -1846,7 +1878,6 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                                 ((compressed[footerOff + 5].toInt() and 0xFF) shl 8) or
                                 ((compressed[footerOff + 6].toInt() and 0xFF) shl 16) or
                                 ((compressed[footerOff + 7].toInt() and 0xFF) shl 24)
-                        Log.d("SteamCM", "[chunk] VZip props=0x%02x dictSize=%d uncompSize=%d totalSize=%d".format(propBits.toInt() and 0xFF, dictSize, decompressedSize, compressed.size))
                         val vzipCrc = (compressed[footerOff].toInt() and 0xFF) or
                                 ((compressed[footerOff + 1].toInt() and 0xFF) shl 8) or
                                 ((compressed[footerOff + 2].toInt() and 0xFF) shl 16) or
@@ -1866,8 +1897,7 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
                             throw Exception("VZip decompressed size mismatch: got $bytesRead expected $decompressedSize")
                         }
                         val actualVzipCrc = java.util.zip.CRC32().apply { update(dest) }.value.toInt()
-                        Log.d("SteamCM", "[chunk] VZip CRC: expected=0x%08x got=0x%08x match=%s".format(vzipCrc, actualVzipCrc, if (vzipCrc == actualVzipCrc) "yes" else "no"))
-                        Log.d("SteamCM", "[chunk] VZip first32: %s".format(dest.take(32).joinToString("") { "%02x".format(it) }))
+                        if (vzipCrc != actualVzipCrc) Log.w("SteamCM", "[chunk] VZip CRC: expected=0x%08x got=0x%08x match=%s".format(vzipCrc, actualVzipCrc, if (vzipCrc == actualVzipCrc) "yes" else "no"))
                         dest
                     }
                     else -> {
@@ -1912,13 +1942,12 @@ Log.d("SteamCM", "[LOGON] field 7 (client_os_type=-500 AndroidUnknown) tag=${f7[
             }
             out.parentFile?.mkdirs()
             val tmp = File(out.parentFile, "${out.name}.tmp")
-            val chunkSemaphore = Semaphore(8)
             RandomAccessFile(tmp, "rw").use { raf ->
                 raf.setLength(file.size)
                 coroutineScope {
                     file.chunks.map { chunk ->
                         async(Dispatchers.IO) {
-                            chunkSemaphore.withPermit {
+                            chunkGate.withPermit {
                                 val data = downloadChunkAndDecrypt(depotId, chunk, depotKey, cdnHosts)
                                 synchronized(raf) {
                                     raf.seek(chunk.offset)
