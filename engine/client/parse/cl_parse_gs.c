@@ -936,10 +936,13 @@ void CL_ParseGoldSrcServerMessage( sizebuf_t *msg )
 			if( cl_sven_proto || cls.signon < SIGNONS )
 			{
 				// Sven Co-op repurposes svc 19 as svc_weaponanimex:
-				// [byte]anim [long]... (hw.dll 0x1D2FAB0 reads BYTE then LONG).
+				// [byte]anim [long]body (hw.dll 0x1D2FAB0). Still ignored here;
+				// traced so its use can be checked against the predicted anims.
 				// Vanilla GoldSrc svc_damage has no payload.
-				MSG_ReadByte( msg );
-				MSG_ReadLong( msg );
+				const int anim = MSG_ReadByte( msg );
+				const int body = MSG_ReadLong( msg );
+				if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+					Con_Printf( "WEAPON-ANIM: svc19 seq=%d body=%d (ignored)\n", anim, body );
 			}
 			break;
 		case svc_spawnstatic:

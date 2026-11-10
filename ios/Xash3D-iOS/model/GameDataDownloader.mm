@@ -114,7 +114,16 @@ static BOOL CMEndpointHasRecentFailure(NSString *endpoint) {
     return port <= 0 || port > 65535 || CMHasRecentFailure(host, port);
 }
 
+// The directory answer changes rarely; asking on every connect cost a round
+// trip (up to 5 s) before each download.
+static NSArray<NSString *> *gCMDirectoryCache = nil;
+static uint64_t gCMDirectoryCachedAt = 0;
+
 static NSArray<NSString *> *CMDirectoryServers() {
+    @synchronized ([GameDataDownloader class]) {
+        if (gCMDirectoryCache.count && svensteam::milliseconds() - gCMDirectoryCachedAt < 30ull * 60 * 1000)
+            return gCMDirectoryCache;
+    }
     NSURL *url = [NSURL URLWithString:@"https://api.steampowered.com/ISteamDirectory/GetCMListForConnect/v1/?maxcount=100"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5.0];
     [request setValue:@"SvenClient-iOS" forHTTPHeaderField:@"User-Agent"];
@@ -146,6 +155,12 @@ static NSArray<NSString *> *CMDirectoryServers() {
         if (host.length && port > 0 && port <= 65535) [servers addObject:[NSString stringWithFormat:@"%@:%ld", host, (long)port]];
     }
     logToFile(@"Steam Directory returned %lu TCP CM servers", (unsigned long)servers.count);
+    if (servers.count) {
+        @synchronized ([GameDataDownloader class]) {
+            gCMDirectoryCache = [servers copy];
+            gCMDirectoryCachedAt = svensteam::milliseconds();
+        }
+    }
     return servers;
 }
 
@@ -1132,7 +1147,7 @@ static NSData *downloadManifestFromCDN(int depotId, int64_t manifestId, uint64_t
         NSString *path = rc>0 ? [NSString stringWithFormat:@"depot/%d/manifest/%lld/5/%llu",depotId,(long long)manifestId,(unsigned long long)rc]
                                : [NSString stringWithFormat:@"depot/%d/manifest/%lld/5",depotId,(long long)manifestId];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/%@",host,path]]];
-        [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval=15;
+        [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval=10;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res=nil;
         __block int statusCode = 0;
         NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
@@ -1219,7 +1234,7 @@ static NSData *downloadChunkAndDecrypt(int depotId, NSDictionary *chunk, NSData 
         int hi = firstHost + attempt;
         NSString *host = hosts[hi % hc];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://%@/depot/%d/chunk/%@", host, depotId, hex]]];
-        [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval = 15;
+        [req setValue:@"Valve/Steam HTTP Client 1.0" forHTTPHeaderField:@"User-Agent"]; req.timeoutInterval = 10;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0); __block NSData *res = nil;
         __block NSString *failure = @"Invalid encrypted or compressed chunk";
         NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {

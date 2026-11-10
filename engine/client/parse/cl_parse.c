@@ -331,6 +331,28 @@ CL_WeaponAnim
 Set new weapon animation
 ==================
 */
+static int s_iClientWeaponAnim = -1;
+static double s_flClientWeaponAnimTime = 0.0;
+
+// The client predicted this animation itself (cl_lw 1). A Sven server still
+// echoes some of them; replaying the echo restarts the same animation.
+void GAME_EXPORT CL_ClientWeaponAnim( int iAnim, int body )
+{
+	s_iClientWeaponAnim = iAnim;
+	s_flClientWeaponAnimTime = host.realtime;
+	CL_WeaponAnim( iAnim, body );
+}
+
+static qboolean CL_IsPredictedWeaponAnimEcho( int iAnim )
+{
+	if( !cl_lw.value || !cl_sven_proto || iAnim != s_iClientWeaponAnim )
+		return false;
+	if( host.realtime - s_flClientWeaponAnimTime > 1.0 )
+		return false;
+	s_iClientWeaponAnim = -1; // one echo per prediction
+	return true;
+}
+
 void GAME_EXPORT CL_WeaponAnim( int iAnim, int body )
 {
 	cl_entity_t *view = &clgame.viewent;
@@ -2917,7 +2939,13 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 	case svc_weaponanim:
 		param1 = MSG_ReadByte( msg );	// iAnim
 		param2 = MSG_ReadByte( msg );	// body
-		CL_WeaponAnim( param1, param2 );
+		{
+			const qboolean echo = CL_IsPredictedWeaponAnimEcho( param1 );
+			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+				Con_Printf( "WEAPON-ANIM: svc seq=%d body=%d echo=%d\n", param1, param2, echo );
+			if( !echo )
+				CL_WeaponAnim( param1, param2 );
+		}
 		break;
 	case svc_roomtype:
 		param1 = MSG_ReadShort( msg );
