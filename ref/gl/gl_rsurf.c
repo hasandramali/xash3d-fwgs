@@ -1806,6 +1806,9 @@ static void R_RenderDecalsForSurface( msurface_t *fa, int cull_type )
 	}
 }
 
+// luxels of animated light style surfaces rebuilt per frame (~ one 256x256 block)
+#define LIGHTSTYLE_REBUILD_BUDGET ( 256 * 256 )
+
 static qboolean R_CheckLightMap( msurface_t *fa )
 {
 	if( unlikely( !r_dynamic->value ))
@@ -1827,6 +1830,19 @@ static qboolean R_CheckLightMap( msurface_t *fa )
 		int sample_size = gEngfuncs.Mod_SampleSizeForFace( fa );
 		int smax = ( info->lightextents[0] / sample_size ) + 1;
 		int tmax = ( info->lightextents[1] / sample_size ) + 1;
+
+		// A fading light style changes every surface it touches at once and
+		// rebuilt them all in one frame. Spread the work: past the budget a
+		// surface keeps its old light and is rebuilt on a following frame.
+		static int s_iStyleBudgetFrame = -1, s_iStyleBudgetUsed = 0;
+		if( s_iStyleBudgetFrame != tr.framecount )
+		{
+			s_iStyleBudgetFrame = tr.framecount;
+			s_iStyleBudgetUsed = 0;
+		}
+		if( s_iStyleBudgetUsed > 0 && s_iStyleBudgetUsed + smax * tmax > LIGHTSTYLE_REBUILD_BUDGET )
+			return false;
+		s_iStyleBudgetUsed += smax * tmax;
 
 		if( smax < 132 && tmax < 132 )
 			R_BuildLightMap( fa, temp, smax * 4, true );

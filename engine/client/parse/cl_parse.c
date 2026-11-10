@@ -333,6 +333,7 @@ Set new weapon animation
 */
 static int s_iClientWeaponAnim = -1;
 static double s_flClientWeaponAnimTime = 0.0;
+static uint s_iClientWeaponAnimCommand = 0;
 
 // The client predicted this animation itself (cl_lw 1). A Sven server still
 // echoes some of them; replaying the echo restarts the same animation.
@@ -340,6 +341,7 @@ void GAME_EXPORT CL_ClientWeaponAnim( int iAnim, int body )
 {
 	s_iClientWeaponAnim = iAnim;
 	s_flClientWeaponAnimTime = host.realtime;
+	s_iClientWeaponAnimCommand = cls.netchan.outgoing_sequence;
 	CL_WeaponAnim( iAnim, body );
 }
 
@@ -348,6 +350,12 @@ static qboolean CL_IsPredictedWeaponAnimEcho( int iAnim )
 	if( !cl_lw.value || !cl_sven_proto || iAnim != s_iClientWeaponAnim )
 		return false;
 	if( host.realtime - s_flClientWeaponAnimTime > 1.0 )
+		return false;
+	// The echo rides on the packet that acknowledges the predicting command.
+	// The same animation acknowledged later is the server starting it on its
+	// own after a misprediction (common with motion and ping), so it plays.
+	const int commandsAfter = (int)( cls.netchan.incoming_acknowledged - s_iClientWeaponAnimCommand );
+	if( commandsAfter < 0 || commandsAfter > 4 )
 		return false;
 	s_iClientWeaponAnim = -1; // one echo per prediction
 	return true;

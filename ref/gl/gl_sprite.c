@@ -250,6 +250,8 @@ Do occlusion test for glow-sprites
 */
 // world radius above which a sprite is left to clip into walls
 #define SPRITE_WALL_PROTECT_RADIUS 256.0f
+// furthest a sprite is pulled toward the eye for its depth test
+#define SPRITE_WALL_PULL_MAX 96.0f
 
 static qboolean R_SpriteOccluded( cl_entity_t *e, vec3_t origin, float *pscale )
 {
@@ -445,9 +447,17 @@ void R_DrawSpriteModel( cl_entity_t *e )
 		const float dist = VectorLength( toSprite );
 		if( radius > 0.0f && radius < SPRITE_WALL_PROTECT_RADIUS && dist > 1.0f )
 		{
-			const float pulled = Q_max( dist - radius, Q_min( 8.0f, dist * 0.5f ));
-			VectorMA( RI.rvp.vieworigin, pulled / dist, toSprite, origin );
-			scale *= pulled / dist;
+			// Only for sprites the eye can reach: one behind a wall stays hidden.
+			pmtrace_t *trace = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, PM_GLASS_IGNORE | PM_STUDIO_IGNORE );
+			if(( 1.0f - trace->fraction ) * dist <= radius + 8.0f )
+			{
+				// A surface seen at a grazing angle cuts the quad unless it is
+				// pulled several radii, so allow up to four, within limits.
+				const float pull = Q_min( Q_min( Q_max( radius * 4.0f, 16.0f ), SPRITE_WALL_PULL_MAX ), dist * 0.5f );
+				const float pulled = dist - pull;
+				VectorMA( RI.rvp.vieworigin, pulled / dist, toSprite, origin );
+				scale *= pulled / dist;
+			}
 		}
 	}
 
