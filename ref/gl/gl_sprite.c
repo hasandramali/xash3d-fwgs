@@ -248,6 +248,9 @@ R_SpriteOccluded
 Do occlusion test for glow-sprites
 ================
 */
+// world radius above which a sprite is left to clip into walls
+#define SPRITE_WALL_PROTECT_RADIUS 256.0f
+
 static qboolean R_SpriteOccluded( cl_entity_t *e, vec3_t origin, float *pscale )
 {
 	if( e->curstate.rendermode == kRenderGlow )
@@ -423,6 +426,29 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	default:
 		pglDisable( GL_BLEND );
 		break;
+	}
+
+	// Glows and additive sprites are depth tested so players in front hide
+	// them, but a sprite touching a wall would lose the half inside it. Pull
+	// it toward the eye by its own radius and shrink it by the same ratio:
+	// the screen image is unchanged, only the depth test moves. Sprites the
+	// size of a big explosion (e.g. weapon_redeemer's fireball and glow) may
+	// still sink into walls so they don't fill the player's view.
+	if( e->curstate.rendermode == kRenderGlow || e->curstate.rendermode == kRenderTransAdd )
+	{
+		vec3_t toSprite;
+		float radius = 0.0f;
+		for( int axis = 0; axis < 3; axis++ )
+			radius = Q_max( radius, Q_max( fabs( model->mins[axis] ), fabs( model->maxs[axis] )));
+		radius *= scale;
+		VectorSubtract( origin, RI.rvp.vieworigin, toSprite );
+		const float dist = VectorLength( toSprite );
+		if( radius > 0.0f && radius < SPRITE_WALL_PROTECT_RADIUS && dist > 1.0f )
+		{
+			const float pulled = Q_max( dist - radius, Q_min( 8.0f, dist * 0.5f ));
+			VectorMA( RI.rvp.vieworigin, pulled / dist, toSprite, origin );
+			scale *= pulled / dist;
+		}
 	}
 
 	// all sprites can have color
