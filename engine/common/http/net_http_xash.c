@@ -558,7 +558,7 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 
 	if( file->server->secure )
 	{
-		file->tls = HTTP_TlsNew( file->socket, file->server->host );
+		file->tls = HTTP_TlsNew( file->socket, file->server->host, sven_fastdl );
 		if( !file->tls )
 		{
 			Con_Printf( S_ERROR "TLS context allocation failed for %s\n", file->server->host );

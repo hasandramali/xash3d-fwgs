@@ -49,6 +49,15 @@ struct tlsctx_s
 	int socket; // not owned; caller closes
 };
 
+static const uint16_t sven_fastdl_groups[] = {
+	MBEDTLS_SSL_IANA_TLS_GROUP_SECP521R1,
+	MBEDTLS_SSL_IANA_TLS_GROUP_SECP384R1,
+	MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,
+	0
+};
+
+static const char *const sven_fastdl_alpn[] = { "http/1.1", NULL };
+
 static void HTTP_TlsLogDebug( void *ctx, int level, const char *file, int line, const char *str )
 {
 	Con_Printf( "TLS[%d] %s:%d %s", level, COM_FileWithoutPath( file ), line, str );
@@ -166,7 +175,7 @@ qboolean HTTP_TlsAvailable( void )
 	return true;
 }
 
-tlsctx_t *HTTP_TlsNew( int socket, const char *hostname )
+tlsctx_t *HTTP_TlsNew( int socket, const char *hostname, qboolean sven_fastdl )
 {
 	if( !g_tls.inited )
 	{
@@ -207,6 +216,20 @@ tlsctx_t *HTTP_TlsNew( int socket, const char *hostname )
 
 	mbedtls_ssl_conf_authmode( &ctx->conf, authmode );
 	mbedtls_ssl_conf_ca_chain( &ctx->conf, &g_tls.cacert, NULL );
+	if( sven_fastdl )
+	{
+		mbedtls_ssl_conf_groups( &ctx->conf, sven_fastdl_groups );
+		mbedtls_ssl_conf_session_tickets( &ctx->conf, MBEDTLS_SSL_SESSION_TICKETS_ENABLED );
+		mbedtls_ssl_conf_encrypt_then_mac( &ctx->conf, MBEDTLS_SSL_ETM_ENABLED );
+
+		ret = mbedtls_ssl_conf_alpn_protocols( &ctx->conf, sven_fastdl_alpn );
+		if( ret != 0 )
+		{
+			HTTP_TlsLogErr( "alpn configuration", ret );
+			HTTP_TlsFree( ctx );
+			return NULL;
+		}
+	}
 	mbedtls_ssl_conf_dbg( &ctx->conf, HTTP_TlsLogDebug, NULL );
 	mbedtls_debug_set_threshold( http_tls_verbose.value );
 
