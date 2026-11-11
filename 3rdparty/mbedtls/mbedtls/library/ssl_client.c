@@ -690,8 +690,7 @@ static int ssl_write_client_hello_body(mbedtls_ssl_context *ssl,
 #endif
 
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
-    if (ssl->conf->MBEDTLS_PRIVATE(sven_clienthello) &&
-        !handshake->hello_retry_request_flag) {
+    if (ssl->conf->MBEDTLS_PRIVATE(sven_clienthello)) {
         return ssl_write_sven_client_hello_body(ssl, buf, end, out_len);
     }
 #endif

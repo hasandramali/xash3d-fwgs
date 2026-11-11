@@ -489,6 +489,7 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 
 	const char *path_suffix = file->url_in_server ? "" : file->path;
 	qboolean sven_fastdl = false;
+	qboolean sven_tls = false;
 
 	// RFC 7230: leave the default port out of Host. Browsers, curl and
 	// Steam's HTTP client do; some CDN/WAF setups reject "host:443".
@@ -507,13 +508,16 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 	if( !file->to_memory && cl_sven_proto && NET_NetadrType( &cls.serveradr ) != NA_UNDEFINED )
 	{
 		sven_fastdl = true;
-		if( COM_StringEmpty( http_useragent.string ) || !Q_strcmp( http_useragent.string, "xash3d" ))
+		sven_tls = !Q_stricmp( file->server->host, "fastdl.sbmesh.com" );
+		if( sven_tls )
+			Q_strncpy( useragent, "Valve/Steam HTTP Client 1.0", sizeof( useragent ));
+		else if( COM_StringEmpty( http_useragent.string ) || !Q_strcmp( http_useragent.string, "xash3d" ))
 			Q_strncpy( useragent, "Sven Co-op", sizeof( useragent ));
 		Q_snprintf( extra_headers, sizeof( extra_headers ),
 			"Referer: %s\r\n"
 			"Cache-Control: no-cache\r\n"
 			"Accept: */*\r\n"
-			"Accept-Encoding: gzip\r\n"
+			"Accept-Encoding: gzip, deflate\r\n"
 			"Connection: keep-alive\r\n",
 			NET_AdrToString( cls.serveradr ));
 	}
@@ -563,7 +567,7 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 
 	if( file->server->secure )
 	{
-		file->tls = HTTP_TlsNew( file->socket, file->server->host, sven_fastdl );
+		file->tls = HTTP_TlsNew( file->socket, file->server->host, sven_tls );
 		if( !file->tls )
 		{
 			Con_Printf( S_ERROR "TLS context allocation failed for %s\n", file->server->host );
