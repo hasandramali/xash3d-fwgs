@@ -489,6 +489,21 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 
 	const char *path_suffix = file->url_in_server ? "" : file->path;
 
+	// Sven's engine (hw.dll 0x1d4aa60, 0x1d4b6bd) downloads with
+	// "User-Agent: Sven Co-op", the game server's address as Referer and
+	// "Cache-Control: no-cache". Some FastDL hosts answer 403 to anything
+	// else, which pushed every file onto the slow in-game transfer.
+	char extra_headers[160] = "";
+#if !XASH_DEDICATED
+	if( !file->to_memory && cl_sven_proto && NET_NetadrType( &cls.serveradr ) != NA_UNDEFINED )
+	{
+		if( COM_StringEmpty( http_useragent.string ) || !Q_strcmp( http_useragent.string, "xash3d" ))
+			Q_strncpy( useragent, "Sven Co-op", sizeof( useragent ));
+		Q_snprintf( extra_headers, sizeof( extra_headers ), "Referer: %s\r\nCache-Control: no-cache\r\n",
+			NET_AdrToString( cls.serveradr ));
+	}
+#endif
+
 	if( file->to_memory )
 	{
 		file->query_length = Q_snprintf( file->buf, MAX_HTTP_BUFFER_SIZE + 1,
@@ -506,11 +521,12 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 			"GET %s%s HTTP/1.1\r\n"
 			"Host: %s:%d\r\n"
 			"User-Agent: %s\r\n"
+			"%s"
 			"Accept-Encoding: gzip, deflate\r\n"
 			"Accept: */*\r\n\r\n",
 			file->server->path, path_suffix,
 			file->server->host, file->server->port,
-			useragent );
+			useragent, extra_headers );
 	}
 	Q_strncpy( file->query_backup, file->buf, sizeof( file->query_backup ));
 	file->bytes_sent = 0;
