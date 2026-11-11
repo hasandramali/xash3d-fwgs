@@ -488,6 +488,7 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 	else Q_strncpy( useragent, http_useragent.string, sizeof( useragent ));
 
 	const char *path_suffix = file->url_in_server ? "" : file->path;
+	qboolean sven_fastdl = false;
 
 	// RFC 7230: leave the default port out of Host. Browsers, curl and
 	// Steam's HTTP client do; some CDN/WAF setups reject "host:443".
@@ -505,6 +506,7 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 #if !XASH_DEDICATED
 	if( !file->to_memory && cl_sven_proto && NET_NetadrType( &cls.serveradr ) != NA_UNDEFINED )
 	{
+		sven_fastdl = true;
 		if( COM_StringEmpty( http_useragent.string ) || !Q_strcmp( http_useragent.string, "xash3d" ))
 			Q_strncpy( useragent, "Sven Co-op", sizeof( useragent ));
 		Q_snprintf( extra_headers, sizeof( extra_headers ), "Referer: %s\r\nCache-Control: no-cache\r\n",
@@ -525,16 +527,30 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 	}
 	else
 	{
-		file->query_length = Q_snprintf( file->buf, MAX_HTTP_BUFFER_SIZE + 1,
-			"GET %s%s HTTP/1.1\r\n"
-			"Host: %s\r\n"
-			"User-Agent: %s\r\n"
-			"%s"
-			"Accept-Encoding: gzip, deflate\r\n"
-			"Accept: */*\r\n\r\n",
-			file->server->path, path_suffix,
-			host_header,
-			useragent, extra_headers );
+		if( sven_fastdl )
+		{
+			file->query_length = Q_snprintf( file->buf, MAX_HTTP_BUFFER_SIZE + 1,
+				"GET %s%s HTTP/1.1\r\n"
+				"Host: %s\r\n"
+				"User-Agent: %s\r\n"
+				"%s\r\n",
+				file->server->path, path_suffix,
+				host_header,
+				useragent, extra_headers );
+		}
+		else
+		{
+			file->query_length = Q_snprintf( file->buf, MAX_HTTP_BUFFER_SIZE + 1,
+				"GET %s%s HTTP/1.1\r\n"
+				"Host: %s\r\n"
+				"User-Agent: %s\r\n"
+				"%s"
+				"Accept-Encoding: gzip, deflate\r\n"
+				"Accept: */*\r\n\r\n",
+				file->server->path, path_suffix,
+				host_header,
+				useragent, extra_headers );
+		}
 	}
 	Q_strncpy( file->query_backup, file->buf, sizeof( file->query_backup ));
 	file->bytes_sent = 0;
