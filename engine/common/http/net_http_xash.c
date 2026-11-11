@@ -489,6 +489,14 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 
 	const char *path_suffix = file->url_in_server ? "" : file->path;
 
+	// RFC 7230: leave the default port out of Host. Browsers, curl and
+	// Steam's HTTP client do; some CDN/WAF setups reject "host:443".
+	char host_header[sizeof( file->server->host ) + 8];
+	if(( file->server->secure && file->server->port == 443 ) || ( !file->server->secure && file->server->port == 80 ))
+		Q_strncpy( host_header, file->server->host, sizeof( host_header ));
+	else
+		Q_snprintf( host_header, sizeof( host_header ), "%s:%d", file->server->host, file->server->port );
+
 	// Sven's engine (hw.dll 0x1d4aa60, 0x1d4b6bd) downloads with
 	// "User-Agent: Sven Co-op", the game server's address as Referer and
 	// "Cache-Control: no-cache". Some FastDL hosts answer 403 to anything
@@ -508,24 +516,24 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 	{
 		file->query_length = Q_snprintf( file->buf, MAX_HTTP_BUFFER_SIZE + 1,
 			"GET %s%s HTTP/1.1\r\n"
-			"Host: %s:%d\r\n"
+			"Host: %s\r\n"
 			"User-Agent: %s\r\n"
 			"Accept: */*\r\n\r\n",
 			file->server->path, path_suffix,
-			file->server->host, file->server->port,
+			host_header,
 			useragent );
 	}
 	else
 	{
 		file->query_length = Q_snprintf( file->buf, MAX_HTTP_BUFFER_SIZE + 1,
 			"GET %s%s HTTP/1.1\r\n"
-			"Host: %s:%d\r\n"
+			"Host: %s\r\n"
 			"User-Agent: %s\r\n"
 			"%s"
 			"Accept-Encoding: gzip, deflate\r\n"
 			"Accept: */*\r\n\r\n",
 			file->server->path, path_suffix,
-			file->server->host, file->server->port,
+			host_header,
 			useragent, extra_headers );
 	}
 	Q_strncpy( file->query_backup, file->buf, sizeof( file->query_backup ));
@@ -1174,6 +1182,15 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 							if( HTTP_FileRedirect( curfile, loc ))
 								return 1;
 						}
+					}
+
+					// first few refusals: log both sides so a FastDL host's rule can be seen
+					static int s_iDeniedReports = 0;
+					if( num == 403 && s_iDeniedReports < 3 )
+					{
+						s_iDeniedReports++;
+						Con_Printf( "FastDL 403 request:\n%s", curfile->query_backup );
+						Con_Printf( "FastDL 403 response:\n%.1024s\n", curfile->buf );
 					}
 
 					char *p = Q_strchr( curfile->buf, '\r' );
