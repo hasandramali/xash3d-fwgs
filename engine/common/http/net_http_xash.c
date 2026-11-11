@@ -502,14 +502,19 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 	// "User-Agent: Sven Co-op", the game server's address as Referer and
 	// "Cache-Control: no-cache". Some FastDL hosts answer 403 to anything
 	// else, which pushed every file onto the slow in-game transfer.
-	char extra_headers[160] = "";
+	char extra_headers[256] = "";
 #if !XASH_DEDICATED
 	if( !file->to_memory && cl_sven_proto && NET_NetadrType( &cls.serveradr ) != NA_UNDEFINED )
 	{
 		sven_fastdl = true;
 		if( COM_StringEmpty( http_useragent.string ) || !Q_strcmp( http_useragent.string, "xash3d" ))
 			Q_strncpy( useragent, "Sven Co-op", sizeof( useragent ));
-		Q_snprintf( extra_headers, sizeof( extra_headers ), "Referer: %s\r\nCache-Control: no-cache\r\n",
+		Q_snprintf( extra_headers, sizeof( extra_headers ),
+			"Referer: %s\r\n"
+			"Cache-Control: no-cache\r\n"
+			"Accept: */*\r\n"
+			"Accept-Encoding: gzip\r\n"
+			"Connection: keep-alive\r\n",
 			NET_AdrToString( cls.serveradr ));
 	}
 #endif

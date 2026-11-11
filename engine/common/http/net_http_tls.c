@@ -56,6 +56,24 @@ static const uint16_t sven_fastdl_groups[] = {
 	0
 };
 
+static const int sven_fastdl_ciphers[] = {
+	0x1302, 0x1303, 0x1301,
+	0xC02B, 0xC02F, 0xC02C, 0xC030,
+	0xC0AE, 0xC0AC, 0xC023, 0xC027, 0xC009, 0xC013,
+	0xC0AF, 0xC0AD, 0xC024, 0xC028, 0xC00A, 0xC014,
+	0x009C, 0xC0A0, 0xC09C, 0x003C, 0x002F,
+	0x009D, 0xC0A1, 0xC09D, 0x003D, 0x0035,
+	0x0041, 0x0084, 0x00FF,
+	0
+};
+
+static const uint16_t sven_fastdl_sig_algs[] = {
+	0x0403, 0x0503, 0x0603, 0x0807, 0x0808, 0x0809, 0x080A, 0x080B,
+	0x0804, 0x0805, 0x0806, 0x0401, 0x0501, 0x0601, 0x0303, 0x0203,
+	0x0301, 0x0201, 0x0302, 0x0202, 0x0402, 0x0502, 0x0602,
+	0
+};
+
 static const char *const sven_fastdl_alpn[] = { "http/1.1", NULL };
 
 static void HTTP_TlsLogDebug( void *ctx, int level, const char *file, int line, const char *str )
@@ -219,6 +237,9 @@ tlsctx_t *HTTP_TlsNew( int socket, const char *hostname, qboolean sven_fastdl )
 	if( sven_fastdl )
 	{
 		mbedtls_ssl_conf_groups( &ctx->conf, sven_fastdl_groups );
+		mbedtls_ssl_conf_ciphersuites( &ctx->conf, sven_fastdl_ciphers );
+		mbedtls_ssl_conf_sig_algs( &ctx->conf, sven_fastdl_sig_algs );
+		mbedtls_ssl_conf_sven_clienthello( &ctx->conf, 1 );
 		mbedtls_ssl_conf_session_tickets( &ctx->conf, MBEDTLS_SSL_SESSION_TICKETS_ENABLED );
 		mbedtls_ssl_conf_encrypt_then_mac( &ctx->conf, MBEDTLS_SSL_ETM_ENABLED );
 
@@ -271,7 +292,8 @@ int HTTP_TlsHandshake( tlsctx_t *ctx )
 	if( ret == 0 )
 		return HTTP_TLS_OK;
 
-	if( ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE )
+	if( ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
+		ret == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET )
 		return HTTP_TLS_WANT;
 
 	HTTP_TlsLogErr( "handshake", ret );
@@ -285,7 +307,8 @@ int HTTP_TlsSend( tlsctx_t *ctx, const void *buf, int len )
 	if( ret >= 0 )
 		return ret;
 
-	if( ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE )
+	if( ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
+		ret == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET )
 		return HTTP_TLS_WANT;
 
 	HTTP_TlsLogErr( "send", ret );
@@ -302,7 +325,8 @@ int HTTP_TlsRecv( tlsctx_t *ctx, void *buf, int len )
 	if( ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY )
 		return 0;
 
-	if( ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE )
+	if( ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
+		ret == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET )
 		return HTTP_TLS_WANT;
 
 	HTTP_TlsLogErr( "recv", ret );
