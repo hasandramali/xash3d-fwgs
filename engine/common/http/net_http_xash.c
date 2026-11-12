@@ -154,6 +154,9 @@ typedef struct httpfile_s
 	struct sockaddr_storage addr;
 	int redirects_followed;
 	qboolean url_in_server;
+	qboolean sven_fastdl;
+	qboolean sven_tls;
+	qboolean sven_retry;
 	tlsctx_t *tls;
 
 	// in-memory response mode (set by HTTP_GetToMemory)
@@ -190,6 +193,12 @@ static struct http_static_s
 		int port;
 		double expires;
 	} tls_failures[8];
+	struct
+	{
+		char host[256];
+		int port;
+		double expires;
+	} sven_tls_servers[8];
 } http;
 
 poolhandle_t http_mempool;
@@ -212,6 +221,11 @@ static int HTTP_FileTlsHandshake( httpfile_t *file );
 static int HTTP_FileDecompress( httpfile_t *file );
 static httpserver_t *HTTP_ParseURL( const char *url_, qboolean full_path );
 static qboolean HTTP_FileRedirect( httpfile_t *file, const char *location );
+#if !XASH_DEDICATED
+static qboolean HTTP_SvenTLSRequired( const httpserver_t *server );
+#endif
+static void HTTP_RememberSvenTLS( const httpserver_t *server );
+static qboolean HTTP_FileRetrySvenTLS( httpfile_t *file );
 
 /*
 ==============
@@ -291,6 +305,9 @@ static void HTTP_FreeFile( httpfile_t *file, qboolean error )
 			file->server = next;
 			file->url_in_server = false;
 			file->redirects_followed = 0;
+			file->sven_fastdl = false;
+			file->sven_tls = false;
+			file->sven_retry = false;
 
 			file->pfn_process = HTTP_FileQueue; // Reset download state, HTTP_Run() will open file again
 			return;
@@ -355,6 +372,85 @@ static int HTTP_FileQueue( httpfile_t *file )
 	file->chunksize = 0;
 	file->chunkhead_len = 0; // drop any stale partial header (fresh socket below)
 	return 1;
+}
+
+#if !XASH_DEDICATED
+static qboolean HTTP_SvenTLSRequired( const httpserver_t *server )
+{
+	if( !server )
+		return false;
+
+	for( int index = 0; index < ARRAYSIZE( http.sven_tls_servers ); index++ )
+	{
+		if( http.sven_tls_servers[index].expires > host.realtime
+			&& http.sven_tls_servers[index].port == server->port
+			&& !Q_stricmp( http.sven_tls_servers[index].host, server->host ))
+			return true;
+	}
+
+	return false;
+}
+#endif
+
+static void HTTP_RememberSvenTLS( const httpserver_t *server )
+{
+	int slot = 0;
+
+	for( int index = 0; index < ARRAYSIZE( http.sven_tls_servers ); index++ )
+	{
+		if( http.sven_tls_servers[index].port == server->port
+			&& !Q_stricmp( http.sven_tls_servers[index].host, server->host ))
+		{
+			slot = index;
+			break;
+		}
+		if( http.sven_tls_servers[index].expires < http.sven_tls_servers[slot].expires )
+			slot = index;
+	}
+
+	Q_strncpy( http.sven_tls_servers[slot].host, server->host, sizeof( http.sven_tls_servers[slot].host ));
+	http.sven_tls_servers[slot].port = server->port;
+	http.sven_tls_servers[slot].expires = host.realtime + 3600.0;
+}
+
+static qboolean HTTP_FileRetrySvenTLS( httpfile_t *file )
+{
+	if( file->to_memory || !file->sven_fastdl || !file->server || !file->server->secure || file->sven_tls || file->sven_retry )
+		return false;
+
+	file->sven_retry = true;
+
+	if( file->tls )
+	{
+		HTTP_TlsFree( file->tls );
+		file->tls = NULL;
+	}
+
+	if( file->socket != -1 )
+	{
+		closesocket( file->socket );
+		http.active_count--;
+		file->socket = -1;
+	}
+
+	if( file->file )
+		g_fsapi.Seek( file->file, 0, SEEK_SET );
+
+	file->downloaded = 0;
+	file->lastchecksize = 0;
+	file->header_size = 0;
+	file->bytes_sent = 0;
+	file->got_response = false;
+	file->compressed = false;
+	file->chunked = false;
+	file->chunksize = 0;
+	file->chunkhead_len = 0;
+	file->size = file->reported_size;
+	file->blocktime = 0;
+
+	Con_Reportf( "HTTP: retrying %s with Sven TLS fingerprint\n", file->path );
+	file->pfn_process = HTTP_FileQueue;
+	return true;
 }
 
 static qboolean HTTP_TLSFailedRecently( const httpserver_t *server )
@@ -489,7 +585,9 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 
 	const char *path_suffix = file->url_in_server ? "" : file->path;
 	qboolean sven_fastdl = false;
-	qboolean sven_tls = false;
+
+	file->sven_fastdl = false;
+	file->sven_tls = false;
 
 	// RFC 7230: leave the default port out of Host. Browsers, curl and
 	// Steam's HTTP client do; some CDN/WAF setups reject "host:443".
@@ -508,11 +606,10 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 	if( !file->to_memory && cl_sven_proto && NET_NetadrType( &cls.serveradr ) != NA_UNDEFINED )
 	{
 		sven_fastdl = true;
-		sven_tls = !Q_stricmp( file->server->host, "fastdl.sbmesh.com" );
-		if( sven_tls )
+		file->sven_fastdl = true;
+		file->sven_tls = file->sven_retry || HTTP_SvenTLSRequired( file->server );
+		if( COM_StringEmpty( http_useragent.string ) || !Q_strcmp( http_useragent.string, "xash3d" ))
 			Q_strncpy( useragent, "Valve/Steam HTTP Client 1.0", sizeof( useragent ));
-		else if( COM_StringEmpty( http_useragent.string ) || !Q_strcmp( http_useragent.string, "xash3d" ))
-			Q_strncpy( useragent, "Sven Co-op", sizeof( useragent ));
 		Q_snprintf( extra_headers, sizeof( extra_headers ),
 			"Referer: %s\r\n"
 			"Cache-Control: no-cache\r\n"
@@ -567,7 +664,7 @@ static int HTTP_FilePrepareRequest( httpfile_t *file )
 
 	if( file->server->secure )
 	{
-		file->tls = HTTP_TlsNew( file->socket, file->server->host, sven_tls );
+		file->tls = HTTP_TlsNew( file->socket, file->server->host, file->sven_tls );
 		if( !file->tls )
 		{
 			Con_Printf( S_ERROR "TLS context allocation failed for %s\n", file->server->host );
@@ -677,6 +774,9 @@ static int HTTP_FileTlsHandshake( httpfile_t *file )
 		file->blockreason = "TLS handshake";
 		return 0;
 	}
+
+	if( HTTP_FileRetrySvenTLS( file ))
+		return 0;
 
 	if( !file->to_memory ) HTTP_RememberTLSFailure( file->server );
 	HTTP_FreeFile( file, true );
@@ -1188,6 +1288,9 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 						num = Q_atoi( tmp );
 				}
 
+				if( num == 200 && curfile->sven_tls )
+					HTTP_RememberSvenTLS( curfile->server );
+
 				if( num != 200 )
 				{
 					if( num == 301 || num == 302 || num == 303 || num == 307 || num == 308 )
@@ -1209,11 +1312,19 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 						}
 					}
 
-					// first few refusals: log both sides so a FastDL host's rule can be seen
-					static int s_iDeniedReports = 0;
-					if( num == 403 && s_iDeniedReports < 3 )
+					if( num == 403 && curfile->sven_fastdl && !curfile->sven_tls && !curfile->sven_retry
+						&& ( Q_stristr( curfile->buf, "Server: cloudflare" ) || Q_stristr( curfile->buf, "CF-RAY:" )))
 					{
-						s_iDeniedReports++;
+						Con_Reportf( "HTTP: Cloudflare denied %s, retrying with Sven TLS fingerprint\n", curfile->path );
+						if( HTTP_FileRetrySvenTLS( curfile ))
+							return 0;
+					}
+
+					// first few refusals: log both sides so a FastDL host's rule can be seen
+					static int iDeniedReports = 0;
+					if( num == 403 && iDeniedReports < 3 )
+					{
+						iDeniedReports++;
 						Con_Printf( "FastDL 403 request:\n%s", curfile->query_backup );
 						Con_Printf( "FastDL 403 response:\n%.1024s\n", curfile->buf );
 					}
@@ -1737,6 +1848,9 @@ static qboolean HTTP_FileRedirect( httpfile_t *file, const char *location )
 		Mem_Free( file->server );
 	file->server = newserver;
 	file->own_server = true;
+	file->sven_fastdl = false;
+	file->sven_tls = false;
+	file->sven_retry = false;
 
 	// truncate the partial download; we'll restart from the new server
 	if( file->file )
