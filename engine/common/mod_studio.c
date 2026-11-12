@@ -1104,8 +1104,14 @@ static studiohdr_t *R_StudioLoadHeader( model_t *mod, void *buffer, size_t buffe
 
 static studiohdr_t *Mod_MaybeTruncateStudioTextureData( model_t *mod )
 {
-#if XASH_LOW_MEMORY
+#if XASH_LOW_MEMORY || XASH_ANDROID
 	studiohdr_t *phdr = (studiohdr_t *)mod->cache.data;
+
+	// models with textures merged from a companion T.mdl have texturedataindex
+	// at or before the merged texture block: truncating them would corrupt
+	// the header and break client-side animation lookups, so keep them whole
+	if( phdr->texturedataindex <= phdr->textureindex || (uint32_t)phdr->texturedataindex > (uint32_t)phdr->length )
+		return (studiohdr_t *)mod->cache.data;
 
 	mod->cache.data = Mem_Realloc( mod->mempool, mod->cache.data, phdr->texturedataindex );
 	phdr = (studiohdr_t *)mod->cache.data; // get the new pointer on studiohdr
@@ -1179,6 +1185,7 @@ void Mod_LoadStudioModel( model_t *mod, void *buffer, size_t buffersize, qboolea
 			size1 + size2 <= SIZE_MAX - (size_t)phdr->length )
 		{
 			// TODO: Mod_StudioLoadTextures will crash if passed a merged studio model!
+			Mod_StudioSnapshotTextureOffsets( mod, thdr, true );
 			ref.dllFuncs.Mod_StudioLoadTextures( mod, thdr );
 			textures_loaded = true;
 
@@ -1213,7 +1220,10 @@ void Mod_LoadStudioModel( model_t *mod, void *buffer, size_t buffersize, qboolea
 
 #if !XASH_DEDICATED
 		if( !Host_IsDedicated( ))
+		{
+			Mod_StudioSnapshotTextureOffsets( mod, phdr, false );
 			ref.dllFuncs.Mod_StudioLoadTextures( mod, phdr );
+		}
 #endif
 	}
 

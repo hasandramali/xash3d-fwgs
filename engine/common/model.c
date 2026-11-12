@@ -23,6 +23,7 @@ GNU General Public License for more details.
 #include "enginefeatures.h"
 #include "client.h"
 #include "server.h"
+#include <float.h>
 
 static model_info_t	mod_crcinfo[MAX_MODELS];
 static model_t	mod_known[MAX_MODELS];
@@ -32,6 +33,422 @@ CVAR_DEFINE( mod_studiocache, "r_studiocache", "1", FCVAR_ARCHIVE, "enables stud
 CVAR_DEFINE_AUTO( r_wadtextures, "0", FCVAR_LATCH, "completely ignore textures in the bsp-file if enabled" );
 CVAR_DEFINE_AUTO( r_showhull, "0", 0, "draw collision hulls 1-3" );
 CVAR_DEFINE_AUTO( r_allow_wad3_luma, "0", FCVAR_LATCH|FCVAR_ARCHIVE, "allow usage of luma textures in wad3 (tilde textures)" );
+
+#if !XASH_DEDICATED
+#if XASH_ANDROID
+#define STUDIO_TEXTURE_CACHE_DEFAULT "512"
+#else
+#define STUDIO_TEXTURE_CACHE_DEFAULT "0"
+#endif
+CVAR_DEFINE_AUTO( r_studio_texture_cache, STUDIO_TEXTURE_CACHE_DEFAULT, FCVAR_ARCHIVE,
+	"evict studio model GL textures above this budget in megabytes (0 = keep all textures)" );
+
+#define STUDIO_RELOAD_FRAME_BUDGET (32u << 20)
+
+typedef struct studiotexmeta_s
+{
+	qboolean	evicted;	// GL textures were freed, ptexture[i].index == 0
+	qboolean	pending;	// needs background reload after a deferred visible touch
+	qboolean	fromT;		// textures live in a companion T.mdl file
+	uint32_t	*ofs;		// per-texture pixel data offset in the source file
+	int		numtextures;
+	size_t		bytes;		// estimated GL memory occupied by the textures
+	float		touch;		// last time the model was seen, -1 = never seen
+} studiotexmeta_t;
+
+static studiotexmeta_t *mod_studiotex[MAX_MODELS];
+static int mod_studiotex_frame = -1;
+static size_t mod_studiotex_framebytes;
+static double mod_studiotex_lastenforce;
+#endif
+
+/*
+===============================================================================
+
+			STUDIO TEXTURE CACHE
+
+Evicts least-recently-seen studio model GL textures when they exceed the
+r_studio_texture_cache budget. CPU model data is always kept intact, so
+server-side tracing and animation are never affected. Evicted textures are
+transparently re-uploaded from disk when the model becomes visible again.
+
+===============================================================================
+*/
+#if !XASH_DEDICATED
+static studiotexmeta_t *Mod_StudioTexMeta( const model_t *mod )
+{
+	int i = mod - mod_known;
+
+	if( i < 0 || i >= MAX_MODELS )
+		return NULL;
+
+	return mod_studiotex[i];
+}
+
+static void Mod_StudioEvictTextures( model_t *mod )
+{
+	studiotexmeta_t *meta = Mod_StudioTexMeta( mod );
+	studiohdr_t *phdr;
+	mstudiotexture_t *pt;
+	int defaulttex, i;
+
+	if( !meta || meta->evicted )
+		return;
+
+	phdr = (studiohdr_t *)mod->cache.data;
+	if( !phdr || phdr->numtextures <= 0 || phdr->textureindex <= 0 )
+		return;
+
+	pt = (mstudiotexture_t *)((byte *)phdr + phdr->textureindex);
+	defaulttex = ref.dllFuncs.GL_FindTexture( REF_DEFAULT_TEXTURE );
+
+	for( i = 0; i < phdr->numtextures; i++ )
+	{
+		if( pt[i].index && pt[i].index != defaulttex )
+			ref.dllFuncs.GL_FreeTexture( pt[i].index );
+		pt[i].index = 0;
+	}
+
+	meta->evicted = true;
+	meta->pending = false;
+}
+
+static void Mod_StudioTexBudgetEnforce( void )
+{
+	float budget_mb = r_studio_texture_cache.value;
+	size_t budget, total;
+	float hold;
+	int i;
+
+	if( budget_mb <= 0.0f || Host_IsDedicated( ))
+		return;
+
+	budget = (size_t)( budget_mb * 1024.0f * 1024.0f );
+
+	total = 0;
+	for( i = 0; i < mod_numknown; i++ )
+	{
+		studiotexmeta_t *meta = mod_studiotex[i];
+
+		if( mod_known[i].type != mod_studio || !meta || meta->evicted )
+			continue;
+
+		total += meta->bytes;
+	}
+
+	if( total <= budget )
+		return;
+
+	// models currently being rendered keep their textures for a while
+	hold = cls.state == ca_active ? 5.0f : 0.0f;
+
+	while( total > budget )
+	{
+		model_t *best = NULL;
+		studiotexmeta_t *bestmeta = NULL;
+		float best_touch = FLT_MAX;
+
+		for( i = 0; i < mod_numknown; i++ )
+		{
+			studiotexmeta_t *meta = mod_studiotex[i];
+			float touch;
+
+			if( mod_known[i].type != mod_studio || !meta || meta->evicted )
+				continue;
+
+			if( mod_known[i].cache.data == NULL || meta->bytes == 0 )
+				continue;
+
+			touch = meta->touch;
+			if( touch >= 0.0f && host.realtime - touch < hold )
+				continue;
+
+			if( touch < best_touch )
+			{
+				best_touch = touch;
+				best = &mod_known[i];
+				bestmeta = meta;
+			}
+		}
+
+		if( !best )
+			break;
+
+		Mod_StudioEvictTextures( best );
+		total -= bestmeta->bytes;
+	}
+}
+
+static qboolean Mod_StudioReloadTextures( model_t *mod )
+{
+	studiotexmeta_t *meta = Mod_StudioTexMeta( mod );
+	studiohdr_t *phdr;
+	mstudiotexture_t *pt;
+	char texfile[MAX_QPATH];
+	fs_offset_t filesize;
+	byte *buf;
+	int defaulttex, cmap, i;
+
+	if( !meta )
+		return false;
+
+	phdr = (studiohdr_t *)mod->cache.data;
+
+	if( !phdr || phdr->numtextures <= 0 || phdr->textureindex <= 0 )
+	{
+		// nothing was uploaded at load time, nothing to restore
+		meta->evicted = false;
+		return true;
+	}
+
+	Q_strncpy( texfile, meta->fromT ? Mod_StudioTexName( mod->name ) : mod->name, sizeof( texfile ));
+
+	buf = FS_LoadFile( texfile, &filesize, false );
+	if( !buf )
+	{
+		// file went away, stop retrying until the model is touched again
+		meta->touch = host.realtime;
+		meta->pending = false;
+		Con_Printf( S_WARN "%s: can't reload textures for %s, file %s is missing\n", __func__, mod->name, texfile );
+		return false;
+	}
+
+	pt = (mstudiotexture_t *)((byte *)phdr + phdr->textureindex);
+	defaulttex = ref.dllFuncs.GL_FindTexture( REF_DEFAULT_TEXTURE );
+	cmap = 0;
+
+	for( i = 0; i < phdr->numtextures; i++ )
+	{
+		char texname[128], name[128], mdlname[MAX_QPATH];
+		qboolean colormap;
+		int flags = 0;
+		int texnum;
+		size_t size;
+
+		if( FBitSet( pt[i].flags, STUDIO_NF_NORMALMAP ))
+			SetBits( flags, TF_NORMALMAP );
+
+		if( FBitSet( pt[i].flags, STUDIO_NF_NOMIPS ))
+			SetBits( flags, TF_NOMIPMAP );
+
+		if( FBitSet( host.features, ENGINE_IMPROVED_LINETRACE ) && FBitSet( pt[i].flags, STUDIO_NF_MASKED ))
+			SetBits( flags, TF_KEEP_SOURCE );
+
+		colormap = !Q_strnicmp( pt[i].name, "DM_Base", 7 ) || !Q_strnicmp( pt[i].name, "remap", 5 );
+		if( colormap )
+			SetBits( flags, TF_FORCE_COLOR );
+
+		Q_strncpy( mdlname, mod->name, sizeof( mdlname ));
+		COM_FileBase( pt[i].name, name, sizeof( name ));
+		COM_StripExtension( mdlname );
+		Q_snprintf( texname, sizeof( texname ), "#%s/%s.mdl", mdlname, name );
+
+		if( meta->ofs[i] >= (uint32_t)filesize )
+		{
+			pt[i].index = defaulttex;
+			if( colormap && cmap < mod->numtextures && mod->textures )
+				mod->textures[cmap++]->gl_texturenum = pt[i].index;
+			continue;
+		}
+
+		// the loader reads width/height/flags from the texture struct
+		// and pixel data from the pointer set below
+		Image_SetMDLPointer( buf + meta->ofs[i] );
+		size = sizeof( mstudiotexture_t ) + (size_t)pt[i].width * pt[i].height + 768;
+		texnum = ref.dllFuncs.GL_LoadTexture( texname, (byte *)&pt[i], size, flags );
+
+		if( !texnum )
+			texnum = defaulttex;
+
+		pt[i].index = texnum;
+
+		if( colormap && cmap < mod->numtextures && mod->textures )
+			mod->textures[cmap++]->gl_texturenum = pt[i].index;
+	}
+
+	Mem_Free( buf );
+
+	meta->evicted = false;
+	meta->touch = host.realtime;
+
+	Con_Reportf( "%s: re-uploaded %i textures for %s\n", __func__, phdr->numtextures, mod->name );
+
+	return true;
+}
+#endif // !XASH_DEDICATED
+
+/*
+================
+Mod_StudioSnapshotTextureOffsets
+
+Called from the studio loader before the renderer uploads the textures,
+while ptexture[i].index still holds pixel data offsets relative to the
+start of the source file. Remembers them so evicted textures can be
+re-uploaded from disk later.
+================
+*/
+void Mod_StudioSnapshotTextureOffsets( model_t *mod, const studiohdr_t *hdr, qboolean fromT )
+{
+#if !XASH_DEDICATED
+	studiotexmeta_t *meta;
+	const mstudiotexture_t *pt;
+	int slot = mod - mod_known;
+	int i;
+
+	if( slot < 0 || slot >= MAX_MODELS )
+		return;
+
+	meta = Mem_Calloc( mod->mempool, sizeof( *meta ));
+	mod_studiotex[slot] = meta;
+	meta->fromT = fromT;
+	meta->touch = -1.0f;
+
+	if( hdr->numtextures <= 0 || hdr->textureindex <= 0 )
+		return;
+
+	meta->numtextures = hdr->numtextures;
+	meta->ofs = Mem_Calloc( mod->mempool, meta->numtextures * sizeof( uint32_t ));
+	pt = (const mstudiotexture_t *)((const byte *)hdr + hdr->textureindex);
+
+	for( i = 0; i < meta->numtextures; i++ )
+	{
+		size_t pixels = (size_t)pt[i].width * pt[i].height;
+
+		meta->ofs[i] = pt[i].index;
+		// RGBA upload plus mipmaps, slightly overestimated
+		meta->bytes += pixels * 6 + 768;
+	}
+#endif
+}
+
+/*
+================
+Mod_StudioTexMetaFree
+
+Called from Mod_FreeModel before the model slot is cleared. The metadata
+itself lives in the model mempool and dies with it.
+================
+*/
+void Mod_StudioTexMetaFree( model_t *mod )
+{
+#if !XASH_DEDICATED
+	int i = mod - mod_known;
+
+	if( i >= 0 && i < MAX_MODELS )
+		mod_studiotex[i] = NULL;
+#endif
+}
+
+/*
+================
+Mod_StudioTouch
+
+Marks the studio model as seen this frame. Models whose textures were
+evicted get them re-uploaded right away if the per-frame reload budget
+allows, otherwise they are queued for background reload.
+================
+*/
+void Mod_StudioTouch( model_t *mod, qboolean visible )
+{
+#if !XASH_DEDICATED
+	studiotexmeta_t *meta;
+
+	if( r_studio_texture_cache.value <= 0.0f || Host_IsDedicated( ))
+		return;
+
+	if( !mod || mod->type != mod_studio )
+		return;
+
+	meta = Mod_StudioTexMeta( mod );
+	if( !meta )
+		return;
+
+	meta->touch = host.realtime;
+
+	if( !meta->evicted )
+		return;
+
+	if( !visible )
+	{
+		meta->pending = true;
+		return;
+	}
+
+	if( host.framecount != mod_studiotex_frame )
+	{
+		mod_studiotex_frame = host.framecount;
+		mod_studiotex_framebytes = 0;
+	}
+
+	// always reload the first model of a frame synchronously, so huge
+	// models can't starve behind small ones
+	if( mod_studiotex_framebytes && mod_studiotex_framebytes + meta->bytes > STUDIO_RELOAD_FRAME_BUDGET )
+	{
+		meta->pending = true;
+		return;
+	}
+
+	if( Mod_StudioReloadTextures( mod ))
+		mod_studiotex_framebytes += meta->bytes;
+#endif
+}
+
+/*
+================
+Mod_StudioTexFrame
+
+Per-client-frame housekeeping: reloads textures of models that were seen
+but couldn't be re-uploaded in the same frame, and periodically enforces
+the texture budget.
+================
+*/
+void Mod_StudioTexFrame( void )
+{
+#if !XASH_DEDICATED
+	int i;
+
+	if( r_studio_texture_cache.value <= 0.0f || Host_IsDedicated( ))
+		return;
+
+	if( host.framecount != mod_studiotex_frame )
+	{
+		mod_studiotex_frame = host.framecount;
+		mod_studiotex_framebytes = 0;
+	}
+
+	if( host.realtime - mod_studiotex_lastenforce > 0.5 )
+	{
+		mod_studiotex_lastenforce = host.realtime;
+		Mod_StudioTexBudgetEnforce();
+	}
+
+	if( cls.state != ca_active )
+		return;
+
+	for( i = 1; i < mod_numknown; i++ )
+	{
+		model_t *mod = &mod_known[i];
+		studiotexmeta_t *meta = mod_studiotex[i];
+
+		if( mod->type != mod_studio || !meta || !meta->evicted || !meta->pending )
+			continue;
+
+		if( mod_studiotex_framebytes && mod_studiotex_framebytes + meta->bytes > STUDIO_RELOAD_FRAME_BUDGET )
+			return;
+
+		if( Mod_StudioReloadTextures( mod ))
+			mod_studiotex_framebytes += meta->bytes;
+	}
+#endif
+}
+
+/*
+===============================================================================
+
+			MOD COMMON UTILS
+
+===============================================================================
+*/
 
 /*
 ===============================================================================
@@ -140,6 +557,9 @@ Mod_FreeModel
 */
 void Mod_FreeModel( model_t *mod )
 {
+	if( mod )
+		Mod_StudioTexMetaFree( mod );
+
 	// already freed?
 	if( !mod || mod->needload == NL_UNREFERENCED )
 		return;
@@ -184,6 +604,9 @@ void Mod_Init( void )
 	Cvar_RegisterVariable( &r_wadtextures );
 	Cvar_RegisterVariable( &r_showhull );
 	Cvar_RegisterVariable( &r_allow_wad3_luma );
+#if !XASH_DEDICATED
+	Cvar_RegisterVariable( &r_studio_texture_cache );
+#endif
 
 	Cmd_AddCommand( "mapstats", Mod_PrintWorldStats_f, "show stats for currently loaded map" );
 	Cmd_AddCommand( "modellist", Mod_Modellist_f, "display loaded models list" );
@@ -407,6 +830,12 @@ static model_t *Mod_LoadModel( model_t *mod, qboolean crash )
 
 	model_info_t *p = &mod_crcinfo[mod - mod_known];
 	mod->needload = NL_PRESENT;
+
+#if !XASH_DEDICATED
+	// keep the studio texture budget satisfied after every load, so
+	// precaching never spikes above the limit
+	Mod_StudioTexBudgetEnforce();
+#endif
 
 	if( FBitSet( p->flags, FCRC_SHOULD_CHECKSUM ))
 	{

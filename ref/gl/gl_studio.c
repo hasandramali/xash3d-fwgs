@@ -130,6 +130,7 @@ static studio_draw_state_t	g_studio;		// global studio state
 
 // global variables
 static qboolean m_fDoRemap;
+static qboolean m_pTexturesLoaded = true;
 static mstudiomodel_t *m_pSubModel;
 static mstudiobodyparts_t *m_pBodyPart;
 static player_info_t *m_pPlayerInfo;
@@ -2520,6 +2521,27 @@ static void R_StudioSetForceFaceFlags( int flags )
 
 /*
 ===============
+R_StudioHeaderTexturesLoaded
+
+Check whether the header's GL textures were evicted by the engine
+studio texture cache. Evicted models must not be drawn: their
+ptexture->index fields are zero until the engine re-uploads them.
+===============
+*/
+static qboolean R_StudioHeaderTexturesLoaded( studiohdr_t *phdr )
+{
+	mstudiotexture_t *ptexture;
+
+	if( !phdr || phdr->numtextures <= 0 || phdr->textureindex <= 0 )
+		return true;
+
+	ptexture = (mstudiotexture_t *)((byte *)phdr + phdr->textureindex);
+
+	return ptexture[0].index != 0;
+}
+
+/*
+===============
 pfnStudioSetHeader
 
 ===============
@@ -2528,6 +2550,7 @@ static void R_StudioSetHeader( studiohdr_t *pheader )
 {
 	m_pStudioHeader = pheader;
 	m_fDoRemap = false;
+	m_pTexturesLoaded = R_StudioHeaderTexturesLoaded( pheader );
 }
 
 studiohdr_t *R_StudioGetHeader( void )
@@ -2994,6 +3017,9 @@ static int R_StudioDrawPlayer( int flags, entity_state_t *pplayer )
 
 	R_StudioSetHeader((studiohdr_t *)gEngfuncs.Mod_Extradata( mod_studio, RI.currentmodel ));
 
+	if( !m_pTexturesLoaded )
+		return 0; // textures evicted by the engine cache, skip until reloaded
+
 	if( pplayer->gaitsequence )
 	{
 		m_pPlayerInfo = pfnPlayerInfo( m_nPlayerIndex );
@@ -3100,9 +3126,13 @@ static int R_StudioDrawPlayer( int flags, entity_state_t *pplayer )
 
 			m_pStudioHeader = (studiohdr_t *)gEngfuncs.Mod_Extradata( mod_studio, pweaponmodel );
 
-			R_StudioMergeBones( RI.currententity, pweaponmodel );
-			R_StudioSetupLighting( &lighting );
-			R_StudioRenderModel( );
+			if( R_StudioHeaderTexturesLoaded( m_pStudioHeader ))
+			{
+				R_StudioMergeBones( RI.currententity, pweaponmodel );
+				R_StudioSetupLighting( &lighting );
+				R_StudioRenderModel( );
+			}
+
 			R_StudioCalcAttachments( );
 
 			*RI.currententity = saveent;
@@ -3149,6 +3179,9 @@ static int R_StudioDrawModel( int flags )
 	}
 
 	R_StudioSetHeader((studiohdr_t *)gEngfuncs.Mod_Extradata( mod_studio, RI.currentmodel ));
+
+	if( !m_pTexturesLoaded )
+		return 0; // textures evicted by the engine cache, skip until reloaded
 
 	R_StudioSetUpTransform( RI.currententity );
 
@@ -3227,6 +3260,20 @@ static void R_StudioDrawModelInternal( cl_entity_t *e, int flags )
 	}
 	else
 	{
+		model_t *model = e->model;
+
+		// players may use a custom playermodel instead of e->model
+		if( e->player )
+			model = R_StudioSetupPlayerModel( e->index - 1 );
+
+		if( !model )
+			model = e->model;
+
+		// the client library drives its own renderer and can't know about
+		// engine texture eviction, don't let it draw garbage
+		if( !R_StudioHeaderTexturesLoaded((studiohdr_t *)gEngfuncs.Mod_Extradata( mod_studio, model )))
+			return;
+
 		// select the properly method
 		if( e->player )
 			pStudioDraw->StudioDrawPlayer( flags, R_StudioGetPlayerState( e->index - 1 ));

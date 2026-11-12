@@ -1060,6 +1060,10 @@ qboolean CL_AddVisibleEntity( cl_entity_t *ent, int entityType )
 	if( !ent || !ent->model )
 		return false;
 
+	// track studio models for the texture cache
+	if( ent->model->type == mod_studio )
+		Mod_StudioTouch( ent->model, true );
+
 	// don't add the player in firstperson mode
 	if( RP_LOCALCLIENT( ent ))
 	{

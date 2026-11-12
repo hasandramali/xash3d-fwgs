@@ -199,6 +199,14 @@ int Mod_HitgroupForStudioHull( int index );
 void Mod_ClearStudioCache( void );
 
 //
+// model.c studio texture cache
+//
+void Mod_StudioSnapshotTextureOffsets( model_t *mod, const studiohdr_t *hdr, qboolean fromT );
+void Mod_StudioTexMetaFree( model_t *mod );
+void Mod_StudioTouch( model_t *mod, qboolean visible );
+void Mod_StudioTexFrame( void );
+
+//
 // mod_sprite.c
 //
 void Mod_LoadSpriteModel( model_t *mod, void *buffer, size_t buffersize, qboolean *loaded );

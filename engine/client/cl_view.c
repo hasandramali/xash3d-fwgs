@@ -116,6 +116,8 @@ static void V_SetupViewModel( void )
 	// alias models has another animation methods
 	if( view->model && view->model->type == mod_studio )
 	{
+		// track the viewmodel for the studio texture cache
+		Mod_StudioTouch( view->model, true );
 		view->curstate.animtime = cl.local.weaponstarttime;
 		view->curstate.frame = 0.0f;
 	}

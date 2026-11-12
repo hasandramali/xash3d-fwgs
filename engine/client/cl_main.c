@@ -4413,6 +4413,9 @@ void Host_ClientFrame( void )
 	// emit visible entities
 	CL_EmitEntities ();
 
+	// process evicted studio model texture reloads
+	Mod_StudioTexFrame();
+
 	// in case we lost connection
 	CL_CheckForResend ();
 
