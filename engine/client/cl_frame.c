@@ -1168,6 +1168,20 @@ static void CL_LinkPlayers( frame_t *frame )
 		if( !state->modelindex || FBitSet( state->effects, EF_NODRAW ))
 			continue;
 
+		// custom player models are resolved by the renderer from the
+		// player's userinfo, not from ent->model, so the entity link
+		// alone doesn't see them; track them for the texture cache
+		if( !COM_StringEmpty( cl.players[i].model ))
+		{
+			char modelpath[MAX_QPATH];
+
+			Q_snprintf( modelpath, sizeof( modelpath ),
+				"models/player/%s/%s.mdl", cl.players[i].model, cl.players[i].model );
+
+			if( FS_FileExists( modelpath, false ))
+				Mod_StudioTouch( Mod_FindName( modelpath, false ), true );
+		}
+
 		ent = &clgame.entities[i + 1];
 
 		// fixup the player indexes...
