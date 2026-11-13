@@ -111,6 +111,8 @@ static void Mod_StudioEvictTextures( model_t *mod )
 
 	meta->evicted = true;
 	meta->pending = false;
+
+	Con_Reportf( "%s: evicted %i textures from %s (%u bytes)\n", __func__, phdr->numtextures, mod->name, (unsigned)meta->bytes );
 }
 
 static void Mod_StudioTexBudgetEnforce( void )
@@ -245,6 +247,8 @@ static qboolean Mod_StudioReloadTextures( model_t *mod )
 
 		if( meta->ofs[i] >= (uint32_t)filesize )
 		{
+			Con_Printf( S_WARN "%s: texture %s of %s has bad offset %u (file is %u bytes), using default\n",
+				__func__, pt[i].name, mod->name, (unsigned)meta->ofs[i], (unsigned)filesize );
 			pt[i].index = defaulttex;
 			if( colormap && cmap < mod->numtextures && mod->textures )
 				mod->textures[cmap++]->gl_texturenum = pt[i].index;
@@ -258,7 +262,10 @@ static qboolean Mod_StudioReloadTextures( model_t *mod )
 		texnum = ref.dllFuncs.GL_LoadTexture( texname, (byte *)&pt[i], size, flags );
 
 		if( !texnum )
+		{
+			Con_Printf( S_WARN "%s: couldn't upload texture %s of %s, using default\n", __func__, texname, mod->name );
 			texnum = defaulttex;
+		}
 
 		pt[i].index = texnum;
 
@@ -439,7 +446,57 @@ void Mod_StudioTexFrame( void )
 		if( Mod_StudioReloadTextures( mod ))
 			mod_studiotex_framebytes += meta->bytes;
 	}
-#endif
+}
+
+/*
+================
+Mod_StudioTexList_f
+
+Displays the state of every studio model in the texture cache.
+================
+*/
+static void Mod_StudioTexList_f( void )
+{
+	size_t total = 0, evicted = 0;
+	int nummodels = 0, numevicted = 0;
+	int i;
+
+	if( r_studio_texture_cache.value <= 0.0f )
+	{
+		Con_Printf( "studio texture cache is disabled\n" );
+		return;
+	}
+
+	for( i = 1; i < mod_numknown; i++ )
+	{
+		model_t *mod = &mod_known[i];
+		studiotexmeta_t *meta = mod_studiotex[i];
+
+		if( mod->type != mod_studio || !meta || meta->bytes == 0 )
+			continue;
+
+		nummodels++;
+		total += meta->bytes;
+
+		if( meta->evicted )
+		{
+			evicted += meta->bytes;
+			numevicted++;
+		}
+
+		Con_Printf( "%s: %s, %u bytes, %i textures, seen %.1fs ago\n",
+			mod->name,
+			meta->evicted ? ( meta->pending ? "evicted, reload queued" : "evicted" ) : "resident",
+			(unsigned)meta->bytes, meta->numtextures,
+			meta->touch >= 0.0f ? host.realtime - meta->touch : -1.0f );
+	}
+
+	Con_Printf( "budget %g Mb: %i studio models, %u bytes resident (%.1f Mb), %i evicted (%.1f Mb)\n",
+		r_studio_texture_cache.value, nummodels,
+		(unsigned)( total - evicted ), ( total - evicted ) / 1048576.0,
+		numevicted, evicted / 1048576.0 );
+}
+#endif // !XASH_DEDICATED
 }
 
 /*
@@ -606,6 +663,7 @@ void Mod_Init( void )
 	Cvar_RegisterVariable( &r_allow_wad3_luma );
 #if !XASH_DEDICATED
 	Cvar_RegisterVariable( &r_studio_texture_cache );
+	Cmd_AddCommand( "studiotexlist", Mod_StudioTexList_f, "display studio models texture cache state" );
 #endif
 
 	Cmd_AddCommand( "mapstats", Mod_PrintWorldStats_f, "show stats for currently loaded map" );

@@ -1062,7 +1062,19 @@ qboolean CL_AddVisibleEntity( cl_entity_t *ent, int entityType )
 
 	// track studio models for the texture cache
 	if( ent->model->type == mod_studio )
+	{
 		Mod_StudioTouch( ent->model, true );
+
+		// players draw their current weapon as an attachment model;
+		// it is rendered by the engine directly and is not touched anywhere else
+		if( ent->curstate.weaponmodel )
+		{
+			model_t *wm = CL_ModelHandle( ent->curstate.weaponmodel );
+
+			if( wm && wm->type == mod_studio )
+				Mod_StudioTouch( wm, true );
+		}
+	}
 
 	// don't add the player in firstperson mode
 	if( RP_LOCALCLIENT( ent ))
