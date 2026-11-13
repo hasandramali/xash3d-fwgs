@@ -446,8 +446,10 @@ void Mod_StudioTexFrame( void )
 		if( Mod_StudioReloadTextures( mod ))
 			mod_studiotex_framebytes += meta->bytes;
 	}
+#endif
 }
 
+#if !XASH_DEDICATED
 /*
 ================
 Mod_StudioTexList_f
@@ -497,7 +499,6 @@ static void Mod_StudioTexList_f( void )
 		numevicted, evicted / 1048576.0 );
 }
 #endif // !XASH_DEDICATED
-}
 
 /*
 ===============================================================================
