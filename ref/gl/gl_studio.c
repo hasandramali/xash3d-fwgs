@@ -2370,7 +2370,14 @@ static model_t *R_StudioSetupPlayerModel( int index )
 				state->model = NULL;
 
 			if( !state->model )
+			{
 				state->model = RI.currententity->model;
+
+				// texture cache diagnostics: the renderer couldn't resolve the
+				// custom player model and fell back to the entity's own model
+				gEngfuncs.Con_Reportf( "R_StudioSetupPlayerModel: slot %d model '%s' path '%s' not resolvable, fallback to %s\n",
+					index, info->model, state->modelname, RI.currententity->model ? RI.currententity->model->name : "(null)" );
+			}
 		}
 	}
 	else
@@ -3272,7 +3279,19 @@ static void R_StudioDrawModelInternal( cl_entity_t *e, int flags )
 		// the client library drives its own renderer and can't know about
 		// engine texture eviction, don't let it draw garbage
 		if( !R_StudioHeaderTexturesLoaded((studiohdr_t *)gEngfuncs.Mod_Extradata( mod_studio, model )))
+		{
+			// texture cache diagnostics: this is the "invisible player" case,
+			// textures were evicted and the touch didn't reload them in time
+			static double	lastskiplog;
+
+			if( gp_host->realtime - lastskiplog > 5.0 )
+			{
+				lastskiplog = gp_host->realtime;
+				gEngfuncs.Con_Reportf( "R_StudioDrawModelInternal: skipping %s slot %d player=%d (textures evicted)\n",
+					model ? model->name : "(null)", e->index, e->player );
+			}
 			return;
+		}
 
 		// select the properly method
 		if( e->player )

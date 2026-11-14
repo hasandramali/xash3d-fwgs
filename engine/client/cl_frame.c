@@ -1178,6 +1178,19 @@ static void CL_LinkPlayers( frame_t *frame )
 			Q_snprintf( modelpath, sizeof( modelpath ),
 				"models/player/%s/%s.mdl", cl.players[i].model, cl.players[i].model );
 
+			// texture cache diagnostics: report each slot's model resolution when it changes
+			{
+				static char lastreported[MAX_CLIENTS][MAX_QPATH];
+
+				if( Q_strcmp( lastreported[i], cl.players[i].model ))
+				{
+					Q_strncpy( lastreported[i], cl.players[i].model, sizeof( lastreported[i] ));
+					Con_Reportf( "CL_LinkPlayers: slot %d setinfo model '%s' path '%s' exists=%d modelindex=%d effects=%#x\n",
+						i, cl.players[i].model, modelpath, FS_FileExists( modelpath, false ),
+						state->modelindex, state->effects );
+				}
+			}
+
 			if( FS_FileExists( modelpath, false ))
 				Mod_StudioTouch( Mod_FindName( modelpath, false ), true );
 		}

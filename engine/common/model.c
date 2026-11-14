@@ -364,7 +364,19 @@ void Mod_StudioTouch( model_t *mod, qboolean visible )
 		return;
 
 	if( !mod || mod->type != mod_studio )
+	{
+		// texture cache diagnostics: touch bounced off a model that isn't
+		// loaded yet (Mod_FindName placeholder); rate-limited so it can't spam
+		static double	lastnotloaded;
+
+		if( mod && mod->name[0] && host.realtime - lastnotloaded > 5.0 )
+		{
+			lastnotloaded = host.realtime;
+			Con_Reportf( "Mod_StudioTouch: %s not a loaded studio model yet (type=%d needload=%d)\n",
+				mod->name, mod->type, mod->needload );
+		}
 		return;
+	}
 
 	meta = Mod_StudioTexMeta( mod );
 	if( !meta )
