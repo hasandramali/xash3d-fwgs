@@ -2447,6 +2447,37 @@ qboolean CL_DispatchUserMessage( const char *pszName, int iSize, void *pbuf )
 
 /*
 ==============
+CL_ParseSvenChangeSky
+
+Sven Co-op runtime sky change (svc 146). The GoldSrc engine applies this
+message itself and the stock client library has no hook for it, so handle
+it engine-side. The payload is the skybox basename string.
+==============
+*/
+static void CL_ParseSvenChangeSky( int iSize, const void *pbuf )
+{
+	const char *src = (const char *)pbuf;
+	char skyname[64];
+	size_t len = 0;
+
+	if( iSize <= 0 || !pbuf )
+		return;
+
+	while( len < sizeof( skyname ) - 1 && len < (size_t)iSize && src[len] )
+		len++;
+
+	if( !len )
+		return;
+
+	memcpy( skyname, src, len );
+	skyname[len] = '\0';
+
+	Con_Reportf( "ChangeSky: %s\n", skyname );
+	R_SetupSky( skyname );
+}
+
+/*
+==============
 CL_ParseUserMessage
 
 handles all user messages
@@ -2748,6 +2779,9 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 
 	CL_WeaponListFix_OnUserMessage( clgame.msg[i].name, iSize, pbuf );
 
+	if( !Q_stricmp( clgame.msg[i].name, "HudText" ) && Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_Printf( "HUDMSG-NET: HudText size=%d payload=\"%.*s\"\n", iSize, iSize, (const char *)pbuf );
+
 	if( clgame.msg[i].func )
 	{
 		clgame.msg[i].func( clgame.msg[i].name, iSize, pbuf );
@@ -2771,6 +2805,11 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num, connprotocol_t proto )
 	// play them engine-side where the precache table and mixer live.
 	if( !Q_strcmp( clgame.msg[i].name, "StartSound" ) && !MSG_CheckOverflow( msg ))
 		CL_ParseSvenStartSound( clgame.msg[i].name, iSize, pbuf );
+
+	// Sven runtime sky changes are applied by the GoldSrc engine, not the
+	// client library; do the same here.
+	if( !Q_strcmp( clgame.msg[i].name, "ChangeSky" ) && !MSG_CheckOverflow( msg ))
+		CL_ParseSvenChangeSky( iSize, pbuf );
 }
 /*
 =====================================================================

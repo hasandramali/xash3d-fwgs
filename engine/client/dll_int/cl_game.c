@@ -2728,6 +2728,9 @@ void CL_HudMessage( const char *pMessage )
 	if( COM_StringEmptyOrNULL( pMessage ))
 		return;
 
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_Printf( "HUDMSG-DISPATCH: HudText payload=\"%s\"\n", pMessage );
+
 	CL_DispatchUserMessage( "HudText", Q_strlen( pMessage ) + 1, (void *)pMessage );
 }
 
@@ -2775,6 +2778,15 @@ void CL_ParseTextMessage( sizebuf_t *msg )
 
 	// to prevent grab too long messages
 	Q_strncpy( (char *)text->pMessage, MSG_ReadString( msg ), 2048 );
+
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_Printf( "TEXTMSG: ch=%d x=%.3f y=%.3f effect=%d color1=%d,%d,%d,%d color2=%d,%d,%d,%d "
+			"fadein=%.2f fadeout=%.2f hold=%.2f fxtime=%.2f name=\"%s\" msg=\"%s\"\n",
+			channel, text->x, text->y, text->effect,
+			text->r1, text->g1, text->b1, text->a1,
+			text->r2, text->g2, text->b2, text->a2,
+			text->fadein, text->fadeout, text->holdtime, text->fxtime,
+			text->pName, (const char *)text->pMessage );
 
 	CL_HudMessage( text->pName );
 }
@@ -4144,7 +4156,14 @@ static int GAME_EXPORT pfnHookUserMsg( const char *pszName, pfnUserMsgHook pfn )
 	{
 		// see if already hooked
 		if( !Q_stricmp( clgame.msg[i].name, pszName ))
+		{
+			// the message may have been pre-registered by the server or the
+			// Sven message restore table with no handler attached yet;
+			// install the hook instead of silently dropping it
+			if( !clgame.msg[i].func )
+				clgame.msg[i].func = pfn;
 			return 1;
+		}
 	}
 
 	if( i == MAX_USER_MESSAGES )
