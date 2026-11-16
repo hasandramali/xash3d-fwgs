@@ -25,7 +25,6 @@ GNU General Public License for more details.
 #include "vid_common.h"
 #include "pm_local.h"
 #include "multi_emulator.h"
-
 #define CL_CONNECTION_TIMEOUT 15.0f
 #define CL_CONNECTION_RETRIES 5
 #define CL_TEST_RETRIES       5
