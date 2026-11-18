@@ -397,6 +397,11 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	float scale = e->curstate.scale;
 	if( !scale ) scale = 1.0f;
 
+	// Laser sights (RPG and Desert Eagle both use sprites/laserdot.spr) must
+	// stay visible through walls; every other glow/additive sprite keeps the
+	// depth test and the wall pull below.
+	const qboolean skipDepthTest = !Q_stricmp( model->name, "sprites/laserdot.spr" );
+
 	if( R_SpriteOccluded( e, origin, &scale ))
 		return; // sprite culled
 
@@ -436,7 +441,7 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	// the screen image is unchanged, only the depth test moves. Sprites the
 	// size of a big explosion (e.g. weapon_redeemer's fireball and glow) may
 	// still sink into walls so they don't fill the player's view.
-	if( e->curstate.rendermode == kRenderGlow || e->curstate.rendermode == kRenderTransAdd )
+	if( !skipDepthTest && ( e->curstate.rendermode == kRenderGlow || e->curstate.rendermode == kRenderTransAdd ))
 	{
 		vec3_t toSprite;
 		float radius = 0.0f;
@@ -557,6 +562,9 @@ void R_DrawSpriteModel( cl_entity_t *e )
 		break;
 	}
 
+	if( skipDepthTest )
+		pglDisable( GL_DEPTH_TEST );
+
 	if( psprite->facecull == SPR_CULL_NONE )
 		GL_Cull( GL_NONE );
 
@@ -620,6 +628,7 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	{
 		pglDisable( GL_BLEND );
 		pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE );
-		pglEnable( GL_DEPTH_TEST );
 	}
+	if( skipDepthTest || e->curstate.rendermode != kRenderNormal )
+		pglEnable( GL_DEPTH_TEST );
 }
