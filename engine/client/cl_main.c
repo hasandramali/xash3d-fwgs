@@ -25,6 +25,7 @@ GNU General Public License for more details.
 #include "vid_common.h"
 #include "pm_local.h"
 #include "multi_emulator.h"
+
 #define CL_CONNECTION_TIMEOUT 15.0f
 #define CL_CONNECTION_RETRIES 5
 #define CL_TEST_RETRIES       5
@@ -62,10 +63,11 @@ CVAR_DEFINE_AUTO( cl_nosmooth, "0", 0, "disable smooth up stair climbing" );
 CVAR_DEFINE_AUTO( cl_smoothtime, "0.1", 0, "time to smooth up" );
 CVAR_DEFINE_AUTO( cl_clockreset, "0.1", 0, "frametime delta maximum value before reset" );
 static CVAR_DEFINE_AUTO( cl_fixtimerate, "7.5", 0, "time in msec to client clock adjusting" );
-CVAR_DEFINE_AUTO( hud_fontscale, "1.0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud font texture" );
+CVAR_DEFINE_AUTO( hud_textscale, "1.0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud font texture" );
 CVAR_DEFINE_AUTO( hud_fontrender, "0", FCVAR_ARCHIVE, "hud font render mode (0: additive, 1: holes, 2: trans)" );
 CVAR_DEFINE_AUTO( hud_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale hud at current resolution" );
 CVAR_DEFINE_AUTO( hud_scale_minimal_width, "640", FCVAR_ARCHIVE|FCVAR_LATCH, "if hud_scale results in a HUD virtual screen smaller than this value, it won't be applied" );
+CVAR_DEFINE_AUTO( hud_sprite_scale, "1.0", FCVAR_ARCHIVE, "scale HUD sprites independently of hud_scale; 1.0 = normal, <1 smaller, >1 bigger" );
 CVAR_DEFINE_AUTO( hud_saytext_scale, "0", FCVAR_ARCHIVE|FCVAR_LATCH, "scale saytext at current resolution; 0 = disabled (not scaled)" );
 CVAR_DEFINE_AUTO( cl_solid_players, "1", 0, "Make all players not solid (can't traceline them)" );
 CVAR_DEFINE_AUTO( cl_updaterate, "101", FCVAR_USERINFO|FCVAR_ARCHIVE, "refresh rate of server messages" );
@@ -4217,10 +4219,11 @@ static void CL_InitLocal( void )
 	Cvar_RegisterVariable( &cl_bmodelinterp );
 	Cvar_RegisterVariable( &cl_clockreset );
 	Cvar_RegisterVariable( &cl_fixtimerate );
-	Cvar_RegisterVariable( &hud_fontscale );
+	Cvar_RegisterVariable( &hud_textscale );
 	Cvar_RegisterVariable( &hud_fontrender );
 	Cvar_RegisterVariable( &hud_scale );
 	Cvar_RegisterVariable( &hud_scale_minimal_width );
+	Cvar_RegisterVariable( &hud_sprite_scale );
 	Cvar_RegisterVariable( &hud_saytext_scale );
 	Cvar_RegisterVariable( &cl_showevents );
 	Cvar_Get( "lastdemo", "", FCVAR_ARCHIVE, "last played demo" );

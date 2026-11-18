@@ -203,10 +203,26 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 		return false;
 	}
 
-	iff_dataPtr += 8;
-	int fmt = GetLittleShort();
+	int fmtChunkLen = iff_chunkLen;
 
-	if( fmt != 1 )
+	iff_dataPtr += 8;
+	int fmt = (unsigned short)GetLittleShort();
+	int srcWidth = 0;
+	int bitsPerSample = 0;
+
+	if( fmt == 0xFFFE )
+	{
+		// WAVE_FORMAT_EXTENSIBLE: the real format tag is carried in the
+		// SubFormat GUID (first two bytes) at offset 24 of the fmt data
+		const byte *fmtdata = iff_dataPtr - 2;
+
+		if( fmtChunkLen >= 40 )
+			fmt = (unsigned short)( fmtdata[24] | ( fmtdata[25] << 8 ));
+		else
+			fmt = 0;
+	}
+
+	if( fmt != 1 && fmt != 3 )
 	{
 		if( fmt != 85 )
 		{
@@ -228,16 +244,45 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 	}
 
 	sound.rate = GetLittleLong();
-	iff_dataPtr += 6;
+	iff_dataPtr += 6; // skip nAvgBytesPerSec and nBlockAlign
 
-	sound.width = GetLittleShort() / 8;
-	if( mpeg_stream ) sound.width = 2; // mp3 always 16bit
+	bitsPerSample = GetLittleShort();
 
-	if( sound.width != 1 && sound.width != 2 )
+	if( mpeg_stream )
 	{
-		Con_DPrintf( S_ERROR "%s: only 8 and 16 bit WAV files supported (%s)\n", __func__, name );
+		srcWidth = 2; // mp3 always 16bit
+	}
+	else
+	{
+		srcWidth = bitsPerSample / 8;
+
+		if( fmt == 1 )
+		{
+			if( bitsPerSample != 8 && bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32 )
+			{
+				Con_DPrintf( S_ERROR "%s: unsupported PCM bit depth %d (%s)\n", __func__, bitsPerSample, name );
+				return false;
+			}
+		}
+		else // IEEE float
+		{
+			if( bitsPerSample != 32 && bitsPerSample != 64 )
+			{
+				Con_DPrintf( S_ERROR "%s: unsupported float bit depth %d (%s)\n", __func__, bitsPerSample, name );
+				return false;
+			}
+		}
+	}
+
+	if( srcWidth <= 0 )
+	{
+		Con_DPrintf( S_ERROR "%s: %s has invalid sample width\n", __func__, name );
 		return false;
 	}
+
+	// the engine mixes signed 8-bit or 16-bit PCM, so everything else
+	// (24/32-bit PCM, IEEE float) is converted down to 16-bit below
+	sound.width = ( !mpeg_stream && fmt == 1 && bitsPerSample == 8 ) ? 1 : 2;
 
 	// get cue chunk
 	FindChunk( name, "cue " );
@@ -275,7 +320,14 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 	}
 
 	iff_dataPtr += 4;
-	int samples = GetLittleLong() / sound.width;
+	int dataSize = GetLittleLong();
+	ptrdiff_t available = iff_end - iff_dataPtr;
+
+	// never read past the buffer even if the declared data size lies
+	if( dataSize > available )
+		dataSize = available;
+
+	int samples = dataSize / srcWidth;
 
 	if( sound.samples )
 	{
@@ -323,29 +375,85 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 	sound.size = sound.samples * sound.width * sound.channels;
 	sound.wav = Mem_Malloc( host.soundpool, sound.size );
 
-	memcpy( sound.wav, buffer + (iff_dataPtr - buffer), sound.size );
+	const byte *src = buffer + (iff_dataPtr - buffer);
+	byte *dst = sound.wav;
+	int totalSamples = sound.samples * sound.channels;
 
-	// swap 16-bit samples from little endian to native
-	if( sound.width == 2 )
+	if( srcWidth == sound.width && ( srcWidth == 1 || srcWidth == 2 ))
 	{
-		short *p = (short *)sound.wav;
-		int count = sound.size / 2;
-		for( int i = 0; i < count; i++ )
-			p[i] = LittleShort( p[i] );
-	}
+		// fast path: data is already in the engine's native format
+		memcpy( dst, src, sound.size );
 
-	// now convert 8-bit sounds to signed
-	if( sound.width == 1 )
-	{
-		signed char	*pData = (signed char *)sound.wav;
-
-		for( int i = 0; i < sound.samples; i++ )
+		// swap 16-bit samples from little endian to native
+		if( sound.width == 2 )
 		{
-			for( int j = 0; j < sound.channels; j++ )
+			short *p = (short *)dst;
+			int count = sound.size / 2;
+			for( int i = 0; i < count; i++ )
+				p[i] = LittleShort( p[i] );
+		}
+
+		// now convert 8-bit sounds to signed
+		if( sound.width == 1 )
+		{
+			signed char	*pData = (signed char *)dst;
+
+			for( int i = 0; i < sound.samples; i++ )
 			{
-				*pData = (byte)((int)((byte)*pData) - 128 );
-				pData++;
+				for( int j = 0; j < sound.channels; j++ )
+				{
+					*pData = (byte)((int)((byte)*pData) - 128 );
+					pData++;
+				}
 			}
+		}
+	}
+	else
+	{
+		// convert 24/32-bit PCM or IEEE float to signed 16-bit native
+		short *out = (short *)dst;
+
+		for( int i = 0; i < totalSamples; i++ )
+		{
+			const byte *s = src + (size_t)i * srcWidth;
+			int v;
+
+			if( fmt == 3 )
+			{
+				if( srcWidth == 4 )
+				{
+					float f;
+
+					memcpy( &f, s, sizeof( f ));
+					v = ( f != f ) ? 0 : (int)( f * 32767.0f );
+				}
+				else
+				{
+					double d;
+
+					memcpy( &d, s, sizeof( d ));
+					v = ( d != d ) ? 0 : (int)( d * 32767.0 );
+				}
+			}
+			else if( srcWidth == 3 )
+			{
+				int32_t t = (int32_t)( s[0] | ( s[1] << 8 ) | ( s[2] << 16 ));
+
+				if( t & 0x800000 ) t |= ~0xFFFFFF; // sign extend from 24 bits
+				v = t >> 8;
+			}
+			else // 32-bit PCM
+			{
+				int32_t t;
+
+				memcpy( &t, s, sizeof( t ));
+				v = LittleLong( t ) >> 16;
+			}
+
+			if( v > 32767 ) v = 32767;
+			else if( v < -32768 ) v = -32768;
+
+			out[i] = (short)v;
 		}
 	}
 

@@ -251,7 +251,7 @@ Do occlusion test for glow-sprites
 // world radius above which a sprite is left to clip into walls
 #define SPRITE_WALL_PROTECT_RADIUS 256.0f
 // furthest a sprite is pulled toward the eye for its depth test
-#define SPRITE_WALL_PULL_MAX 96.0f
+#define SPRITE_WALL_PULL_MAX 128.0f
 
 static qboolean R_SpriteOccluded( cl_entity_t *e, vec3_t origin, float *pscale )
 {
@@ -436,7 +436,6 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	// the screen image is unchanged, only the depth test moves. Sprites the
 	// size of a big explosion (e.g. weapon_redeemer's fireball and glow) may
 	// still sink into walls so they don't fill the player's view.
-	qboolean skipDepthTest = false;
 	if( e->curstate.rendermode == kRenderGlow || e->curstate.rendermode == kRenderTransAdd )
 	{
 		vec3_t toSprite;
@@ -449,28 +448,15 @@ void R_DrawSpriteModel( cl_entity_t *e )
 		if( radius > 0.0f && radius < SPRITE_WALL_PROTECT_RADIUS && dist > 1.0f )
 		{
 			// Only for sprites the eye can reach: one behind a wall stays hidden.
-			const pmtrace_t *trace = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, PM_GLASS_IGNORE | PM_STUDIO_IGNORE );
-			const float worldGap = ( 1.0f - trace->fraction ) * dist;
-			if( worldGap <= radius + 8.0f )
+			pmtrace_t *trace = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, PM_GLASS_IGNORE | PM_STUDIO_IGNORE );
+			if(( 1.0f - trace->fraction ) * dist <= radius + 8.0f )
 			{
-				// Centre in sight and no player or model in front of it: draw
-				// it whole, as GoldSrc does for glows, so sharp corners and
-				// spiky geometry near the eye can't bite into it either.
-				trace = gEngfuncs.EV_VisTraceLine( RI.rvp.vieworigin, origin, PM_GLASS_IGNORE | PM_STUDIO_BOX );
-				if(( 1.0f - trace->fraction ) * dist <= radius + 8.0f )
-				{
-					skipDepthTest = true;
-					pglDisable( GL_DEPTH_TEST );
-				}
-				else
-				{
-					// Someone stands in front: keep the depth test so they
-					// hide it, pulled so a wall it touches doesn't cut it.
-					const float pull = Q_min( Q_min( Q_max( radius * 4.0f, 16.0f ), SPRITE_WALL_PULL_MAX ), dist * 0.5f );
-					const float pulled = dist - pull;
-					VectorMA( RI.rvp.vieworigin, pulled / dist, toSprite, origin );
-					scale *= pulled / dist;
-				}
+				// A surface seen at a grazing angle cuts the quad unless it is
+				// pulled several radii, so allow up to six, within limits.
+				const float pull = Q_min( Q_min( Q_max( radius * 6.0f, 24.0f ), SPRITE_WALL_PULL_MAX ), dist * 0.5f );
+				const float pulled = dist - pull;
+				VectorMA( RI.rvp.vieworigin, pulled / dist, toSprite, origin );
+				scale *= pulled / dist;
 			}
 		}
 	}
@@ -546,11 +532,7 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	{
 		float dot = RI.vforward[2];
 		if(( dot > 0.999848f ) || ( dot < -0.999848f ))	// cos(1 degree) = 0.999848
-		{
-			if( skipDepthTest )
-				pglEnable( GL_DEPTH_TEST );
 			return; // invisible
-		}
 		VectorSet( v_up, 0.0f, 0.0f, 1.0f );
 		VectorSet( v_right, RI.vforward[1], -RI.vforward[0], 0.0f );
 		VectorNormalize( v_right );
@@ -630,8 +612,6 @@ void R_DrawSpriteModel( cl_entity_t *e )
 
 	pglDisable( GL_ALPHA_TEST );
 	pglDepthMask( GL_TRUE );
-	if( skipDepthTest )
-		pglEnable( GL_DEPTH_TEST );
 
 	if( e->curstate.rendermode == kRenderGlow || e->curstate.rendermode == kRenderTransAdd )
 		R_AllowFog( true );

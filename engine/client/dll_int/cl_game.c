@@ -2529,6 +2529,21 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 		s2 = t2 = 1.0f;
 	}
 
+	// optional independent HUD sprite scale (text and crosshair unaffected)
+	if( hud_sprite_scale.value > 0.0f && hud_sprite_scale.value != 1.0f
+		&& clgame.ds.pSprite != clgame.ds.pCrosshair )
+	{
+		float s = hud_sprite_scale.value;
+		float sw = width * s;
+		float sh = height * s;
+
+		// keep the sprite centered while resizing
+		x += ( width - sw ) * 0.5f;
+		y += ( height - sh ) * 0.5f;
+		width = sw;
+		height = sh;
+	}
+
 	// pass scissor test if supposed
 	if( !CL_Scissor( &clgame.ds.scissor, &x, &y, &width, &height, &s1, &t1, &s2, &t2 ))
 		return;
@@ -4045,12 +4060,12 @@ int GAME_EXPORT CL_GetScreenInfo( SCREENINFO *pscrinfo )
 	qboolean apply_scale_factor = false; // we don't want floating point inaccuracies
 	float scale_factor = hud_scale.value;
 
-	if( FBitSet( hud_fontscale.flags, FCVAR_CHANGED ))
+	if( FBitSet( hud_textscale.flags, FCVAR_CHANGED ))
 	{
 		CL_FreeFont( &cls.creditsFont );
 		SCR_LoadCreditsFont();
 
-		ClearBits( hud_fontscale.flags, FCVAR_CHANGED );
+		ClearBits( hud_textscale.flags, FCVAR_CHANGED );
 	}
 
 	// setup screen info
