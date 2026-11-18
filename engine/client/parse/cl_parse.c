@@ -2923,7 +2923,16 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 		CL_ParseServerTime( msg, proto );
 		break;
 	case svc_print:
-		Con_Printf( "%s", MSG_ReadString( msg ));
+		s = MSG_ReadString( msg );
+		if( !Q_strcmp( s, "Classic mode is not supported on this map." ) ||
+		    !Q_strcmp( s, "Classic mode is not supported on this map.\n" ) ||
+		    !Q_strcmp( s, "Survival mode is not supported on this map." ) ||
+		    !Q_strcmp( s, "Survival mode is not supported on this map.\n" ) ||
+		    strstr( s, "Classic mode is not supported on this map." ) ||
+		    strstr( s, "Survival mode is not supported on this map." ))
+			CL_CenterPrint( s, 0.25f );
+		else
+			Con_Printf( "%s", s );
 		break;
 	case svc_stufftext:
 		s = MSG_ReadString( msg );
