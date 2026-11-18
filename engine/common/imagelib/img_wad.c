@@ -630,6 +630,10 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 {
 	dwadinfo_t whdr;
 
+	// only used for player decals in tempdecal.wad: a single lump laid out like Image_SaveWAD and GoldSrc write it, reject anything else
+	if( !Image_CheckFlag( IL_LOAD_PLAYER_DECAL ))
+		return false;
+
 	if( !buffer || filesize < (fs_offset_t)sizeof( dwadinfo_t ))
 		return false;
 
@@ -637,22 +641,20 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 	le_struct_swap( dwadinfo_swap, &whdr );
 	if( whdr.ident != IDWAD2HEADER && whdr.ident != IDWAD3HEADER )
 		return false;
-	if( whdr.numlumps <= 0 || whdr.infotableofs <= 0 || whdr.infotableofs >= (int)filesize )
+	if( whdr.numlumps <= 0 || whdr.infotableofs < (int)sizeof( dwadinfo_t ) || whdr.infotableofs >= (int)filesize )
 		return false;
 	if( whdr.numlumps > ( filesize - whdr.infotableofs ) / sizeof( dlumpinfo_t ))
 		return false;
 
 	for( int i = 0; i < whdr.numlumps; ++i )
 	{
-		unsigned char grad_palette[256 * 3];
 		dlumpinfo_t lump;
 		mip_t mip;
-		qboolean      alpha_mode = false;
-		unsigned char frontR = 0, frontG = 0, frontB = 0;
 
 		memcpy( &lump, buffer + whdr.infotableofs + i * sizeof( dlumpinfo_t ), sizeof( lump ));
 		le_struct_swap( dlumpinfo_swap, &lump );
 
+		// Sven Co-op WADs may carry compressed lumps we can't decode; skip them
 		if(( lump.type != TYP_MIPTEX && lump.type != TYP_PALETTE ) || FBitSet( lump.attribs, ATTR_COMPRESSED ))
 			continue;
 
@@ -695,26 +697,6 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 		if( mipdata[palette_offset - 2] != 0 || mipdata[palette_offset - 1] != 1 )
 			continue;
 		const unsigned char *palette = mipdata + palette_offset;
-		const unsigned char *use_palette = palette;
-
-		// handle gradient palette
-		if( lump.type == TYP_PALETTE )
-		{
-			// gradient palette
-			const unsigned char *frontColorPtr = palette + 255 * 3;
-			frontR = frontColorPtr[0];
-			frontG = frontColorPtr[1];
-			frontB = frontColorPtr[2];
-			for( int j = 0; j < 256; ++j )
-			{
-				float t = j / 255.0f;
-				grad_palette[j * 3 + 0] = (unsigned char)( frontR * t );
-				grad_palette[j * 3 + 1] = (unsigned char)( frontG * t );
-				grad_palette[j * 3 + 2] = (unsigned char)( frontB * t );
-			}
-			use_palette = grad_palette;
-			alpha_mode = true; // gradient
-		}
 
 		// prepare image structure
 		Image_Reset();
@@ -722,21 +704,39 @@ qboolean Image_LoadWAD( const char *name, const byte *buffer, fs_offset_t filesi
 		image.height = height;
 		image.type = PF_RGBA_32;
 		image.flags = IMAGE_HAS_COLOR | IMAGE_HAS_ALPHA;
-		image.size = width * height * 4;
+		image.size = m0size * 4;
 		image.rgba = Mem_Malloc( host.imagepool, image.size );
 		image.palette = NULL;
 
-		// convert indexed pixels to RGBA
-		for( int j = 0; j < (int)( width * height ); ++j )
+		if( lump.type == TYP_PALETTE )
 		{
-			byte idx = pixels[j];
-			image.rgba[j * 4 + 0] = use_palette[idx * 3 + 0];
-			image.rgba[j * 4 + 1] = use_palette[idx * 3 + 1];
-			image.rgba[j * 4 + 2] = use_palette[idx * 3 + 2];
-			if( alpha_mode )
-				image.rgba[j * 4 + 3] = idx; // soft transparency
-			else
-				image.rgba[j * 4 + 3] = ( idx == 255 ) ? 0 : 255; // classic
+			// gradient decal: last palette color, index is alpha
+			SetBits( image.flags, IMAGE_COLORINDEX );
+
+			image.fogParams[0] = palette[255 * 3 + 0];
+			image.fogParams[1] = palette[255 * 3 + 1];
+			image.fogParams[2] = palette[255 * 3 + 2];
+			image.fogParams[3] = VectorAvg( image.fogParams );
+
+			for( uint32_t j = 0; j < m0size; j++ )
+			{
+				image.rgba[j * 4 + 0] = image.fogParams[0];
+				image.rgba[j * 4 + 1] = image.fogParams[1];
+				image.rgba[j * 4 + 2] = image.fogParams[2];
+				image.rgba[j * 4 + 3] = pixels[j];
+			}
+		}
+		else
+		{
+			for( uint32_t j = 0; j < m0size; j++ )
+			{
+				byte idx = pixels[j];
+
+				image.rgba[j * 4 + 0] = palette[idx * 3 + 0];
+				image.rgba[j * 4 + 1] = palette[idx * 3 + 1];
+				image.rgba[j * 4 + 2] = palette[idx * 3 + 2];
+				image.rgba[j * 4 + 3] = ( idx == 255 ) ? 0 : 255;
+			}
 		}
 		return true;
 	}
