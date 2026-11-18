@@ -553,7 +553,7 @@ static int CL_GetGoldSrcFragmentSize( void *unused, fragsize_t mode )
 	case FRAGSIZE_UNRELIABLE:
 		return 1400; // MAX_ROUTABLE_PACKET
 	default:
-		if( cls.state == ca_active && pList->nUserData1 )
+		if( cls.state == ca_active )
 		{
 			// GoldSrc's default value is 512
 			// let's help users to not shoot themselves in the foot,
@@ -1505,7 +1505,8 @@ static void CL_SendConnectPacket( connprotocol_t proto, int challenge )
 
 	netadrtype_t adrtype = NET_NetadrType( &adr );
 
-	if( adr.port == 0 ) adr.port = MSG_BigShort( PORT_SERVER );
+	if( adr.port == 0 )
+		adr.port = PORT_SERVER;
 
 	int input_devices = IN_CollectInputDevices();
 	IN_LockInputDevices( adrtype != NA_LOOPBACK ? true : false );
