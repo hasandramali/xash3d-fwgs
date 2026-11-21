@@ -1879,8 +1879,7 @@ void Key_Console( int key )
 		}
 		else
 		{
-			UI_SetActiveMenu( true );
-			Key_SetKeyDest( key_menu ); // transition from console to menu
+			// Keep console active during connect, don't switch to menu
 		}
 		return;
 	}
