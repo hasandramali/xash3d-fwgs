@@ -1878,7 +1878,10 @@ void Key_Console( int key )
 			Key_SetKeyDest( key_game );
 		}
 		else
+		{
 			UI_SetActiveMenu( true );
+			Key_SetKeyDest( key_menu ); // transition from console to menu
+		}
 		return;
 	}
 
@@ -2429,9 +2432,13 @@ void Con_DrawConsole( void )
 	{
 		if( !cl_allow_levelshots.value && !cls.timedemo )
 		{
-			if( cls.key_dest != key_console && Con_BackgroundMapActive( ))
-				con.vislines = con.showlines = 0;
-			else con.vislines = con.showlines = refState.height;
+			// when the user leaves the console for the menu during connect,
+		// drop the console backdrop so the menu (and its connection
+		// progress dialog) becomes visible instead of staying hidden
+		// behind a full-screen console.
+		if( cls.key_dest != key_console )
+			con.vislines = con.showlines = 0;
+		else con.vislines = con.showlines = refState.height;
 		}
 		else
 		{
