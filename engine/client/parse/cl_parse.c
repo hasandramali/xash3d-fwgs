@@ -1102,7 +1102,7 @@ static void CL_ParseServerData( sizebuf_t *msg, connprotocol_t proto )
 	}
 
 	if( !cls.changedemo )
-		UI_SetActiveMenu( cl.background );
+		CL_ShutMenuForConnect(); // keep the connect/download console open
 	else if( !cls.demoplayback )
 		Key_SetKeyDest( key_menu );
 

@@ -1880,8 +1880,13 @@ void Key_Console( int key )
 		}
 		else
 		{
-			UI_SetActiveMenu( true ); // show console/menu during connect
-			Key_SetKeyDest( key_console ); // ensure console key dest is set
+			// not in game: closing the console must give input back to the main menu
+			// UI_SetActiveMenu( true ) sets key_dest to key_menu in gameui
+			UI_SetActiveMenu( true );
+
+			// fallback in case gameui isn't loaded and left us in console
+			if( cls.key_dest == key_console )
+				Key_SetKeyDest( key_menu );
 		}
 		return;
 	}
@@ -2423,7 +2428,8 @@ void Con_DrawConsole( void )
 {
 	// never draw console when changelevel in-progress, unless the player
 	// opened it to read the connect/download output
-	if( cls.state != ca_disconnected && ( cls.changelevel || cls.changedemo ) && cls.key_dest != key_console )
+	if( cls.state != ca_disconnected && ( cls.changelevel || cls.changedemo )
+		&& cls.key_dest != key_console && cls.state != ca_connecting && cls.state != ca_connected )
 		return;
 
 	// check for console width changes from a vid mode change
@@ -2431,22 +2437,19 @@ void Con_DrawConsole( void )
 
 	if( cls.state == ca_connecting || cls.state == ca_connected )
 	{
-		if( cls.key_dest == key_console )
+		if( !cls.timedemo && cls.key_dest != key_menu )
 		{
-			// the player opened the console to follow the connect/download
-			// output; keep it readable over the loading plaque
+			// The console is the only place the connect/download output can be
+			// read: most servers have no levelshot, so the plaque is "*black"
+			// and hiding the console here leaves the player staring at a black
+			// screen with only the download counter in the corner. This also
+			// covers key_dest being reset to key_game by the menu DLL when it
+			// shuts itself down during the connect handshake.
 			con.vislines = con.showlines = refState.height;
-		}
-		else if( !cl_allow_levelshots.value && !cls.timedemo )
-		{
-			// when the user leaves the console for the menu during connect,
-			// drop the console backdrop so the menu (and its connection
-			// progress dialog) becomes visible instead of staying hidden
-			// behind a full-screen console.
-			con.vislines = con.showlines = 0;
 		}
 		else
 		{
+			// the user opened the menu during connect: let it draw
 			con.showlines = 0;
 
 			if( host_developer.value >= DEV_EXTENDED && !cls.timedemo )

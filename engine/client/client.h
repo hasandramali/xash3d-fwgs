@@ -886,6 +886,7 @@ void CL_Particle( const vec3_t org, int color, float life, int zpos, int zvel );
 //
 void CL_Init( void );
 void CL_Disconnect_f( void );
+void CL_ShutMenuForConnect( void );
 void CL_ProcessFile( qboolean successfully_received, const char *filename );
 void CL_WriteUsercmd( connprotocol_t proto, sizebuf_t *msg, int from, int to );
 void CL_SetupNetchanForProtocol( connprotocol_t proto );

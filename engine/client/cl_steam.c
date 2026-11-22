@@ -1598,7 +1598,7 @@ static void SteamBroker_RetryP2P( void )
 	cls.serveradr = peer;
 	cls.connect_time = host.realtime;
 	cls.max_fragment_size = FRAGMENT_MAX_SIZE;
-	UI_SetActiveMenu( false );
+	CL_ShutMenuForConnect();
 }
 
 static void SteamBroker_UpdateP2P( void )

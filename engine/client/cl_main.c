@@ -428,6 +428,13 @@ static void CL_CheckClientState( void )
 		cls.changedemo = false;		// changedemo is done
 		cl.first_frame = true;		// first rendering frame
 
+		// the console was kept open during connecting/downloading to show the
+		// handshake output; hand the screen back to the game now that the map
+		// is actually running (same end result as the menu DLL forcing key_game
+		// on connect, but only once the connection is finished)
+		if( !cl.background && cls.key_dest == key_console )
+			Key_SetKeyDest( key_game );
+
 		CL_UpdateLogo();
 
 		SCR_MakeLevelShot();		// make levelshot if needs
@@ -2088,6 +2095,27 @@ static void CL_Reconnect( qboolean setup_netchan )
 
 /*
 =====================
+CL_ShutMenuForConnect
+
+Hides the menu when a connect step starts. The menu DLL's UI_CloseMenu()
+forces key_dest to key_game, which silently closed the console the player
+was reading the connect/download output in (the levelshot is "*black" for
+most servers, so the screen just went black). Restore the console when it
+was the active key destination.
+=====================
+*/
+void CL_ShutMenuForConnect( void )
+{
+	qboolean console_open = ( cls.key_dest == key_console );
+
+	UI_SetActiveMenu( cl.background );
+
+	if( console_open && !cl.background )
+		Key_SetKeyDest( key_console );
+}
+
+/*
+=====================
 CL_Disconnect
 
 Goes from a connected state to full screen console state
@@ -3015,7 +3043,7 @@ static void CL_ClientConnect( connprotocol_t proto, const char *c, netadr_t from
 	}
 
 	CL_Reconnect( true );
-	UI_SetActiveMenu( cl.background );
+	CL_ShutMenuForConnect();
 }
 
 static void CL_Print( const char *c, const char *args, netadr_t from, sizebuf_t *msg )
