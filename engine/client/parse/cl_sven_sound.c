@@ -209,17 +209,31 @@ void CL_SvenSoundFrame( void )
 	if( !cl.audio_prepped || !svenSoundLoaded ) return;
 	if( svenSoundPrecacheIndex < svenSoundTable.soundCount )
 	{
-		double deadline = Sys_DoubleTime() + 0.002;
-		while( svenSoundPrecacheIndex < svenSoundTable.soundCount && registered < 8 )
+		// look at the clock before every sample: decoding a single ogg can
+		// take longer than the whole budget, and the old code checked it only
+		// after up to eight of them
+		double deadline = Sys_DoubleTime() + Q_max( 0.0f, s_preload_ms.value ) * 0.001;
+		int handled = 0;
+		while( svenSoundPrecacheIndex < svenSoundTable.soundCount && registered < 8 && handled < 32 )
 		{
-			int index = svenSoundPrecacheIndex++;
-			if( !svenSoundHandleValid[index] )
-			{
-				svenSoundHandles[index] = S_RegisterSvenSound( svenSoundTable.sounds[index] );
-				svenSoundHandleValid[index] = true;
-				registered++;
-			}
-			if( Sys_DoubleTime() >= deadline ) break;
+			int index;
+			qboolean warm;
+
+			if( registered > 0 && Sys_DoubleTime() >= deadline )
+				break;
+
+			index = svenSoundPrecacheIndex++;
+			handled++;
+			if( svenSoundHandleValid[index] )
+				continue;
+
+			// after s_preload_mb is spent only the name is registered, so
+			// the sample is decoded on first use instead of all up front
+			warm = !S_PreloadBudgetExhausted();
+			svenSoundHandles[index] = warm ? S_RegisterSvenSound( svenSoundTable.sounds[index] )
+				: S_RegisterSvenSoundLazy( svenSoundTable.sounds[index] );
+			svenSoundHandleValid[index] = true;
+			if( warm ) registered++;
 		}
 	}
 	for( int index = 0, played = 0; index < svenPendingCount && played < 16; )

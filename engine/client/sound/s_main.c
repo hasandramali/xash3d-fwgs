@@ -57,6 +57,9 @@ CVAR_DEFINE_AUTO( snd_mute_losefocus, "1", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "sile
 CVAR_DEFINE_AUTO( s_test, "0", 0, "engine developer cvar for quick testing new features" );
 CVAR_DEFINE_AUTO( s_samplecount, "0", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "sample count (0 for default value)" );
 CVAR_DEFINE_AUTO( s_warn_late_precache, "0", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "warn about late precached sounds on client-side" );
+CVAR_DEFINE( s_preload_mb, "s_preload_mb", "256", FCVAR_ARCHIVE, "preload at most this many MB of decoded sounds per map (0 = preload everything)" );
+CVAR_DEFINE( s_preload_ms, "s_preload_ms", "2", FCVAR_ARCHIVE, "time budget in milliseconds per frame for sound preloading" );
+CVAR_DEFINE( s_cache_mb, "s_cache_mb", "512", FCVAR_ARCHIVE, "cap for the decoded sound cache in MB, least recently used sounds are released above it (0 = unlimited)" );
 
 /*
 =============================================================================
@@ -833,6 +836,12 @@ void S_StartSvenSound( const sven_sound_event_t *event, sound_t handle )
 		return;
 	}
 	sfx = S_GetSfxByHandle( handle );
+
+	// the sample may only be registered (lazy Sven sound or an evicted
+	// cache entry), but the loop checks below need the decoded data
+	if( sfx && !sfx->cache && !S_TestSoundChar( sfx->name, '!' ))
+		S_LoadSound( sfx );
+
 	if( event->entity >= 0 && ( event->flags & ( SVEN_SND_CHANGE_VOL | SVEN_SND_CHANGE_PITCH )))
 	{
 		for( int index = 0; index < snd.total_channels; index++ )
@@ -1775,6 +1784,11 @@ void SND_UpdateSound( void )
 	if( clgame.soundFuncs.pfnS_UpdateSound )
 		clgame.soundFuncs.pfnS_UpdateSound();
 
+	// decode queued precached sounds within this frame's time budget and
+	// keep the decoded cache inside s_cache_mb
+	S_PreloadFrame();
+	S_SoundCacheMaintenance();
+
 	// if the loading plaque is up, clear everything
 	// out to make sure we aren't looping a dirty
 	// dma buffer while loading
@@ -2064,6 +2078,11 @@ void S_SoundInfo_f( void )
 	Con_Printf( "%5d bits/sample\n", 16 );
 	Con_Printf( "%5d bytes/sec\n", SOUND_DMA_SPEED );
 	Con_Printf( "%5d total_channels\n", snd.total_channels );
+	Con_Printf( "%s decoded sound cache (s_cache_mb %g)\n", Q_memprint( S_SoundCacheSize() ), s_cache_mb.value );
+	if( s_preload_mb.value > 0.0f )
+		Con_Printf( "%s preload budget (s_preload_ms %g)\n",
+			Q_memprint((size_t)( s_preload_mb.value * 1024.0f * 1024.0f )), s_preload_ms.value );
+	else Con_Printf( "preloading everything at map start (s_preload_mb 0)\n" );
 
 	S_PrintBackgroundTrackState ();
 }
@@ -2152,6 +2171,9 @@ qboolean S_Init( void )
 	Cvar_RegisterVariable( &s_test );
 	Cvar_RegisterVariable( &s_samplecount );
 	Cvar_RegisterVariable( &s_warn_late_precache );
+	Cvar_RegisterVariable( &s_preload_mb );
+	Cvar_RegisterVariable( &s_preload_ms );
+	Cvar_RegisterVariable( &s_cache_mb );
 
 	if( Sys_CheckParm( "-nosound" ))
 	{

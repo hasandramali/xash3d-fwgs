@@ -61,6 +61,9 @@ extern convar_t s_test;  // cvar to test new effects
 extern convar_t s_samplecount;
 extern convar_t s_warn_late_precache;
 extern convar_t snd_mute_losefocus;
+extern convar_t s_preload_mb;
+extern convar_t s_preload_ms;
+extern convar_t s_cache_mb;
 
 wavdata_t *S_LoadSound( sfx_t *sfx );
 float S_GetMasterVolume( void );
@@ -98,8 +101,14 @@ sfx_t *S_FindName( const char *name, qboolean *pfInCache );
 const char *S_SoundName( const sfx_t *sfx );
 sound_t S_RegisterSound( const char *name );
 sound_t S_RegisterSvenSound( const char *name );
+sound_t S_RegisterSvenSoundLazy( const char *name );
 void S_FreeSound( sfx_t *sfx );
 void S_InitSounds( void );
+void S_UncacheSound( sfx_t *sfx );
+size_t S_SoundCacheSize( void );
+qboolean S_PreloadBudgetExhausted( void );
+void S_PreloadFrame( void );
+void S_SoundCacheMaintenance( void );
 
 // s_dsp.c
 void SX_Init( void );

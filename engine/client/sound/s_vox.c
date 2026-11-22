@@ -183,8 +183,7 @@ void VOX_FreeWord( channel_t *ch )
 	if( !word->sfx || FBitSet( word->flags, FL_VOXWORD_IN_CACHE ))
 		return;
 
-	FS_FreeSound( word->sfx->cache );
-	word->sfx->cache = NULL;
+	S_UncacheSound( word->sfx ); // releases the sample and its cache accounting
 	word->sfx = NULL;
 }
 

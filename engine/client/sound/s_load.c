@@ -17,6 +17,7 @@ GNU General Public License for more details.
 #include "client.h"
 #include "sound.h"
 #include "sven_sound.h"
+#include "platform/platform.h"
 
 // during registration it is possible to have more sounds
 // than could actually be referenced during gameplay,
@@ -25,11 +26,29 @@ GNU General Public License for more details.
 #define MAX_SFX      8192
 #define MAX_SFX_HASH (MAX_SFX/4)
 
+// sounds up to this size are decoded before long tracks while preloading,
+// so short gameplay samples are ready first
+#define S_PRELOAD_SMALL_FILE ( 256 * 1024 )
+
 static int      s_numSfx = 0;
 static sfx_t    s_knownSfx[MAX_SFX];
 static char     *s_fullSfxNames[MAX_SFX];
 static sfx_t    *s_sfxHashList[MAX_SFX_HASH];
 static qboolean s_registering = false;
+
+// decoded sound cache accounting and LRU bookkeeping
+static size_t   s_cachedBytes;            // decoded PCM held by s_knownSfx
+static size_t   s_sfxBytes[MAX_SFX];      // decoded size of each sfx slot
+static double   s_sfxLastUse[MAX_SFX];    // LRU stamp of each sfx slot
+static double   s_sfxUseClock;            // monotonic LRU stamp source
+static byte     s_sfxInUse[MAX_SFX];      // scratch flags for the eviction pass
+
+// frame-budgeted preload set up by S_EndRegistration
+static qboolean s_preloadPending;         // a preload pass is waiting for frames
+static int      s_preloadCursor;          // current slot of the preload scan
+static qboolean s_preloadLongTracks;      // second scan: long tracks only
+static qboolean s_preloadDone;            // preload pass finished
+static qboolean s_preloadBudgetHit;       // eager loading budget already reached
 
 #define SENTENCE_INDEX -99999 // unique sentence index
 static string   s_sentenceImmediateName;	// keep dummy sentence name
@@ -98,6 +117,85 @@ static wavdata_t *S_CreateDefaultSound( void )
 
 /*
 =================
+S_AccountSound
+
+remember how much decoded PCM a sfx slot holds and mark it as used now
+=================
+*/
+static void S_AccountSound( sfx_t *sfx )
+{
+	int index;
+	size_t bytes;
+
+	if( sfx < s_knownSfx || sfx >= s_knownSfx + MAX_SFX )
+		return;
+
+	index = sfx - s_knownSfx;
+	bytes = sfx->cache ? sizeof( wavdata_t ) + sfx->cache->size : 0;
+
+	if( s_sfxBytes[index] )
+		s_cachedBytes -= Q_min( s_sfxBytes[index], s_cachedBytes );
+
+	s_sfxBytes[index] = bytes;
+	s_cachedBytes += bytes;
+	s_sfxLastUse[index] = ++s_sfxUseClock;
+}
+
+/*
+=================
+S_ForgetSound
+
+stop accounting cached PCM without touching the cache itself
+=================
+*/
+static void S_ForgetSound( sfx_t *sfx )
+{
+	int index;
+
+	if( sfx < s_knownSfx || sfx >= s_knownSfx + MAX_SFX )
+		return;
+
+	index = sfx - s_knownSfx;
+
+	if( s_sfxBytes[index] )
+		s_cachedBytes -= Q_min( s_sfxBytes[index], s_cachedBytes );
+
+	s_sfxBytes[index] = 0;
+	s_sfxLastUse[index] = 0;
+}
+
+/*
+=================
+S_UncacheSound
+
+drop the decoded PCM of a sound but keep its registration, so it can be
+loaded again from disk when it is needed
+=================
+*/
+void S_UncacheSound( sfx_t *sfx )
+{
+	if( !sfx || !sfx->cache )
+		return;
+
+	S_ForgetSound( sfx );
+	FS_FreeSound( sfx->cache );
+	sfx->cache = NULL;
+}
+
+/*
+=================
+S_SoundCacheSize
+
+amount of decoded PCM currently held by the sound cache
+=================
+*/
+size_t S_SoundCacheSize( void )
+{
+	return s_cachedBytes;
+}
+
+/*
+=================
 S_LoadSound
 =================
 */
@@ -115,7 +213,11 @@ static wavdata_t *S_LoadSoundInternal( sfx_t *sfx, qboolean allowDefault )
 
 	// see if still in memory
 	if( sfx->cache )
+	{
+		// a cache hit is also a use: keep the LRU order fresh
+		s_sfxLastUse[sfx - s_knownSfx] = ++s_sfxUseClock;
 		return sfx->cache;
+	}
 
 	if( COM_StringEmptyOrNULL( sfx->name ))
 		return NULL;
@@ -148,6 +250,7 @@ static wavdata_t *S_LoadSoundInternal( sfx_t *sfx, qboolean allowDefault )
 		Sound_Process( &sc, SOUND_44k, sc->width, sc->channels, SOUND_RESAMPLE );
 
 	sfx->cache = sc;
+	S_AccountSound( sfx );
 
 	return sfx->cache;
 }
@@ -254,9 +357,12 @@ void S_FreeSound( sfx_t *sfx )
 	if( clgame.soundFuncs.pfnS_FreeSound )
 	{
 		clgame.soundFuncs.pfnS_FreeSound( sfx, sfx - s_knownSfx );
+		S_ForgetSound( sfx );
 	}
-	else if( sfx->cache )
-		FS_FreeSound( sfx->cache );
+	else
+	{
+		S_UncacheSound( sfx );
+	}
 	if( s_fullSfxNames[sfx - s_knownSfx] )
 		Mem_Free( s_fullSfxNames[sfx - s_knownSfx] );
 	s_fullSfxNames[sfx - s_knownSfx] = NULL;
@@ -311,13 +417,33 @@ void S_EndRegistration( void )
 			S_FreeSound( sfx ); // don't need this sound
 	}
 
-	// load everything in
-	for( i = 0, sfx = s_knownSfx; i < s_numSfx; i++, sfx++ )
+	s_preloadPending = false;
+	s_preloadCursor = 0;
+	s_preloadLongTracks = false;
+	s_preloadDone = false;
+	s_preloadBudgetHit = false;
+
+	if( s_preload_mb.value <= 0.0f )
 	{
-		if( !sfx->name[0] )
-			continue;
-		S_LoadSound( sfx );
+		// no budget: keep the old behaviour and load everything in at once
+		for( i = 0, sfx = s_knownSfx; i < s_numSfx; i++, sfx++ )
+		{
+			if( !sfx->name[0] )
+				continue;
+			S_LoadSound( sfx );
+		}
+		s_preloadDone = true;
 	}
+	else
+	{
+		// the rest is decoded by S_PreloadFrame() within a small per-frame
+		// time budget, so connecting doesn't stall on hundreds of sounds;
+		// whatever isn't ready in time is loaded on its first use
+		s_preloadPending = true;
+		Con_DPrintf( "Sound preload: %s already cached, deferring the rest (s_preload_mb %g)\n",
+			Q_memprint( s_cachedBytes ), s_preload_mb.value );
+	}
+
 	s_registering = false;
 }
 
@@ -360,6 +486,21 @@ sound_t S_RegisterSvenSound( const char *name )
 	return sfx - s_knownSfx;
 }
 
+/*
+==================
+S_RegisterSvenSoundLazy
+
+register a Sven sound without decoding it right away; the sample is loaded
+from disk when it is actually played, or by the frame-budgeted preloader
+==================
+*/
+sound_t S_RegisterSvenSoundLazy( const char *name )
+{
+	sfx_t *sfx = S_FindName( name, NULL );
+	if( !sfx ) return -1;
+	return sfx - s_knownSfx;
+}
+
 sfx_t *S_GetSfxByHandle( sound_t handle )
 {
 	if( !snd.initialized )
@@ -388,6 +529,7 @@ void S_InitSounds( void )
 	s_knownSfx->hashNext = s_sfxHashList[s_knownSfx->hashValue];
 	s_sfxHashList[s_knownSfx->hashValue] = s_knownSfx;
 	s_knownSfx->cache = S_CreateDefaultSound();
+	S_AccountSound( s_knownSfx );
 	s_numSfx = 1;
 }
 
@@ -416,5 +558,217 @@ void S_FreeSounds( void )
 	memset( s_knownSfx, 0, sizeof( s_knownSfx ));
 	memset( s_sfxHashList, 0, sizeof( s_sfxHashList ));
 
+	memset( s_sfxBytes, 0, sizeof( s_sfxBytes ));
+	memset( s_sfxLastUse, 0, sizeof( s_sfxLastUse ));
+	s_cachedBytes = 0;
+	s_sfxUseClock = 0;
+	s_preloadPending = false;
+	s_preloadCursor = 0;
+	s_preloadLongTracks = false;
+	s_preloadDone = false;
+	s_preloadBudgetHit = false;
+
 	s_numSfx = 0;
+}
+
+/*
+=================
+S_PreloadBudgetExhausted
+
+qtrue once the eager loading budget is spent. Sticky until the next map, so
+releasing cache memory doesn't restart preloading and thrash the disk again
+=================
+*/
+qboolean S_PreloadBudgetExhausted( void )
+{
+	size_t limit;
+
+	if( s_preload_mb.value <= 0.0f )
+		return false; // no budget, everything may be loaded eagerly
+
+	if( !s_preloadBudgetHit )
+	{
+		limit = (size_t)( s_preload_mb.value * 1024.0f * 1024.0f );
+		if( s_cachedBytes >= limit )
+			s_preloadBudgetHit = true;
+	}
+
+	return s_preloadBudgetHit;
+}
+
+/*
+=================
+S_NextPreloadSound
+
+pick the next sound the preloader should decode: short samples first, long
+tracks afterwards
+=================
+*/
+static sfx_t *S_NextPreloadSound( double deadline )
+{
+	while( s_preloadCursor < s_numSfx )
+	{
+		sfx_t *sfx = &s_knownSfx[s_preloadCursor];
+		s_preloadCursor++;
+
+		if( !sfx->name[0] || sfx->cache )
+			continue;
+
+		if( Sys_DoubleTime() >= deadline )
+			return NULL; // out of time, even before probing the file
+
+		if( !s_preloadLongTracks && FS_FileSize( S_SoundName( sfx ), false ) > S_PRELOAD_SMALL_FILE )
+			continue; // long track: leave it for the second pass
+
+		return sfx;
+	}
+
+	if( !s_preloadLongTracks )
+	{
+		s_preloadLongTracks = true;
+		s_preloadCursor = 0;
+		return S_NextPreloadSound( deadline );
+	}
+
+	s_preloadDone = true; // nothing left to preload
+	return NULL;
+}
+
+/*
+=================
+S_PreloadFrame
+
+called once per frame: decodes a few precached sounds within a small time
+budget instead of stalling the whole connect sequence on all of them
+=================
+*/
+void S_PreloadFrame( void )
+{
+	double budget, deadline;
+
+	if( !s_preloadPending || s_preloadDone || !snd.initialized || s_registering )
+		return;
+
+	budget = Q_max( 0.1f, s_preload_ms.value ) * 0.001;
+	deadline = Sys_DoubleTime() + budget;
+
+	while( !s_preloadDone )
+	{
+		sfx_t *sfx;
+		double start, cost;
+
+		if( S_PreloadBudgetExhausted( ))
+		{
+			s_preloadDone = true;
+			break;
+		}
+
+		if( Sys_DoubleTime() >= deadline )
+			break; // out of this frame's budget, continue next frame
+
+		sfx = S_NextPreloadSound( deadline );
+		if( !sfx )
+			break; // out of time or nothing left (s_preloadDone is set then)
+
+		start = Sys_DoubleTime();
+		S_LoadSoundInternal( sfx, false );
+		cost = Sys_DoubleTime() - start;
+
+		if( sfx->cache && cost > Q_max( 0.010, budget * 8.0 ))
+		{
+			// a single long track can burn more than a whole frame, don't
+			// stack more of those on top of it
+			Con_DPrintf( "Sound preload: %s took %.1f ms, loading the rest on demand\n",
+				S_SoundName( sfx ), cost * 1000.0 );
+			s_preloadDone = true;
+		}
+	}
+}
+
+/*
+=================
+S_SoundCacheMaintenance
+
+keep the decoded sound cache inside s_cache_mb, releasing the least recently
+used samples that are not currently playing. Sounds stay registered and are
+loaded again on their next use
+=================
+*/
+void S_SoundCacheMaintenance( void )
+{
+	int evicted = 0;
+	size_t cap, target;
+
+	if( !snd.initialized || s_registering || s_numSfx <= 1 )
+		return;
+
+	// while connecting the cache is being filled on purpose, don't fight it
+	if( cls.state != ca_active )
+		return;
+
+	// the game DLL owns the cache through the sound interface, don't pull
+	// wavdata_t out from under it
+	if( clgame.soundFuncs.pfnS_FreeSound )
+		return;
+
+	cap = (size_t)( Q_max( 0.0f, s_cache_mb.value ) * 1024.0f * 1024.0f );
+	if( !cap || s_cachedBytes <= cap )
+		return;
+
+	target = cap - cap / 5; // release 20% at once, so we don't evict every frame
+
+	// mark every sound that playback still points at
+	memset( s_sfxInUse, 0, Q_min( (size_t)s_numSfx, sizeof( s_sfxInUse )));
+
+	for( int i = 0; i < NUM_AMBIENTS; i++ )
+	{
+		if( snd.ambient_sfx[i] > 0 && snd.ambient_sfx[i] < s_numSfx )
+			s_sfxInUse[snd.ambient_sfx[i]] = 1;
+	}
+
+	for( int i = 0; i < snd.total_channels; i++ )
+	{
+		channel_t *ch = &snd.channels[i];
+
+		if( ch->sfx && ( ch->sfx - s_knownSfx ) >= 0 && ( ch->sfx - s_knownSfx ) < MAX_SFX )
+			s_sfxInUse[ch->sfx - s_knownSfx] = 1;
+
+		if( !ch->words )
+			continue;
+
+		for( int j = 0; j < CVOXWORDMAX && ch->words[j].sfx; j++ )
+		{
+			int index = ch->words[j].sfx - s_knownSfx;
+			if( index >= 0 && index < MAX_SFX )
+				s_sfxInUse[index] = 1;
+		}
+	}
+
+	while( s_cachedBytes > target && evicted < 8 )
+	{
+		sfx_t *victim = NULL;
+
+		for( int i = 1; i < s_numSfx; i++ )
+		{
+			sfx_t *sfx = &s_knownSfx[i];
+
+			if( !sfx->cache || s_sfxInUse[i] )
+				continue;
+
+			if( sfx->servercount != cl.servercount )
+				continue; // belongs to another server state, freed on disconnect
+
+			if( !victim || s_sfxLastUse[i] < s_sfxLastUse[victim - s_knownSfx] )
+				victim = sfx;
+		}
+
+		if( !victim )
+			break; // everything left is in use, keep the extra memory for now
+
+		S_UncacheSound( victim );
+		evicted++;
+	}
+
+	if( evicted )
+		Con_DPrintf( "Sound cache: released %d sound(s), now %s\n", evicted, Q_memprint( s_cachedBytes ));
 }
