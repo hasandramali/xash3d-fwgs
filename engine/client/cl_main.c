@@ -2141,7 +2141,8 @@ void CL_Disconnect( void )
 	}
 
 	UI_SetActiveMenu( true );
-	Key_SetKeyDest( key_console ); // ensure console key dest is set after disconnect}
+	Key_SetKeyDest( key_console ); // ensure console key dest is set after disconnect
+}
 
 void CL_Disconnect_f( void )
 {
