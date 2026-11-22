@@ -1880,6 +1880,7 @@ void Key_Console( int key )
 		else
 		{
 			UI_SetActiveMenu( true ); // show console/menu during connect
+			Key_SetKeyDest( key_console ); // ensure console key dest is set
 		}
 		return;
 	}
@@ -1911,7 +1912,6 @@ void Key_Console( int key )
 
 		// copy line to history buffer
 		// just in case, remove all CR and LF characters pushing it to the history
-		// not sure how they get even added in the first place
 		COM_RemoveLineFeed( con.input.buffer, sizeof( con.input.buffer ));
 		Con_HistoryAppend( &con.history, &con.input );
 
