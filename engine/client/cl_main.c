@@ -1815,7 +1815,10 @@ static void CL_Connect_f( void )
 	CL_Disconnect();
 
 	UI_SetActiveMenu( false );
-	Key_SetKeyDest( key_console );
+
+	// Set console as key destination but DON'T enable text input
+	// This allows console to be opened with `~` key without auto-triggering keyboard on join
+	cls.key_dest = key_console;
 
 	cls.state = ca_connecting;
 	cls.net_protocol = proto;
