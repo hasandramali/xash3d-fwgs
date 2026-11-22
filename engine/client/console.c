@@ -2426,25 +2426,27 @@ Con_DrawConsole
 */
 void Con_DrawConsole( void )
 {
-	// never draw console when changelevel in-progress, unless the player
-	// opened it to read the connect/download output
-	if( cls.state != ca_disconnected && ( cls.changelevel || cls.changedemo )
-		&& cls.key_dest != key_console && cls.state != ca_connecting && cls.state != ca_connected )
-		return;
+	// connect, download and changelevel all leave the client without a level
+	// to draw, and most servers have no levelshot either, so the plaque is
+	// plain black. Keep the console visible in these phases: it is the only
+	// place where the reconnect/download/loading output is printed, otherwise
+	// the player stares at a black screen with just the download counter.
+	qboolean in_transition = ( cls.state == ca_connecting || cls.state == ca_connected
+		|| cls.state == ca_validate || cls.changelevel || cls.changedemo );
+
+	// signon finishes before the new map is actually set up, which clears
+	// changelevel while there is still nothing to render (the renderer is only
+	// ready once video_prepped is set), so keep treating that window as loading
+	if( !in_transition && cls.state == ca_active && !cl.video_prepped && !cl.background )
+		in_transition = true;
 
 	// check for console width changes from a vid mode change
 	Con_CheckResize ();
 
-	if( cls.state == ca_connecting || cls.state == ca_connected )
+	if( in_transition )
 	{
 		if( !cls.timedemo && cls.key_dest != key_menu )
 		{
-			// The console is the only place the connect/download output can be
-			// read: most servers have no levelshot, so the plaque is "*black"
-			// and hiding the console here leaves the player staring at a black
-			// screen with only the download counter in the corner. This also
-			// covers key_dest being reset to key_game by the menu DLL when it
-			// shuts itself down during the connect handshake.
 			con.vislines = con.showlines = refState.height;
 		}
 		else
