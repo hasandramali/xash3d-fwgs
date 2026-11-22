@@ -57,9 +57,9 @@ CVAR_DEFINE_AUTO( snd_mute_losefocus, "1", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "sile
 CVAR_DEFINE_AUTO( s_test, "0", 0, "engine developer cvar for quick testing new features" );
 CVAR_DEFINE_AUTO( s_samplecount, "0", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "sample count (0 for default value)" );
 CVAR_DEFINE_AUTO( s_warn_late_precache, "0", FCVAR_ARCHIVE|FCVAR_FILTERABLE, "warn about late precached sounds on client-side" );
-CVAR_DEFINE( s_preload_mb, "s_preload_mb", "256", FCVAR_ARCHIVE, "preload at most this many MB of decoded sounds per map (0 = preload everything)" );
+CVAR_DEFINE( s_preload_mb, "s_preload_mb", "512", FCVAR_ARCHIVE, "preload at most this many MB of decoded sounds per map (0 = preload everything)" );
 CVAR_DEFINE( s_preload_ms, "s_preload_ms", "2", FCVAR_ARCHIVE, "time budget in milliseconds per frame for sound preloading" );
-CVAR_DEFINE( s_cache_mb, "s_cache_mb", "512", FCVAR_ARCHIVE, "cap for the decoded sound cache in MB, least recently used sounds are released above it (0 = unlimited)" );
+CVAR_DEFINE( s_cache_mb, "s_cache_mb", "768", FCVAR_ARCHIVE, "cap for the decoded sound cache in MB, least recently used sounds are released above it (0 = unlimited)" );
 
 /*
 =============================================================================
