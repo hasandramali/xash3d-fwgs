@@ -680,6 +680,9 @@ void SCR_UpdateScreen( void )
 	case ca_connecting:
 	case ca_connected:
 	case ca_validate:
+		// keep the console animated while connecting/downloading, otherwise
+		// con.vislines stays 0 and an opened console renders as a black screen
+		Con_RunConsole ();
 		screen_redraw = SCR_DrawPlaque();
 		break;
 	case ca_active:

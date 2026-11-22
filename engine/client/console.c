@@ -314,8 +314,9 @@ void Con_ToggleConsole_f( void )
 
 	SCR_EndLoadingPlaque();
 
-	// show console only in game, from menu, or to close console
-	if( cls.state != ca_active && cls.key_dest != key_menu && cls.key_dest != key_console )
+	// show console only in game, from menu, during connect/download, or to close console
+	if( cls.state != ca_active && cls.state != ca_connecting && cls.state != ca_connected
+		&& cls.state != ca_validate && cls.key_dest != key_menu && cls.key_dest != key_console )
 		return;
 
 	Con_ClearTyping();
@@ -2420,8 +2421,9 @@ Con_DrawConsole
 */
 void Con_DrawConsole( void )
 {
-	// never draw console when changelevel in-progress
-	if( cls.state != ca_disconnected && ( cls.changelevel || cls.changedemo ))
+	// never draw console when changelevel in-progress, unless the player
+	// opened it to read the connect/download output
+	if( cls.state != ca_disconnected && ( cls.changelevel || cls.changedemo ) && cls.key_dest != key_console )
 		return;
 
 	// check for console width changes from a vid mode change
@@ -2429,15 +2431,19 @@ void Con_DrawConsole( void )
 
 	if( cls.state == ca_connecting || cls.state == ca_connected )
 	{
-		if( !cl_allow_levelshots.value && !cls.timedemo )
+		if( cls.key_dest == key_console )
+		{
+			// the player opened the console to follow the connect/download
+			// output; keep it readable over the loading plaque
+			con.vislines = con.showlines = refState.height;
+		}
+		else if( !cl_allow_levelshots.value && !cls.timedemo )
 		{
 			// when the user leaves the console for the menu during connect,
-		// drop the console backdrop so the menu (and its connection
-		// progress dialog) becomes visible instead of staying hidden
-		// behind a full-screen console.
-		if( cls.key_dest != key_console )
+			// drop the console backdrop so the menu (and its connection
+			// progress dialog) becomes visible instead of staying hidden
+			// behind a full-screen console.
 			con.vislines = con.showlines = 0;
-		else con.vislines = con.showlines = refState.height;
 		}
 		else
 		{

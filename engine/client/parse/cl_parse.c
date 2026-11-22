@@ -331,33 +331,68 @@ CL_WeaponAnim
 Set new weapon animation
 ==================
 */
-static int s_iClientWeaponAnim = -1;
-static double s_flClientWeaponAnimTime = 0.0;
-static uint s_iClientWeaponAnimCommand = 0;
+#define WEAPON_PREDICT_HISTORY 8
+
+typedef struct
+{
+	int	anim;
+	double	time;
+	uint	command;
+	qboolean used;
+} predicted_weapon_anim_t;
+
+static predicted_weapon_anim_t s_predictions[WEAPON_PREDICT_HISTORY];
+static uint s_predictionHead;
 
 // The client predicted this animation itself (cl_lw 1). A Sven server still
 // echoes some of them; replaying the echo restarts the same animation.
 void GAME_EXPORT CL_ClientWeaponAnim( int iAnim, int body )
 {
-	s_iClientWeaponAnim = iAnim;
-	s_flClientWeaponAnimTime = host.realtime;
-	s_iClientWeaponAnimCommand = cls.netchan.outgoing_sequence;
+	predicted_weapon_anim_t *slot = &s_predictions[s_predictionHead++ % WEAPON_PREDICT_HISTORY];
+
+	slot->anim = iAnim;
+	slot->time = host.realtime;
+	slot->command = cls.netchan.outgoing_sequence;
+	slot->used = false;
+
 	CL_WeaponAnim( iAnim, body );
 }
 
 static qboolean CL_IsPredictedWeaponAnimEcho( int iAnim )
 {
-	if( !cl_lw.value || !cl_sven_proto || iAnim != s_iClientWeaponAnim )
+	if( !cl_lw.value || !cl_sven_proto )
 		return false;
-	if( host.realtime - s_flClientWeaponAnimTime > 1.0 )
+
+	predicted_weapon_anim_t *newest = NULL;
+
+	// Match against every recent prediction, not just the newest one. The shot
+	// fired right before a reload is acknowledged after the reload animation
+	// was predicted, and replaying that stale echo used to cut the reload
+	// animation short (fire anim replaced the reload anim one frame later).
+	for( int i = 0; i < WEAPON_PREDICT_HISTORY; i++ )
+	{
+		predicted_weapon_anim_t *p = &s_predictions[i];
+
+		if( p->used || p->anim != iAnim )
+			continue;
+		if( host.realtime - p->time > 1.0 )
+			continue;
+
+		// The echo rides on the packet that acknowledges the predicting command.
+		// The same animation acknowledged later is the server starting it on its
+		// own after a misprediction (common with motion and ping), so it plays.
+		const int commandsAfter = (int)( cls.netchan.incoming_acknowledged - p->command );
+		if( commandsAfter < 0 || commandsAfter > 4 )
+			continue;
+
+		if( !newest || p->time > newest->time )
+			newest = p;
+	}
+
+	if( !newest )
 		return false;
-	// The echo rides on the packet that acknowledges the predicting command.
-	// The same animation acknowledged later is the server starting it on its
-	// own after a misprediction (common with motion and ping), so it plays.
-	const int commandsAfter = (int)( cls.netchan.incoming_acknowledged - s_iClientWeaponAnimCommand );
-	if( commandsAfter < 0 || commandsAfter > 4 )
-		return false;
-	s_iClientWeaponAnim = -1; // one echo per prediction
+
+	newest->used = true; // one echo per prediction
 	return true;
 }
 
