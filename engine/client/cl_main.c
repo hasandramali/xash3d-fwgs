@@ -2132,12 +2132,16 @@ void CL_Disconnect( void )
 	cls.signon = 0;
 	cls.net_protocol = PROTO_CURRENT;
 
-	// back to menu in non-developer mode
+	// back to menu in non-developer mode, but keep console open if that was the key_dest
 	if( host_developer.value || cls.key_dest == key_menu )
+	{
+		if( cls.key_dest == key_console )
+			Key_SetKeyDest( key_console ); // ensure console stays open
 		return;
+	}
 
 	UI_SetActiveMenu( true );
-}
+	Key_SetKeyDest( key_console ); // ensure console key dest is set after disconnect}
 
 void CL_Disconnect_f( void )
 {

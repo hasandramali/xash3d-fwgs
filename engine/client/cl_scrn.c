@@ -505,7 +505,10 @@ void SCR_BeginLoadingPlaque( qboolean is_background )
 		return; // already set
 
 	if( cls.key_dest == key_console )
+	{
+		UI_SetActiveMenu( true );
 		return;
+	}
 
 	if( is_background ) IN_MouseSavePos( );
 	cls.draw_changelevel = !is_background;
