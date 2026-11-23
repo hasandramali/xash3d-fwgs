@@ -733,7 +733,6 @@ extern convar_t	hud_textscale;
 extern convar_t hud_fontrender;
 extern convar_t	hud_scale;
 extern convar_t hud_scale_minimal_width;
-extern convar_t hud_sprite_scale;
 extern convar_t hud_saytext_scale;
 extern convar_t	r_showtextures;
 extern convar_t	r_showtextures_zoom;
