@@ -1014,9 +1014,11 @@ void GAME_EXPORT Key_SetKeyDest( int key_dest )
 		break;
 	case key_console:
 		cls.key_dest = key_console;
-		Key_EnableTextInput( false, false );
+#if !XASH_NSWITCH && !XASH_PSVITA // if we don't disable this, pops up the keyboard during load
+		Key_EnableTextInput( true, false );
+#endif
 		break;
-}	case key_message:
+	case key_message:
 		cls.key_dest = key_message;
 		Key_EnableTextInput( true, false );
 		break;
