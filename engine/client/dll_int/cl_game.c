@@ -2828,7 +2828,7 @@ return soundname from index
 static const char *CL_SoundFromIndex( int index )
 {
 	// make sure what we in-bounds
-	index = bound( 0, index, MAX_SOUNDS );
+	index = bound( 0, index, MAX_SOUNDS - 1 );
 	int hSound = cl.sound_index[index];
 
 	if( !hSound )
@@ -4319,7 +4319,7 @@ pfnPlaySoundByIndex
 static void GAME_EXPORT pfnPlaySoundByIndex( int iSound, float volume )
 {
 	// make sure what we in-bounds
-	iSound = bound( 0, iSound, MAX_SOUNDS );
+	iSound = bound( 0, iSound, MAX_SOUNDS - 1 );
 	int hSound = cl.sound_index[iSound];
 	if( !hSound ) return;
 

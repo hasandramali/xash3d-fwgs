@@ -2015,6 +2015,13 @@ int SV_BuildSoundMsg( sizebuf_t *msg, edict_t *ent, int chan, const char *sample
 	ClearBits( flags, SND_FILTER_CLIENT );
 	ClearBits( flags, SND_SPAWNING );
 
+	// native svc_sound carries MAX_SOUND_BITS of index; never truncate it silently
+	if( sound_idx < 0 || sound_idx >= MAX_SOUNDS_NONSENTENCE )
+	{
+		Con_Reportf( S_ERROR "%s: sound index %d out of native protocol range\n", __func__, sound_idx );
+		return 0;
+	}
+
 	if( spawn ) MSG_BeginServerCmd( msg, svc_sound );
 	else MSG_BeginServerCmd( msg, svc_restoresound );
 	MSG_WriteUBitLong( msg, flags, MAX_SND_FLAGS_BITS );

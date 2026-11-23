@@ -109,9 +109,9 @@ GNU General Public License for more details.
 #define MAX_MODEL_BITS		12		// 12 bits == 4096 models
 #define MAX_MODELS			(1<<MAX_MODEL_BITS)
 
-#define MAX_SOUND_BITS		11
-#define MAX_SOUNDS			(1<<MAX_SOUND_BITS)	// 11 bits == 2048 sounds
-#define MAX_SOUNDS_NONSENTENCE MAX_SOUNDS
+#define MAX_SOUND_BITS		11		// native Xash svc_sound index field
+#define MAX_SOUNDS			(1<<12)	// 4096 sounds: GoldSrc/Sven resourcelist index is 12 bits
+#define MAX_SOUNDS_NONSENTENCE	(1<<MAX_SOUND_BITS)	// 2048 sounds; boundary of the native 11-bit index space
 
 #define MAX_ENTITY_BITS		13		// 13 bits = 8192 edicts
 #define MAX_EDICTS			(1<<MAX_ENTITY_BITS)
@@ -169,7 +169,7 @@ GNU General Public License for more details.
 #define MAX_TOTAL_CMDS          32
 
 #define MAX_RESOURCES		(MAX_MODELS+MAX_SOUNDS+MAX_CUSTOM+MAX_EVENTS)
-#define MAX_RESOURCE_BITS		13	// 13 bits 8192 resource (4096 models + 2048 sounds + 1024 events + 1024 files)
+#define MAX_RESOURCE_BITS		14	// 14 bits 16384 resource (4096 models + 4096 sounds + 1024 events + 1024 files)
 #define	FRAGMENT_MIN_SIZE			508		// RFC 791: 576(min ip packet) - 60 (ip header) - 8 (udp header)
 #define FRAGMENT_DEFAULT_SIZE		1200		// default MTU
 #define FRAGMENT_MAX_SIZE		64000		// maximal fragment size
@@ -181,6 +181,7 @@ GNU General Public License for more details.
 #undef MAX_EVENTS
 #undef MAX_MODELS
 #undef MAX_SOUNDS
+#undef MAX_SOUNDS_NONSENTENCE
 #undef MAX_CUSTOM
 #undef MAX_DLIGHTS
 #undef MAX_ELIGHTS
@@ -192,6 +193,7 @@ GNU General Public License for more details.
 #define MAX_EVENTS			128
 #define MAX_MODELS			512
 #define MAX_SOUNDS			512
+#define MAX_SOUNDS_NONSENTENCE		512
 #define MAX_CUSTOM			32
 #define MAX_DLIGHTS			16		// dynamic lights (rendered per one frame)
 #define MAX_ELIGHTS			32		// entity only point lights

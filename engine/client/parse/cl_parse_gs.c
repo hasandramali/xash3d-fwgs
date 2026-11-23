@@ -722,7 +722,13 @@ static void CL_ParseSoundPacketGS( sizebuf_t *msg )
 		Q_snprintf( sentenceName, sizeof( sentenceName ), "!%i", sound );
 		handle = S_RegisterSound( sentenceName );
 	}
-	else handle = cl.sound_index[sound];	// see precached sound
+	else if( sound >= 0 && sound < MAX_SOUNDS )
+		handle = cl.sound_index[sound];	// see precached sound
+	else
+	{
+		Con_Reportf( S_ERROR "%s: bad sound index %d (max %d)\n", __func__, sound, MAX_SOUNDS );
+		return;
+	}
 
 	if( !cl.audio_prepped )
 		return; // too early
@@ -757,7 +763,13 @@ static void CL_ParseSpawnStaticSound( sizebuf_t *msg )
 		Q_snprintf( sentenceName, sizeof( sentenceName ), "!%i", sound );
 		handle = S_RegisterSound( sentenceName );
 	}
-	else handle = cl.sound_index[sound];	// see precached sound
+	else if( sound >= 0 && sound < MAX_SOUNDS )
+		handle = cl.sound_index[sound];	// see precached sound
+	else
+	{
+		Con_Reportf( S_ERROR "%s: bad static sound index %d (max %d)\n", __func__, sound, MAX_SOUNDS );
+		return;
+	}
 
 	S_AmbientSound( pos, entnum, handle, volume, attn, pitch, flags );
 }

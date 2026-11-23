@@ -164,15 +164,17 @@ int GAME_EXPORT SV_SoundIndex( const char *filename )
 	Q_strncpy( name, filename, sizeof( name ));
 	COM_FixSlashes( name );
 
-	for( i = 1; i < MAX_SOUNDS && sv.sound_precache[i][0]; i++ )
+	// the native server protocol encodes sound indices in MAX_SOUND_BITS,
+	// so the precache list may not grow past the 11-bit index space
+	for( i = 1; i < MAX_SOUNDS_NONSENTENCE && sv.sound_precache[i][0]; i++ )
 	{
 		if( !Q_stricmp( sv.sound_precache[i], name ))
 			return i;
 	}
 
-	if( i == MAX_SOUNDS )
+	if( i == MAX_SOUNDS_NONSENTENCE )
 	{
-		Host_Error( "MAX_SOUNDS limit exceeded (%d)\n", MAX_SOUNDS );
+		Host_Error( "MAX_SOUNDS limit exceeded (%d)\n", MAX_SOUNDS_NONSENTENCE );
 		return 0;
 	}
 
