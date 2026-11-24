@@ -53,11 +53,13 @@ static float	g_DecalClipVerts2[MAX_DECALCLIPVERT][VERTEXSIZE];
 
 decal_t	gDecalPool[MAX_RENDER_DECALS];
 static int	gDecalCount;
+static int	gDecalModBrushReports;
 
 void R_ClearDecals( void )
 {
 	memset( gDecalPool, 0, sizeof( gDecalPool ));
 	gDecalCount = 0;
+	gDecalModBrushReports = 0;
 }
 
 // unlink pdecal from any surface it's attached to
@@ -757,7 +759,14 @@ void R_DecalShoot( int textureIndex, int entityIndex, int modelIndex, vec3_t pos
 
 	if( model->type != mod_brush )
 	{
-		gEngfuncs.Con_Reportf( S_ERROR "Decals must hit mod_brush!\n" );
+		// GoldSrc drops decals on anything but brush models too, so this is
+		// expected for blood/paint that lands on players and NPCs. Only the
+		// first few hits per map are reported to keep the console usable.
+		if( gDecalModBrushReports < 3 )
+			gEngfuncs.Con_Reportf( S_ERROR "Decals must hit mod_brush!\n" );
+		else if( gDecalModBrushReports == 3 )
+			gEngfuncs.Con_Reportf( S_ERROR "Decals must hit mod_brush!: further hits on non-brush models suppressed\n" );
+		gDecalModBrushReports++;
 		return;
 	}
 
@@ -864,6 +873,22 @@ void DrawSingleDecal( decal_t *pDecal, msurface_t *fa )
 	int numVerts;
 	float *v = R_DecalSetupVerts( pDecal, fa, pDecal->texture, &numVerts );
 	if( !numVerts ) return;
+
+	// the texture may have been released (renderer restart, texture cache
+	// eviction) while this decal survived. binding it would sample the default
+	// white/checkerboard texture, so drop the decal instead of drawing garbage.
+	if( R_GetTexture( pDecal->texture )->texnum == 0 )
+		return;
+
+	// decals are drawn after the world pass and must not inherit its texture
+	// state (lightmap combine, detail stage, vertex color). GoldSrc always
+	// sets a plain modulate stage here; without it a stale combine/unit state
+	// tints every decal with a single texel, which shows up as flat white or
+	// dark checkerboard decals.
+	GL_SelectTexture( XASH_TEXTURE0 );
+	pglEnable( GL_TEXTURE_2D );
+	pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
+	pglColor4ub( 255, 255, 255, 255 );
 
 	GL_Bind( XASH_TEXTURE0, pDecal->texture );
 

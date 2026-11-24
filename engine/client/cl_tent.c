@@ -43,6 +43,7 @@ static TEMPENTITY *cl_tempents = NULL;		// entities pool
 static int cl_num_tempents;
 static int cl_tempentity_type = -1;
 static CVAR_DEFINE_AUTO( cl_trace_tempmodels, "0", 0, "trace model indices used by projectile and fading temporary effects" );
+static CVAR_DEFINE_AUTO( cl_decal_debug, "0", 0, "trace decal name and texture resolution" );
 
 static void CL_TraceTempModel( const char *effect, int modelIndex, const vec3_t origin )
 {
@@ -216,6 +217,8 @@ void CL_InitTempEnts( void )
 {
 	if( Cvar_FindVar( cl_trace_tempmodels.name ) != &cl_trace_tempmodels )
 		Cvar_RegisterVariable( &cl_trace_tempmodels );
+	if( Cvar_FindVar( cl_decal_debug.name ) != &cl_decal_debug )
+		Cvar_RegisterVariable( &cl_decal_debug );
 	cl_num_tempents = GI->max_tents;
 	if( !Q_stricmp( GI->gamefolder, "svencoop" ))
 		cl_num_tempents = Q_max( cl_num_tempents, 2048 );
@@ -3050,6 +3053,24 @@ int GAME_EXPORT CL_DecalIndex( int id )
 {
 	id = bound( 0, id, MAX_DECALS - 1 );
 
+	// decal textures may disappear behind our back: the renderer is restarted
+	// on vid_restart and its texture slots are reused when studio textures are
+	// evicted. A stale number then binds the default (magenta checkerboard) or
+	// white texture, i.e. exactly the broken decals players report, so verify
+	// the slot still holds the texture we asked for before reusing it.
+	if( cl.decal_index[id] != 0 && !Mod_AllowMaterials( ))
+	{
+		const char *texname = ref.dllFuncs.GL_TextureName( cl.decal_index[id] );
+
+		if( COM_StringEmptyOrNULL( texname ) || Q_stricmp( texname, host.draw_decals[id] ))
+		{
+			if( cl_decal_debug.value )
+				Con_Printf( "DECAL %d '%s': cached texture %d now holds '%s', reloading\n",
+					id, host.draw_decals[id], (int)cl.decal_index[id], texname ? texname : "<freed>" );
+			cl.decal_index[id] = 0;
+		}
+	}
+
 	if( cl.decal_index[id] == 0 )
 	{
 		int gl_texturenum = 0;
@@ -3094,6 +3115,15 @@ int GAME_EXPORT CL_DecalIndex( int id )
 
 		cl.decal_index[id] = gl_texturenum;
 		Image_ClearForceFlags();
+
+		if( cl_decal_debug.value )
+		{
+			if( gl_texturenum > 0 )
+				Con_Printf( "DECAL %d '%s' -> texture %d '%s' %dx%d\n", id, host.draw_decals[id], gl_texturenum,
+					ref.dllFuncs.GL_TextureName( gl_texturenum ),
+					(int)REF_GET_PARM( PARM_TEX_WIDTH, gl_texturenum ), (int)REF_GET_PARM( PARM_TEX_HEIGHT, gl_texturenum ));
+			else Con_Reportf( S_ERROR "DECAL %d '%s': texture load failed\n", id, host.draw_decals[id] );
+		}
 	}
 
 	return cl.decal_index[id];
