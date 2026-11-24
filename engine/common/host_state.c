@@ -153,6 +153,15 @@ static void Host_RunFrame( double time )
 	// at this time, we don't need to get events from OS on dedicated
 #if !XASH_DEDICATED
 	Platform_RunEvents();
+
+	// The app is in background and its GL context is unbound: any upload done
+	// now is lost, which used to leave a join that finished in background with
+	// white/checkerboarded world and player textures. Don't run the frame (and
+	// don't advance host.realtime, so the signon watchdog can't misfire) until
+	// the platform sees us again. Platform_RunEvents above is where we block.
+	if( Platform_IsAppPaused( ))
+		return;
+
 	VID_UpdateWindowInsets();
 #endif // XASH_DEDICATED
 

@@ -297,6 +297,14 @@ static inline void Platform_Vibrate( float life, char flags ) {}
 static inline void Platform_Vibrate2( float time, int low_freq, int high_freq, uint flags ) {}
 #endif
 
+#if XASH_ANDROID && XASH_SDL == 2
+// true while the app is in the background and Android/SDL has unbound the GL
+// context: nothing may be uploaded or drawn until we are back in foreground
+qboolean Platform_IsAppPaused( void );
+#else
+static inline qboolean Platform_IsAppPaused( void ) { return false; }
+#endif
+
 /*
 ==============================================================================
 

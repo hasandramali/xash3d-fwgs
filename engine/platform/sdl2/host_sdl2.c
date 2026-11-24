@@ -25,6 +25,32 @@ GNU General Public License for more details.
 #include "voice.h"
 #include "vid_common.h"
 
+#if XASH_ANDROID
+static qboolean s_appPaused;
+
+/*
+=============
+SDLash_AppPaused
+
+On Android the app keeps running when it goes to background, but SDL unbinds
+our GL context (the EGL surface is gone with the window). Every texture, model
+skin or sprite uploaded in that window silently fails, which is why a join
+finished in background came back with white/checkerboarded textures. The
+engine stops running frames while this is set, so the loading happens after
+we are back with a live context.
+=============
+*/
+qboolean Platform_IsAppPaused( void )
+{
+	return s_appPaused;
+}
+
+static void SDLash_SetAppPaused( qboolean paused )
+{
+	s_appPaused = paused;
+}
+#endif // XASH_ANDROID
+
 /*
 =============
 SDLash_KeyEvent
@@ -296,6 +322,26 @@ static void SDLash_EventHandler( SDL_Event *event )
 	case SDL_QUIT:
 		CL_RequestQuit( "caught SDL_QUIT" );
 		break;
+#if XASH_ANDROID
+	case SDL_APP_WILLENTERBACKGROUND:
+		SDLash_SetAppPaused( true );
+		break;
+	case SDL_APP_DIDENTERFOREGROUND:
+		SDLash_SetAppPaused( false );
+		break;
+	case SDL_RENDER_DEVICE_RESET:
+		// SDL could not restore the GL context and created a new one: every
+		// object the renderer uploaded is gone and the engine has no way to
+		// re-upload them in place. Rejoin the server so the level (and all of
+		// its textures) is rebuilt in the new context.
+		if( !SV_Active() && cls.state != ca_disconnected && !cls.demoplayback
+			&& !COM_StringEmptyOrNULL( cls.servername ))
+		{
+			Con_Printf( S_WARN "Video device was reset in background, reconnecting...\n" );
+			Cbuf_AddText( "reconnect\n" );
+		}
+		break;
+#endif // XASH_ANDROID
 	case SDL_MOUSEWHEEL:
 		IN_MWheelEvent( event->wheel.y );
 		break;
@@ -394,11 +440,17 @@ static void SDLash_EventHandler( SDL_Event *event )
 			break;
 		case SDL_WINDOWEVENT_MINIMIZED:
 			host.status = HOST_SLEEP;
+#if XASH_ANDROID
+			SDLash_SetAppPaused( true );
+#endif
 			if( Voice_IsRecording() ) Voice_RecordStop();
 			Cvar_DirectSet( &vid_maximized, "0" );
 			VID_RestoreScreenResolution( (window_mode_t)vid_fullscreen.value );
 			break;
 		case SDL_WINDOWEVENT_RESTORED:
+#if XASH_ANDROID
+			SDLash_SetAppPaused( false );
+#endif
 			host.status = HOST_FRAME;
 			host.force_draw_version_time = host.realtime + FORCE_DRAW_VERSION_TIME;
 			Cvar_DirectSet( &vid_maximized, "0" );
@@ -406,6 +458,11 @@ static void SDLash_EventHandler( SDL_Event *event )
 				VID_SetMode();
 			break;
 		case SDL_WINDOWEVENT_FOCUS_GAINED:
+#if XASH_ANDROID
+			// resume event is the safe one here, but never stay frozen if the
+			// platform only reports focus
+			SDLash_SetAppPaused( false );
+#endif
 			SDLash_ActiveEvent( true );
 			break;
 		case SDL_WINDOWEVENT_FOCUS_LOST:
@@ -432,6 +489,18 @@ SDLash_RunEvents
 void Platform_RunEvents( void )
 {
 	SDL_Event event;
+
+#if XASH_ANDROID
+	if( s_appPaused )
+	{
+		// Android kept us alive without a GL context. Block here (no frames
+		// are run while paused, see Host_RunFrame) until the resume event
+		// arrives instead of spinning, then decode exactly that event.
+		if( SDL_WaitEventTimeout( &event, 250 ))
+			SDLash_EventHandler( &event );
+		return;
+	}
+#endif
 
 	while( host.status != HOST_CRASHED && !host.shutdown_issued && SDL_PollEvent( &event ) )
 		SDLash_EventHandler( &event );
