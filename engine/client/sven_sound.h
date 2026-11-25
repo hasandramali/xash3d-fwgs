@@ -51,4 +51,9 @@ qboolean CL_SvenSoundActive( void );
 const char *CL_SvenSentenceText( int index );
 void S_StartSvenSound( const sven_sound_event_t *event, sound_t handle );
 
+// client-side map sound prediction (cl_sven_mapsnd.c)
+char CL_SvenTextureMaterial( const char *name );
+void CL_SvenPlayTextureHit( vec3_t start, vec3_t end, int physent, const char *raw );
+void CL_SvenPredictMapSounds( void );
+
 #endif

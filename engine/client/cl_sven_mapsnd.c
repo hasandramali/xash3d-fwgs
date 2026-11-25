@@ -34,8 +34,7 @@
 #include "common.h"
 #include "client.h"
 #include "sound.h"
-
-qboolean CL_SvenSoundActive( void ); // from cl_parse.c
+#include "sven_sound.h"
 
 // ----------------------------------------------------------------------------
 // material table (mirrors PM_LoadMaterials / PM_FindTextureType in

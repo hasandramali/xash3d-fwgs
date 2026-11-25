@@ -64,6 +64,139 @@ static int GetLittleLong( void )
 
 /*
 =================
+IMA ADPCM tables (IMA/DVI recommended practices)
+=================
+*/
+static const int imaIndexTable[16] =
+{
+	-1, -1, -1, -1, 2, 4, 6, 8,
+	-1, -1, -1, -1, 2, 4, 6, 8
+};
+
+static const int imaStepTable[89] =
+{
+	7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31,
+	34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143,
+	157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
+	724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024,
+	3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+	15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
+};
+
+/*
+=================
+IMA_ADPCM_Nibble
+
+decode one 4-bit IMA ADPCM nibble, updating the running predictor
+and step index, and return the reconstructed 16-bit sample
+=================
+*/
+static short IMA_ADPCM_Nibble( int *predictor, int *index, int nibble )
+{
+	int step = imaStepTable[*index];
+	int diff = step >> 3;
+
+	if( nibble & 4 ) diff += step;
+	if( nibble & 2 ) diff += step >> 1;
+	if( nibble & 1 ) diff += step >> 2;
+
+	if( nibble & 8 )
+		*predictor -= diff;
+	else
+		*predictor += diff;
+
+	if( *predictor > 32767 ) *predictor = 32767;
+	else if( *predictor < -32768 ) *predictor = -32768;
+
+	*index += imaIndexTable[nibble];
+	if( *index < 0 ) *index = 0;
+	else if( *index > 88 ) *index = 88;
+
+	return (short)*predictor;
+}
+
+/*
+=================
+IMA_ADPCM_DecodeWAV
+
+decode Microsoft IMA ADPCM (WAVE_FORMAT_IMA_ADPCM, tag 0x11) block data
+into native 16-bit PCM. Each block starts with a per-channel 4-byte header
+(predictor int16, step index u8, reserved u8). The body is a stream of
+4-byte words taken round-robin across the channels, each word carrying
+eight samples unpacked low nibble first.
+=================
+*/
+static void IMA_ADPCM_DecodeWAV( short *dst, const byte *src, int dataSize,
+	int blockAlign, int channels )
+{
+	int blocks = ( dataSize + blockAlign - 1 ) / blockAlign;
+
+	for( int block = 0; block < blocks; block++ )
+	{
+		const byte *p = src + block * blockAlign;
+		int blockRemaining = dataSize - block * blockAlign;
+		int predictor[2], index[2];
+
+		if( blockRemaining > blockAlign )
+			blockRemaining = blockAlign;
+		if( blockRemaining < 4 * channels )
+			break;
+
+		// per-channel block header, the predictor is the block's first sample
+		for( int ch = 0; ch < channels; ch++ )
+		{
+			predictor[ch] = (short)( p[0] | ( p[1] << 8 ));
+			index[ch] = p[2];
+			if( index[ch] > 88 ) index[ch] = 88;
+			p += 4;
+		}
+
+		for( int ch = 0; ch < channels; ch++ )
+			*dst++ = (short)predictor[ch];
+
+		if( channels == 1 )
+		{
+			int nibbles = ( blockRemaining - 4 ) * 2;
+
+			for( int i = 0; i < nibbles; i++ )
+			{
+				int nibble = ( i & 1 ) ? ( p[i >> 1] >> 4 ) & 0x0F : p[i >> 1] & 0x0F;
+
+				*dst++ = IMA_ADPCM_Nibble( &predictor[0], &index[0], nibble );
+			}
+		}
+		else
+		{
+			int groups = ( blockRemaining - 4 * channels ) / ( 4 * channels );
+
+			for( int g = 0; g < groups; g++ )
+			{
+				short decoded[2][8];
+
+				for( int ch = 0; ch < channels; ch++ )
+				{
+					const byte *q = p + ( g * channels + ch ) * 4;
+
+					for( int i = 0; i < 8; i++ )
+					{
+						int nibble = ( i & 1 ) ? ( q[i >> 1] >> 4 ) & 0x0F : q[i >> 1] & 0x0F;
+
+						decoded[ch][i] = IMA_ADPCM_Nibble( &predictor[ch], &index[ch], nibble );
+					}
+				}
+
+				for( int i = 0; i < 8; i++ )
+				{
+					for( int ch = 0; ch < channels; ch++ )
+						*dst++ = decoded[ch][i];
+				}
+			}
+		}
+	}
+}
+
+/*
+=================
 FindNextChunk
 =================
 */
@@ -222,37 +355,64 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 			fmt = 0;
 	}
 
-	if( fmt != 1 && fmt != 3 )
+	if( fmt != 1 && fmt != 3 && fmt != 85 && fmt != 0x11 )
 	{
-		if( fmt != 85 && fmt != 0x11 )
+		Con_DPrintf( S_ERROR "%s: %s not a microsoft PCM format\n", __func__, name );
+		return false;
+	}
+
+	// mp3 stream packed in a wav container (WAVE_FORMAT_MPEGLAYER3)
+	mpeg_stream = ( fmt == 85 );
+
+	sound.channels = GetLittleShort();
+	if( sound.channels != 1 && sound.channels != 2 )
+	{
+		Con_DPrintf( S_ERROR "%s: only mono and stereo WAV files supported (%s)\n", __func__, name );
+		return false;
+	}
+
+	sound.rate = GetLittleLong();
+	iff_dataPtr += 4; // skip nAvgBytesPerSec
+	int blockAlign = GetLittleShort();
+
+	bitsPerSample = GetLittleShort();
+
+	if( mpeg_stream )
+	{
+		srcWidth = 2; // mp3 always 16bit
+	}
+	else if( fmt == 0x11 )
+	{
+		// IMA ADPCM is decoded into 16-bit PCM below; only 4-bit is supported
+		if( bitsPerSample != 4 )
 		{
-			Con_DPrintf( S_ERROR "%s: %s not a microsoft PCM format\n", __func__, name );
+			Con_DPrintf( S_ERROR "%s: unsupported IMA ADPCM bit depth %d (%s)\n", __func__, bitsPerSample, name );
 			return false;
 		}
-		else
+		if( blockAlign <= 4 * sound.channels )
 		{
-			if( fmt == 0x11 )
+			Con_DPrintf( S_ERROR "%s: %s has an invalid IMA ADPCM block alignment\n", __func__, name );
+			return false;
+		}
+		srcWidth = 2;
+	}
+	else
+	{
+		srcWidth = bitsPerSample / 8;
+
+		if( fmt == 1 )
+		{
+			if( bitsPerSample != 8 && bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32 )
 			{
-				// IMA ADPCM: 4-bit ADPCM, decompress to 16-bit PCM
-				if( fmtChunkLen < 22 )
-				{
-					Con_DPrintf( S_ERROR "%s: %s IMA ADPCM fmt chunk too small\n", __func__, name );
-					return false;
-				}
-				// Read coefficients (already in buffer after fmt data)
-				iff_dataPtr += 16; // skip 2 byte format + 2 byte channels + 4 byte rate + 2 byte block_align + 2 byte bits_per_sample + 2 cbExtraData
-				// The IMA ADPCM coefficients are stored as 6 four-bit coeffs = 8 bytes, already there
-				// Decode frame: each output sample is 2 bytes, each input nibble gives 4-bit difference
-				// IMA ADPCM index table for step size
-				static const signed short indexTable[89] = {
-					-1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 21, 21, 21, 21, 22, 22, 22, 22, 23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 26, 27, 27, 27, 27, 28, 28, 28, 28, 29, 29, 29, 29, 30, 30, 30, 30, 31, 31, 31, 31, 32, 32, 32, 32, 33, 33, 33, 33, 34, 34, 34, 34, 35, 35, 35, 35, 36, 36, 36, 36, 37, 37, 37, 37, 38, 38, 38, 38, 39, 39, 39, 39, 40, 40, 40, 40, 41, 41, 41, 41, 42, 42, 42, 42, 43, 43, 43, 43, 44, 44, 44, 44, 45, 45, 45, 45, 46, 46, 46, 46, 47, 47, 47, 47, 48, 48, 48, 48, 49, 49, 49, 49, 50, 50, 50, 50, 51, 51, 51, 51, 52, 52, 52, 52, 53, 53, 53, 54, 54, 55, 55, 56, 56, 57, 57, 58, 58, 59, 59, 60, 60, 62, 62, 64, 64,
-				};
-				// Decode: IMA ADPCM nibble -> differential, index adjusts step size
-				// Each output sample: read nibble from compressed data, compute difference, add to predicted value
-				// This is a full decoder; for now just report error and skip
-// IMA ADPCM decompressor: 4-bit ADPCM -> 16-bit PCM
-// Input: nibble-packed bytes starting at iff_dataPtr
-// Output: 16-bit PCM samples, returns number of samples decoded
+				Con_DPrintf( S_ERROR "%s: unsupported PCM bit depth %d (%s)\n", __func__, bitsPerSample, name );
+				return false;
+			}
+		}
+		else // IEEE float
+		{
+			if( bitsPerSample != 32 && bitsPerSample != 64 )
+			{
+				Con_DPrintf( S_ERROR "%s: unsupported float bit depth %d (%s)\n", __func__, bitsPerSample, name );
 				return false;
 			}
 		}
@@ -311,17 +471,48 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 	if( dataSize > available )
 		dataSize = available;
 
-	int samples = dataSize / srcWidth;
+	int samples;
 
-	if( sound.samples )
+	if( fmt == 0x11 )
 	{
-		if( samples < sound.samples )
+		// IMA ADPCM: one block yields 1 + 8*groups samples per channel,
+		// where groups counts 4-byte words per channel in the block body
+		int groups = ( blockAlign - 4 * sound.channels ) / ( 4 * sound.channels );
+		int samplesPerBlock = 1 + groups * 8;
+		int blocks = dataSize / blockAlign;
+
+		samples = blocks * samplesPerBlock * sound.channels;
+
+		if( dataSize % blockAlign )
 		{
-			Con_DPrintf( S_ERROR "%s: %s has a bad loop length\n", __func__, name );
-			return false;
+			int tailBytes = dataSize % blockAlign - 4 * sound.channels;
+
+			if( tailBytes > 0 )
+			{
+				// mirror IMA_ADPCM_DecodeWAV: mono consumes every remaining
+				// byte, stereo only whole 4-byte words per channel
+				if( sound.channels == 1 )
+					samples += ( 1 + tailBytes * 2 );
+				else
+					samples += ( 1 + ( tailBytes / 8 ) * 8 ) * sound.channels;
+			}
 		}
+		sound.samples = samples;
 	}
-	else sound.samples = samples;
+	else
+	{
+		samples = dataSize / srcWidth;
+
+		if( sound.samples )
+		{
+			if( samples < sound.samples )
+			{
+				Con_DPrintf( S_ERROR "%s: %s has a bad loop length\n", __func__, name );
+				return false;
+			}
+		}
+		else sound.samples = samples;
+	}
 
 	if( sound.samples <= 0 )
 	{
@@ -363,7 +554,11 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 	byte *dst = sound.wav;
 	int totalSamples = sound.samples * sound.channels;
 
-	if( srcWidth == sound.width && ( srcWidth == 1 || srcWidth == 2 ))
+	if( fmt == 0x11 )
+	{
+		IMA_ADPCM_DecodeWAV( (short *)dst, src, dataSize, blockAlign, sound.channels );
+	}
+	else if( srcWidth == sound.width && ( srcWidth == 1 || srcWidth == 2 ))
 	{
 		// fast path: data is already in the engine's native format
 		memcpy( dst, src, sound.size );
@@ -389,6 +584,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 					*pData = (byte)((int)((byte)*pData) - 128 );
 					pData++;
 				}
+			}
 		}
 	}
 	else
@@ -417,6 +613,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 					memcpy( &d, s, sizeof( d ));
 					v = ( d != d ) ? 0 : (int)( d * 32767.0 );
 				}
+			}
 			else if( srcWidth == 3 )
 			{
 				int32_t t = (int32_t)( s[0] | ( s[1] << 8 ) | ( s[2] << 16 ));
@@ -642,72 +839,4 @@ void Stream_FreeWAV( stream_t *stream )
 	if( stream->file )
 		FS_Close( stream->file );
 	Mem_Free( stream );
-}
-
-/*
-=================
-IMA_ADPCM_Decode
-=================
-*/
-static int IMA_ADPCM_Decode( const byte **ppsrc, byte *dst, int maxSamples )
-{
-	const byte *src = *ppsrc;
-	int nSamples = 0;
-	int predictor = 0;
-	int index = 0;
-	int sign, step, delta, diff;
-	int sample;
-
-	// Initial predictor from first two bytes of data (after fmt chunk)
-	if( fmtChunkLen >= 22 )
-	{
-		predictor = (short)GetLittleShort( src + 2 );
-	}
-
-	src++; // skip past the extra byte
-
-	while( nSamples < maxSamples )
-	{
-		// Get compressed nibble pair (2 nibbles per byte)
-		if( src >= *iff_end ) break;
-		byte b = *src++;
-
-		// Low nibble first in IMA ADPCM
-		nibble = b & 0x0F;
-		// High nibble first in IMA ADPCM
-		nibble = (b >> 4) & 0x0F;
-
-		// Look up ADPCM step size index change
-		index += indexTable[ nibble ];
-		if( index < 0 ) index = 0;
-		if( index > 88 ) index = 88;
-
-		// Differential is derived from the step size using the lookup tables
-		step = indexTable[index];
-		// Note: larger step size gives larger differential
-		diff = step >> 3;
-		if( sign > 0 )
-	{
-			delta += (step * coef1[index & 3]) >> 4;
-		}
-		else
-	{
-			delta -= (step * coef2[index & 3]) >> 4;
-		}
-		index += (nibble & 4) ? 1 : 0;
-		index += (nibble & 2) ? 1 : 0;
-		index += (nibble & 1) ? 1 : 0;
-		if( index < 0 ) index = 0;
-		if( index > 88 ) index = 88;
-
-		diff = delta;
-
-		sample = predictor + diff;
-		if( sample > 32767 ) sample = 32767;
-		if( sample < -32768 ) sample = -32768;
-		dst[nSamples++] = (short)sample;
-		predictor = sample;
-
-	*ppsrc = src;
-	return nSamples;
 }
