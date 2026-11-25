@@ -457,9 +457,6 @@ static void Mod_StudioCalcBoneAdj( float *adj, const byte *pcontroller )
 	{
 		i = pbonecontroller[j].index;
 
-		if( i == STUDIO_MOUTH )
-			continue; // ignore mouth
-
 		if( i >= MAXSTUDIOCONTROLLERS )
 			continue;
 
@@ -486,7 +483,22 @@ static void Mod_StudioCalcBoneAdj( float *adj, const byte *pcontroller )
 		case STUDIO_Y:
 		case STUDIO_Z:
 			adj[j] = value;
-			break;
+		}
+
+		// handle mouth controller (index 4)
+		if( pbonecontroller[j].index == STUDIO_MOUTH )
+		{
+			// mouth open: 0 = closed, 255 = fully open
+			float mouth_val = value;
+			adj[j] = mouth_val;
+		}
+
+		// handle eye blink controller
+		if( pbonecontroller[j].index == 5 )
+		{
+			// eye blink: 0 = open, 255 = closed
+			float blink_val = value;
+			adj[j] = 1.0f - blink_val;
 		}
 	}
 }

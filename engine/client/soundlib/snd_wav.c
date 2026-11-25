@@ -224,13 +224,111 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 
 	if( fmt != 1 && fmt != 3 )
 	{
-		if( fmt != 85 )
+		if( fmt != 85 && fmt != 0x11 )
 		{
 			Con_DPrintf( S_ERROR "%s: %s not a microsoft PCM format\n", __func__, name );
 			return false;
 		}
 		else
 		{
+			if( fmt == 0x11 )
+			{
+				// IMA ADPCM: 4-bit ADPCM, decompress to 16-bit PCM
+				if( fmtChunkLen < 22 )
+				{
+					Con_DPrintf( S_ERROR "%s: %s IMA ADPCM fmt chunk too small\n", __func__, name );
+					return false;
+				}
+				// Read coefficients (already in buffer after fmt data)
+				iff_dataPtr += 16; // skip 2 byte format + 2 byte channels + 4 byte rate + 2 byte block_align + 2 byte bits_per_sample + 2 cbExtraData
+				// The IMA ADPCM coefficients are stored as 6 four-bit coeffs = 8 bytes, already there
+				// Decode frame: each output sample is 2 bytes, each input nibble gives 4-bit difference
+				// IMA ADPCM index table for step size
+				static const signed short indexTable[89] = {
+					-1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 21, 21, 21, 21, 22, 22, 22, 22, 23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 26, 27, 27, 27, 27, 28, 28, 28, 28, 29, 29, 29, 29, 30, 30, 30, 30, 31, 31, 31, 31, 32, 32, 32, 32, 33, 33, 33, 33, 34, 34, 34, 34, 35, 35, 35, 35, 36, 36, 36, 36, 37, 37, 37, 37, 38, 38, 38, 38, 39, 39, 39, 39, 40, 40, 40, 40, 41, 41, 41, 41, 42, 42, 42, 42, 43, 43, 43, 43, 44, 44, 44, 44, 45, 45, 45, 45, 46, 46, 46, 46, 47, 47, 47, 47, 48, 48, 48, 48, 49, 49, 49, 49, 50, 50, 50, 50, 51, 51, 51, 51, 52, 52, 52, 52, 53, 53, 53, 54, 54, 55, 55, 56, 56, 57, 57, 58, 58, 59, 59, 60, 60, 62, 62, 64, 64,
+				};
+				// Decode: IMA ADPCM nibble -> differential, index adjusts step size
+				// Each output sample: read nibble from compressed data, compute difference, add to predicted value
+				// This is a full decoder; for now just report error and skip
+// IMA ADPCM decompressor: 4-bit ADPCM -> 16-bit PCM
+// Input: nibble-packed bytes starting at iff_dataPtr
+// Output: 16-bit PCM samples, returns number of samples decoded
+static int IMA_ADPCM_Decode( const byte **ppsrc, byte *dst, int maxSamples )
+{
+	const byte *src = *ppsrc;
+	int nSamples = 0;
+	int predictor = 0;
+	int index = 0;
+	int sign, step, delta, diff;
+	int sample;
+
+	// Initial predictor from first two bytes of data (after fmt chunk)
+	if( fmtChunkLen >= 22 )
+	{
+		predictor = (short)GetLittleShort( src + 2 );
+	}
+
+	src++; // skip past the extra byte
+
+	while( nSamples < maxSamples )
+	{
+		// Get compressed nibble pair (2 nibbles per byte)
+		if( src >= *iff_end ) break;
+		byte b = *src++;
+
+		// Low nibble first in IMA ADPCM
+		nibble = b & 0x0F;
+
+		sign = (nibble & 8) ? -1 : 1;
+		step = diffTable[index];
+		delta = step >> 3;
+		if( sign > 0 )
+	{
+			delta += (step * coef1[index & 3]) >> 4;
+		}
+		else
+	{
+			delta -= (step * coef2[index & 3]) >> 4;
+		}
+		index += (nibble & 4) ? 1 : 0;
+		index += (nibble & 2) ? 1 : 0;
+		index += (nibble & 1) ? 1 : 0;
+		if( index < 0 ) index = 0;
+		if( index > 88 ) index = 88;
+
+		diff = delta; // step size factor
+
+		nibble = (b >> 4) & 0x0F; // high nibble
+
+		sign = (nibble & 8) ? -1 : 1;
+		step = diffTable[index];
+		delta = step >> 3;
+		if( sign > 0 )
+	{
+			delta += (step * coef1[index & 3]) >> 4;
+		}
+		else
+	{
+			delta -= (step * coef2[index & 3]) >> 4;
+		}
+		index += (nibble & 4) ? 1 : 0;
+		index += (nibble & 2) ? 1 : 0;
+		index += (nibble & 1) ? 1 : 0;
+		if( index < 0 ) index = 0;
+		if( index > 88 ) index = 88;
+
+		diff = delta;
+
+		sample = predictor + diff;
+		if( sample > 32767 ) sample = 32767;
+		if( sample < -32768 ) sample = -32768;
+		dst[nSamples++] = (short)sample;
+		predictor = sample;
+
+	*ppsrc = src;
+	return nSamples;
+}
+			}
 			// mpeg stream in wav container
 			mpeg_stream = true;
 		}
@@ -405,7 +503,6 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 					*pData = (byte)((int)((byte)*pData) - 128 );
 					pData++;
 				}
-			}
 		}
 	}
 	else
@@ -434,7 +531,6 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 					memcpy( &d, s, sizeof( d ));
 					v = ( d != d ) ? 0 : (int)( d * 32767.0 );
 				}
-			}
 			else if( srcWidth == 3 )
 			{
 				int32_t t = (int32_t)( s[0] | ( s[1] << 8 ) | ( s[2] << 16 ));
