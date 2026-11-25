@@ -253,120 +253,6 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 // IMA ADPCM decompressor: 4-bit ADPCM -> 16-bit PCM
 // Input: nibble-packed bytes starting at iff_dataPtr
 // Output: 16-bit PCM samples, returns number of samples decoded
-static int IMA_ADPCM_Decode( const byte **ppsrc, byte *dst, int maxSamples )
-{
-	const byte *src = *ppsrc;
-	int nSamples = 0;
-	int predictor = 0;
-	int index = 0;
-	int sign, step, delta, diff;
-	int sample;
-
-	// Initial predictor from first two bytes of data (after fmt chunk)
-	if( fmtChunkLen >= 22 )
-	{
-		predictor = (short)GetLittleShort( src + 2 );
-	}
-
-	src++; // skip past the extra byte
-
-	while( nSamples < maxSamples )
-	{
-		// Get compressed nibble pair (2 nibbles per byte)
-		if( src >= *iff_end ) break;
-		byte b = *src++;
-
-		// Low nibble first in IMA ADPCM
-		nibble = b & 0x0F;
-
-		sign = (nibble & 8) ? -1 : 1;
-		step = diffTable[index];
-		delta = step >> 3;
-		if( sign > 0 )
-	{
-			delta += (step * coef1[index & 3]) >> 4;
-		}
-		else
-	{
-			delta -= (step * coef2[index & 3]) >> 4;
-		}
-		index += (nibble & 4) ? 1 : 0;
-		index += (nibble & 2) ? 1 : 0;
-		index += (nibble & 1) ? 1 : 0;
-		if( index < 0 ) index = 0;
-		if( index > 88 ) index = 88;
-
-		diff = delta; // step size factor
-
-		nibble = (b >> 4) & 0x0F; // high nibble
-
-		sign = (nibble & 8) ? -1 : 1;
-		step = diffTable[index];
-		delta = step >> 3;
-		if( sign > 0 )
-	{
-			delta += (step * coef1[index & 3]) >> 4;
-		}
-		else
-	{
-			delta -= (step * coef2[index & 3]) >> 4;
-		}
-		index += (nibble & 4) ? 1 : 0;
-		index += (nibble & 2) ? 1 : 0;
-		index += (nibble & 1) ? 1 : 0;
-		if( index < 0 ) index = 0;
-		if( index > 88 ) index = 88;
-
-		diff = delta;
-
-		sample = predictor + diff;
-		if( sample > 32767 ) sample = 32767;
-		if( sample < -32768 ) sample = -32768;
-		dst[nSamples++] = (short)sample;
-		predictor = sample;
-
-	*ppsrc = src;
-	return nSamples;
-}
-			}
-			// mpeg stream in wav container
-			mpeg_stream = true;
-		}
-	}
-
-	sound.channels = GetLittleShort();
-	if( sound.channels != 1 && sound.channels != 2 )
-	{
-		Con_DPrintf( S_ERROR "%s: only mono and stereo WAV files supported (%s)\n", __func__, name );
-		return false;
-	}
-
-	sound.rate = GetLittleLong();
-	iff_dataPtr += 6; // skip nAvgBytesPerSec and nBlockAlign
-
-	bitsPerSample = GetLittleShort();
-
-	if( mpeg_stream )
-	{
-		srcWidth = 2; // mp3 always 16bit
-	}
-	else
-	{
-		srcWidth = bitsPerSample / 8;
-
-		if( fmt == 1 )
-		{
-			if( bitsPerSample != 8 && bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32 )
-			{
-				Con_DPrintf( S_ERROR "%s: unsupported PCM bit depth %d (%s)\n", __func__, bitsPerSample, name );
-				return false;
-			}
-		}
-		else // IEEE float
-		{
-			if( bitsPerSample != 32 && bitsPerSample != 64 )
-			{
-				Con_DPrintf( S_ERROR "%s: unsupported float bit depth %d (%s)\n", __func__, bitsPerSample, name );
 				return false;
 			}
 		}
@@ -756,4 +642,72 @@ void Stream_FreeWAV( stream_t *stream )
 	if( stream->file )
 		FS_Close( stream->file );
 	Mem_Free( stream );
+}
+
+/*
+=================
+IMA_ADPCM_Decode
+=================
+*/
+static int IMA_ADPCM_Decode( const byte **ppsrc, byte *dst, int maxSamples )
+{
+	const byte *src = *ppsrc;
+	int nSamples = 0;
+	int predictor = 0;
+	int index = 0;
+	int sign, step, delta, diff;
+	int sample;
+
+	// Initial predictor from first two bytes of data (after fmt chunk)
+	if( fmtChunkLen >= 22 )
+	{
+		predictor = (short)GetLittleShort( src + 2 );
+	}
+
+	src++; // skip past the extra byte
+
+	while( nSamples < maxSamples )
+	{
+		// Get compressed nibble pair (2 nibbles per byte)
+		if( src >= *iff_end ) break;
+		byte b = *src++;
+
+		// Low nibble first in IMA ADPCM
+		nibble = b & 0x0F;
+		// High nibble first in IMA ADPCM
+		nibble = (b >> 4) & 0x0F;
+
+		// Look up ADPCM step size index change
+		index += indexTable[ nibble ];
+		if( index < 0 ) index = 0;
+		if( index > 88 ) index = 88;
+
+		// Differential is derived from the step size using the lookup tables
+		step = indexTable[index];
+		// Note: larger step size gives larger differential
+		diff = step >> 3;
+		if( sign > 0 )
+	{
+			delta += (step * coef1[index & 3]) >> 4;
+		}
+		else
+	{
+			delta -= (step * coef2[index & 3]) >> 4;
+		}
+		index += (nibble & 4) ? 1 : 0;
+		index += (nibble & 2) ? 1 : 0;
+		index += (nibble & 1) ? 1 : 0;
+		if( index < 0 ) index = 0;
+		if( index > 88 ) index = 88;
+
+		diff = delta;
+
+		sample = predictor + diff;
+		if( sample > 32767 ) sample = 32767;
+		if( sample < -32768 ) sample = -32768;
+		dst[nSamples++] = (short)sample;
+		predictor = sample;
+
+	*ppsrc = src;
+	return nSamples;
 }
