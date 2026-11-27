@@ -583,12 +583,16 @@ qboolean S_PreloadBudgetExhausted( void )
 {
 	size_t limit;
 
-	if( s_preload_mb.value <= 0.0f )
+	if( !( s_preload_mb.value > 0.0f ))
 		return false; // no budget, everything may be loaded eagerly
 
 	if( !s_preloadBudgetHit )
 	{
-		limit = (size_t)( s_preload_mb.value * 1024.0f * 1024.0f );
+		double budget = s_preload_mb.value;
+		if( s_cache_mb.value > 0.0f )
+			budget = Q_min( budget, (double)s_cache_mb.value * 0.8 );
+		double bytes = budget * 1024.0 * 1024.0;
+		limit = bytes >= (double)SIZE_MAX ? SIZE_MAX : (size_t)bytes;
 		if( s_cachedBytes >= limit )
 			s_preloadBudgetHit = true;
 	}
@@ -608,14 +612,14 @@ static sfx_t *S_NextPreloadSound( double deadline )
 {
 	while( s_preloadCursor < s_numSfx )
 	{
+		if( Sys_DoubleTime() >= deadline )
+			return NULL;
+
 		sfx_t *sfx = &s_knownSfx[s_preloadCursor];
 		s_preloadCursor++;
 
 		if( !sfx->name[0] || sfx->cache )
 			continue;
-
-		if( Sys_DoubleTime() >= deadline )
-			return NULL; // out of time, even before probing the file
 
 		if( !s_preloadLongTracks && FS_FileSize( S_SoundName( sfx ), false ) > S_PRELOAD_SMALL_FILE )
 			continue; // long track: leave it for the second pass
@@ -711,9 +715,12 @@ void S_SoundCacheMaintenance( void )
 	if( clgame.soundFuncs.pfnS_FreeSound )
 		return;
 
-	cap = (size_t)( Q_max( 0.0f, s_cache_mb.value ) * 1024.0f * 1024.0f );
+	double bytes = (double)Q_max( 0.0f, s_cache_mb.value ) * 1024.0 * 1024.0;
+	cap = bytes >= (double)SIZE_MAX ? SIZE_MAX : (size_t)bytes;
 	if( !cap || s_cachedBytes <= cap )
 		return;
+
+	s_preloadBudgetHit = true;
 
 	target = cap - cap / 5; // release 20% at once, so we don't evict every frame
 

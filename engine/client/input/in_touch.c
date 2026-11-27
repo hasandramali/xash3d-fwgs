@@ -128,6 +128,7 @@ static struct touch_s
 
 	// other features
 	qboolean clientonly;
+	qboolean clientonly_wanted; // last client-only mode client.dll asked for
 	qboolean numericalmenu;
 	rgba_t scolor;
 	int swidth;
@@ -202,7 +203,7 @@ static void IN_TouchCheckCoords( float *x1, float *y1, float *x2, float *y2  );
 static void IN_TouchEditClear( void );
 static void Touch_InitConfig( void );
 static void Touch_ResetSticks( void );
-static void Touch_NumericalMenuExit_f( void );
+void Touch_NumericalMenuExit( void );
 
 void Touch_NotifyResize( void )
 {
@@ -633,11 +634,11 @@ static void Touch_DisableEdit_f( void )
 		Touch_WriteConfig();
 }
 
-void Touch_SetClientOnly( byte state )
+// Applies the client-only mode itself. Kept separate from
+// Touch_SetClientOnly so that the numerical menu can take the mode over
+// without pretending client.dll asked for it.
+static void Touch_ApplyClientOnly( byte state )
 {
-	if( touch.numericalmenu )
-		Touch_NumericalMenuExit_f();
-
 	// TODO: fix clash with vgui cursors
 	if( touch.clientonly == state )
 		return;
@@ -678,6 +679,21 @@ void Touch_SetClientOnly( byte state )
 		Platform_SetCursorType( dc_none );
 		IN_ActivateMouse();
 	}
+}
+
+void Touch_SetClientOnly( byte state )
+{
+	// client.dll requests this mode for its VGUI menus and camera UI, and
+	// repeats the request on every menu/camera update (including while
+	// dead, spectating or in other states). The numerical menu belongs to
+	// the player, so those requests must not tear it down right after it
+	// opens: it is closed by its exit button, on map change or on quit.
+	touch.clientonly_wanted = state;
+
+	if( touch.numericalmenu )
+		return;
+
+	Touch_ApplyClientOnly( state );
 }
 
 static void Touch_SetClientOnly_f( void )
@@ -785,7 +801,7 @@ static void Touch_ClearList( touchbuttonlist_t *list )
 
 static void Touch_RemoveAll_f( void )
 {
-	Touch_NumericalMenuExit_f();
+	Touch_NumericalMenuExit();
 	IN_TouchEditClear();
 	Touch_ClearList( &touch.list_user );
 	touch.config_aspect_ratio = 0.0f;
@@ -1173,13 +1189,18 @@ static void Touch_NumericalMenuRelease( void )
 
 static void Touch_NumericalMenuExit_f( void )
 {
+	Touch_NumericalMenuExit();
+}
+
+void Touch_NumericalMenuExit( void )
+{
 	if( !touch.numericalmenu )
 		return;
 
 	touch.numericalmenu = false;
 	Touch_NumericalMenuRelease();
 	Touch_RemoveButton( "_numbers_*", true );
-	Touch_SetClientOnly( false );
+	Touch_ApplyClientOnly( touch.clientonly_wanted );
 }
 
 static void Touch_NumericalMenu_f( void )
@@ -1187,13 +1208,18 @@ static void Touch_NumericalMenu_f( void )
 	rgba_t color;
 	touch_button_t *button;
 
-	if( !touch.initialized || touch.numericalmenu || touch.clientonly )
+	if( !touch.initialized || touch.numericalmenu )
+		return;
+
+	// A VGUI menu owns the screen in this state and would swallow every tap
+	// meant for the number buttons, leaving the menu impossible to close.
+	if( Cvar_VariableInteger( "cl_sven_ui_capture" ) || Cvar_VariableInteger( "cl_sven_camera_mouse" ))
 		return;
 
 	Touch_InitConfig();
 	Touch_NumericalMenuRelease();
-	Touch_SetClientOnly( true );
 	touch.numericalmenu = true;
+	Touch_ApplyClientOnly( true );
 	MakeRGBA( color, 255, 255, 255, 150 );
 	button = Touch_AddButton( &touch.list_user, "_numbers_slot1", "touch_default/key_1", "slot1", 0.360000, 0.142222, 0.460000, 0.320000, color, true );
 	button->flags = TOUCH_FL_CLIENT | TOUCH_FL_NOEDIT;
@@ -1352,6 +1378,7 @@ void Touch_Init( void )
 	touch.state = state_none;
 	touch.showeditbuttons = true;
 	touch.clientonly = false;
+	touch.clientonly_wanted = false;
 	touch.numericalmenu = false;
 	touch.precision = false;
 	MakeRGBA( touch.scolor, 255, 255, 255, 255 );

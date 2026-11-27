@@ -1903,6 +1903,10 @@ CL_ClearState
 */
 void CL_ClearState( void )
 {
+	// The numerical menu is map/connection specific: drop it on changelevel
+	// or disconnect so it cannot linger with stale buttons.
+	Touch_NumericalMenuExit();
+
 	HTTP_CancelDownloads();
 	memset( &cls.dl, 0, sizeof( cls.dl ));
 	host.downloadcount = 0;

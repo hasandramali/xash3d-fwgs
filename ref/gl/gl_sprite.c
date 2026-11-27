@@ -405,6 +405,22 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	if( R_SpriteOccluded( e, origin, &scale ))
 		return; // sprite culled
 
+	if( ( e->curstate.rendermode == kRenderGlow || e->curstate.rendermode == kRenderTransAdd ) &&
+		RI.fogEnabled && gl_fog.value && RI.cached_waterlevel == 3 && !RI.fogCustom )
+	{
+		vec3_t distance;
+		VectorSubtract( origin, RI.rvp.vieworigin, distance );
+		if( RI.fogEnd > RI.fogStart && RI.fogDensity <= 0.0f )
+			tr.blend *= bound( 0.0f, ( RI.fogEnd - VectorLength( distance )) / ( RI.fogEnd - RI.fogStart ), 1.0f );
+		else
+		{
+			float density = Q_max( 0.0f, RI.fogDensity ) * VectorLength( distance );
+			if( FBitSet( gp_host->features, ENGINE_QUAKE_COMPATIBLE ))
+				density *= density;
+			tr.blend *= expf( -density );
+		}
+	}
+
 	r_stats.c_sprite_models_drawn++;
 
 	if( e->curstate.rendermode == kRenderGlow || e->curstate.rendermode == kRenderTransAdd )

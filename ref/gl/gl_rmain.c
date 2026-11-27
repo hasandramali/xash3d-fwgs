@@ -700,6 +700,7 @@ static void R_CheckFog( void )
 			// in some cases waterlevel jumps from 3 to 1. Catch it
 			RI.cached_waterlevel = ENGINE_GET_PARM( PARM_WATER_LEVEL );
 			RI.cached_contents = CONTENTS_EMPTY;
+			RI.cached_waterentity = 0;
 			if( !RI.fogCustom )
 			{
 				glState.isFogEnabled = false;
@@ -717,7 +718,8 @@ static void R_CheckFog( void )
 
 	RI.cached_waterlevel = ENGINE_GET_PARM( PARM_WATER_LEVEL );
 
-	if( !IsLiquidContents( RI.cached_contents ) && IsLiquidContents( cnt ))
+	if( IsLiquidContents( cnt ) && ( cnt != RI.cached_contents ||
+		RI.cached_waterentity != ( ent ? ent->index : 0 ) || RI.viewleaf != RI.oldviewleaf ))
 	{
 		gl_texture_t *tex = NULL;
 
@@ -739,18 +741,26 @@ static void R_CheckFog( void )
 		}
 		else
 		{
-			tex = R_RecursiveFindWaterTexture( RI.viewleaf->parent, NULL, false );
+			tex = R_RecursiveFindWaterTexture( (const mnode_t *)RI.viewleaf, NULL, true );
+			if( !tex && RI.viewleaf->parent )
+				tex = R_RecursiveFindWaterTexture( RI.viewleaf->parent, (const mnode_t *)RI.viewleaf, false );
 			if( tex ) RI.cached_contents = RI.viewleaf->contents;
 		}
 
-		if( !tex ) return;	// no valid fogs
+		if( !tex )
+		{
+			RI.cached_contents = CONTENTS_EMPTY;
+			return;
+		}
+		RI.cached_waterentity = ent ? ent->index : 0;
 
 		// copy fog params
 		RI.fogColor[0] = tex->fogParams[0] / 255.0f;
 		RI.fogColor[1] = tex->fogParams[1] / 255.0f;
 		RI.fogColor[2] = tex->fogParams[2] / 255.0f;
-		RI.fogDensity = tex->fogParams[3] * 0.000025f;
-		RI.fogStart = RI.fogEnd = 0.0f;
+		RI.fogDensity = 0.0f;
+		RI.fogStart = 0.0f;
+		RI.fogEnd = 1536.0f - 4.0f * tex->fogParams[3];
 		RI.fogColor[3] = 1.0f;
 		RI.fogCustom = false;
 		RI.fogEnabled = true;
@@ -796,8 +806,17 @@ void R_DrawFog( void )
 		return;
 
 	pglEnable( GL_FOG );
-	pglFogi( GL_FOG_MODE, FBitSet( gp_host->features, ENGINE_QUAKE_COMPATIBLE ) ? GL_EXP2 : GL_EXP );
-	pglFogf( GL_FOG_DENSITY, RI.fogDensity );
+	if( RI.fogEnd > RI.fogStart && RI.fogDensity <= 0.0f )
+	{
+		pglFogi( GL_FOG_MODE, GL_LINEAR );
+		pglFogf( GL_FOG_START, RI.fogStart );
+		pglFogf( GL_FOG_END, RI.fogEnd );
+	}
+	else
+	{
+		pglFogi( GL_FOG_MODE, FBitSet( gp_host->features, ENGINE_QUAKE_COMPATIBLE ) ? GL_EXP2 : GL_EXP );
+		pglFogf( GL_FOG_DENSITY, RI.fogDensity );
+	}
 	pglFogfv( GL_FOG_COLOR, RI.fogColor );
 	pglHint( GL_FOG_HINT, GL_NICEST );
 }
@@ -986,13 +1005,13 @@ void R_RenderScene( void )
 	R_Clear( ~0 );
 
 	R_MarkLeaves();
+	R_CheckFog();
 	R_DrawFog ();
 	if( FBitSet( RI.rvp.flags, RF_DRAW_WORLD ))
 		R_AnimateRipples();
 
 	R_CheckGLFog();
 	R_DrawWorld();
-	R_CheckFog();
 
 	gEngfuncs.CL_ExtraUpdate ();	// don't let sound get messed up if going slow
 

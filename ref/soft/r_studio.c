@@ -1922,8 +1922,8 @@ static void R_StudioDrawPoints( void )
 
 		g_nFaceFlags = ptexture[pskinref[pmesh->skinref]].flags | g_nForceFaceFlags;
 
-		s = 1.0f / (float)ptexture[pskinref[pmesh->skinref]].width;
-		t = 1.0f / (float)ptexture[pskinref[pmesh->skinref]].height;
+		s = FBitSet( g_nFaceFlags, STUDIO_NF_CHROME ) ? (1.0f / 64.0f) : 1.0f / (float)ptexture[pskinref[pmesh->skinref]].width;
+		t = FBitSet( g_nFaceFlags, STUDIO_NF_CHROME ) ? (1.0f / 64.0f) : 1.0f / (float)ptexture[pskinref[pmesh->skinref]].height;
 
 		if( FBitSet( g_nFaceFlags, STUDIO_NF_MASKED ))
 		{

@@ -888,13 +888,25 @@ void DrawSingleDecal( decal_t *pDecal, msurface_t *fa )
 	GL_SelectTexture( XASH_TEXTURE0 );
 	pglEnable( GL_TEXTURE_2D );
 	pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
-	pglColor4ub( 255, 255, 255, 255 );
+	float opacity = 1.0f;
+	if( RI.currententity->curstate.rendermode == kRenderTransTexture ||
+		RI.currententity->curstate.rendermode == kRenderTransColor ||
+		RI.currententity->curstate.rendermode == kRenderTransAdd ||
+		RI.currententity->curstate.rendermode == kRenderGlow )
+		opacity = bound( 0.0f, tr.blend, 1.0f );
 
 	GL_Bind( XASH_TEXTURE0, pDecal->texture );
 
 	if( FBitSet( R_GetTexture( pDecal->texture )->flags, TF_PREMULTIPLIED ))
+	{
+		pglColor4f( opacity, opacity, opacity, opacity );
 		pglBlendFunc( GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
-	else pglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+	}
+	else
+	{
+		pglColor4f( 1.0f, 1.0f, 1.0f, opacity );
+		pglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+	}
 
 	pglBegin( GL_POLYGON );
 
@@ -1029,11 +1041,24 @@ void DrawSurfaceDecals( msurface_t *fa, qboolean single, qboolean reverse )
 			GL_Cull( GL_FRONT );
 
 		if( e->curstate.rendermode == kRenderTransColor )
+		{
 			pglDisable( GL_TEXTURE_2D );
+			pglColor4ub( e->curstate.rendercolor.r, e->curstate.rendercolor.g, e->curstate.rendercolor.b, e->curstate.renderamt );
+		}
+		else if( e->curstate.rendermode == kRenderTransAdd )
+			pglColor4f( tr.blend, tr.blend, tr.blend, 1.0f );
+		else if( e->curstate.rendermode == kRenderTransTexture || e->curstate.rendermode == kRenderGlow )
+			pglColor4f( 1.0f, 1.0f, 1.0f, tr.blend );
+		else
+			pglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
 
 		// restore blendfunc here
-		if( e->curstate.rendermode == kRenderTransAdd || e->curstate.rendermode == kRenderGlow )
+		if( e->curstate.rendermode == kRenderTransAdd )
+			pglBlendFunc( GL_ONE, GL_ONE );
+		else if( e->curstate.rendermode == kRenderGlow )
 			pglBlendFunc( GL_SRC_ALPHA, GL_ONE );
+		else
+			pglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 
 		pglTexEnvf( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
 	}

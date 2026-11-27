@@ -15,6 +15,7 @@ GNU General Public License for more details.
 */
 
 #include <stddef.h>
+#include <limits.h>
 #include "soundlib.h"
 
 static const byte *iff_data;
@@ -22,6 +23,18 @@ static const byte *iff_dataPtr;
 static const byte *iff_end;
 static const byte *iff_lastChunk;
 static int iff_chunkLen;
+
+typedef struct
+{
+	int blockAlign;
+	int dataOffset;
+	int dataSize;
+	int decodedBlockBytes;
+	int cachedBlock;
+	int cachedBytes;
+	short *decoded;
+	byte *encoded;
+} ima_stream_t;
 
 static int IsFourCC( const void *ptr, const void *fourcc )
 {
@@ -129,7 +142,7 @@ eight samples unpacked low nibble first.
 static void IMA_ADPCM_DecodeWAV( short *dst, const byte *src, int dataSize,
 	int blockAlign, int channels )
 {
-	int blocks = ( dataSize + blockAlign - 1 ) / blockAlign;
+	int blocks = dataSize / blockAlign + ( dataSize % blockAlign != 0 );
 
 	for( int block = 0; block < blocks; block++ )
 	{
@@ -276,7 +289,9 @@ static qboolean StreamFindNextChunk( file_t *file, const char *name, int *last_c
 
 	while( 1 )
 	{
-		FS_Seek( file, *last_chunk, SEEK_SET );
+		if( *last_chunk < 0 || (fs_offset_t)*last_chunk + 8 > FS_FileLength( file ) ||
+			FS_Seek( file, *last_chunk, SEEK_SET ) == -1 )
+			return false;
 
 		if( FS_Eof( file ))
 			return false;	// didn't find the chunk
@@ -291,7 +306,10 @@ static qboolean StreamFindNextChunk( file_t *file, const char *name, int *last_c
 			return false;	// didn't find the chunk
 
 		FS_Seek( file, -8, SEEK_CUR );
-		*last_chunk = FS_Tell( file ) + 8 + (( iff_chunk_len + 1 ) & ~1 );
+		fs_offset_t nextChunk = FS_Tell( file ) + 8 + ( (uint64_t)iff_chunk_len + 1 ) / 2 * 2;
+		if( nextChunk > INT_MAX )
+			return false;
+		*last_chunk = nextChunk;
 		if( FS_Read( file, chunkName, sizeof( chunkName )) != sizeof( chunkName ))
 			return false;
 
@@ -320,7 +338,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 	// find "RIFF" chunk
 	FindChunk( name, "RIFF" );
 
-	if( !iff_dataPtr || !IsFourCC( iff_dataPtr + 8, "WAVE" ))
+	if( !iff_dataPtr || iff_end - iff_dataPtr < 12 || !IsFourCC( iff_dataPtr + 8, "WAVE" ))
 	{
 		Con_DPrintf( S_ERROR "%s: %s missing 'RIFF/WAVE' chunks\n", __func__, name );
 		return false;
@@ -330,7 +348,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 	iff_data = iff_dataPtr + 12;
 	FindChunk( name, "fmt " );
 
-	if( !iff_dataPtr )
+	if( !iff_dataPtr || iff_chunkLen < 16 )
 	{
 		Con_DPrintf( S_ERROR "%s: %s missing 'fmt ' chunk\n", __func__, name );
 		return false;
@@ -373,7 +391,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 
 	sound.rate = GetLittleLong();
 	iff_dataPtr += 4; // skip nAvgBytesPerSec
-	int blockAlign = GetLittleShort();
+	int blockAlign = (unsigned short)GetLittleShort();
 
 	bitsPerSample = GetLittleShort();
 
@@ -478,26 +496,28 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesi
 		// IMA ADPCM: one block yields 1 + 8*groups samples per channel,
 		// where groups counts 4-byte words per channel in the block body
 		int groups = ( blockAlign - 4 * sound.channels ) / ( 4 * sound.channels );
-		int samplesPerBlock = 1 + groups * 8;
+		int samplesPerBlock = sound.channels == 1 ? 1 + ( blockAlign - 4 ) * 2 : 1 + groups * 8;
 		int blocks = dataSize / blockAlign;
 
-		samples = blocks * samplesPerBlock * sound.channels;
+		uint64_t decodedSamples = (uint64_t)blocks * samplesPerBlock * sound.channels;
 
 		if( dataSize % blockAlign )
 		{
 			int tailBytes = dataSize % blockAlign - 4 * sound.channels;
 
-			if( tailBytes > 0 )
+			if( tailBytes >= 0 )
 			{
 				// mirror IMA_ADPCM_DecodeWAV: mono consumes every remaining
 				// byte, stereo only whole 4-byte words per channel
 				if( sound.channels == 1 )
-					samples += ( 1 + tailBytes * 2 );
+					decodedSamples += ( 1 + tailBytes * 2 );
 				else
-					samples += ( 1 + ( tailBytes / 8 ) * 8 ) * sound.channels;
+					decodedSamples += ( 1 + ( tailBytes / 8 ) * 8 ) * sound.channels;
 			}
 		}
-		sound.samples = samples;
+		if( decodedSamples > INT_MAX / sizeof( short ))
+			return false;
+		sound.samples = (int)decodedSamples;
 	}
 	else
 	{
@@ -671,100 +691,105 @@ Stream_OpenWAV
 */
 stream_t *Stream_OpenWAV( const char *filename )
 {
-	stream_t	*stream;
-	int 	last_chunk = 0;
-	char	chunkName[4];
-	file_t	*file;
-	short	t;
+	int last_chunk = 0;
+	byte header[20];
+	int chunkSize, dataSize;
+	uint factSamples = 0;
+	file_t *file;
 
 	if( !filename || !*filename )
 		return NULL;
-
-	// open
 	file = FS_Open( filename, "rb", false );
-	if( !file ) return NULL;
-
-	// find "RIFF" chunk
-	if( !StreamFindNextChunk( file, "RIFF", &last_chunk ))
-	{
-		Con_DPrintf( S_ERROR "%s: %s missing RIFF chunk\n", __func__, filename );
-		FS_Close( file );
+	if( !file )
 		return NULL;
-	}
+	if( !StreamFindNextChunk( file, "RIFF", &last_chunk ) ||
+		FS_Read( file, header, 8 ) != 8 || !IsFourCC( header + 4, "WAVE" ))
+		goto invalid;
 
-	FS_Seek( file, 4, SEEK_CUR );
-
-	if( FS_Read( file, chunkName, 4 ) != 4 )
+	last_chunk = 12;
+	if( !StreamFindNextChunk( file, "fmt ", &last_chunk ) || FS_Read( file, &chunkSize, 4 ) != 4 )
+		goto invalid;
+	chunkSize = LittleLong( chunkSize );
+	if( chunkSize < 16 || FS_Read( file, header, 16 ) != 16 )
+		goto invalid;
+	int format = header[0] | ( header[1] << 8 );
+	int channels = header[2] | ( header[3] << 8 );
+	uint rate = (uint)header[4] | ( (uint)header[5] << 8 ) | ( (uint)header[6] << 16 ) | ( (uint)header[7] << 24 );
+	int blockAlign = header[12] | ( header[13] << 8 );
+	int bits = header[14] | ( header[15] << 8 );
+	if( ( channels != 1 && channels != 2 ) || !rate || rate > INT_MAX )
+		goto invalid;
+	if( format != 1 && format != 0x11 )
+		goto invalid;
+	if( format == 1 && ( ( bits != 8 && bits != 16 ) || blockAlign != channels * ( bits / 8 ) ))
+		goto invalid;
+	int blockSamples = 0;
+	if( format == 0x11 )
 	{
-		Con_DPrintf( S_ERROR "%s: %s missing WAVE chunk, truncated\n", __func__, filename );
-		FS_Close( file );
-		return false;
+		if( bits != 4 || blockAlign <= 4 * channels || chunkSize < 20 || FS_Read( file, header, 4 ) != 4 )
+			goto invalid;
+		blockSamples = channels == 1 ? 1 + ( blockAlign - 4 ) * 2 : 1 + ( ( blockAlign - 8 ) / 8 ) * 8;
+		if( ( header[0] | ( header[1] << 8 )) < 2 || ( header[2] | ( header[3] << 8 )) != blockSamples )
+			goto invalid;
+		last_chunk = 12;
+		if( StreamFindNextChunk( file, "fact", &last_chunk ))
+		{
+			if( FS_Read( file, &chunkSize, 4 ) != 4 || LittleLong( chunkSize ) < 4 || FS_Read( file, &factSamples, 4 ) != 4 )
+				goto invalid;
+			factSamples = LittleLong( factSamples );
+		}
 	}
-
-	if( !IsFourCC( chunkName, "WAVE" ))
+	last_chunk = 12;
+	if( !StreamFindNextChunk( file, "data", &last_chunk ) || FS_Read( file, &dataSize, 4 ) != 4 )
+		goto invalid;
+	dataSize = LittleLong( dataSize );
+	fs_offset_t dataOffset = FS_Tell( file );
+	fs_offset_t available = FS_FileLength( file ) - dataOffset;
+	if( dataSize <= 0 || available <= 0 || dataOffset < 0 || dataOffset > INT_MAX )
+		goto invalid;
+	if( dataSize > available )
+		dataSize = available;
+	int width = format == 0x11 ? 2 : bits / 8;
+	uint64_t frames = dataSize / blockAlign;
+	if( format == 0x11 )
 	{
-		Con_DPrintf( S_ERROR "%s: %s missing WAVE chunk\n", __func__, filename );
-		FS_Close( file );
-		return NULL;
+		frames *= blockSamples;
+		int tail = dataSize % blockAlign - 4 * channels;
+		if( tail >= 0 )
+			frames += channels == 1 ? 1 + tail * 2 : 1 + ( tail / 8 ) * 8;
+		if( factSamples )
+			frames = Q_min( frames, factSamples );
 	}
-
-	// get "fmt " chunk
-	int iff_data = FS_Tell( file );
-	last_chunk = iff_data;
-	if( !StreamFindNextChunk( file, "fmt ", &last_chunk ))
-	{
-		Con_DPrintf( S_ERROR "%s: %s missing 'fmt ' chunk\n", __func__, filename );
-		FS_Close( file );
-		return NULL;
-	}
-
-	FS_Read( file, chunkName, 4 );
-
-	FS_Read( file, &t, sizeof( t ));
-	t = LittleShort( t );
-	if( t != 1 )
-	{
-		Con_DPrintf( S_ERROR "%s: %s not a microsoft PCM format\n", __func__, filename );
-		FS_Close( file );
-		return NULL;
-	}
-
-	FS_Read( file, &t, sizeof( t ));
-	sound.channels = LittleShort( t );
-
-	FS_Read( file, &sound.rate, sizeof( int ));
-	sound.rate = LittleLong( sound.rate );
-
-	FS_Seek( file, 6, SEEK_CUR );
-
-	FS_Read( file, &t, sizeof( t ));
-	sound.width = LittleShort( t ) / 8;
-
-	sound.loopstart = 0;
-
-	// find data chunk
-	last_chunk = iff_data;
-	if( !StreamFindNextChunk( file, "data", &last_chunk ))
-	{
-		Con_DPrintf( S_ERROR "%s: %s missing 'data' chunk\n", __func__, filename );
-		FS_Close( file );
-		return NULL;
-	}
-
-	FS_Read( file, &sound.samples, sizeof( int ));
-	sound.samples = ( LittleLong( sound.samples ) / sound.width ) / sound.channels;
-
-	// at this point we have valid stream
-	stream = Mem_Calloc( host.soundpool, sizeof( stream_t ));
+	uint64_t decodedSize = frames * channels * width;
+	if( !decodedSize || decodedSize > INT_MAX )
+		goto invalid;
+	stream_t *stream = Mem_Calloc( host.soundpool, sizeof( stream_t ));
 	stream->file = file;
-	stream->size = sound.samples * sound.width * sound.channels;
-	stream->buffsize = FS_Tell( file ); // header length
-	stream->channels = sound.channels;
-	stream->width = sound.width;
-	stream->rate = sound.rate;
+	stream->size = decodedSize;
+	stream->buffsize = dataOffset;
+	stream->channels = channels;
+	stream->width = width;
+	stream->rate = rate;
 	stream->type = WF_PCMDATA;
-
+	if( format == 0x11 )
+	{
+		int decodedBlockBytes = blockSamples * channels * width;
+		ima_stream_t *decoder = Mem_Calloc( host.soundpool, sizeof( *decoder ) + decodedBlockBytes + blockAlign );
+		decoder->blockAlign = blockAlign;
+		decoder->dataOffset = dataOffset;
+		decoder->dataSize = dataSize;
+		decoder->decodedBlockBytes = decodedBlockBytes;
+		decoder->cachedBlock = -1;
+		decoder->decoded = (short *)( decoder + 1 );
+		decoder->encoded = (byte *)decoder->decoded + decodedBlockBytes;
+		stream->ptr = decoder;
+	}
 	return stream;
+
+invalid:
+	Con_DPrintf( S_ERROR "%s: unsupported or malformed WAV stream (%s)\n", __func__, filename );
+	FS_Close( file );
+	return NULL;
 }
 
 /*
@@ -776,14 +801,48 @@ assume stream is valid
 */
 int Stream_ReadWAV( stream_t *stream, int bytes, void *buffer )
 {
-	if( !stream->file ) return 0;	// invalid file
+	if( !stream->file || !buffer || bytes <= 0 ) return 0;
 
 	int remaining = stream->size - stream->pos;
 	if( remaining <= 0 ) return 0;
 	if( bytes > remaining ) bytes = remaining;
 
+	if( stream->ptr )
+	{
+		ima_stream_t *decoder = stream->ptr;
+		int copied = 0;
+		while( copied < bytes )
+		{
+			int block = stream->pos / decoder->decodedBlockBytes;
+			int offset = stream->pos % decoder->decodedBlockBytes;
+			if( decoder->cachedBlock != block )
+			{
+				int encodedOffset = block * decoder->blockAlign;
+				int encodedBytes = Q_min( decoder->blockAlign, decoder->dataSize - encodedOffset );
+				if( encodedBytes < 4 * stream->channels ||
+					FS_Seek( stream->file, (fs_offset_t)decoder->dataOffset + encodedOffset, SEEK_SET ) == -1 ||
+					FS_Read( stream->file, decoder->encoded, encodedBytes ) != encodedBytes )
+					break;
+				int body = encodedBytes - 4 * stream->channels;
+				int frames = stream->channels == 1 ? 1 + body * 2 : 1 + ( body / 8 ) * 8;
+				IMA_ADPCM_DecodeWAV( decoder->decoded, decoder->encoded, encodedBytes, decoder->blockAlign, stream->channels );
+				decoder->cachedBytes = frames * stream->channels * 2;
+				decoder->cachedBlock = block;
+			}
+			int count = Q_min( bytes - copied, decoder->cachedBytes - offset );
+			if( count <= 0 )
+				break;
+			memcpy( (byte *)buffer + copied, (byte *)decoder->decoded + offset, count );
+			stream->pos += count;
+			copied += count;
+		}
+		return copied;
+	}
+
+	bytes = FS_Read( stream->file, buffer, bytes );
+	if( bytes <= 0 )
+		return 0;
 	stream->pos += bytes;
-	FS_Read( stream->file, buffer, bytes );
 
 	if( stream->width == 2 )
 	{
@@ -805,6 +864,13 @@ assume stream is valid
 */
 int Stream_SetPosWAV( stream_t *stream, int newpos )
 {
+	if( newpos < 0 || (size_t)newpos > stream->size )
+		return false;
+	if( stream->ptr )
+	{
+		stream->pos = newpos;
+		return true;
+	}
 	// NOTE: stream->pos it's real file position without header size
 	if( FS_Seek( stream->file, stream->buffsize + newpos, SEEK_SET ) != -1 )
 	{
@@ -838,5 +904,7 @@ void Stream_FreeWAV( stream_t *stream )
 {
 	if( stream->file )
 		FS_Close( stream->file );
+	if( stream->ptr )
+		Mem_Free( stream->ptr );
 	Mem_Free( stream );
 }
