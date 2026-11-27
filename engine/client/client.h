@@ -1198,6 +1198,7 @@ void CL_DecayLights( void );
 dlight_t *CL_GetDynamicLight( int number );
 dlight_t *CL_GetEntityLight( int number );
 void CL_WeaponAnim( int iAnim, int body );
+void CL_ServerWeaponAnim( int iAnim, int body );
 void CL_ClientWeaponAnim( int iAnim, int body );
 void CL_ClearEffects( void );
 void CL_ClearCustomSprayDecals( void );

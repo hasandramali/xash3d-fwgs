@@ -171,7 +171,7 @@ word CL_EventIndex( const char *name )
 	if( COM_StringEmptyOrNULL( name ))
 		return 0;
 
-	for( word i = 1; i < MAX_EVENTS && cl.event_precache[i][0]; i++ )
+	for( word i = 1; i < MAX_EVENTS; i++ )
 	{
 		if( !Q_stricmp( cl.event_precache[i], name ))
 			return i;
@@ -528,7 +528,7 @@ void GAME_EXPORT CL_PlaybackEvent( int flags, const edict_t *pInvoker, word even
 	}
 
 	// check event for precached
-	if( !CL_EventIndex( cl.event_precache[eventindex] ))
+	if( !cl.event_precache[eventindex][0] )
 	{
 		Con_DPrintf( S_ERROR "%s: event %i was not precached\n", __func__, eventindex );
 		return;

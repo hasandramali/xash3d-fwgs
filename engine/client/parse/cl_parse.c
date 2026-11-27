@@ -396,6 +396,15 @@ static qboolean CL_IsPredictedWeaponAnimEcho( int iAnim )
 	return true;
 }
 
+void CL_ServerWeaponAnim( int iAnim, int body )
+{
+	const qboolean echo = CL_IsPredictedWeaponAnimEcho( iAnim );
+	if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
+		Con_Printf( "WEAPON-ANIM: svc seq=%d body=%d echo=%d\n", iAnim, body, echo );
+	if( !echo )
+		CL_WeaponAnim( iAnim, body );
+}
+
 void GAME_EXPORT CL_WeaponAnim( int iAnim, int body )
 {
 	cl_entity_t *view = &clgame.viewent;
@@ -3024,13 +3033,7 @@ qboolean CL_ParseCommonHLMessage( sizebuf_t *msg, connprotocol_t proto, int svc_
 	case svc_weaponanim:
 		param1 = MSG_ReadByte( msg );	// iAnim
 		param2 = MSG_ReadByte( msg );	// body
-		{
-			const qboolean echo = CL_IsPredictedWeaponAnimEcho( param1 );
-			if( Cvar_VariableInteger( "cl_goldsrc_debug" ) >= 1 )
-				Con_Printf( "WEAPON-ANIM: svc seq=%d body=%d echo=%d\n", param1, param2, echo );
-			if( !echo )
-				CL_WeaponAnim( param1, param2 );
-		}
+		CL_ServerWeaponAnim( param1, param2 );
 		break;
 	case svc_roomtype:
 		param1 = MSG_ReadShort( msg );
