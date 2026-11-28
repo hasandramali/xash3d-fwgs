@@ -401,6 +401,10 @@ cl_entity_t *R_BeamGetEntity( int index )
 {
 	if( index < 0 )
 		return clgame.dllFuncs.pfnGetUserEntity( BEAMENT_ENTITY( -index ));
+	if( cl_sven_proto && BEAMENT_ENTITY( index ) == cl.playernum + 1 &&
+		BEAMENT_ATTACHMENT( index ) > 0 && BEAMENT_ATTACHMENT( index ) <= 4 &&
+		cl.viewentity == cl.playernum + 1 && !CL_IsThirdPerson() && clgame.viewent.model )
+		return &clgame.viewent;
 	return CL_GetEntityByIndex( BEAMENT_ENTITY( index ));
 }
 
